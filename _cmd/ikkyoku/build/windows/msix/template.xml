@@ -8,7 +8,7 @@
         AllowPromptForPassword="false">
     </Settings>
     <Installer
-        Path="ikkyoku-app.exe"
+        Path="ikkyoku.exe"
         Arguments=""
         InstallLocation="C:\Program Files\ShinteLab\ikkyoku">
     </Installer>
@@ -28,7 +28,7 @@
                 Id="com.shintelab.ikkyoku"
                 Description="ikkyoku - shogi broadcast capture"
                 DisplayName="ikkyoku"
-                ExecutableName="ikkyoku-app.exe"
+                ExecutableName="ikkyoku.exe"
                 EntryPoint="Windows.FullTrustApplication">
                 
             </Application>
@@ -47,7 +47,7 @@
             <Logo>Assets\AppIcon.png</Logo>
         </Properties>
     </PackageInformation>
-    <SaveLocation PackagePath="ikkyoku-app.msix" />
+    <SaveLocation PackagePath="ikkyoku.msix" />
     <PackageIntegrity>
         <CertificatePath></CertificatePath>
     </PackageIntegrity>

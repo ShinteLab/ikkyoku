@@ -13,8 +13,8 @@
 
 ## なぜ Chrome 拡張ではなくネイティブなのか（経緯）
 
-最初のプロトタイプは Chrome 拡張（MV3）だった。[`_probe-chrome/`](_probe-chrome/) に
-その検証コードと結論を残してある。要点だけ書くと以下の通り。
+最初のプロトタイプは Chrome 拡張（MV3）だった（検証コードは Phase 0 完了後に削除済み。
+結果は `../TODO.md` 冒頭の「Phase 0 の検証結果」の表に記録してある）。要点だけ書くと以下の通り。
 
 - ABEMA は盤面データを通信でも DOM でも流していない（映像に焼き込んで配信している）
 - `<video>` → canvas の `drawImage`、および `chrome.tabs.captureVisibleTab` はどちらも
@@ -30,8 +30,6 @@ DRM を一切気にせず済む。副次的な利点として:
 - Go で書けるので `core` / `engine` / `suteme` を直接 import できる。WASM も gRPC-web も不要
 - MV3 の制約（service worker の寿命・offscreen document・CSP・MAIN world）が全部消える
 
-詳しい検証内容は `_probe-chrome/README.md` を参照。
-
 ## これは何をするツールか（そして何をしないか）
 
 - **すること**: 画面の指定領域を PNG にして保存する。それだけ
@@ -43,46 +41,9 @@ DRM を一切気にせず済む。副次的な利点として:
 これは `../TODO.md` の「どの層も履歴に依存しない」「suteme は棋譜の仕組みを持たない」という
 原則を、取り込み層であるこのツールでも踏襲したもの。
 
-## インストール・ビルド
+## インストール・ビルド・使い方
 
-```powershell
-cd ikkyoku
-go build -o _dist\ikkyoku.exe ./_cmd/ikkyoku
-```
-
-PureGo（cgo なし）でビルドできる。`$env:CGO_ENABLED='0'` でも問題なくビルドが通ることを
-確認済み。
-
-## 使い方
-
-```powershell
-# 接続されているディスプレイの一覧（番号・解像度・座標）を表示する
-.\_dist\ikkyoku.exe -list
-
-# 単発モード: 起動して即座に1枚撮って終了する（動作確認用）
-.\_dist\ikkyoku.exe -once
-
-# 常駐モード（既定）: ホットキー(既定 Alt+S)を押すたびにキャプチャする。Ctrl+C で終了
-.\_dist\ikkyoku.exe
-
-# ディスプレイ番号を指定
-.\_dist\ikkyoku.exe -display 1
-
-# 矩形領域を直接指定（x,y,width,height）
-.\_dist\ikkyoku.exe -region 100,200,1280,720
-
-# 保存先を変更（既定は os.UserConfigDir()/ikkyoku/captures）
-.\_dist\ikkyoku.exe -out D:\capture
-
-# ホットキーを変更（既定 alt+s）
-.\_dist\ikkyoku.exe -hotkey ctrl+shift+s
-```
-
-- キャプチャ領域が未指定なら**プライマリディスプレイ全体**になる
-- 保存のたびに `saved=<パス> region=<x,y,w,h> size=<WxH>` の形式で 1 行標準出力する
-- ファイル名はキャプチャ時刻のタイムスタンプ（例 `20260804-193045.png`）
-- 設定（ディスプレイ番号・領域・保存先）は `os.UserConfigDir()/ikkyoku/config.json` に
-  保存・読み込みできる。**フラグ指定が優先**され、フラグが無い項目だけ設定ファイルの値を使う
+CLI は無い。ビルドと使い方は下記「GUI アプリ（Wails3）」を参照。
 
 ## 採用ライブラリと cgo 確認
 
@@ -94,14 +55,18 @@ PureGo（cgo なし）でビルドできる。`$env:CGO_ENABLED='0'` でも問�
 | 画面キャプチャ | `github.com/kbinani/screenshot` | 不要（Windows は GDI 直呼び） |
 | グローバルホットキー | `golang.design/x/hotkey` | 不要（Windows は `RegisterHotKey` を x/sys 経由で直呼び。cgo が要るのは macOS 側の実装のみ） |
 
-ホットキー登録が失敗する環境（他アプリと競合等）向けに、標準入力で Enter を押すたびに
-キャプチャするフォールバックも用意してある（自動的に切り替わる。`-no-hotkey-fallback` で禁止可）。
+`golang.design/x/hotkey` は現状ルートパッケージの `ParseHotkey` / `DefaultHotkey`
+（文字列パースと既定値）だけに使っている。GUI アプリ自体のホットキー登録は
+Wails 標準の `app.GlobalShortcut` を使っており、この節のライブラリを直接呼んではいない
+（詳細は `ikkyoku/CLAUDE.md` の「ホットキー」節を参照）。
 
 ## GUI アプリ（Wails3）
 
-CLI は `-region x,y,width,height` を数値で指定する必要があり実用的ではないため、
-画面の上に重ねる「透過した枠」で範囲を指定できる GUI アプリを `_cmd/ikkyoku-app/` に用意した。
+数値で座標を指定する方式は盤面に枠を合わせる操作では実用的ではないため、
+画面の上に重ねる「透過した枠」で範囲を指定できる GUI アプリを `_cmd/ikkyoku/` に用意した。
 ウィンドウを将棋盤の上にドラッグ・リサイズして合わせ、ボタンかホットキー(既定 `Alt+S`)で撮る。
+**現状 `ikkyoku` は「ルートパッケージ（ライブラリ）＋この GUI アプリ」の 2 つだけの構成で、
+CLI は無い。**
 
 - **透過**: `application.BackgroundType: BackgroundTypeTransparent` +
   `BackgroundColour: NewRGBA(0,0,0,0)` でクライアント領域(WebView の中身)を透過させる。
@@ -117,30 +82,29 @@ CLI は `-region x,y,width,height` を数値で指定する必要があり実用
   操作パネルは、ガイド枠のウィンドウとは別ウィンドウにしてある。ガイド枠側には
   クリックできる UI を一切置かない(置いた要素はそのままキャプチャに写り込むため)
 - **ウィンドウ状態の永続化**: ガイド枠ウィンドウの位置・サイズは終了時に保存し、
-  次回起動時に復元する(`os.UserConfigDir()/ikkyoku/app-window.json`。CLI 用の
+  次回起動時に復元する(`os.UserConfigDir()/ikkyoku/app-window.json`。ルートパッケージの
   `Config`(`config.json`)とは別ファイル)
 
 ビルド:
 
 ```powershell
-cd ikkyoku\_cmd\ikkyoku-app
+cd ikkyoku\_cmd\ikkyoku
 npm --prefix frontend install    # 初回のみ
 wails3 build                     # frontend のビルド〜bindings 生成〜go build まで一括
 # または
 wails3 dev                       # 開発モード
 ```
 
-`wails3 build` で `bin\ikkyoku-app.exe` が生成される。詳細な設計判断は
+`wails3 build` で `bin\ikkyoku.exe` が生成される。詳細な設計判断は
 `ikkyoku/CLAUDE.md` の「GUI アプリ(Wails3)」節を参照。
 
 ## コード構成
 
 - ルート（`github.com/ShinteLab/ikkyoku`）: ライブラリ。`Capture` / `ListDisplays` /
-  `SavePNG` / `Config` の読み書き等。CLI・GUI どちらにも依存しないので、両方から
+  `SavePNG` / `Config` の読み書き等。GUI アプリに依存しないので、GUI から
   直接 import して使う
-- `_cmd/ikkyoku/`: CLI エントリポイント。フラグ処理とキャプチャ処理を分離してあり、
-  本体ロジックはルートパッケージ呼び出しに徹する
-- `_cmd/ikkyoku-app/`: Wails3 GUI アプリ(独立したネストモジュール)。上記参照
+- `_cmd/ikkyoku/`: Wails3 GUI アプリ(独立したネストモジュール、モジュール名は
+  `ikkyoku-app`)。上記参照
 
 ## 開発上の約束
 

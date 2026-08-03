@@ -12,8 +12,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 `<video>` の画素を保護しており、Chrome 自身のキャプチャ API（`captureVisibleTab` /
 `drawImage`）はいずれも黒フレームになることが分かった。一方 OS レベルの画面キャプチャは
 DRM を素通りする。そのため入口を Chrome 拡張からネイティブアプリに切り替えた。
-検証当時のコードは `_probe-chrome/`（アンダースコア始まりで Go ビルド対象外）に残っている。
-経緯の詳細は `README.md` と `_probe-chrome/README.md` を参照。
+検証当時のコード（`_probe-chrome/`）は Phase 0 完了後に削除済み。検証結果は
+`../TODO.md` 冒頭の「Phase 0 の検証結果」の表に記録してあるので、経緯を確認したいときは
+そちらと本ファイル・`README.md` を参照。
 
 ## モジュール / 位置づけ
 
@@ -52,14 +53,18 @@ DRM を素通りする。そのため入口を Chrome 拡張からネイティ�
 | `save.go` | `SavePNG` / `DefaultOutDir` / タイムスタンプ式ファイル名生成 |
 | `config.go` | `Config` の JSON 読み書き（`encoding/json` のみ、標準ライブラリで完結） |
 | `hotkey.go` | `ParseHotkey`（`"alt+s"` 文字列 → `golang.design/x/hotkey` の修飾子・キー） |
-| `_cmd/ikkyoku/main.go` | CLI エントリポイント。flag 処理・常駐/単発モードの制御。**ロジックはここに書かず、上記のライブラリ関数を呼ぶだけに保つこと**（GUI から流用するときのため） |
-| `_cmd/ikkyoku-app/` | Wails3 GUI アプリ(独立したネストモジュール)。下記「GUI アプリ(Wails3)」参照 |
-| `_probe-chrome/` | Phase 0 で使った Chrome 拡張の検証コード（役目終了・現行実装ではない） |
+| `_cmd/ikkyoku/` | Wails3 GUI アプリ(独立したネストモジュール)。下記「GUI アプリ(Wails3)」参照 |
+
+**ディレクトリ名は `ikkyoku`、モジュール名は `ikkyoku-app`。** `kicho` が
+「ディレクトリ `_cmd/kicho`・モジュール名 `kicho-app`」という構成なので、それに揃えてある。
+紛らわしいので混同しないこと。
 
 ## GUI アプリ(Wails3)
 
-`_cmd/ikkyoku-app/` に置いてある。CLI（`-region x,y,width,height` を数値で指定する必要があり
+`_cmd/ikkyoku/` に置いてある。数値で座標を指定する方式（盤面に枠を合わせる操作では
 実用的ではない）の代わりに、画面に重ねる透過ウィンドウで領域を視覚的に合わせられるようにしたもの。
+**現状 `ikkyoku` は「ルートパッケージ（ライブラリ）＋この GUI アプリ」の 2 つだけの構成で、
+CLI は無い。**
 
 - **独立したネストモジュール**（`kicho/_cmd/kicho`・`prokishi/_cmd/prokishi-server` と同じ構成）。
   `module ikkyoku-app`、`replace github.com/ShinteLab/ikkyoku => ../../` でルートパッケージを参照する
@@ -69,7 +74,7 @@ DRM を素通りする。そのため入口を Chrome 拡張からネイティ�
   生成される**（実機で確認したバグ）。そのため `wails3 init -t vanilla` の出力を
   React 抜きの vanilla TypeScript に手作業で作り直してある。将来 CLI を上げたときは
   この制約が直っているか確認すること
-- Wails 依存は `_cmd/ikkyoku-app/` にのみ置く（ルートパッケージ `ikkyoku` は触らない）。
+- Wails 依存は `_cmd/ikkyoku/` にのみ置く（ルートパッケージ `ikkyoku` は触らない）。
   `Capture` / `SavePNG` / `DefaultOutDir` / `ParseHotkey` / `DefaultHotkey` を
   そのまま import して使っており、ロジックを再実装していない
 
@@ -135,13 +140,13 @@ Frameless に依存する透過実装ではないことを Wails 本体のソー
 wails3 skill(`tray-hotkey.md`)で保証されており、二重にホットキー実装を持ち込むと
 競合のリスクがあるため。一方で「alt+s」のような文字列の妥当性検証・既定値の一元化は
 既存の `ikkyoku.ParseHotkey` / `ikkyoku.DefaultHotkey` を単一のソースとして再利用し
-(`hotkeyAccelerator` 関数)、CLI 版と GUI 版で「有効なホットキー文字列」の定義が
-ずれないようにしてある。
+(`hotkeyAccelerator` 関数)、「有効なホットキー文字列」の定義をルートパッケージに
+一本化してある。
 
 ### ウィンドウ状態の永続化
 
 ガイド枠ウィンドウの位置・サイズだけを `os.UserConfigDir()/ikkyoku/app-window.json` に
-保存・復元する(`windowstate.go`)。**ルートパッケージの `Config`(`config.json`。CLI 用)とは
+保存・復元する(`windowstate.go`)。**ルートパッケージの `Config`(`config.json`)とは
 あえて別ファイルにしてある**。ルートパッケージに Wails 依存(`application` パッケージの
 `ScreenNearestDipPoint` 等)を持ち込まないための分離。
 
@@ -160,12 +165,12 @@ wails3 skill(`tray-hotkey.md`)で保証されており、二重にホットキ�
 
 ### 実機での検証結果(2026-08-04 / ディスプレイ 0: 2560x1440)
 
-**このツール自身のキャプチャ CLI で画面全体を撮り、画像を目視して確認した。**
-GUI の見た目を検証する手段として有効なので、今後も同じ方法が使える:
+**GUI 自身のガイド枠を画面いっぱいに広げてキャプチャし、画像を目視して確認した。**
+「画面全体を撮って目視で GUI の見た目を検証する」という手法自体は有効なので、今後も使える:
 
 ```powershell
-Start-Process .\_cmd\ikkyoku-app\bin\ikkyoku-app.exe
-.\_dist\ikkyoku.exe -once -display 0 -out <一時ディレクトリ>
+Start-Process .\_cmd\ikkyoku\bin\ikkyoku.exe
+# ガイド枠ウィンドウを画面いっぱいにドラッグ・リサイズしてから撮る
 ```
 
 検証済み:
@@ -196,12 +201,12 @@ Start-Process .\_cmd\ikkyoku-app\bin\ikkyoku-app.exe
 ### コマンド
 
 ```powershell
-cd ikkyoku\_cmd\ikkyoku-app
+cd ikkyoku\_cmd\ikkyoku
 npm --prefix frontend install         # 初回のみ
 wails3 generate bindings -ts -i       # Go の Service/Model を変えたら必ず実行
 wails3 dev                            # 開発モード
 wails3 build                          # frontend ビルド〜bindings 生成〜go build まで一括
-go build -o bin\ikkyoku-app.exe .     # Go だけを素早く確認したいとき(frontend/dist が要る)
+go build -o bin\ikkyoku.exe .         # Go だけを素早く確認したいとき(frontend/dist が要る)
 ```
 
 - `wails3 generate bindings` は Taskfile(`build/Taskfile.yml` の `generate:bindings`)と
@@ -212,29 +217,26 @@ go build -o bin\ikkyoku-app.exe .     # Go だけを素早く確認したいと�
 
 ## アーキテクチャ
 
-- **ルートパッケージ（`ikkyoku`）はライブラリとして完結させる。** CLI 固有の関心事
-  （flag、標準出力へのログ、シグナルハンドリング）は `_cmd/ikkyoku/main.go` 側に置く。
-  将来 Wails3 の GUI から呼ぶときにルートパッケージをそのまま import できるようにするため
-- **常駐モードとフォールバック**: `golang.design/x/hotkey` の `Register()` が失敗する環境
-  （他アプリとのキー競合等）では、標準入力で Enter を押すたびにキャプチャする方式に
-  自動的にフォールバックする（`_cmd/ikkyoku/main.go` の `stdinFallbackMode`）。
-  `-no-hotkey-fallback` で禁止できる
-- **設定の優先順位**: CLI フラグ > 設定ファイル（`Config`）> 既定値（プライマリディスプレイ全体）。
-  `_cmd/ikkyoku/main.go` の `resolveRegion` を参照
+- **ルートパッケージ（`ikkyoku`）はライブラリとして完結させる。** GUI 固有の関心事
+  （Wails のイベント・ウィンドウ管理・ホットキー登録）は `_cmd/ikkyoku/` 側に置く。
+  ルートパッケージは GUI に依存せず、そのまま import して使う
 - Windows の `golang.design/x/hotkey` は内部で `runtime.LockOSThread()` した専用の
   goroutine を起動し、`RegisterHotKey` のメッセージループを回す。呼び出し側
-  （このツール）が追加でスレッド管理をする必要はない
+  （このツール）が追加でスレッド管理をする必要はない（現状 GUI 側のホットキー登録は
+  Wails 標準の `app.GlobalShortcut` を使っており、この仕組み自体は直接は呼んでいない。
+  「ホットキー」節を参照）
 
 ## よく使うコマンド
 
 ```powershell
 cd ikkyoku
 go build ./...                          # ルートパッケージのみ（_cmd はアンダースコア始まりで対象外）
-go build -o _dist\ikkyoku.exe ./_cmd/ikkyoku
 go vet ./...
-go vet ./_cmd/ikkyoku
 go test ./...
 ```
+
+`_cmd/ikkyoku/`（Wails3 GUI アプリ）は独立したネストモジュールなので、上記の
+`./...` には含まれない。ビルド・確認は「GUI アプリ(Wails3)」節のコマンドを使うこと。
 
 **`go mod tidy` の実行後は require 行が消えていないか確認すること**
 （親 `CLAUDE.md` に書かれている `_cmd` 配下が `go build ./...` の走査対象外になる落とし穴）。

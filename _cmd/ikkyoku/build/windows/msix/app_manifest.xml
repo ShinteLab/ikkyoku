@@ -29,7 +29,7 @@
   </Resources>
   
   <Applications>
-    <Application Id="com.shintelab.ikkyoku" Executable="ikkyoku-app.exe" EntryPoint="Windows.FullTrustApplication">
+    <Application Id="com.shintelab.ikkyoku" Executable="ikkyoku.exe" EntryPoint="Windows.FullTrustApplication">
       <uap:VisualElements
         DisplayName="ikkyoku"
         Description="ikkyoku - shogi broadcast capture"
@@ -41,7 +41,7 @@
       </uap:VisualElements>
       
       <Extensions>
-        <desktop:Extension Category="windows.fullTrustProcess" Executable="ikkyoku-app.exe" />
+        <desktop:Extension Category="windows.fullTrustProcess" Executable="ikkyoku.exe" />
         
         
       </Extensions>

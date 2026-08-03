@@ -1,207 +1,167 @@
-// ikkyoku コマンドは画面の指定領域をホットキー（既定 Alt+S）または単発で PNG に保存する。
+// ikkyoku コマンドは ikkyoku の Wails3 GUI。
 //
-// 盤面認識・SFEN 変換などの将棋ロジックはここには一切無い。撮って保存するだけ。
-// フラグ処理とキャプチャ処理は分離してあり（本ファイルは flag 処理と入出力のみ）、
-// 実処理は親パッケージ github.com/ShinteLab/ikkyoku を呼ぶだけになっている。
-// 将来 Wails3 の GUI から呼ぶときも同じ親パッケージを直接 import すればよい。
+// 画面に「透過した枠」を重ね、その枠の中身をキャプチャして PNG に保存するだけのツール。
+// 将棋のロジック(SFEN・盤面・駒)は一切持たない。撮って保存するだけ。
+// 実処理は親パッケージ github.com/ShinteLab/ikkyoku をそのまま呼ぶ。Wails 依存のコードは
+// このディレクトリ(_cmd/ikkyoku)にのみ置く(wails3 skill の architecture 方針)。
 package main
 
 import (
-	"bufio"
-	"flag"
-	"fmt"
+	"embed"
+	"log/slog"
 	"os"
-	"os/signal"
-	"syscall"
 
-	"github.com/ShinteLab/ikkyoku"
-	"golang.design/x/hotkey"
+	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
+//go:embed all:frontend/dist
+var assets embed.FS
+
 func main() {
-	if err := run(os.Args[1:]); err != nil {
-		fmt.Fprintln(os.Stderr, "ikkyoku:", err)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	}))
+	slog.SetDefault(logger)
+
+	captureSvc := NewCaptureService(logger)
+
+	app := application.New(application.Options{
+		Name:        "ikkyoku",
+		Description: "ikkyoku - shogi broadcast region capture",
+		Logger:      logger,
+		Services: []application.Service{
+			application.NewService(captureSvc),
+		},
+		Assets: application.AssetOptions{
+			Handler: application.AssetFileServerFS(assets),
+		},
+		Mac: application.MacOptions{
+			ApplicationShouldTerminateAfterLastWindowClosed: true,
+		},
+	})
+
+	state := loadWindowState()
+	// Phase 1(Run() 前): スクリーン情報を使わない簡易な安全策のみ行う。
+	// マルチモニタのクランプは Phase 2(WindowRuntimeReady)で行う
+	// (ScreenNearestDipPoint は Run() 前は nil を返すため。wails3 skill window-state.md)。
+	_, _, w, h := safeFallback(state)
+
+	opts := application.WebviewWindowOptions{
+		Title:     "ikkyoku",
+		Width:     w,
+		Height:    h,
+		MinWidth:  minWindowWidth,
+		MinHeight: minWindowHeight,
+		// Frameless にはしない(タイトルバー・枠を持つ通常ウィンドウにする、というユーザー要望)。
+		// クライアント領域だけを透過させる。
+		BackgroundType:   application.BackgroundTypeTransparent,
+		BackgroundColour: application.NewRGBA(0, 0, 0, 0),
+		URL:              "/?window=frame",
+		// 中継の再生ウィンドウの「上」に重ねて盤面に合わせる道具なので、最前面は必須。
+		// これが無いと枠が中継ウィンドウの後ろに回り、位置合わせができなくなる(実測)。
+		AlwaysOnTop: true,
+	}
+	if state.X == unsetPosition && state.Y == unsetPosition {
+		// 初回起動(保存された位置が無い)は中央表示にフォールバックする。
+		// センチネル値をそのまま X/Y に渡すと画面外に出てしまうため。
+		opts.InitialPosition = application.WindowCentered
+	} else {
+		opts.X, opts.Y = state.X, state.Y
+		opts.InitialPosition = application.WindowXY
+	}
+
+	window := app.Window.NewWithOptions(opts)
+	captureSvc.bind(app, window)
+
+	// Phase 2(Run() 後): WindowRuntimeReady はウィンドウ単位で発火し、この時点なら
+	// ScreenNearestDipPoint も SetSize/SetPosition も確実に効く(ApplicationStarted では不確実)。
+	if state.X != unsetPosition || state.Y != unsetPosition {
+		window.RegisterHook(events.Common.WindowRuntimeReady, func(e *application.WindowEvent) {
+			x, y, cw, ch := clampToScreen(state)
+			window.SetSize(cw, ch)
+			window.SetPosition(x, y)
+		})
+	}
+
+	// 終了前に位置・サイズを保存する。
+	// WindowClosing はデフォルトの破棄用リスナーが並列 goroutine で走るため、
+	// OnWindowEvent(listener) だと破棄と保存処理がレースしうる。RegisterHook(hook) は
+	// listener より前に同期実行されるため、破棄が始まる前に確実に Position()/Size() を読める
+	// (wails3 skill tray-hotkey.md の hook/listener 順序の説明、window-state.md の
+	// 「WindowClosing 時点では座標が不正になりうる」を踏まえた対策)。
+	window.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
+		ww, wh := window.Size()
+		wx, wy := window.Position()
+		if err := saveWindowState(windowState{X: wx, Y: wy, Width: ww, Height: wh}); err != nil {
+			logger.Error("ウィンドウ状態の保存に失敗しました", "error", err)
+		}
+	})
+
+	// 操作パネル(「撮る」ボタン・保存先・サムネイル)は別ウィンドウにする。
+	// ガイド枠ウィンドウの中には一切 UI を置かない(置いた要素はそのままキャプチャに
+	// 写り込むため。依頼の「ボタンはキャプチャ領域に入らない場所に置く」の実現方法)。
+	// 同じフロントバンドルを URL クエリで出し分ける(wails3 skill advanced.md 参照)。
+	panelX, panelY := unsetPosition, unsetPosition
+	if state.X != unsetPosition && state.Y != unsetPosition {
+		panelX, panelY = state.X, state.Y-panelHeight-panelGap
+		if panelY < 0 {
+			panelY = state.Y + h + panelGap // 上に置く余白が無ければ枠の下に置く
+		}
+	}
+	panelOpts := application.WebviewWindowOptions{
+		Title:       "ikkyoku - 操作パネル",
+		Width:       panelWidth,
+		Height:      panelHeight,
+		AlwaysOnTop: true,
+		URL:         "/?window=panel",
+	}
+	if panelX == unsetPosition {
+		panelOpts.InitialPosition = application.WindowCentered
+	} else {
+		panelOpts.X, panelOpts.Y = panelX, panelY
+		panelOpts.InitialPosition = application.WindowXY
+	}
+	panel := app.Window.NewWithOptions(panelOpts)
+
+	// パネルがガイド枠に重なっているとパネルごと写り込む。
+	// 初回起動時は枠・パネルとも WindowCentered になり必ず重なるため、
+	// 枠の配置が確定した時点(WindowRuntimeReady)でパネルを枠の外へ退避させる。
+	// 座標はどちらも Wails の DIP なので、ここで DPI 換算は不要
+	// (物理ピクセルが要るのはキャプチャ領域の算出だけ。captureservice.go 参照)。
+	window.RegisterHook(events.Common.WindowRuntimeReady, func(e *application.WindowEvent) {
+		fx, fy := window.Position()
+		_, fh := window.Size()
+		py := fy - panelHeight - panelGap
+		if py < 0 {
+			py = fy + fh + panelGap // 上に余白が無ければ枠の下へ
+		}
+		panel.SetPosition(fx, py)
+	})
+
+	// グローバルホットキー(既定 alt+s)。ウィンドウが非アクティブでも効くことが重要
+	// (中継の再生画面にフォーカスがある状態で撮るのが普通の使い方のため)。
+	accel, err := hotkeyAccelerator(resolveHotkey())
+	if err != nil {
+		logger.Error("ホットキーの解決に失敗しました", "error", err)
+	} else if err := app.GlobalShortcut.Register(accel, func() {
+		if _, err := captureSvc.Capture(); err != nil {
+			logger.Error("ホットキーからのキャプチャに失敗しました", "error", err)
+			app.Event.Emit("capture:failed", err.Error())
+			return
+		}
+	}); err != nil {
+		// 登録失敗は致命的にしない(他アプリと競合している環境がありうる)。
+		// 「撮る」ボタンは引き続き使えるので、UI からエラーが分かるようにだけ通知する。
+		logger.Warn("グローバルホットキーの登録に失敗しました", "hotkey", accel, "error", err)
+		app.Event.Emit("hotkey:register-failed", map[string]any{
+			"hotkey": accel,
+			"error":  err.Error(),
+		})
+	}
+
+	if err := app.Run(); err != nil {
+		logger.Error("アプリが異常終了しました", "error", err)
 		os.Exit(1)
 	}
-}
-
-func run(args []string) error {
-	fs := flag.NewFlagSet("ikkyoku", flag.ContinueOnError)
-	var (
-		list       = fs.Bool("list", false, "接続されているディスプレイの一覧を表示して終了する")
-		once       = fs.Bool("once", false, "起動して即座に1枚撮って終了する（動作確認用）")
-		displayIdx = fs.Int("display", -1, "キャプチャするディスプレイ番号（-list で確認）。-region と併用不可")
-		regionFlag = fs.String("region", "", "キャプチャする矩形領域 x,y,width,height（-display と併用不可）")
-		outDir     = fs.String("out", "", "保存先ディレクトリ（既定: os.UserConfigDir()/ikkyoku/captures）")
-		hotkeyStr  = fs.String("hotkey", "", "常駐モードのグローバルホットキー（既定 "+ikkyoku.DefaultHotkey+"）")
-		configPath = fs.String("config", "", "設定ファイルのパス（既定: os.UserConfigDir()/ikkyoku/config.json）")
-		noStdin    = fs.Bool("no-hotkey-fallback", false, "ホットキー登録に失敗した際、標準入力(Enter)へのフォールバックを禁止する")
-		saveConfig = fs.Bool("save-config", false, "解決した領域・保存先・ホットキーを設定ファイルに書き出して終了する")
-	)
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-
-	if *list {
-		return printDisplays(os.Stdout)
-	}
-
-	cfgPath := *configPath
-	if cfgPath == "" {
-		p, err := ikkyoku.DefaultConfigPath()
-		if err != nil {
-			return err
-		}
-		cfgPath = p
-	}
-	cfg, err := ikkyoku.LoadConfig(cfgPath)
-	if err != nil {
-		return err
-	}
-
-	region, err := resolveRegion(*displayIdx, *regionFlag, cfg)
-	if err != nil {
-		return err
-	}
-
-	dir := *outDir
-	if dir == "" {
-		dir = cfg.OutDir
-	}
-	if dir == "" {
-		dir, err = ikkyoku.DefaultOutDir()
-		if err != nil {
-			return err
-		}
-	}
-
-	hk := resolveHotkey(*hotkeyStr, cfg)
-
-	if *saveConfig {
-		// 領域は解決済みの矩形として保存する（ディスプレイ番号ではなく確定した座標）。
-		// 毎回フラグを渡さずに済ませるための機能。
-		next := ikkyoku.Config{Region: &region, OutDir: dir, Hotkey: hk}
-		if err := ikkyoku.SaveConfig(cfgPath, next); err != nil {
-			return err
-		}
-		fmt.Printf("saved-config=%s region=%s out=%s hotkey=%s\n", cfgPath, region, dir, hk)
-		return nil
-	}
-
-	if *once {
-		return captureOnce(region, dir)
-	}
-	return residentMode(region, dir, hk, !*noStdin)
-}
-
-// resolveRegion はフラグ・設定ファイルの優先順でキャプチャ領域を決定する。
-// 優先順位: -region > -display > 設定ファイル(Region) > 設定ファイル(Display) > プライマリディスプレイ全体。
-func resolveRegion(displayIdx int, regionFlag string, cfg ikkyoku.Config) (ikkyoku.Region, error) {
-	if regionFlag != "" {
-		if displayIdx >= 0 {
-			return ikkyoku.Region{}, fmt.Errorf("-region と -display は同時に指定できません")
-		}
-		return ikkyoku.ParseRegion(regionFlag)
-	}
-	if displayIdx >= 0 {
-		return ikkyoku.DisplayRegion(displayIdx)
-	}
-	if cfg.Region != nil {
-		return *cfg.Region, nil
-	}
-	if cfg.Display != nil {
-		return ikkyoku.DisplayRegion(*cfg.Display)
-	}
-	return ikkyoku.PrimaryRegion()
-}
-
-// resolveHotkey は -hotkey > 設定ファイル > 既定値 の優先順でホットキーを決定する。
-func resolveHotkey(flagVal string, cfg ikkyoku.Config) string {
-	if flagVal != "" {
-		return flagVal
-	}
-	if cfg.Hotkey != "" {
-		return cfg.Hotkey
-	}
-	return ikkyoku.DefaultHotkey
-}
-
-func printDisplays(w *os.File) error {
-	displays := ikkyoku.ListDisplays()
-	if len(displays) == 0 {
-		return fmt.Errorf("ディスプレイが見つかりませんでした")
-	}
-	for _, d := range displays {
-		r := d.Region()
-		fmt.Fprintf(w, "%d: %dx%d at (%d,%d)\n", d.Index, r.Width, r.Height, r.X, r.Y)
-	}
-	return nil
-}
-
-func captureOnce(region ikkyoku.Region, dir string) error {
-	img, err := ikkyoku.Capture(region)
-	if err != nil {
-		return err
-	}
-	path, err := ikkyoku.SavePNG(img, dir)
-	if err != nil {
-		return err
-	}
-	printSaved(path, region, img.Bounds())
-	return nil
-}
-
-// residentMode はホットキーを押すたびにキャプチャする常駐モード。Ctrl+C で終了する。
-// ホットキー登録に失敗した場合（他アプリと競合等）、allowFallback が true なら
-// 標準入力で Enter を押すたびにキャプチャする方式にフォールバックする。
-func residentMode(region ikkyoku.Region, dir, hotkeyStr string, allowFallback bool) error {
-	mods, key, err := ikkyoku.ParseHotkey(hotkeyStr)
-	if err != nil {
-		return err
-	}
-
-	hk := hotkey.New(mods, key)
-	if regErr := hk.Register(); regErr != nil {
-		if !allowFallback {
-			return fmt.Errorf("ホットキー(%s)の登録に失敗しました: %w", hotkeyStr, regErr)
-		}
-		fmt.Fprintf(os.Stderr, "ikkyoku: ホットキー(%s)の登録に失敗しました（%v）。"+
-			"標準入力で Enter を押すたびにキャプチャする方式に切り替えます。\n", hotkeyStr, regErr)
-		return stdinFallbackMode(region, dir)
-	}
-	defer hk.Unregister()
-
-	fmt.Printf("ikkyoku: 常駐モード開始（ホットキー %s、Ctrl+C で終了）\n", hotkeyStr)
-
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-
-	for {
-		select {
-		case <-hk.Keydown():
-			if err := captureOnce(region, dir); err != nil {
-				fmt.Fprintln(os.Stderr, "ikkyoku:", err)
-			}
-		case <-sigCh:
-			fmt.Println("ikkyoku: 終了します")
-			return nil
-		}
-	}
-}
-
-// stdinFallbackMode はグローバルホットキーが使えない環境向けのフォールバック。
-// 標準入力から改行を読むたびに 1 枚キャプチャする。Ctrl+C で終了する。
-func stdinFallbackMode(region ikkyoku.Region, dir string) error {
-	fmt.Println("ikkyoku: Enter キーでキャプチャします（Ctrl+C で終了）")
-	scanner := bufio.NewScanner(os.Stdin)
-	for scanner.Scan() {
-		if err := captureOnce(region, dir); err != nil {
-			fmt.Fprintln(os.Stderr, "ikkyoku:", err)
-		}
-	}
-	return scanner.Err()
-}
-
-func printSaved(path string, region ikkyoku.Region, bounds interface{ String() string }) {
-	fmt.Printf("saved=%s region=%s size=%s\n", path, region, bounds)
 }

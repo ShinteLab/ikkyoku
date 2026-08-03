@@ -3,26 +3,26 @@
 #
 # The lines below are called `modelines`. See `:help modeline`
 
-name: "ikkyoku-app.exe"
+name: "ikkyoku"
 arch: ${GOARCH}
 platform: "linux"
 version: "0.1.0"
 section: "default"
 priority: "extra"
 maintainer: ${GIT_COMMITTER_NAME} <${GIT_COMMITTER_EMAIL}>
-description: "ikkyoku - shogi broadcast capture"
-vendor: "ShinteLab"
+description: "My Product Description"
+vendor: "My Company"
 homepage: "https://wails.io"
 license: "MIT"
 release: "1"
 
 contents:
-  - src: "./bin/ikkyoku-app.exe"
-    dst: "/usr/local/bin/ikkyoku-app.exe"
+  - src: "./bin/ikkyoku"
+    dst: "/usr/local/bin/ikkyoku"
   - src: "./build/appicon.png"
-    dst: "/usr/share/icons/hicolor/128x128/apps/ikkyoku-app.exe.png"
-  - src: "./build/linux/ikkyoku-app.exe.desktop"
-    dst: "/usr/share/applications/ikkyoku-app.exe.desktop"
+    dst: "/usr/share/icons/hicolor/128x128/apps/ikkyoku.png"
+  - src: "./build/linux/ikkyoku.desktop"
+    dst: "/usr/share/applications/ikkyoku.desktop"
 
 # Default dependencies for the GTK4 + WebKitGTK 6.0 stack (Ubuntu 24.04+ / Debian 13+)
 depends:

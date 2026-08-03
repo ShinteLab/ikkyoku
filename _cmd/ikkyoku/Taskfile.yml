@@ -1,7 +1,7 @@
 version: '3'
 
 vars:
-  APP_NAME: "ikkyoku-app"
+  APP_NAME: "ikkyoku"
   BIN_DIR: "bin"
   PACKAGE_MANAGER: '{{.PACKAGE_MANAGER | default "npm"}}'
   VITE_PORT: '{{.WAILS_VITE_PORT | default 9245}}'
@@ -15,7 +15,7 @@ includes:
   windows: ./build/windows/Taskfile.yml
   darwin: ./build/darwin/Taskfile.yml
   linux: ./build/linux/Taskfile.yml
-  # ikkyoku-app はデスクトップ専用(将棋中継のキャプチャ用)。
+  # ikkyoku はデスクトップ専用(将棋中継のキャプチャ用)。
   # ios / android は対象外なので includes から外してある(wails3 skill setup.md 参照)。
 
 tasks:
