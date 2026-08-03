@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>ikkyoku — 盤面診断</title>
+  <link rel="stylesheet" href="sidepanel.css" />
+</head>
+<body>
+  <header>
+    <h1>ikkyoku <span class="subtitle">— 中継盤面診断 (Phase 0)</span></h1>
+    <p class="lead">
+      ABEMA将棋中継から盤面情報をどう取れるか、安い順に 4 経路を診断します。
+    </p>
+    <div class="target-tab" id="target-tab">対象タブ: 取得中…</div>
+    <button id="run-all" class="primary">スナップショットを撮る（全診断・Alt+S）</button>
+  </header>
+
+  <main>
+    <!-- 1. 通信の傍受 -->
+    <section id="section-net">
+      <h2>1. 通信の傍受 <span class="badge">最優先</span></h2>
+      <p class="desc">
+        WebSocket / fetch / XHR を記録します。盤面らしき JSON が流れていれば、
+        画像認識は一切不要になります。ここで勝てるのが最良です。
+      </p>
+      <div class="controls">
+        <button id="net-clear">ログをクリア</button>
+        <label class="checkbox">
+          <input type="checkbox" id="net-only-board" />
+          「盤面っぽい」ものだけ表示
+        </label>
+        <span id="net-count" class="count"></span>
+      </div>
+      <div id="net-log" class="log"></div>
+    </section>
+
+    <!-- 2. DOM の走査 -->
+    <section id="section-dom">
+      <h2>2. DOM の走査</h2>
+      <p class="desc">
+        盤面が DOM / Canvas 要素として描かれていないかを調べます。
+      </p>
+      <div class="controls">
+        <button id="dom-scan">DOM を調べる</button>
+      </div>
+      <div id="dom-result" class="result"></div>
+    </section>
+
+    <!-- 3. タブのキャプチャ -->
+    <section id="section-tab-capture">
+      <h2>3. タブのキャプチャ</h2>
+      <p class="desc">
+        <code>chrome.tabs.captureVisibleTab</code> で画面全体を撮ります。
+      </p>
+      <div class="controls">
+        <button id="tab-capture">タブをキャプチャ</button>
+      </div>
+      <div id="tab-capture-result" class="result"></div>
+    </section>
+
+    <!-- 4. video 要素のキャプチャ -->
+    <section id="section-video-capture">
+      <h2>4. video 要素のキャプチャ <span class="badge warn">DRM注意</span></h2>
+      <p class="desc">
+        ページ内の <code>&lt;video&gt;</code> を canvas に <code>drawImage</code> します。
+        DRM (Widevine/EME) 保護時は黒フレームか SecurityError になる可能性が高いです。
+      </p>
+      <div class="controls">
+        <button id="video-capture">video をキャプチャ</button>
+      </div>
+      <div id="video-capture-result" class="result"></div>
+    </section>
+  </main>
+
+  <script src="sidepanel.js"></script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Name=ikkyoku
+Comment=ikkyoku - shogi broadcast capture
+# The Exec line includes %u to pass the URL to the application
+Exec=/usr/local/bin/ikkyoku-app.exe %u
+Terminal=false
+Type=Application
+Icon=ikkyoku-app.exe
+Categories=Utility;
+StartupWMClass=ikkyoku-app.exe
+
+ 

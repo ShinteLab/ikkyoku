@@ -1,0 +1,101 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+#app {
+  height: 100%;
+}
+
+/* ---- ガイド枠ウィンドウ(?window=frame) -----------------------------------
+   クライアント領域を完全に透過させ、内周に細いガイド枠だけを描く。
+   それ以外の要素は一切置かない(写り込み対策)。 */
+html.is-frame,
+html.is-frame body,
+html.is-frame #app {
+  background: transparent;
+}
+
+.capture-guide {
+  position: fixed;
+  inset: 0;
+  /* border-box なので、枠線はビューポートの内側にちょうど収まる。
+     太さは frame.ts の GUIDE_BORDER_PX / Go 側の guideBorderPx と揃えること。 */
+  border-style: solid;
+  border-color: rgba(255, 64, 64, 0.9);
+  pointer-events: none; /* クリック・ドラッグは常にネイティブウィンドウ側に通す */
+}
+
+/* ---- 操作パネル(?window=panel) -------------------------------------------- */
+html.is-panel,
+html.is-panel body {
+  background: #1b1d23;
+  color: #f2f3f5;
+}
+
+.panel {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.panel-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.capture-btn {
+  flex: 0 0 auto;
+  padding: 8px 20px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #fff;
+  background: #ff4d4d;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.capture-btn:hover {
+  background: #ff2d2d;
+}
+
+.capture-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.hotkey-hint {
+  font-size: 12px;
+  color: #9aa6c0;
+  border: 1px solid #3a3d47;
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+
+.status {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: #c7cbd4;
+  word-break: break-all;
+}
+
+.status.is-error {
+  color: #ff7a7a;
+}
+
+.thumbnail {
+  max-width: 100%;
+  border: 1px solid #3a3d47;
+  border-radius: 6px;
+}
