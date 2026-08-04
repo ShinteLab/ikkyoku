@@ -48,6 +48,27 @@ export function Layout(): $CancellablePromise<$models.GuideLayout> {
 }
 
 /**
+ * Recognizer は直近の読み込み結果を返す。**読み込み直さない。**
+ * フロントが起動時に状態を表示するためだけに 3.5MB を読み直すのを避ける。
+ */
+export function Recognizer(): $CancellablePromise<$models.RecognizerStatus> {
+    return $Call.ByID(1357821961);
+}
+
+/**
+ * ReloadRecognizer は駒種推論器を読み込み直し、その結果を返す。起動時にも呼ぶ。
+ * 
+ * **再読み込みの入口を用意しているのは、学習データを育てながら使うため。**
+ * suteme は一度読み込んだ推論器をキャッシュするので、学習データを更新しても
+ * これを呼ぶまで(あるいは再起動するまで)反映されない。
+ * 訂正 → 学習データ更新 → 撮り直す、というループを回すのにアプリの再起動を
+ * 挟みたくない。
+ */
+export function ReloadRecognizer(): $CancellablePromise<$models.RecognizerStatus> {
+    return $Call.ByID(3817107600);
+}
+
+/**
  * ShowFrame は隠した枠を出し直す。メイン画面のボタンから呼ばれる。
  */
 export function ShowFrame(): $CancellablePromise<void> {

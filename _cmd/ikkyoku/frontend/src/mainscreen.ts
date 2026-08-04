@@ -58,8 +58,11 @@ export function mountMainScreen(root: HTMLElement): void {
       <div class="main-toolbar">
         <span class="hint">撮るのは枠のツールバー、または <span class="hotkey-hint">Alt+S</span></span>
         <span class="spacer"></span>
+        <button id="reload-btn" class="ghost-btn" type="button"
+                title="学習データを更新したあとに押すと、認識器を読み込み直します">認識器を再読み込み</button>
         <button id="show-frame-btn" class="ghost-btn" type="button">枠を表示</button>
       </div>
+      <p id="recognizer" class="recognizer"></p>
 
       <div class="content">
         <div class="board-area">
@@ -94,6 +97,8 @@ export function mountMainScreen(root: HTMLElement): void {
   `;
 
   const showFrame = root.querySelector<HTMLButtonElement>("#show-frame-btn")!;
+  const reloadBtn = root.querySelector<HTMLButtonElement>("#reload-btn")!;
+  const recognizer = root.querySelector<HTMLParagraphElement>("#recognizer")!;
   const board = root.querySelector<HTMLElement>("#board")!;
   const placeholder = root.querySelector<HTMLParagraphElement>("#board-placeholder")!;
   const sfenOut = root.querySelector<HTMLElement>("#sfen")!;
@@ -196,6 +201,48 @@ export function mountMainScreen(root: HTMLElement): void {
   showFrame.addEventListener("click", () => {
     void CaptureService.ShowFrame();
   });
+
+  // 学習データを育てながら使うための入口。suteme は一度読んだ推論器をキャッシュするので、
+  // データを更新してもこれを押すまで(あるいは再起動するまで)反映されない。
+  const showRecognizer = (st: { source: string; ready: boolean; error: string }) => {
+    if (st.error) {
+      recognizer.textContent = `認識器を読み込めません: ${st.error}`;
+      recognizer.className = "recognizer is-error";
+      return;
+    }
+    if (st.ready) {
+      recognizer.textContent = `認識器: ${st.source}`;
+    } else {
+      recognizer.textContent = "認識器: suteme の既定の場所を探します";
+    }
+    recognizer.className = "recognizer";
+  };
+
+  const reload = async () => {
+    reloadBtn.disabled = true;
+    try {
+      showRecognizer(await CaptureService.ReloadRecognizer());
+    } catch (err) {
+      recognizer.textContent = `認識器の再読み込みに失敗しました: ${String(err)}`;
+      recognizer.className = "recognizer is-error";
+    } finally {
+      reloadBtn.disabled = false;
+    }
+  };
+
+  reloadBtn.addEventListener("click", () => {
+    void reload();
+  });
+
+  // 起動時は読み込み直さず、Go 側が起動時に読んだ結果をそのまま出す
+  // (表示のためだけに 3.5MB を読み直さない)。
+  void (async () => {
+    try {
+      showRecognizer(await CaptureService.Recognizer());
+    } catch {
+      /* 状態が取れないだけなので黙って諦める。実害は最初のキャプチャで分かる。 */
+    }
+  })();
 
   // ホットキー(Go側の GlobalShortcut)や枠のツールバーからのキャプチャは、この画面が
   // フォーカスされていなくても発生する。結果は Wails イベントで受け取って UI に反映する。

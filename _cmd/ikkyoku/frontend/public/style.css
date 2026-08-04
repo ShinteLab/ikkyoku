@@ -159,6 +159,25 @@ html.is-main body {
   background: #3a3d47;
 }
 
+.ghost-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* 認識器(suteme の学習データ)の読み込み状況。データを育てながら使うので、
+   「今どれを読んでいるか」が常に見えているほうがよい。 */
+.recognizer {
+  flex: 0 0 auto;
+  margin: 0;
+  font-size: 11.5px;
+  color: #6f7787;
+  word-break: break-all;
+}
+
+.recognizer.is-error {
+  color: #ff7a7a;
+}
+
 /* 撮る操作はメイン画面には置かない(枠のツールバーとホットキーで完結する)。
    ここはその案内。 */
 .hint {

@@ -52,6 +52,14 @@ type GuideLayout struct {
 	ToolbarPx int `json:"toolbarPx"`
 }
 
+// RecognizerStatus は駒種推論器(suteme)の読み込み状況。
+type RecognizerStatus struct {
+	// Source は読み込み元。設定で指定していなければ空(suteme 既定の探索に任せる)。
+	Source string `json:"source"`
+	Ready  bool   `json:"ready"`
+	Error  string `json:"error"`
+}
+
 // CaptureService は Wails にバインドする、GUI からのキャプチャ操作。
 // ロジックは持たず、ikkyoku ルートパッケージ(Capture / SavePNG / DefaultOutDir)を
 // 呼ぶだけに徹する(ikkyoku/CLAUDE.md: 将棋のロジックを書かない、状態を持たない)。
@@ -63,14 +71,64 @@ type CaptureService struct {
 	wins   *appWindows
 	logger *slog.Logger
 
+	// recognizerDir は駒種推論器の学習データの置き場所(ikkyoku.Config の SutemeDataDir)。
+	// 空なら suteme 既定の探索(カレントディレクトリ → 実行ファイルのディレクトリ)に任せる。
+	recognizerDir string
+
 	mu sync.Mutex
 	// mainShown はメイン画面を一度でも出したか。2 回目以降のキャプチャで
 	// 前面に出し直さないための記録(観戦中にフォーカスを奪わない)。
 	mainShown bool
+	// recognizerStatus は直近の読み込み結果。表示のためだけに 3.5MB を
+	// 読み直さなくて済むよう覚えておく。
+	recognizerStatus RecognizerStatus
 }
 
-func NewCaptureService(logger *slog.Logger) *CaptureService {
-	return &CaptureService{logger: logger}
+func NewCaptureService(logger *slog.Logger, recognizerDir string) *CaptureService {
+	return &CaptureService{logger: logger, recognizerDir: recognizerDir}
+}
+
+// ReloadRecognizer は駒種推論器を読み込み直し、その結果を返す。起動時にも呼ぶ。
+//
+// **再読み込みの入口を用意しているのは、学習データを育てながら使うため。**
+// suteme は一度読み込んだ推論器をキャッシュするので、学習データを更新しても
+// これを呼ぶまで(あるいは再起動するまで)反映されない。
+// 訂正 → 学習データ更新 → 撮り直す、というループを回すのにアプリの再起動を
+// 挟みたくない。
+func (s *CaptureService) ReloadRecognizer() RecognizerStatus {
+	st := s.loadRecognizer()
+	s.mu.Lock()
+	s.recognizerStatus = st
+	s.mu.Unlock()
+	return st
+}
+
+// Recognizer は直近の読み込み結果を返す。**読み込み直さない。**
+// フロントが起動時に状態を表示するためだけに 3.5MB を読み直すのを避ける。
+func (s *CaptureService) Recognizer() RecognizerStatus {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.recognizerStatus
+}
+
+func (s *CaptureService) loadRecognizer() RecognizerStatus {
+	if s.recognizerDir == "" {
+		// suteme 既定の探索に任せる。ここではキャッシュを捨てるだけで、
+		// 実際に読めるかどうかは最初のキャプチャのときに分かる。
+		recognize.UseDefaultPredictor()
+		s.logger.Info("駒種推論器は suteme の既定探索に任せます")
+		return RecognizerStatus{}
+	}
+
+	st := RecognizerStatus{Source: s.recognizerDir}
+	if err := recognize.UsePredictorFrom(s.recognizerDir); err != nil {
+		st.Error = err.Error()
+		s.logger.Warn("駒種推論器を読み込めませんでした", "dir", s.recognizerDir, "error", err)
+		return st
+	}
+	st.Ready = true
+	s.logger.Info("駒種推論器を読み込みました", "dir", s.recognizerDir)
+	return st
 }
 
 // bind は main() から起動シーケンスの中で呼ぶ。ServiceStartup は使わない

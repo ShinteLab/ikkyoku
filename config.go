@@ -14,6 +14,16 @@ type Config struct {
 	Region  *Region `json:"region,omitempty"`
 	OutDir  string  `json:"outDir,omitempty"`
 	Hotkey  string  `json:"hotkey,omitempty"`
+
+	// SutemeDataDir は suteme の駒種推論器の学習データ
+	// (training_data_v2.json / model_v2.json)を置いたディレクトリ。
+	//
+	// 空なら suteme 既定の探索(カレントディレクトリ → 実行ファイルのディレクトリ)に任せる。
+	// 指定できるようにしてあるのは、**学習データが 3.5MB 級で、しかも育て続けるもの**
+	// だから。実行ファイルの隣にコピーを置く運用にすると、更新のたびにコピーし直す必要が
+	// あり、古いデータで認識してしまう事故が起きる。開発中は suteme のリポジトリを
+	// 直接指しておけば、データを更新した結果がそのまま反映される。
+	SutemeDataDir string `json:"sutemeDataDir,omitempty"`
 }
 
 // DefaultConfigPath は既定の設定ファイルパスを返す（os.UserConfigDir()/ikkyoku/config.json）。

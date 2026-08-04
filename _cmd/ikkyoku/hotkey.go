@@ -1,14 +1,33 @@
 package main
 
 import (
+	"log/slog"
 	"strings"
 
 	"github.com/ShinteLab/ikkyoku"
 )
 
+// loadConfig は ikkyoku.Config(os.UserConfigDir()/ikkyoku/config.json)を読む。
+// 読めなければゼロ値を返して起動を続ける(設定が無いのは正常な状態)。
+//
+// ウィンドウの位置・サイズはこれとは別ファイル(app-window.json)に持っている。
+// あちらは Wails 依存を避けるための分離で、こちらはアプリ本来の設定。
+func loadConfig(logger *slog.Logger) ikkyoku.Config {
+	path, err := ikkyoku.DefaultConfigPath()
+	if err != nil {
+		logger.Warn("設定ファイルの場所を決められませんでした", "error", err)
+		return ikkyoku.Config{}
+	}
+	cfg, err := ikkyoku.LoadConfig(path)
+	if err != nil {
+		logger.Warn("設定を読み込めませんでした", "path", path, "error", err)
+		return ikkyoku.Config{}
+	}
+	return cfg
+}
+
 // resolveHotkey は GUI 版の既定ホットキーを返す。
-// 今のところ設定 UI は無く常に既定値(alt+s)を使う。将来 UI から変更できるようにする場合、
-// ikkyoku.Config を読み書きする形にすれば CLI 版(_cmd/ikkyoku)と設定ファイルを共有できる。
+// 今のところ設定 UI は無く常に既定値(alt+s)を使う。
 func resolveHotkey() string {
 	return ikkyoku.DefaultHotkey
 }

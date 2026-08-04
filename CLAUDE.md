@@ -26,7 +26,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 |---|---|---|
 | 0 | 中継から盤面を取れるか検証 | **完了**。OS レベルの画面キャプチャ一本と確定（下記） |
 | 1 | 取り込み層（透過ウィンドウで領域指定 → PNG） | **完了** |
-| 2 | 盤面認識（`suteme`）。持ち駒の認識も要る | **ikkyoku 側は完了・今ここ**。`suteme.LoadSFEN` の実装待ち（下記） |
+| 2 | 盤面認識（`suteme`）。持ち駒の認識も要る | **完了・今ここ**。動くが精度はこれから（下記） |
 | 3 | 局面矯正層（駒数保存則・静的合法性・手番の決定） | 未着手。**ikkyoku に入る** |
 | 3.5 | 棋譜組み立て層（局面を日和見的に繋ぐ。**任意**） | 未着手 |
 | 4 | エンジン接続（`engine` を直接 import） | 未着手 |
@@ -78,37 +78,55 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **`ikkyoku` は独立したリポジトリなので、単体で clone した場合そのファイルは存在しない。**
 その場合はこの節が構想に関する唯一の情報源になる。**この節を薄くしないこと。**
 
-## Phase 2: suteme への接続（**ikkyoku 側は実装済み**）
+## Phase 2: suteme への接続（**動いている**）
 
-撮った画像を `suteme` に渡し、返った SFEN で盤面を描くところまで繋いである
+撮った画像を `suteme` に渡し、返った SFEN で盤面を描くところまで繋がっている
 （`recognize` パッケージ → `CaptureService.Capture` → メイン画面）。
 
-### ⚠️ 現状 `suteme.LoadSFEN` は未実装のスタブ
-
-```go
-func LoadSFEN(img image.Image) (string, error) {
-	return "", fmt.Errorf("not implemented")
-}
-```
-
-**そのため実際には盤面が出ない。** ikkyoku 側の配線・描画は完成していて、
-`suteme` 側が実装された時点で動き出す。**ikkyoku 側で回避実装を書かないこと**
-（認識器は suteme の責務。責務の線引き参照）。
-
-`suteme` には `DetectBoard` + `NewKNN`(k-NN 認識器) + `RecognizeBoard` という
-実装済みの部品が揃っているので、`LoadSFEN` はそれらを繋ぐだけで書けるはず。
-ただし k-NN は `training_data_v2.json`（約 3.6MB、`suteme` のカレントディレクトリ前提）を
-必要とするため、**suteme 側で embed するなど「パス無しで使える」形にする必要がある**
-（ikkyoku がデータファイルの置き場所を知る設計にはしたくない）。
+**認識の精度はまだ低い**（実測で `L: 11枚（上限4）` のような警告が出る状態）。
+これは Phase 2 の失敗ではない。**「今どれくらいか」が見えるようになったこと自体が成果**で、
+精度は学習データを育てて上げていく。`ValidatePieces` の警告がそのまま
+「どれくらい外しているか」の指標になっている。
 
 ### 使う API（`github.com/ShinteLab/suteme`）
 
-| 関数 | 用途 | 状態 |
-|---|---|---|
-| `LoadSFEN(img image.Image) (string, error)` | **画像 → SFEN 盤面文字列。これが本命の継ぎ目** | **スタブ** |
-| `ValidatePieces(sfenBoard string) *PieceValidation` | **駒数保存則の検証**。`Warnings` と `HandTotal` を返す | 実装済み |
-| `DetectBoard(img image.Image) *BoardRegion` | 画像中の盤の矩形を検出 | 実装済み |
-| `Analyze(img image.Image) *AnalyzeResult` | エッジ画像 + 盤領域。`DrawBoard` でデバッグ描画できる | 実装済み |
+| 関数 | 用途 |
+|---|---|
+| `LoadSFEN(img image.Image) (string, error)` | **画像 → SFEN 盤面文字列。これが本命の継ぎ目** |
+| `ValidatePieces(sfenBoard string) *PieceValidation` | **駒数保存則の検証**。`Warnings` と `HandTotal` を返す |
+| `LoadPredictor(dir string) (Predictor, error)` | dir から駒種推論器を読む（下記） |
+| `SetPredictor(p Predictor)` | 以後 `LoadSFEN` が使う推論器を差し替える。`nil` で既定探索に戻る |
+
+### ⚠️ 学習データの置き場所は ikkyoku が決める
+
+`LoadSFEN` は駒種推論器を必要とし、`suteme` は既定で
+**カレントディレクトリ → 実行ファイルのディレクトリ**の順に
+`training_data_v2.json`（k-NN 優先）/ `model_v2.json` を探す。
+どちらも 3.5MB 級で、**しかも育て続けるファイル**。
+
+**実行ファイルの隣にコピーを置く運用は取らない。** 更新のたびにコピーし直す必要があり、
+古いデータで認識する事故が起きる。代わりに `ikkyoku.Config` の `SutemeDataDir` で
+場所を指し、`recognize.UsePredictorFrom` → `suteme.SetPredictor` で読み込む。
+開発中は `suteme` のリポジトリを直接指しておけばよい:
+
+```json
+{ "sutemeDataDir": "D:/Go/Projects/shinte/suteme" }
+```
+
+（`os.UserConfigDir()/ikkyoku/config.json`。**JSON なのでパスはスラッシュ区切りで書く**）
+
+`SutemeDataDir` が空なら `suteme` 既定の探索に任せる。配布時にデータを同梱するなら
+そちらの経路になる。
+
+- **ファイルのシンボリックリンクで代用しようとしないこと。** Windows では管理者権限
+  （または開発者モード）が要る。ジャンクションはディレクトリ専用で、`suteme` が探すのは
+  「そのディレクトリ直下の 2 ファイル」なので代用にならない
+- **`suteme` は一度読んだ推論器をキャッシュする。** 学習データを更新しても、
+  再読み込みするまで反映されない。メイン画面の「認識器を再読み込み」
+  （`CaptureService.ReloadRecognizer`）がその入口。訂正 → 学習データ更新 → 撮り直す、
+  というループにアプリの再起動を挟まないため
+- 起動時に先に読み込んでおく（撮った瞬間に 3.5MB の読み込みで待たされないように）。
+  表示のためだけに読み直さないよう、状態取得は `CaptureService.Recognizer`（読み込まない）に分けてある
 
 ### 分かっていること（設計に効く）
 
@@ -265,9 +283,9 @@ New-Item -ItemType Junction -Path (Join-Path $w 'core')   -Target 'D:\Go\Project
 | `capture.go` | `Region` / `DisplayInfo` / `ListDisplays` / `Capture` など、キャプチャの中核 |
 | `region.go` | `ParseRegion`（`"x,y,width,height"` 文字列 → `Region`） |
 | `save.go` | `SavePNG` / `DefaultOutDir` / タイムスタンプ式ファイル名生成 |
-| `config.go` | `Config` の JSON 読み書き（`encoding/json` のみ、標準ライブラリで完結） |
+| `config.go` | `Config` の JSON 読み書き（`encoding/json` のみ、標準ライブラリで完結）。`SutemeDataDir` もここ |
 | `hotkey.go` | `ParseHotkey`（`"alt+s"` 文字列 → `golang.design/x/hotkey` の修飾子・キー） |
-| `recognize/` | 画像 → 盤面。`suteme` を呼ぶだけ。**認識器はここに書かない**。Phase 3 の局面矯正層はここに入る |
+| `recognize/` | 画像 → 盤面。`suteme` を呼ぶだけ（`recognize.go`）＋どの学習データを使うかの指定（`predictor.go`）。**認識器はここに書かない**。Phase 3 の局面矯正層はここに入る |
 | `_cmd/ikkyoku/` | Wails3 GUI アプリ(独立したネストモジュール)。下記「GUI アプリ(Wails3)」参照 |
 
 **ディレクトリ名は `ikkyoku`、モジュール名は `ikkyoku-app`。** `kicho` が

@@ -48,3 +48,15 @@ export interface GuideLayout {
     "borderPx": number;
     "toolbarPx": number;
 }
+
+/**
+ * RecognizerStatus は駒種推論器(suteme)の読み込み状況。
+ */
+export interface RecognizerStatus {
+    /**
+     * Source は読み込み元。設定で指定していなければ空(suteme 既定の探索に任せる)。
+     */
+    "source": string;
+    "ready": boolean;
+    "error": string;
+}

@@ -49,7 +49,7 @@ func main() {
 	}))
 	slog.SetDefault(logger)
 
-	captureSvc := NewCaptureService(logger)
+	captureSvc := NewCaptureService(logger, loadConfig(logger).SutemeDataDir)
 
 	app := application.New(application.Options{
 		Name:        "ikkyoku",
@@ -82,6 +82,10 @@ func main() {
 	registerFrameHooks(wins, state.Frame, captureSvc)
 	registerMainHooks(app, wins, state.Main, logger)
 	registerHotkey(app, captureSvc, logger)
+
+	// 駒種推論器(suteme)を先に用意しておく。3.5MB の学習データを読むので、
+	// 最初のキャプチャのときに読み始めると撮った瞬間に待たされる。
+	captureSvc.ReloadRecognizer()
 
 	if err := app.Run(); err != nil {
 		logger.Error("アプリが異常終了しました", "error", err)

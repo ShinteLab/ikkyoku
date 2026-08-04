@@ -8,5 +8,6 @@ export {
 
 export type {
     CaptureResult,
-    GuideLayout
+    GuideLayout,
+    RecognizerStatus
 } from "./models.js";
