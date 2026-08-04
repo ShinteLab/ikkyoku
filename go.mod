@@ -3,14 +3,21 @@ module github.com/ShinteLab/ikkyoku
 go 1.26.1
 
 require (
+	github.com/ShinteLab/suteme v0.0.0-00010101000000-000000000000
 	github.com/kbinani/screenshot v0.0.0-20250624051815-089614a94018
 	golang.design/x/hotkey v0.6.1
 )
 
 require (
+	github.com/ShinteLab/core v0.0.0-00010101000000-000000000000 // indirect
 	github.com/gen2brain/shm v0.1.0 // indirect
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
+	github.com/goml/gobrain v0.0.0-20201212123421-2e2d98ca8249 // indirect
 	github.com/jezek/xgb v1.1.1 // indirect
 	github.com/lxn/win v0.0.0-20210218163916-a377121e959e // indirect
 	golang.org/x/sys v0.24.0 // indirect
 )
+
+replace github.com/ShinteLab/suteme => ../suteme
+
+replace github.com/ShinteLab/core => ../core

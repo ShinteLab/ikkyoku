@@ -3,17 +3,20 @@ module ikkyoku-app
 go 1.26.1
 
 require (
+	github.com/ShinteLab/core v0.0.0-00010101000000-000000000000
 	github.com/ShinteLab/ikkyoku v0.0.0-00010101000000-000000000000
 	github.com/wailsapp/wails/v3 v3.0.0-beta.3
 	golang.org/x/sys v0.45.0
 )
 
 require (
+	github.com/ShinteLab/suteme v0.0.0-00010101000000-000000000000 // indirect
 	github.com/adrg/xdg v0.5.3 // indirect
 	github.com/coder/websocket v1.8.14 // indirect
 	github.com/gen2brain/shm v0.1.0 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/godbus/dbus/v5 v5.2.2 // indirect
+	github.com/goml/gobrain v0.0.0-20201212123421-2e2d98ca8249 // indirect
 	github.com/jchv/go-winloader v0.0.0-20250406163304-c1995be93bd1 // indirect
 	github.com/jezek/xgb v1.1.1 // indirect
 	github.com/kbinani/screenshot v0.0.0-20250624051815-089614a94018 // indirect
@@ -25,3 +28,7 @@ require (
 
 // ikkyoku はタグ未発行のため相対パスの replace で参照する(親 CLAUDE.md の運用に準拠)。
 replace github.com/ShinteLab/ikkyoku => ../../
+
+replace github.com/ShinteLab/suteme => ../../../suteme
+
+replace github.com/ShinteLab/core => ../../../core

@@ -58,9 +58,7 @@ func main() {
 		Services: []application.Service{
 			application.NewService(captureSvc),
 		},
-		Assets: application.AssetOptions{
-			Handler: application.AssetFileServerFS(assets),
-		},
+		Assets: assetOptions(),
 		Mac: application.MacOptions{
 			ApplicationShouldTerminateAfterLastWindowClosed: true,
 		},

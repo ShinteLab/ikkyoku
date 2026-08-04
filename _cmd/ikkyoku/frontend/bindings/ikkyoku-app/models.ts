@@ -3,6 +3,11 @@
 
 /**
  * CaptureResult はフロントに返すキャプチャ結果。
+ * 
+ * 盤面の認識結果も含むが、**認識できなくてもキャプチャは成功**として返す
+ * (設計原則3「段階的に劣化すること」。撮った 1 局面が残ることのほうが大事で、
+ * 認識はその上に乗るもの)。認識だけが失敗したときは SFEN が空になり、
+ * RecognizeError に理由が入る。
  */
 export interface CaptureResult {
     "path": string;
@@ -13,6 +18,27 @@ export interface CaptureResult {
      * data:image/png;base64,... のサムネイル(等倍)
      */
     "thumbnail": string;
+
+    /**
+     * 盤面部分のみ。認識できなければ空
+     */
+    "sfen": string;
+
+    /**
+     * 駒数保存則に反する点
+     */
+    "warnings": string[] | null;
+
+    /**
+     * 駒台の推定枚数(先後不明)
+     */
+    "handTotal": { [_ in string]?: number } | null;
+
+    /**
+     * RecognizeError は「撮れたが認識できなかった」ときの理由。
+     * キャプチャ自体の失敗はこれではなく Capture のエラーで表す。
+     */
+    "recognizeError": string;
 }
 
 /**

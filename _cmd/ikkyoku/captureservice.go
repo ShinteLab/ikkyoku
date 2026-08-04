@@ -12,6 +12,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 
 	"github.com/ShinteLab/ikkyoku"
+	"github.com/ShinteLab/ikkyoku/recognize"
 )
 
 // 枠ウィンドウのレイアウト寸法(CSS px)。**ここが唯一のソース。**
@@ -160,11 +161,24 @@ func (s *CaptureService) Layout() GuideLayout {
 }
 
 // CaptureResult はフロントに返すキャプチャ結果。
+//
+// 盤面の認識結果も含むが、**認識できなくてもキャプチャは成功**として返す
+// (設計原則3「段階的に劣化すること」。撮った 1 局面が残ることのほうが大事で、
+// 認識はその上に乗るもの)。認識だけが失敗したときは SFEN が空になり、
+// RecognizeError に理由が入る。
 type CaptureResult struct {
 	Path      string `json:"path"`
 	Width     int    `json:"width"`
 	Height    int    `json:"height"`
 	Thumbnail string `json:"thumbnail"` // data:image/png;base64,... のサムネイル(等倍)
+
+	SFEN      string         `json:"sfen"`      // 盤面部分のみ。認識できなければ空
+	Warnings  []string       `json:"warnings"`  // 駒数保存則に反する点
+	HandTotal map[string]int `json:"handTotal"` // 駒台の推定枚数(先後不明)
+
+	// RecognizeError は「撮れたが認識できなかった」ときの理由。
+	// キャプチャ自体の失敗はこれではなく Capture のエラーで表す。
+	RecognizeError string `json:"recognizeError"`
 }
 
 // Capture はガイド枠の内側を撮って PNG 保存し、保存先パスとサムネイルを返す。
@@ -199,8 +213,28 @@ func (s *CaptureService) Capture() (CaptureResult, error) {
 	}
 
 	b := img.Bounds()
-	result := CaptureResult{Path: path, Width: b.Dx(), Height: b.Dy(), Thumbnail: thumb}
+	result := CaptureResult{
+		Path:      path,
+		Width:     b.Dx(),
+		Height:    b.Dy(),
+		Thumbnail: thumb,
+		Warnings:  []string{},
+		HandTotal: map[string]int{},
+	}
 	s.logger.Info("キャプチャしました", "path", path, "width", b.Dx(), "height", b.Dy())
+
+	// 盤面の認識。**ここで失敗してもキャプチャは成功として返す。**
+	// PNG は既に保存できており、撮った 1 局面を失わないことのほうが大事
+	// (設計原則3。認識失敗はキャプチャの失敗ではない)。
+	if board, err := recognize.FromImage(img); err != nil {
+		result.RecognizeError = err.Error()
+		s.logger.Warn("盤面を認識できませんでした", "path", path, "error", err)
+	} else {
+		result.SFEN = board.SFEN
+		result.Warnings = board.Warnings
+		result.HandTotal = board.HandTotal
+		s.logger.Info("盤面を認識しました", "sfen", board.SFEN, "warnings", len(board.Warnings))
+	}
 	if s.app != nil {
 		s.app.Event.Emit("capture:done", result)
 	}

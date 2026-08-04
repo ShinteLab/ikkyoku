@@ -25,8 +25,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | Phase | 内容 | 状態 |
 |---|---|---|
 | 0 | 中継から盤面を取れるか検証 | **完了**。OS レベルの画面キャプチャ一本と確定（下記） |
-| 1 | 取り込み層（透過ウィンドウで領域指定 → PNG） | **ほぼ完了**。今ここ |
-| 2 | 盤面認識（`suteme`）。持ち駒の認識も要る | 未着手 |
+| 1 | 取り込み層（透過ウィンドウで領域指定 → PNG） | **完了** |
+| 2 | 盤面認識（`suteme`）。持ち駒の認識も要る | **ikkyoku 側は完了・今ここ**。`suteme.LoadSFEN` の実装待ち（下記） |
 | 3 | 局面矯正層（駒数保存則・静的合法性・手番の決定） | 未着手。**ikkyoku に入る** |
 | 3.5 | 棋譜組み立て層（局面を日和見的に繋ぐ。**任意**） | 未着手 |
 | 4 | エンジン接続（`engine` を直接 import） | 未着手 |
@@ -78,20 +78,37 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **`ikkyoku` は独立したリポジトリなので、単体で clone した場合そのファイルは存在しない。**
 その場合はこの節が構想に関する唯一の情報源になる。**この節を薄くしないこと。**
 
-## 次のステップ（Phase 2: suteme に繋ぐ）
+## Phase 2: suteme への接続（**ikkyoku 側は実装済み**）
 
-**キャプチャを洗練させた後の次の一手は「撮った画像を `suteme` に渡し、認識結果を出す」こと。**
-`suteme` 側には既に使える入口があるので、まずは繋いで**どれくらい認識できるかを可視化する**
-ところから始める（精度を上げるのはその後。現状を測らないまま作り込まない）。
+撮った画像を `suteme` に渡し、返った SFEN で盤面を描くところまで繋いである
+（`recognize` パッケージ → `CaptureService.Capture` → メイン画面）。
 
-### 使う API（`github.com/ShinteLab/suteme`。2026-08-04 時点で実在を確認済み）
+### ⚠️ 現状 `suteme.LoadSFEN` は未実装のスタブ
 
-| 関数 | 用途 |
-|---|---|
-| `LoadSFEN(img image.Image) (string, error)` | **画像 → SFEN 盤面文字列。これが本命の継ぎ目** |
-| `DetectBoard(img image.Image) *BoardRegion` | 画像中の盤の矩形を検出 |
-| `Analyze(img image.Image) *AnalyzeResult` | エッジ画像 + 盤領域。`DrawBoard` でデバッグ描画できる |
-| `ValidatePieces(sfenBoard string) *PieceValidation` | **駒数保存則の検証**。`Warnings` と `HandTotal` を返す |
+```go
+func LoadSFEN(img image.Image) (string, error) {
+	return "", fmt.Errorf("not implemented")
+}
+```
+
+**そのため実際には盤面が出ない。** ikkyoku 側の配線・描画は完成していて、
+`suteme` 側が実装された時点で動き出す。**ikkyoku 側で回避実装を書かないこと**
+（認識器は suteme の責務。責務の線引き参照）。
+
+`suteme` には `DetectBoard` + `NewKNN`(k-NN 認識器) + `RecognizeBoard` という
+実装済みの部品が揃っているので、`LoadSFEN` はそれらを繋ぐだけで書けるはず。
+ただし k-NN は `training_data_v2.json`（約 3.6MB、`suteme` のカレントディレクトリ前提）を
+必要とするため、**suteme 側で embed するなど「パス無しで使える」形にする必要がある**
+（ikkyoku がデータファイルの置き場所を知る設計にはしたくない）。
+
+### 使う API（`github.com/ShinteLab/suteme`）
+
+| 関数 | 用途 | 状態 |
+|---|---|---|
+| `LoadSFEN(img image.Image) (string, error)` | **画像 → SFEN 盤面文字列。これが本命の継ぎ目** | **スタブ** |
+| `ValidatePieces(sfenBoard string) *PieceValidation` | **駒数保存則の検証**。`Warnings` と `HandTotal` を返す | 実装済み |
+| `DetectBoard(img image.Image) *BoardRegion` | 画像中の盤の矩形を検出 | 実装済み |
+| `Analyze(img image.Image) *AnalyzeResult` | エッジ画像 + 盤領域。`DrawBoard` でデバッグ描画できる | 実装済み |
 
 ### 分かっていること（設計に効く）
 
@@ -105,18 +122,40 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **`DetectBoard` はガイド枠の自動フィットに転用できる。** 撮った画像から盤の矩形が出るなら、
   ユーザーが手で合わせた枠を補正できる。Phase 1 の洗練としても効く
 
-### 最初にやること（この順で）
+### ikkyoku 側の実装（済み）
 
-1. `go.mod` に `suteme` への依存を足す（ワークスペースでは `replace ../suteme`）。
-   **依存の向きは `ikkyoku → suteme`。逆参照しない**
-2. 撮った直後に `LoadSFEN` を呼び、**操作パネルに SFEN 文字列をそのまま出す**。
-   まずは生の結果を見えるようにするだけでよい
-3. `ValidatePieces` の `Warnings` と `HandTotal` も併せて出す
-4. **認識できなかった場合もアプリが普通に動くこと。**
-   設計原則 3「段階的に劣化する」。認識失敗はキャプチャの失敗ではない。
-   PNG の保存は成功したまま、認識結果だけが空になる形にする
-5. 盤の描画（`core/web` の `<shogi-board>` を使う）は**その次**。
-   先に「文字列で出す」で現状を測る
+- `recognize` パッケージ（ルートモジュール）が `LoadSFEN` + `ValidatePieces` を呼ぶ。
+  **認識器はここに書かない**（suteme の責務）。一方、Phase 3 の局面矯正層はここに入る
+- `CaptureService.Capture` が撮った直後に呼び、`CaptureResult` に
+  `sfen` / `warnings` / `handTotal` / `recognizeError` を載せて返す
+- **認識に失敗してもキャプチャは成功として扱う**（設計原則3）。PNG の保存は済んでおり、
+  盤が出ない代わりに理由が UI に出るだけ。`recognizeError` がその理由
+- メイン画面が SFEN・駒台の推定枚数（先後不明）・警告を出し、`<shogi-board>` で盤を描く
+
+#### `<shogi-board>` の配信（ファイルをコピーしない）
+
+`core/web` は共有資産を `web.Assets`（embed）で公開している。ikkyoku は
+`AssetOptions.Middleware` で `/shinte-web/` に流しているだけ（`shinteweb.go`）。
+suteme の学習用サーバと同じパス・同じ方式。フロントは実行時に
+`import("/shinte-web/shogi-board.js")` する（バンドル対象ではないので `@vite-ignore` 付き。
+パスを変数に逃がしてあるのは tsc がリテラルを解決しようとするため）。
+
+**npm 依存(`@shinte/web`)にはしていない。** private パッケージで `file:` 参照になり、
+相対パスが git worktree で壊れるうえ node_modules 共有の問題も絡む。Go 側は既に core に
+依存しているので、embed を配信するほうが単純で確実。
+
+#### ⚠️ 駒文字フォントはドキュメント側に登録し直す必要がある
+
+`<shogi-board>` は `@font-face`(ShogiSFEN) を **Shadow DOM 内の style にしか持っていない**が、
+**Chromium は shadow root 内の `@font-face` を無視する**（フォントはドキュメント単位で解決される）。
+そのままだと駒がラテン文字（`l`/`n`/`s`/`g`/`k`…、後手は 180 度回転）で描画される。
+`mainscreen.ts` の `registerBoardFont()` が `font.js` の `FONT_DATA_URL` を
+ドキュメントの `<style>` に登録し直して回避している（**フォントの実体は core のまま**）。
+**本来は `core/web` 側で登録するのが筋なので、直ったらこの関数は消せる。**
+
+同じ理由で、`shogi-board` に `hidden` を付けても消えない
+（`:host { display: inline-block }` が UA の `display:none` に勝つ）。
+外側から `shogi-board[hidden] { display: none }` を当てて打ち消している。
 
 ### 想定される躓き
 
@@ -167,14 +206,42 @@ DRM を素通りする。そのため入口を Chrome 拡張からネイティ�
   `golang.org/x/sys/windows` 経由で直呼びしており cgo 不要（cgo が要るのは macOS 側の実装のみ。
   `go.mod` に `golang.design/x/mainthread` が入っていないのはそのため。macOS の
   「main thread でイベントを処理する」制約は Windows には無い）
+- `github.com/ShinteLab/suteme` — 盤面認識（`recognize` パッケージが使う）。
+  `core` も間接的に入る
+- `github.com/ShinteLab/core` — `_cmd/ikkyoku` が `core/web` の embed（`<shogi-board>`）を配信する
 
 ワークスペース（`ShinteLab/shinte`）に置いた場合、そのルートに go.mod は無いので
 `go` コマンドは必ずこの `ikkyoku/` ディレクトリで実行すること。
 
-`core`/`engine`/`suteme` への依存は**まだ無い**（現状キャプチャしかしていないため）。
-Phase 2 以降でこれらを呼ぶときは、依存の向き（`ikkyoku → core / suteme / engine`、
-**逆参照しない**）を守ること。ワークスペースに並んでいる状態では `replace` の
-相対パス参照になる（`../core` など。他のサブプロジェクトと同じ運用）。
+依存の向きは `ikkyoku → core / suteme / engine`。**逆参照しない。**
+ワークスペースに並んでいる状態では `replace` の相対パス参照になる（他のサブプロジェクトと同じ運用）:
+
+```
+go.mod                    replace .../suteme => ../suteme,       .../core => ../core
+_cmd/ikkyoku/go.mod       replace .../suteme => ../../../suteme, .../core => ../../../core
+```
+
+`_cmd/ikkyoku` にも同じ replace が要る。**path 置換されたモジュール自身の replace は
+無視される**ため（`ikkyoku` を `../../` で参照している以上、`ikkyoku/go.mod` の replace は効かない）。
+
+### ⚠️ git worktree で作業するときは replace が解決できない
+
+`replace` は go.mod からの相対パスなので、`ikkyoku/.claude/worktrees/<名前>/` で作業すると
+`../suteme` が `ikkyoku/.claude/worktrees/suteme` を指してしまい解決できない。
+**worktree 側に合わせて replace を書き換えないこと**（本来の配置で壊れる）。
+代わりに、ジャンクションを置いてパスを成立させる:
+
+```powershell
+$w = 'D:\Go\Projects\shinte\ikkyoku\.claude\worktrees'
+New-Item -ItemType Junction -Path (Join-Path $w 'suteme') -Target 'D:\Go\Projects\shinte\suteme'
+New-Item -ItemType Junction -Path (Join-Path $w 'core')   -Target 'D:\Go\Projects\shinte\core'
+```
+
+`.gitignore` が `.*` を無視するので git には見えない。
+`_cmd/ikkyoku` 側の `../../../suteme` も同じジャンクションで解決される。
+
+**消すときは `Remove-Item -Recurse` を使わないこと**（参照先の中身まで消しうる）。
+`[System.IO.Directory]::Delete($path, $false)` で reparse point だけを消す。
 
 ## 設計制約（必ず守ること）
 
@@ -200,6 +267,7 @@ Phase 2 以降でこれらを呼ぶときは、依存の向き（`ikkyoku → co
 | `save.go` | `SavePNG` / `DefaultOutDir` / タイムスタンプ式ファイル名生成 |
 | `config.go` | `Config` の JSON 読み書き（`encoding/json` のみ、標準ライブラリで完結） |
 | `hotkey.go` | `ParseHotkey`（`"alt+s"` 文字列 → `golang.design/x/hotkey` の修飾子・キー） |
+| `recognize/` | 画像 → 盤面。`suteme` を呼ぶだけ。**認識器はここに書かない**。Phase 3 の局面矯正層はここに入る |
 | `_cmd/ikkyoku/` | Wails3 GUI アプリ(独立したネストモジュール)。下記「GUI アプリ(Wails3)」参照 |
 
 **ディレクトリ名は `ikkyoku`、モジュール名は `ikkyoku-app`。** `kicho` が
@@ -228,7 +296,8 @@ CLI は無い。**
 | `_cmd/ikkyoku/` のファイル | 役割 |
 |---|---|
 | `main.go` | ウィンドウ 2 枚の生成・フック登録・ホットキー登録 |
-| `captureservice.go` | Wails にバインドする Service。**寸法定数の唯一のソース**・`captureRegion`・枠の表示/非表示 |
+| `captureservice.go` | Wails にバインドする Service。**寸法定数の唯一のソース**・`captureRegion`・枠の表示/非表示・認識の呼び出し |
+| `shinteweb.go` | `core/web` の embed を `/shinte-web/` で配信する AssetServer ミドルウェア |
 | `geometry.go` | ウィンドウ位置の追跡（終了時に `Position()` を読めないため） |
 | `windowstate.go` | `app-window.json` の読み書き・既定値・画面内へのクランプ |
 | `clientrect_windows.go` | HWND からクライアント矩形を物理ピクセルで取得（`clientrect_other.go` はスタブ） |

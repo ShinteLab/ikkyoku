@@ -187,19 +187,126 @@ html.is-main body {
   color: #ff7a7a;
 }
 
-/* 撮った画像の置き場。Phase 2 で認識結果(SFEN・警告)を並べるのもこの領域。 */
-.preview {
+.status.is-warn {
+  color: #ffc46b;
+}
+
+/* 盤を左、読み取り結果を右に並べる。盤が主役だが、
+   認識が当てにならないうちは SFEN と警告も同時に見たいため。 */
+.content {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
-  align-items: flex-start;
-  justify-content: center;
+  gap: 14px;
+}
+
+.side {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   overflow: auto;
 }
 
-.thumbnail {
+/* 盤面。この画面の主役。SFEN から <shogi-board>(core/web)が SVG で描く。
+   幅を決め打ちしているのは、中の SVG が max-width:100%/height:auto で
+   追従するため。高さ側で制限しても縦横比が保てない。 */
+.board-area {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.board-area shogi-board {
+  width: 300px;
   max-width: 100%;
-  max-height: 100%;
+}
+
+/* `hidden` 属性を効かせるために必要。<shogi-board> は Shadow DOM 内で
+   `:host { display: inline-block }` を指定しており、これが hidden の既定スタイル
+   (UA の display:none)に勝ってしまう。外側のドキュメント側スタイルは :host より
+   強いので、ここで打ち消す。 */
+.board-area shogi-board[hidden] {
+  display: none;
+}
+
+.board-placeholder {
+  margin: 0;
+  font-size: 13px;
+  color: #6f7787;
+}
+
+.board-placeholder.is-error {
+  color: #ff7a7a;
+}
+
+/* 認識結果の文字表示。盤の描画が当てにならないうちは、こちらが一次情報になる。 */
+.readout {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sfen-row,
+.hand-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.field-label {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: #6f7787;
+  letter-spacing: 0.04em;
+}
+
+.sfen {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  color: #c7cbd4;
+  word-break: break-all;
+}
+
+.hand {
+  font-size: 13px;
+  color: #c7cbd4;
+}
+
+.note {
+  font-size: 11px;
+  color: #6f7787;
+}
+
+/* ValidatePieces の警告。「ここが怪しい」の提示にそのまま使える。 */
+.warnings {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #ffc46b;
+}
+
+/* 撮った画像そのものは普段は見ない。今は認識結果を突き合わせるためのデバッグ用。 */
+.debug {
+  flex: 0 0 auto;
+  border-top: 1px solid #2a2d36;
+  padding-top: 8px;
+}
+
+.debug > summary {
+  font-size: 11px;
+  color: #6f7787;
+  cursor: pointer;
+}
+
+.thumbnail {
+  margin-top: 8px;
+  max-width: 100%;
+  max-height: 180px;
   object-fit: contain;
   border: 1px solid #3a3d47;
   border-radius: 6px;
