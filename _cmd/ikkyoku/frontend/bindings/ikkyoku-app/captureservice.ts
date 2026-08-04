@@ -24,3 +24,32 @@ import * as $models from "./models.js";
 export function Capture(): $CancellablePromise<$models.CaptureResult> {
     return $Call.ByID(3605231503);
 }
+
+/**
+ * HideFrame は枠を隠す。フロント(ツールバーの✕)と Alt+F4 の両方から呼ばれる。
+ * 
+ * 閉じずに隠すだけなのは、枠が「見せるための UI」ではなく「撮る領域の定義」だから。
+ * 隠しても HWND は生きているので、そのまま Alt+S で同じ領域を撮り続けられる。
+ * むしろ隠したほうが、ツールバーやガイド枠が写り込む余地が原理的に無くなる。
+ * 
+ * 枠を隠した結果として可視ウィンドウが 1 枚も無くなると、アプリが動いているのに
+ * 操作できない状態になる。それを避けるため、メイン画面がまだ出ていなければ出す。
+ */
+export function HideFrame(): $CancellablePromise<void> {
+    return $Call.ByID(2583042588);
+}
+
+/**
+ * Layout は枠ウィンドウが描くべき寸法を返す。フロントは起動時にこれを呼び、
+ * CSS 変数に反映してからガイド枠を描く(定数の二重管理を避けるため)。
+ */
+export function Layout(): $CancellablePromise<$models.GuideLayout> {
+    return $Call.ByID(3905037405);
+}
+
+/**
+ * ShowFrame は隠した枠を出し直す。メイン画面のボタンから呼ばれる。
+ */
+export function ShowFrame(): $CancellablePromise<void> {
+    return $Call.ByID(3510559659);
+}

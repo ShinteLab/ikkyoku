@@ -225,6 +225,18 @@ CLI は無い。**
   `Capture` / `SavePNG` / `DefaultOutDir` / `ParseHotkey` / `DefaultHotkey` を
   そのまま import して使っており、ロジックを再実装していない
 
+| `_cmd/ikkyoku/` のファイル | 役割 |
+|---|---|
+| `main.go` | ウィンドウ 2 枚の生成・フック登録・ホットキー登録 |
+| `captureservice.go` | Wails にバインドする Service。**寸法定数の唯一のソース**・`captureRegion`・枠の表示/非表示 |
+| `geometry.go` | ウィンドウ位置の追跡（終了時に `Position()` を読めないため） |
+| `windowstate.go` | `app-window.json` の読み書き・既定値・画面内へのクランプ |
+| `clientrect_windows.go` | HWND からクライアント矩形を物理ピクセルで取得（`clientrect_other.go` はスタブ） |
+| `hotkey.go` | ホットキー文字列 → Wails のアクセラレータ表記 |
+| `frontend/src/main.ts` | エントリ。**素の `import "@wailsio/runtime"`** と `?window=` による画面分岐 |
+| `frontend/src/frame.ts` | 枠（ツールバー + ガイド枠） |
+| `frontend/src/mainscreen.ts` | メイン画面 |
+
 ### ウィンドウ構成(2枚)
 
 将棋盤に重ねる透過ウィンドウの中に操作用の UI を置くと、その UI 自体がキャプチャに
@@ -232,37 +244,91 @@ CLI は無い。**
 
 | ウィンドウ | URL | 役割 |
 |---|---|---|
-| ガイド枠(`frame`) | `/?window=frame` | 透過。2px のガイド枠だけを描く。クリック可能な要素は一切置かない |
-| 操作パネル(`panel`) | `/?window=panel` | 不透明の通常ウィンドウ。「撮る」ボタン・保存先パス・直近のサムネイルを表示 |
+| 枠(`frame`) | `/?window=frame` | Frameless・透過。上部のツールバー(撮る/✕)とガイド枠だけを描く。**「どこを撮るか」の定義そのもの** |
+| メイン画面(`main`) | `/?window=main` | アプリ本体。撮った画像・保存先・(将来は)認識結果と設定。**起動時は非表示** |
+
+**メインは枠ではなくメイン画面。** 枠は位置合わせが済めば用済みになりうる道具で、
+アプリの寿命を握る画面ではない。
+
+- 起動直後は**枠だけ**が見える。メイン画面は `Hidden: true` で作られ、
+  **最初のキャプチャで現れる**（`revealMain`）。2 回目以降は前面に出し直さない
+  （観戦中にフォーカスを奪わないため）
+- **枠は閉じても破棄せず隠すだけ。** 領域の定義を生かしたままにするため。
+  隠れていても HWND は生きているので、**枠が非表示のまま `Alt+S` で同じ領域が撮れる**
+  （むしろ隠したほうがツールバーやガイド枠が写り込む余地が原理的に無くなる）
+- **メイン画面を閉じるとアプリが終了する。** 枠は隠れて生き続けるので、
+  ここで明示的に `app.Quit()` しないとプロセスが残る
+- 枠を隠した結果として可視ウィンドウが 0 枚になると操作不能になるため、
+  `HideFrame` はメイン画面が未表示なら先に出す
+- **キャプチャ領域の基準は枠のまま。これは移せない**（領域は枠のクライアント矩形そのもの）
 
 同じフロントバンドルを URL クエリで出し分ける(wails3 skill `advanced.md` の
 「マルチウィンドウは URL クエリで画面分岐」パターン)。フロント側は `frontend/src/main.ts` が
-`?window=` を見て `frame.ts` / `panel.ts` のどちらかをマウントする。
+`?window=` を見て `frame.ts` / `mainscreen.ts` のどちらかをマウントする。
 
-### 透過の実装
+### 透過と Frameless
 
 `WebviewWindowOptions.BackgroundType: application.BackgroundTypeTransparent` +
-`BackgroundColour: application.NewRGBA(0, 0, 0, 0)` をガイド枠ウィンドウに設定している。
+`BackgroundColour: application.NewRGBA(0, 0, 0, 0)` を枠ウィンドウに設定している。
 **`application.WindowsWindow{ BackgroundType: ... }` ではない**（`WindowsWindow` 構造体には
 `BackgroundType` フィールドが無い。実際の Wails v3 ソース(`webview_window_options.go`)で
 確認済み。`BackgroundType`/`BackgroundColour` は `WebviewWindowOptions` 直下のフィールド）。
-`Frameless` は `false` のまま(ユーザー要望どおりタイトルバー・枠を持つ通常ウィンドウ)。
-Frameless に依存する透過実装ではないことを Wails 本体のソース(`webview_window_windows.go`)で
-確認している。
+
+`Frameless: true`。OS のタイトルバーの代わりに、フロント側が上部にツールバーを描く。
+`Windows.DisableFramelessWindowDecorations: true` も付けている（既定では DWM のフレームを
+クライアント領域へ延ばして影・角丸を残すが、中継映像に重ねる透過ウィンドウなので
+影も角丸も邪魔で、透過領域に DWM が描く余地も残したくない）。
+
+#### Frameless の移動とリサイズ(**ここを踏むと枠が一切動かせなくなる**)
+
+Frameless にすると移動もリサイズも OS 任せでなくなる。
+
+- **移動** … ツールバーに CSS の `--wails-draggable: drag`。カスタムプロパティは継承するので、
+  ボタン側は `no-drag` に戻す
+- **リサイズ** … Wails ランタイムがウィンドウ端 5px（角は +10px）を座標で検出する。
+  `DisableResize` は `false` のままにしておくこと
+- **⚠️ どちらも `frontend/src/main.ts` の素の `import "@wailsio/runtime"` が前提。**
+  ランタイムの `drag.js` がページ全体の mousedown/mousemove を監視して初めて成立する仕組みで、
+  **これが無いと `--wails-draggable` を書いても何も起きない**
+  （wails3 skill `frameless.md` の冒頭。名前付き import だけでは副作用が有効化されないことがある）
 
 フロント側(`frame.ts` / `style.css`)は `html.is-frame` に `background: transparent` を指定し、
-`.capture-guide` という `position: fixed; inset: 0; border: 2px solid ...` の要素だけを描く。
-`pointer-events: none` にしてあるので、クリック・ドラッグは常にネイティブウィンドウ側へ通る。
+ツールバー（不透明）とガイド枠（`border` だけの要素）を縦に積む。ガイド枠は
+`pointer-events: none` だが、**リサイズの端検出は座標だけで要素を見ていない**ので影響しない。
 
 ### キャプチャ領域の決定(物理ピクセル・HWND 直接取得)
 
-**キャプチャ領域は「クライアント領域を、ガイド枠の太さぶん内側にオフセットした矩形」**という
+**キャプチャ領域は「クライアント領域から、ツールバーとガイド枠を除いた内側の矩形」**という
 決定論的な方式にしてある(`captureservice.go` の `captureRegion`)。「撮る直前に枠を消して
 少し待って撮る」というタイミング依存の方式は採っていない。
 
-- ガイド枠の太さは Go 側 `captureservice.go` の `guideBorderPx` と、フロント側
-  `frontend/src/frame.ts` の `GUIDE_BORDER_PX` の 2 箇所に定数として存在する。
-  **両者は必ず一致させること**(どちらかだけ変えると枠が写り込む、または枠の内側が余る)
+```
+┌──────────────────────────┐ ← 端 5px = リサイズ(Wails ランタイムが座標で検出)
+│ ツールバー(toolbarHeightPx)│ ← 撮る/✕。ドラッグ移動もここ
+├──────────────────────────┤
+│ ┌──────────────────────┐ │ ← ガイド枠(guideBorderPx)
+│ │   ここを撮る(透過)    │ │
+│ └──────────────────────┘ │
+└──────────────────────────┘
+```
+
+- **寸法の唯一のソースは Go 側**(`captureservice.go` の `guideBorderPx` /
+  `toolbarHeightPx`)。フロントは起動時に `CaptureService.Layout()` を呼び、
+  CSS 変数(`--guide-border` / `--toolbar-height`)に流し込んでから描く。
+  **フロントに既定値を書かないこと。** ずれると「見えている枠」と「実際に撮れる領域」が
+  食い違い、枠が写り込む。取得に失敗したときは黙って描かず、ツールバーにエラーを出す
+- Frameless なので**クライアント領域はウィンドウ全体と一致する**(Wails が `WM_NCCALCSIZE` で
+  標準フレームを外す)。タイトルバー・枠の厚みを別途足し引きする必要はない
+- **CSS px → 物理ピクセルの変換は切り上げる**(`scaleUp`)。丸めで 1px ずれたとき、
+  内側に食い込む(盤が 1px 欠ける)のは実害が無いが、外側にはみ出すと赤い枠が写り込むため
+- **⚠️ `framelessBottomPaddingPx = 1` を引くこと。** Wails は Frameless のとき
+  `WM_NCCALCSIZE` で `rgrc.Bottom += 1` と `setPadding(edge.Rect{Bottom: 1})` を行っている
+  (リサイズ時のちらつき回避)。結果として**クライアント領域の最下 1 行には WebView が
+  描画されず**、ガイド枠の下辺が `GetClientRect` の下端より 1px 上に来る。これを引かないと
+  撮った画像の最下行に赤い枠が 1px 写り込む(実測で確認 → 修正済み)。
+  この余白のせいで**枠ウィンドウはクライアント高さがウィンドウ高さより 1px 大きい**
+  (`480x421` client / `480x420` window)という妙な状態になる。ウィンドウ判別に
+  「client == window なら Frameless」という判定を使わないこと
 - 座標は**物理ピクセル**で取得する。`kbinani/screenshot` は物理ピクセルで動くが、
   Wails の `Window.Position()`/`Size()` は **DIP(論理ピクセル)** を返すため、
   マルチモニタでスケーリング(150% 等)が混在する環境ではそのまま使うとずれる
@@ -292,23 +358,34 @@ wails3 skill(`tray-hotkey.md`)で保証されており、二重にホットキ�
 
 ### ウィンドウ状態の永続化
 
-ガイド枠ウィンドウの位置・サイズだけを `os.UserConfigDir()/ikkyoku/app-window.json` に
-保存・復元する(`windowstate.go`)。**ルートパッケージの `Config`(`config.json`)とは
+枠とメイン画面**両方**の位置・サイズを `os.UserConfigDir()/ikkyoku/app-window.json` に
+保存・復元する(`windowstate.go` / `geometry.go`)。**ルートパッケージの `Config`(`config.json`)とは
 あえて別ファイルにしてある**。ルートパッケージに Wails 依存(`application` パッケージの
 `ScreenNearestDipPoint` 等)を持ち込まないための分離。
 
 - 未設定(初回起動)の判定にはセンチネル値 `-32000` を使う。マルチモニタで左/上に
   モニタがあると座標が負になりうるため、`0` や `< 0` では判定できない(wails3 skill
   `window-state.md`)
-- 終了時の保存は `events.Common.WindowClosing` の **`RegisterHook`**(`OnWindowEvent` ではない)
-  で行っている。デフォルトの破棄用リスナーは並列 goroutine で走るため、hook(同期・
-  listener より前に実行される)でないと破棄とレースして `Position()`/`Size()` が
-  不正な値を返しうる(wails3 skill `tray-hotkey.md` の hook/listener 順序の説明、
-  `window-state.md` の該当セクション)
+- **⚠️ 終了時に `Position()`/`Size()` を読んではいけない。** `WindowClosing` の時点では
+  破棄が進行しており、**不正な値が返る**(wails3 skill `window-state.md`「特に Frameless で
+  発生しやすい」。このアプリでも実測で確認し、枠を動かしても保存値が追従しない不具合が出た)。
+  代わりに `geometryTracker`(`geometry.go`)が `WindowDidMove` / `WindowDidResize` の
+  たびに位置を記録しておき、**終了時にはその記録を保存する**。
+  スキルが挙げている回避策(フロントの✕から Go の `Quit()` を呼ぶ)は自前の✕しか無い
+  ウィンドウ向けで、**ネイティブのタイトルバーを持つメイン画面には使えない**
+  (Alt+F4・OS シャットダウンを自前の経路に通せないため)
+- 保存の起点はメイン画面の `WindowClosing` の **`RegisterHook`**(`OnWindowEvent` ではない)。
+  デフォルトの破棄用リスナーは並列 goroutine で走るため、hook(同期・listener より前に実行)
+  でないと破棄とレースする(wails3 skill `tray-hotkey.md` の hook/listener 順序の説明)。
+  **枠は閉じられないので、保存経路はここ 1 本だけ**
+- 枠の `WindowClosing` hook は `e.Cancel()` + `Hide()`。ツールバーの自前✕は
+  `WindowClosing` を通らない(wails3 skill `pitfalls.md`)ので、そちらは JS から
+  `CaptureService.HideFrame()` を呼んで同じ入口に合流させている
 - マルチモニタのクランプ(`clampToScreen`)は `events.Common.WindowRuntimeReady` で行う
   (`ScreenNearestDipPoint` は `app.Run()` 前は `nil` を返すため)
-- 操作パネルの位置・サイズは永続化していない(最小実装。毎回ガイド枠ウィンドウの
-  近く(上、はみ出すなら下)に出す)
+- **旧フォーマット(枠 1 枚ぶんのフラットな JSON)との互換は取っていない。**
+  ツールバーが増えて同じウィンドウサイズでも撮れる領域が変わったので、
+  旧い座標を復元しても位置合わせはやり直しになるため
 
 ### 実機での検証結果(2026-08-04 / ディスプレイ 0: 2560x1440)
 
@@ -337,12 +414,38 @@ Start-Process .\_cmd\ikkyoku\bin\ikkyoku.exe
   重なるとパネルごと写り込む。`WindowRuntimeReady` で枠の位置を読み、パネルを枠の外へ
   退避させるようにした
 
+#### 追加検証(Frameless 化・メイン画面の格上げ後)
+
+**アプリを起動 → HWND から矩形を直接取得 → その矩形をスクリーンショットから切り出して
+ピクセル値を調べる**、という手順で写り込みを厳密に確認した。目視より確実なので今後も使える
+(検証用の PowerShell は使い捨てにしたが、`GetClientRect`+`ClientToScreen`+`GetDpiForWindow` を
+呼ぶだけ)。撮った PNG の外周 2px をスキャンして赤(`#E93D3D` 系)が 0 個であることを確認している。
+
+- **ツールバー・ガイド枠の写り込み** … 無し。四辺すべて内容のみ(`476x384`)
+- **枠のクライアント矩形が Frameless でウィンドウ全体と一致すること** … 確認
+  (メイン画面は `704x481` client / `720x520` window なのに対し、枠は `480x421`/`480x420`)
+- **起動直後は枠だけが見えること** … 確認(可視ウィンドウ 1 枚)
+- **最初のキャプチャでメイン画面が出ること** … 確認(枠の下に非重複で配置される)
+- **枠を閉じてもアプリが生き残ること** … 確認(`WM_CLOSE` を送ってもプロセス継続・枠は非表示)
+- **メイン画面を閉じるとアプリが終了すること** … 確認
+- **ウィンドウ位置・サイズの保存・復元** … 確認(枠を `300,200` へ動かして終了 → 保存値が
+  `300,200` → 再起動でその位置に復元)。**これは以前「未検証」だった項目で、実際に壊れていた**
+  (終了時に `Position()` を読んでいたため。上記「ウィンドウ状態の永続化」参照)
+- **`CGO_ENABLED=0` でのビルド** … 通る(PureGo 方針の維持を確認)
+
 **まだ未検証**:
 
-- **4K モニタ(ディスプレイ 1、150% スケーリング想定)での物理ピクセル一致。**
-  検証したのはディスプレイ 0 のみ。`GetClientRect`+`ClientToScreen` を使っているので
-  理屈上は合うはずだが、実測はしていない
-- ウィンドウ位置・サイズの保存・復元(次回起動時に前回位置へ戻るか)
+- **ツールバーのドラッグ移動と、ウィンドウ端のリサイズ。**
+  実際にマウスを操作しないと判定できず、自動では確認していない。
+  特に**ガイド枠が 2px のままでリサイズ領域を塞がないか**は要確認
+  (wails3 skill `frameless.md` は「ルート要素に 5px のパディングを設けること」としているが、
+  これは alpha2.117 前提の記述で、**beta.3 のランタイム実装(`drag.ts`)を読む限り
+  リサイズの端検出は座標だけで要素を見ていない**ため、塞がれない可能性が高い)
+- **4K モニタ(150% スケーリング想定)での物理ピクセル一致。**
+  検証したのは 100% のモニタのみ。`GetClientRect`+`ClientToScreen` を使っているので
+  理屈上は合うはずだが、実測はしていない。
+  なお**検証用スクリプトを PowerShell で書くときは注意**: PowerShell は DPI 非対応プロセスなので
+  座標が仮想化され、per-monitor DPI aware な Wails アプリと座標系が食い違いうる
 - `GetDpiForWindow` が無い環境(Windows 10 未満)でのフォールバック
 
 ### コマンド

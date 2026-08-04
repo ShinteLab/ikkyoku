@@ -15,42 +15,148 @@ body {
 }
 
 /* ---- ガイド枠ウィンドウ(?window=frame) -----------------------------------
-   クライアント領域を完全に透過させ、内周に細いガイド枠だけを描く。
-   それ以外の要素は一切置かない(写り込み対策)。 */
+   Frameless。上部にツールバー、その下が透過するキャプチャ領域。
+   ツールバーより下には一切要素を置かない(置いた要素はそのまま写り込む)。
+
+   --guide-border / --toolbar-height はここでは定義しない。Go 側
+   (captureservice.go)が唯一のソースで、frame.ts が起動時に受け取って
+   :root へ流し込む。既定値をここに書くと二重管理が復活し、値がずれたときに
+   「見えている枠」と「実際に撮れる領域」が食い違う。 */
 html.is-frame,
 html.is-frame body,
 html.is-frame #app {
   background: transparent;
 }
 
-.capture-guide {
-  position: fixed;
-  inset: 0;
-  /* border-box なので、枠線はビューポートの内側にちょうど収まる。
-     太さは frame.ts の GUIDE_BORDER_PX / Go 側の guideBorderPx と揃えること。 */
-  border-style: solid;
-  border-color: rgba(255, 64, 64, 0.9);
-  pointer-events: none; /* クリック・ドラッグは常にネイティブウィンドウ側に通す */
+html.is-frame #app {
+  display: flex;
+  flex-direction: column;
 }
 
-/* ---- 操作パネル(?window=panel) -------------------------------------------- */
-html.is-panel,
-html.is-panel body {
+.frame-toolbar {
+  flex: 0 0 auto;
+  /* Go 側 toolbarHeightPx と一致する高さ。captureRegion がこの高さぶん
+     上端を下げてキャプチャするので、内容で高さが変わらないよう固定する。 */
+  height: var(--toolbar-height, 0px);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 4px 0 10px;
+  background: #1b1d23;
+  color: #f2f3f5;
+  font-size: 12px;
+  user-select: none;
+  -webkit-user-select: none;
+  /* OS のタイトルバーが無いので、ここがウィンドウの移動ハンドルになる。
+     カスタムプロパティは継承するため、ボタン側で no-drag に戻す。 */
+  --wails-draggable: drag;
+}
+
+.frame-title {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: #9aa6c0;
+}
+
+.frame-title.is-error {
+  color: #ff7a7a;
+}
+
+.frame-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  --wails-draggable: no-drag;
+}
+
+.frame-btn {
+  padding: 3px 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #f2f3f5;
+  background: #2a2d36;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.frame-btn:hover {
+  background: #3a3d47;
+}
+
+.frame-btn.is-primary {
+  font-weight: 600;
+  background: #ff4d4d;
+}
+
+.frame-btn.is-primary:hover {
+  background: #ff2d2d;
+}
+
+.frame-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.capture-guide {
+  flex: 1 1 auto;
+  min-height: 0;
+  /* border-box なので、枠線は要素の内側にちょうど収まる。
+     この枠線の内側が、そのままキャプチャされる領域になる。 */
+  border: var(--guide-border, 0px) solid rgba(255, 64, 64, 0.9);
+  pointer-events: none; /* 透過部分は DOM のヒットテスト対象にしない */
+}
+
+/* 寸法の取得に失敗したときだけ、ツールバーにエラーを表示するための高さを与える。
+   この状態ではキャプチャ自体も成立しないので、領域の正しさは問題にならない。 */
+html.is-frame.is-layout-error .frame-toolbar {
+  height: 32px;
+}
+
+/* ---- メイン画面(?window=main) --------------------------------------------
+   アプリ本体。撮った画像・保存先・(将来は)認識結果と設定を置く。 */
+html.is-main,
+html.is-main body {
   background: #1b1d23;
   color: #f2f3f5;
 }
 
-.panel {
+.main-screen {
+  height: 100%;
   padding: 14px 16px;
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
-.panel-row {
+.main-toolbar {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.main-toolbar .spacer {
+  flex: 1 1 auto;
+}
+
+.ghost-btn {
+  flex: 0 0 auto;
+  padding: 6px 14px;
+  font-size: 13px;
+  color: #f2f3f5;
+  background: #2a2d36;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.ghost-btn:hover {
+  background: #3a3d47;
 }
 
 .capture-btn {
@@ -83,6 +189,7 @@ html.is-panel body {
 }
 
 .status {
+  flex: 0 0 auto;
   margin: 0;
   font-size: 12.5px;
   line-height: 1.5;
@@ -94,8 +201,20 @@ html.is-panel body {
   color: #ff7a7a;
 }
 
+/* 撮った画像の置き場。Phase 2 で認識結果(SFEN・警告)を並べるのもこの領域。 */
+.preview {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  overflow: auto;
+}
+
 .thumbnail {
   max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
   border: 1px solid #3a3d47;
   border-radius: 6px;
 }

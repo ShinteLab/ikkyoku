@@ -7,5 +7,6 @@ export {
 };
 
 export type {
-    CaptureResult
+    CaptureResult,
+    GuideLayout
 } from "./models.js";

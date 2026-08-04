@@ -14,3 +14,11 @@ export interface CaptureResult {
      */
     "thumbnail": string;
 }
+
+/**
+ * GuideLayout は枠ウィンドウの描画寸法(CSS px)をフロントに渡すための型。
+ */
+export interface GuideLayout {
+    "borderPx": number;
+    "toolbarPx": number;
+}

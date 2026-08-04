@@ -15,24 +15,27 @@ import (
 const unsetPosition = -32000
 
 const (
-	defaultWindowWidth  = 480
-	defaultWindowHeight = 420
-	minWindowWidth      = 240
-	minWindowHeight     = 200
-	maxReasonableSize   = 4000
+	// 枠ウィンドウ。盤に重ねる道具なので小さめ。
+	defaultFrameWidth  = 480
+	defaultFrameHeight = 420
+	minFrameWidth      = 240
+	minFrameHeight     = 200
 
-	// 操作パネル(main.go)のサイズと、ガイド枠ウィンドウとの間隔。
-	// パネルは位置・サイズを永続化しない(最小限の実装。毎回ガイド枠の近くに出す)。
-	panelWidth  = 300
-	panelHeight = 150
-	panelGap    = 8
+	// メイン画面。撮った画像・認識結果・設定を並べるアプリ本体の画面なので広く取る。
+	defaultMainWidth  = 720
+	defaultMainHeight = 520
+	minMainWidth      = 360
+	minMainHeight     = 280
+
+	maxReasonableSize = 4000
+
+	// 初回にメイン画面を枠の外へ逃がすときの間隔。重なったまま撮ると
+	// メイン画面ごとキャプチャに写り込む(画面の合成結果を撮るため、
+	// z 順を変えても避けられない)。
+	windowGap = 8
 )
 
-// windowState は永続化するウィンドウの位置・サイズ。
-//
-// ikkyoku ルートパッケージの Config(CLI のキャプチャ設定)とはあえて分けてある。
-// ルートパッケージに Wails 依存(application パッケージ)を持ち込まないための分離で、
-// ウィンドウ状態は GUI アプリ固有の関心事なのでこちらに閉じる。
+// windowState は 1 ウィンドウぶんの位置・サイズ。
 type windowState struct {
 	X      int `json:"x"`
 	Y      int `json:"y"`
@@ -40,12 +43,29 @@ type windowState struct {
 	Height int `json:"height"`
 }
 
-func defaultWindowState() windowState {
-	return windowState{X: unsetPosition, Y: unsetPosition, Width: defaultWindowWidth, Height: defaultWindowHeight}
+// appState は永続化するウィンドウ状態の全体。
+//
+// ikkyoku ルートパッケージの Config(config.json)とはあえて分けてある。
+// ルートパッケージに Wails 依存(application パッケージ)を持ち込まないための分離で、
+// ウィンドウ状態は GUI アプリ固有の関心事なのでこちらに閉じる。
+//
+// 以前は枠ウィンドウ 1 枚ぶんをフラットな JSON で持っていた。互換は取っていない。
+// 枠に高さ toolbarHeightPx のツールバーが増えたことで、同じウィンドウサイズでも
+// 撮れる領域が変わっており、**旧い座標をそのまま復元しても位置合わせはやり直しになる**ため。
+type appState struct {
+	Frame windowState `json:"frame"`
+	Main  windowState `json:"main"`
 }
 
-// windowStatePath は os.UserConfigDir()/ikkyoku/app-window.json を返す。
-func windowStatePath() (string, error) {
+func defaultAppState() appState {
+	return appState{
+		Frame: windowState{X: unsetPosition, Y: unsetPosition, Width: defaultFrameWidth, Height: defaultFrameHeight},
+		Main:  windowState{X: unsetPosition, Y: unsetPosition, Width: defaultMainWidth, Height: defaultMainHeight},
+	}
+}
+
+// appStatePath は os.UserConfigDir()/ikkyoku/app-window.json を返す。
+func appStatePath() (string, error) {
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		return "", fmt.Errorf("ikkyoku-app: 設定ディレクトリの取得に失敗しました: %w", err)
@@ -53,11 +73,11 @@ func windowStatePath() (string, error) {
 	return filepath.Join(dir, "ikkyoku", "app-window.json"), nil
 }
 
-// loadWindowState はウィンドウ状態を読み込む。ファイルが無い・壊れている場合は
+// loadAppState はウィンドウ状態を読み込む。ファイルが無い・壊れている場合は
 // エラーを無視して既定値を返す(初回起動やファイル破損でアプリが起動できなくなるのを避ける)。
-func loadWindowState() windowState {
-	def := defaultWindowState()
-	path, err := windowStatePath()
+func loadAppState() appState {
+	def := defaultAppState()
+	path, err := appStatePath()
 	if err != nil {
 		return def
 	}
@@ -65,18 +85,21 @@ func loadWindowState() windowState {
 	if err != nil {
 		return def
 	}
-	var st windowState
+	var st appState
 	if err := json.Unmarshal(b, &st); err != nil {
 		return def
 	}
-	if st.Width <= 0 || st.Height <= 0 {
-		return def
+	if st.Frame.Width <= 0 || st.Frame.Height <= 0 {
+		st.Frame = def.Frame
+	}
+	if st.Main.Width <= 0 || st.Main.Height <= 0 {
+		st.Main = def.Main
 	}
 	return st
 }
 
-func saveWindowState(st windowState) error {
-	path, err := windowStatePath()
+func saveAppState(st appState) error {
+	path, err := appStatePath()
 	if err != nil {
 		return err
 	}
@@ -96,21 +119,21 @@ func saveWindowState(st windowState) error {
 // safeFallback は Run() 前(スクリーン情報が使えない段階)での簡易な安全策。
 // 保存値が異常でも極端なサイズで開かないようにするだけで、マルチモニタのクランプはしない
 // (それは Run() 後の clampToScreen が担当する。wails3 skill window-state.md)。
-func safeFallback(state windowState) (x, y, w, h int) {
+func safeFallback(state windowState, defW, defH int) (w, h int) {
 	w, h = state.Width, state.Height
 	if w <= 0 || w > maxReasonableSize {
-		w = defaultWindowWidth
+		w = defW
 	}
 	if h <= 0 || h > maxReasonableSize {
-		h = defaultWindowHeight
+		h = defH
 	}
-	return state.X, state.Y, w, h
+	return w, h
 }
 
 // clampToScreen は WindowRuntimeReady 時点(Run() 後)で呼ぶ。
 // 保存位置が存在しないモニタ・解像度変更後などでウィンドウが画面外に飛ぶのを防ぐ。
-func clampToScreen(state windowState) (x, y, w, h int) {
-	_, _, w, h = safeFallback(state)
+func clampToScreen(state windowState, defW, defH int) (x, y, w, h int) {
+	w, h = safeFallback(state, defW, defH)
 	x, y = state.X, state.Y
 
 	cx, cy := x+w/2, y+h/2
