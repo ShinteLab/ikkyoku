@@ -3,6 +3,9 @@
 // 撮った画像・保存先・(将来は)認識結果と設定を置く画面。起動時は非表示で、最初の
 // キャプチャで現れる。**この画面を閉じるとアプリが終了する**(枠を閉じても終了しない)。
 //
+// **撮る操作はここには置かない。** 撮るのは盤に枠を合わせている最中の操作なので、
+// 枠のツールバーとホットキーで完結する。ここは撮れたものを見る側。
+//
 // 枠(frame.ts)とは別ウィンドウなので、ここに置いた要素はキャプチャに写り込まない
 // ——ただし**枠に重なる位置に動かすと写り込む**(画面の合成結果を撮るため)。初回だけ
 // Go 側が枠の外へ逃がす(captureservice.go の placeMainBesideFrame)。
@@ -20,8 +23,7 @@ export function mountMainScreen(root: HTMLElement): void {
   root.innerHTML = `
     <div class="main-screen">
       <div class="main-toolbar">
-        <button id="capture-btn" class="capture-btn" type="button">撮る</button>
-        <span class="hotkey-hint">Alt+S</span>
+        <span class="hint">撮るのは枠のツールバー、または <span class="hotkey-hint">Alt+S</span></span>
         <span class="spacer"></span>
         <button id="show-frame-btn" class="ghost-btn" type="button">枠を表示</button>
       </div>
@@ -34,7 +36,6 @@ export function mountMainScreen(root: HTMLElement): void {
     </div>
   `;
 
-  const button = root.querySelector<HTMLButtonElement>("#capture-btn")!;
   const showFrame = root.querySelector<HTMLButtonElement>("#show-frame-btn")!;
   const status = root.querySelector<HTMLParagraphElement>("#status")!;
   const thumbnail = root.querySelector<HTMLImageElement>("#thumbnail")!;
@@ -53,21 +54,6 @@ export function mountMainScreen(root: HTMLElement): void {
     status.classList.add("is-error");
   };
 
-  const capture = async () => {
-    button.disabled = true;
-    try {
-      showResult(await CaptureService.Capture());
-    } catch (err) {
-      showError(String(err));
-    } finally {
-      button.disabled = false;
-    }
-  };
-
-  button.addEventListener("click", () => {
-    void capture();
-  });
-
   // 枠は閉じても隠れるだけなので、ここから出し直せる。
   showFrame.addEventListener("click", () => {
     void CaptureService.ShowFrame();
@@ -82,7 +68,7 @@ export function mountMainScreen(root: HTMLElement): void {
     showError(event.data);
   });
   Events.On("hotkey:register-failed", (event: { data: { hotkey: string; error: string } }) => {
-    status.textContent = `グローバルホットキー(${event.data.hotkey})の登録に失敗しました。「撮る」ボタンは使えます。`;
+    status.textContent = `グローバルホットキー(${event.data.hotkey})の登録に失敗しました。枠のツールバーの「撮る」は使えます。`;
     status.classList.add("is-error");
   });
 }
