@@ -18,6 +18,7 @@ interface CaptureResult {
   height: number;
   thumbnail: string;
   sfen: string;
+  confidence: number;
   warnings: string[];
   handTotal: Record<string, number>;
   recognizeError: string;
@@ -76,6 +77,10 @@ export function mountMainScreen(root: HTMLElement): void {
               <span class="field-label">SFEN</span>
               <code id="sfen" class="sfen">-</code>
             </div>
+            <div id="confidence-row" class="hand-row" hidden>
+              <span class="field-label">検出</span>
+              <span id="confidence" class="note"></span>
+            </div>
             <div id="hand-row" class="hand-row" hidden>
               <span class="field-label">駒台</span>
               <span id="hand" class="hand"></span>
@@ -102,6 +107,8 @@ export function mountMainScreen(root: HTMLElement): void {
   const board = root.querySelector<HTMLElement>("#board")!;
   const placeholder = root.querySelector<HTMLParagraphElement>("#board-placeholder")!;
   const sfenOut = root.querySelector<HTMLElement>("#sfen")!;
+  const confidenceRow = root.querySelector<HTMLDivElement>("#confidence-row")!;
+  const confidenceOut = root.querySelector<HTMLElement>("#confidence")!;
   const handRow = root.querySelector<HTMLDivElement>("#hand-row")!;
   const handOut = root.querySelector<HTMLElement>("#hand")!;
   const warnings = root.querySelector<HTMLUListElement>("#warnings")!;
@@ -140,6 +147,18 @@ export function mountMainScreen(root: HTMLElement): void {
     board.setAttribute("sfen", sfen);
     board.hidden = false;
     placeholder.hidden = true;
+  };
+
+  // 盤面検出の信頼度。低いときは「盤が映っていない画面を撮った」可能性のほうが高いので、
+  // 認識結果を疑う入口として出しておく(警告と違い、局面の中身の話ではない)。
+  const showConfidence = (confidence: number, sfen: string) => {
+    if (!sfen) {
+      confidenceRow.hidden = true;
+      return;
+    }
+    confidenceOut.textContent = `${Math.round(confidence * 100)}%`;
+    confidenceOut.classList.toggle("is-low", confidence < 0.75);
+    confidenceRow.hidden = false;
   };
 
   const showHand = (hand: Record<string, number>) => {
@@ -182,6 +201,7 @@ export function mountMainScreen(root: HTMLElement): void {
 
     sfenOut.textContent = result.sfen || "-";
     showBoard(result.sfen, true);
+    showConfidence(result.confidence, result.sfen);
     showHand(result.handTotal);
     showWarnings(result.warnings);
 

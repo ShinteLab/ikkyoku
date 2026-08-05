@@ -25,7 +25,12 @@ export interface CaptureResult {
     "sfen": string;
 
     /**
-     * 駒数保存則に反する点
+     * 盤面検出の信頼度(0.0〜1.0)
+     */
+    "confidence": number;
+
+    /**
+     * 局面として成立していない点
      */
     "warnings": string[] | null;
 
