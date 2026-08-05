@@ -65,8 +65,12 @@ export function mountFrame(root: HTMLElement): void {
   let flyoutTimer = 0;
   const flash = (text: string) => {
     window.clearTimeout(flashTimer);
+    window.clearTimeout(warnTimer);
     for (const el of [toolbar, guide]) {
       // 連打しても毎回光るよう、アニメーションを付け直す(リフローで巻き戻す)。
+      // is-shake も落とす。同じ border-color を奪い合い、後勝ちで撮影の合図が
+      // 出なくなるため(CSS の宣言順)。
+      el.classList.remove("is-shake");
       el.classList.remove("is-flash");
       void (el as HTMLElement).offsetWidth;
       el.classList.add("is-flash");
@@ -112,6 +116,69 @@ export function mountFrame(root: HTMLElement): void {
       captureBtn.disabled = false;
     }, flyoutMs);
   };
+
+  // 透明部分をクリックしたときに「後ろには届いていない」ことを知らせる。
+  //
+  // 中継の上に重ねて使うので、後ろの画面を触ったつもりでこの枠を叩くことがある。
+  // .capture-guide の pointer-events:none は **DOM 内のヒットテストを外すだけ**で、
+  // OS から見れば枠ウィンドウが普通にクリックを受け取っており、後ろへは一切渡らない。
+  // 無反応だと「クリックが効かない画面」に見えてしまうので、枠が受け取ったことを返す。
+  //
+  // ⚠️ ここでもキャプチャ領域の内側には何も描かない(写り込むため)。合図はツールバーを
+  // 揺らすのと、ガイド枠の線を警告色で明滅させるのだけで出す。**ウィンドウ自体は
+  // 揺らさない** — 枠の位置がそのままキャプチャ領域の定義なので、揺れている最中に
+  // Alt+S が来ると撮る場所がずれる。
+  // アニメーションは CSS 側でツールバーが 0.7s、ガイド枠の明滅が 0.7s×2。
+  // 文字はそれより少し長く残す(見落とさないように)。
+  const warnHoldMs = 1500;
+  let warnTimer = 0;
+  const warnClickBlocked = () => {
+    window.clearTimeout(warnTimer);
+    window.clearTimeout(flashTimer);
+    for (const el of [toolbar, guide]) {
+      el.classList.remove("is-shake");
+      el.classList.remove("is-flash"); // 同上。border-color を奪い合わせない
+      void (el as HTMLElement).offsetWidth; // 連打しても毎回頭から再生させる
+      el.classList.add("is-shake");
+    }
+    title.textContent = "クリックは後ろに届きません";
+    title.classList.remove("is-error");
+    warnTimer = window.setTimeout(() => {
+      for (const el of [toolbar, guide]) {
+        el.classList.remove("is-shake");
+      }
+      title.textContent = baseTitle;
+    }, warnHoldMs);
+  };
+
+  // クリックかどうかの判定。ウィンドウ端(リサイズ)とツールバーは対象外にする。
+  // resizeEdgePx は Wails ランタイムがリサイズ判定に使う幅に合わせた値。
+  // 厳密に一致していなくてよい(少し広めに見て合図を出さないだけ)。
+  const resizeEdgePx = 6;
+  const dragSlopPx = 3;
+  let downX = 0;
+  let downY = 0;
+  root.addEventListener("mousedown", (e) => {
+    downX = e.clientX;
+    downY = e.clientY;
+  });
+  root.addEventListener("click", (e) => {
+    if ((e.target as HTMLElement).closest(".frame-toolbar")) {
+      return; // ツールバーの操作。合図は要らない
+    }
+    if (Math.abs(e.clientX - downX) > dragSlopPx || Math.abs(e.clientY - downY) > dragSlopPx) {
+      return; // ドラッグ(リサイズ)の終わり。クリックではない
+    }
+    if (
+      e.clientX < resizeEdgePx ||
+      e.clientY < resizeEdgePx ||
+      window.innerWidth - e.clientX < resizeEdgePx ||
+      window.innerHeight - e.clientY < resizeEdgePx
+    ) {
+      return; // ウィンドウ端。リサイズを掴もうとした操作
+    }
+    warnClickBlocked();
+  });
 
   // **エフェクトの起点はイベント 1 本にする。**「撮る」ボタンとホットキー(Alt+S)は
   // どちらも Go 側の CaptureService.Capture() に入り、成功すると capture:done が
