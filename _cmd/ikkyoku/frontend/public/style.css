@@ -450,7 +450,12 @@ html.is-main body {
   color: #6f7787;
 }
 
-/* ValidatePieces の警告。「ここが怪しい」の提示にそのまま使える。 */
+/* 検出の信頼度が低いとき。盤が映っていない画面を撮った疑いを色で出す。 */
+.note.is-low {
+  color: #ffc46b;
+}
+
+/* 局面として成立していない点。「ここが怪しい」の提示にそのまま使える。 */
 .warnings {
   margin: 0;
   padding-left: 18px;

@@ -230,9 +230,10 @@ type CaptureResult struct {
 	Height    int    `json:"height"`
 	Thumbnail string `json:"thumbnail"` // data:image/png;base64,... のサムネイル(等倍)
 
-	SFEN      string         `json:"sfen"`      // 盤面部分のみ。認識できなければ空
-	Warnings  []string       `json:"warnings"`  // 駒数保存則に反する点
-	HandTotal map[string]int `json:"handTotal"` // 駒台の推定枚数(先後不明)
+	SFEN       string         `json:"sfen"`       // 盤面部分のみ。認識できなければ空
+	Confidence float64        `json:"confidence"` // 盤面検出の信頼度(0.0〜1.0)
+	Warnings   []string       `json:"warnings"`   // 局面として成立していない点
+	HandTotal  map[string]int `json:"handTotal"`  // 駒台の推定枚数(先後不明)
 
 	// RecognizeError は「撮れたが認識できなかった」ときの理由。
 	// キャプチャ自体の失敗はこれではなく Capture のエラーで表す。
@@ -284,14 +285,21 @@ func (s *CaptureService) Capture() (CaptureResult, error) {
 	// 盤面の認識。**ここで失敗してもキャプチャは成功として返す。**
 	// PNG は既に保存できており、撮った 1 局面を失わないことのほうが大事
 	// (設計原則3。認識失敗はキャプチャの失敗ではない)。
+	//
+	// **オプションは付けない(suteme の既定 = 全部調べるがエラーにはしない)。**
+	// 駒数が合わない・玉が無いといった盤面でも、撮った 1 局面は解析させたい。
+	// 「おかしい」は Warnings として UI に出し、直すのは訂正 UI(Phase 5)の仕事。
+	// エラーになるのは盤そのものが取れなかったときだけになる。
 	if board, err := recognize.FromImage(img); err != nil {
 		result.RecognizeError = err.Error()
 		s.logger.Warn("盤面を認識できませんでした", "path", path, "error", err)
 	} else {
 		result.SFEN = board.SFEN
+		result.Confidence = board.Confidence
 		result.Warnings = board.Warnings
 		result.HandTotal = board.HandTotal
-		s.logger.Info("盤面を認識しました", "sfen", board.SFEN, "warnings", len(board.Warnings))
+		s.logger.Info("盤面を認識しました",
+			"sfen", board.SFEN, "confidence", board.Confidence, "warnings", len(board.Warnings))
 	}
 	if s.app != nil {
 		s.app.Event.Emit("capture:done", result)
