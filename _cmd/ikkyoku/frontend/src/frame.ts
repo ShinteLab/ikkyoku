@@ -10,6 +10,7 @@
 // 寸法(枠の太さ・ツールバーの高さ)はここでは決めない。Go 側が唯一のソースで、
 // CaptureService.Layout() から受け取って CSS 変数に流し込む。以前はフロントにも同じ
 // 定数を置いていたが、ずれると枠が写り込むという直接的な不具合になるため一本化した。
+import { Events } from "@wailsio/runtime";
 import { CaptureService } from "../bindings/ikkyoku-app";
 
 export function mountFrame(root: HTMLElement): void {
@@ -45,7 +46,8 @@ export function mountFrame(root: HTMLElement): void {
   //
   // 撮った結果はメイン画面に出るが、枠は中継の上に重ねて使うので、メイン画面が
   // 背面や別モニタにあると「押したのに何も起きていない」ように見える。誤って押した
-  // ときに気づけないと、いつの間にか PNG が増えていく。
+  // ときに気づけないと、いつの間にか PNG が増えていく。ホットキー(Alt+S)は
+  // なおさらで、フォーカスが別アプリにあるまま発火するため気づく手がかりが無い。
   //
   // ⚠️ エフェクトはツールバーとガイド枠の**線の上だけ**で完結させること。
   // ガイド枠の内側はキャプチャ領域そのものなので、そこに何か描くと撮った画像に
@@ -67,22 +69,38 @@ export function mountFrame(root: HTMLElement): void {
     }, 900);
   };
 
+  // 結果の表示はメイン画面の役目。ここではツールバーが狭いので簡潔に出す。
+  const showError = (message: string) => {
+    window.clearTimeout(flashTimer);
+    title.textContent = `失敗: ${message}`;
+    title.classList.add("is-error");
+  };
+
+  // **エフェクトの起点はイベント 1 本にする。**「撮る」ボタンとホットキー(Alt+S)は
+  // どちらも Go 側の CaptureService.Capture() に入り、成功すると capture:done が
+  // 全ウィンドウへ飛ぶ(captureservice.go)。ボタン側の await でも光らせると、
+  // クリック時だけ二重に光る(イベントの到着は await の解決と前後する)。
+  Events.On("capture:done", () => {
+    flash("撮りました");
+  });
+  // ホットキー経由の失敗はこちらに来る(main.go の GlobalShortcut ハンドラ)。
+  // ボタン経由の失敗は呼び出し元で捕まえるので、ここには来ない。
+  Events.On("capture:failed", (event: { data: string }) => {
+    showError(event.data);
+  });
+
   captureBtn.addEventListener("click", () => {
     void (async () => {
       captureBtn.disabled = true;
       // 押した直後の反応は文字だけにする。**撮り終える前に光らせてはいけない**
       // (ツールバーは領域外なので写らないが、ガイド枠の線の色は撮影中に変わると
-      // 境界の見え方が変わる。合図は撮り終えてから出す)。
+      // 境界の見え方が変わる。合図は撮り終えてから capture:done で出す)。
       window.clearTimeout(flashTimer);
       title.textContent = "撮影中…";
       try {
         await CaptureService.Capture();
-        flash("撮りました");
       } catch (err) {
-        // 結果の表示はメイン画面の役目。ここではツールバーが狭いので簡潔に出す。
-        window.clearTimeout(flashTimer);
-        title.textContent = `失敗: ${String(err)}`;
-        title.classList.add("is-error");
+        showError(String(err));
       } finally {
         captureBtn.disabled = false;
       }
