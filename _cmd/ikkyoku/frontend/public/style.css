@@ -294,6 +294,91 @@ html.is-main body {
   flex: 1 1 auto;
 }
 
+/* ---- タブ ----------------------------------------------------------------
+   盤面(盤と SFEN だけ)とデバッグ(認識器の状態・警告・撮った画像)の 2 枚。
+   盤を大きく見せるのが目的なので、盤面タブに項目を足さないこと。 */
+.tabs {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: #23262e;
+  border-radius: 7px;
+}
+
+.tab {
+  position: relative;
+  padding: 5px 14px;
+  font-size: 13px;
+  color: #9aa6c0;
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.tab:hover {
+  color: #f2f3f5;
+}
+
+.tab.is-active {
+  color: #f2f3f5;
+  background: #3a3d47;
+}
+
+/* 警告・エラーはデバッグタブの中にあるので、盤面タブを見ているあいだは気づけない。
+   タブに点を出して「見に行くべきものがある」ことだけ伝える(開けば消える)。 */
+.tab.has-warn::after,
+.tab.has-error::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  right: 5px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ffc46b;
+}
+
+.tab.has-error::after {
+  background: #ff7a7a;
+}
+
+/* パネル。hidden は JS 側で付け外しする(display の指定と競合しないよう
+   :not([hidden]) ではなく is-active で組む)。 */
+.panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: none;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.panel.is-active {
+  display: flex;
+}
+
+#panel-debug {
+  overflow: auto;
+}
+
+.debug-row {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.debug-shot {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  border-top: 1px solid #2a2d36;
+  padding-top: 8px;
+}
+
 .ghost-btn {
   flex: 0 0 auto;
   padding: 6px 14px;
@@ -317,7 +402,8 @@ html.is-main body {
 /* 認識器(suteme の学習データ)の読み込み状況。データを育てながら使うので、
    「今どれを読んでいるか」が常に見えているほうがよい。 */
 .recognizer {
-  flex: 0 0 auto;
+  flex: 1 1 auto;
+  min-width: 0;
   margin: 0;
   font-size: 11.5px;
   color: #6f7787;
@@ -360,37 +446,26 @@ html.is-main body {
   color: #ffc46b;
 }
 
-/* 盤を左、読み取り結果を右に並べる。盤が主役だが、
-   認識が当てにならないうちは SFEN と警告も同時に見たいため。 */
-.content {
+/* 盤面。この画面の主役。SFEN から <shogi-board>(core/web)が SVG で描く。 */
+.board-area {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
-  gap: 14px;
-}
-
-.side {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  overflow: auto;
-}
-
-/* 盤面。この画面の主役。SFEN から <shogi-board>(core/web)が SVG で描く。
-   幅を決め打ちしているのは、中の SVG が max-width:100%/height:auto で
-   追従するため。高さ側で制限しても縦横比が保てない。 */
-.board-area {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
 }
 
+/* ⚠️ 盤の大きさは**幅でしか決まらない**。<shogi-board> の SVG は
+   `max-width: 100%; height: auto` なので、host に高さを与えても SVG は追従しない。
+   SVG 自体は正方形(viewBox が `0 0 size size`)なので、幅を「ウィンドウ高さから
+   ツールバーと SFEN 行を引いたぶん」で頭打ちにすれば、縦にはみ出さずに最大化できる。
+
+   ⚠️ **560px より大きくはならない。** SVG の width 属性が固有サイズ(core/web の
+   `CELL*9 + MARGIN*2` = 560)で、指定されているのは `max-width` だけなので、
+   host を広げても縮まないだけで伸びはしない。これ以上大きくするには core/web 側の
+   svg に `width: 100%` が要る(= 他の利用側にも効く変更)なので、ここではやらない。 */
 .board-area shogi-board {
-  width: 300px;
-  max-width: 100%;
+  width: min(100%, calc(100vh - 120px));
 }
 
 /* `hidden` 属性を効かせるために必要。<shogi-board> は Shadow DOM 内で
@@ -411,19 +486,18 @@ html.is-main body {
   color: #ff7a7a;
 }
 
-/* 認識結果の文字表示。盤の描画が当てにならないうちは、こちらが一次情報になる。 */
-.readout {
-  flex: 0 0 auto;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
 .sfen-row,
 .hand-row {
+  flex: 0 0 auto;
   display: flex;
   align-items: baseline;
   gap: 8px;
+}
+
+/* `display: flex` は UA の `[hidden] { display: none }` より強いので、
+   打ち消さないと駒台が空のまま見出しだけ出てしまう。 */
+.hand-row[hidden] {
+  display: none;
 }
 
 .field-label {
@@ -452,6 +526,7 @@ html.is-main body {
 
 /* ValidatePieces の警告。「ここが怪しい」の提示にそのまま使える。 */
 .warnings {
+  flex: 0 0 auto;
   margin: 0;
   padding-left: 18px;
   font-size: 12px;
@@ -459,23 +534,10 @@ html.is-main body {
   color: #ffc46b;
 }
 
-/* 撮った画像そのものは普段は見ない。今は認識結果を突き合わせるためのデバッグ用。 */
-.debug {
-  flex: 0 0 auto;
-  border-top: 1px solid #2a2d36;
-  padding-top: 8px;
-}
-
-.debug > summary {
-  font-size: 11px;
-  color: #6f7787;
-  cursor: pointer;
-}
-
+/* 撮った画像そのものは盤を読むのに要らない。認識結果と突き合わせるためのもの。 */
 .thumbnail {
-  margin-top: 8px;
   max-width: 100%;
-  max-height: 180px;
+  max-height: 240px;
   object-fit: contain;
   border: 1px solid #3a3d47;
   border-radius: 6px;

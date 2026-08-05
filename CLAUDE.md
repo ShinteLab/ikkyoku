@@ -148,7 +148,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   `sfen` / `warnings` / `handTotal` / `recognizeError` を載せて返す
 - **認識に失敗してもキャプチャは成功として扱う**（設計原則3）。PNG の保存は済んでおり、
   盤が出ない代わりに理由が UI に出るだけ。`recognizeError` がその理由
-- メイン画面が SFEN・駒台の推定枚数（先後不明）・警告を出し、`<shogi-board>` で盤を描く
+- メイン画面は **2 タブ**。**盤面タブは `<shogi-board>` と SFEN だけ**で、盤をできるだけ
+  大きく見せる。認識器の状態・再読み込み・駒台の推定枚数（先後不明）・警告・保存先・
+  撮った画像は**デバッグタブ**に寄せてある（認識精度を追うための情報であって、
+  盤を読むのに要るものではないため）。**盤面タブに項目を足さないこと**。
+  警告・エラーが出るとデバッグタブに点が付く（開けば消える）
+
+  ⚠️ **盤は 560px より大きくならない。** `<shogi-board>` の SVG は width 属性が
+  固有サイズ（core/web の `CELL*9 + MARGIN*2`）で、CSS は `max-width: 100%` しか
+  指定していないため、host を広げても伸びない。これ以上大きくするには core/web の
+  svg に `width: 100%` を足す必要があり、他の利用側（prokishi / suteme）にも効く
 
 #### `<shogi-board>` の配信（ファイルをコピーしない）
 

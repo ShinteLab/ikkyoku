@@ -3,6 +3,10 @@
 // 撮った画像から割り出した盤面・SFEN・警告を出す画面。起動時は非表示で、最初の
 // キャプチャで現れる。**この画面を閉じるとアプリが終了する**(枠を閉じても終了しない)。
 //
+// 画面は 2 タブ。**盤面タブは盤と SFEN だけ**で、盤をできるだけ大きく見せる。
+// 認識器の状態・駒台の推定・警告・保存先・撮った画像はデバッグタブに寄せてある
+// (認識精度を追うための情報であって、盤を読むのに要るものではないため)。
+//
 // **撮る操作はここには置かない。** 撮るのは盤に枠を合わせている最中の操作なので、
 // 枠のツールバーとホットキーで完結する。ここは撮れたものを見る側。
 //
@@ -56,41 +60,48 @@ export function mountMainScreen(root: HTMLElement): void {
   root.innerHTML = `
     <div class="main-screen">
       <div class="main-toolbar">
-        <span class="hint">撮るのは枠のツールバー、または <span class="hotkey-hint">Alt+S</span></span>
+        <div class="tabs" role="tablist">
+          <button id="tab-board" class="tab is-active" type="button"
+                  role="tab" aria-selected="true" aria-controls="panel-board">盤面</button>
+          <button id="tab-debug" class="tab" type="button"
+                  role="tab" aria-selected="false" aria-controls="panel-debug">デバッグ</button>
+        </div>
         <span class="spacer"></span>
-        <button id="reload-btn" class="ghost-btn" type="button"
-                title="学習データを更新したあとに押すと、認識器を読み込み直します">認識器を再読み込み</button>
+        <span class="hint">撮るのは枠のツールバー、または <span class="hotkey-hint">Alt+S</span></span>
         <button id="show-frame-btn" class="ghost-btn" type="button">枠を表示</button>
       </div>
-      <p id="recognizer" class="recognizer"></p>
 
-      <div class="content">
+      <div id="panel-board" class="panel is-active" role="tabpanel" aria-labelledby="tab-board">
         <div class="board-area">
           <shogi-board id="board" hidden></shogi-board>
           <p id="board-placeholder" class="board-placeholder">まだ撮っていません。</p>
         </div>
+        <div class="sfen-row">
+          <span class="field-label">SFEN</span>
+          <code id="sfen" class="sfen">-</code>
+        </div>
+      </div>
 
-        <div class="side">
-          <div class="readout">
-            <div class="sfen-row">
-              <span class="field-label">SFEN</span>
-              <code id="sfen" class="sfen">-</code>
-            </div>
-            <div id="hand-row" class="hand-row" hidden>
-              <span class="field-label">駒台</span>
-              <span id="hand" class="hand"></span>
-              <span class="note">先後不明</span>
-            </div>
-            <ul id="warnings" class="warnings" hidden></ul>
-            <p id="status" class="status" role="status" aria-live="polite">
-              ガイド枠を盤面に合わせて撮影してください。
-            </p>
-          </div>
+      <div id="panel-debug" class="panel" role="tabpanel" aria-labelledby="tab-debug" hidden>
+        <div class="debug-row">
+          <button id="reload-btn" class="ghost-btn" type="button"
+                  title="学習データを更新したあとに押すと、認識器を読み込み直します">認識器を再読み込み</button>
+          <p id="recognizer" class="recognizer"></p>
+        </div>
 
-          <details class="debug" open>
-            <summary>デバッグ: 撮った画像</summary>
-            <img id="thumbnail" class="thumbnail" alt="直近のキャプチャ" hidden />
-          </details>
+        <div id="hand-row" class="hand-row" hidden>
+          <span class="field-label">駒台</span>
+          <span id="hand" class="hand"></span>
+          <span class="note">先後不明</span>
+        </div>
+        <ul id="warnings" class="warnings" hidden></ul>
+        <p id="status" class="status" role="status" aria-live="polite">
+          ガイド枠を盤面に合わせて撮影してください。
+        </p>
+
+        <div class="debug-shot">
+          <span class="field-label">撮った画像</span>
+          <img id="thumbnail" class="thumbnail" alt="直近のキャプチャ" hidden />
         </div>
       </div>
     </div>
@@ -107,6 +118,45 @@ export function mountMainScreen(root: HTMLElement): void {
   const warnings = root.querySelector<HTMLUListElement>("#warnings")!;
   const status = root.querySelector<HTMLParagraphElement>("#status")!;
   const thumbnail = root.querySelector<HTMLImageElement>("#thumbnail")!;
+
+  // タブ。盤面タブは「撮れた盤と SFEN」だけに絞り、認識器の状態・警告・撮った画像
+  // といった突き合わせ用の情報はデバッグタブへ寄せてある。**盤を大きく見せるのが目的**
+  // なので、盤面タブに項目を足すときは本当にそこに要るのかを毎回考えること。
+  //
+  // 隠すのは表示だけで、両方のパネルの中身は常に更新する(タブを切り替えた瞬間に
+  // 古い内容が出ることが無いように)。
+  const tabs: { tab: HTMLButtonElement; panel: HTMLElement }[] = [
+    { tab: root.querySelector<HTMLButtonElement>("#tab-board")!, panel: root.querySelector<HTMLElement>("#panel-board")! },
+    { tab: root.querySelector<HTMLButtonElement>("#tab-debug")!, panel: root.querySelector<HTMLElement>("#panel-debug")! },
+  ];
+  const debugTab = tabs[1].tab;
+
+  const selectTab = (target: HTMLButtonElement) => {
+    for (const { tab, panel } of tabs) {
+      const active = tab === target;
+      tab.classList.toggle("is-active", active);
+      tab.setAttribute("aria-selected", String(active));
+      panel.classList.toggle("is-active", active);
+      panel.hidden = !active;
+    }
+    if (target === debugTab) {
+      debugTab.classList.remove("has-warn", "has-error");
+    }
+  };
+
+  for (const { tab } of tabs) {
+    tab.addEventListener("click", () => selectTab(tab));
+  }
+
+  // 警告やエラーはデバッグタブの中にあるので、盤面タブを見ているあいだは気づけない。
+  // タブ側に印を出して「見に行くべきものがある」ことだけ伝える。
+  const markDebug = (level: "" | "warn" | "error") => {
+    debugTab.classList.remove("has-warn", "has-error");
+    if (debugTab.classList.contains("is-active") || level === "") {
+      return;
+    }
+    debugTab.classList.add(level === "error" ? "has-error" : "has-warn");
+  };
 
   // <shogi-board> は core/web の Web Component。Go 側が core の embed から
   // /shinte-web/ 配下に配信している(shinteweb.go)。**フロントにファイルをコピーしない**
@@ -189,12 +239,17 @@ export function mountMainScreen(root: HTMLElement): void {
       thumbnail.src = result.thumbnail;
       thumbnail.hidden = false;
     }
+
+    markDebug(
+      result.recognizeError ? "error" : (result.warnings?.length ?? 0) > 0 ? "warn" : "",
+    );
   };
 
   const showError = (message: string) => {
     status.textContent = `キャプチャに失敗しました: ${message}`;
     status.classList.add("is-error");
     status.classList.remove("is-warn");
+    markDebug("error");
   };
 
   // 枠は閉じても隠れるだけなので、ここから出し直せる。
@@ -208,6 +263,7 @@ export function mountMainScreen(root: HTMLElement): void {
     if (st.error) {
       recognizer.textContent = `認識器を読み込めません: ${st.error}`;
       recognizer.className = "recognizer is-error";
+      markDebug("error");
       return;
     }
     if (st.ready) {
@@ -225,6 +281,7 @@ export function mountMainScreen(root: HTMLElement): void {
     } catch (err) {
       recognizer.textContent = `認識器の再読み込みに失敗しました: ${String(err)}`;
       recognizer.className = "recognizer is-error";
+      markDebug("error");
     } finally {
       reloadBtn.disabled = false;
     }
@@ -255,5 +312,6 @@ export function mountMainScreen(root: HTMLElement): void {
   Events.On("hotkey:register-failed", (event: { data: { hotkey: string; error: string } }) => {
     status.textContent = `グローバルホットキー(${event.data.hotkey})の登録に失敗しました。枠のツールバーの「撮る」は使えます。`;
     status.classList.add("is-error");
+    markDebug("error");
   });
 }
