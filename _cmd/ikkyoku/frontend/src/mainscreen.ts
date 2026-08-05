@@ -22,10 +22,14 @@ interface CaptureResult {
   height: number;
   thumbnail: string;
   sfen: string;
+  confidence: number;
   warnings: string[];
   handTotal: Record<string, number>;
   recognizeError: string;
 }
+
+// これを下回ったら検出を疑う。盤が映っていない画面を撮ったときにここが落ちる。
+const LOW_CONFIDENCE = 0.75;
 
 // 駒台の表示順(飛角金銀桂香歩)。SFEN の駒文字をそのまま並べる。
 const HAND_ORDER = ["R", "B", "G", "S", "N", "L", "P"];
@@ -89,6 +93,10 @@ export function mountMainScreen(root: HTMLElement): void {
           <p id="recognizer" class="recognizer"></p>
         </div>
 
+        <div id="confidence-row" class="hand-row" hidden>
+          <span class="field-label">検出</span>
+          <span id="confidence" class="note"></span>
+        </div>
         <div id="hand-row" class="hand-row" hidden>
           <span class="field-label">駒台</span>
           <span id="hand" class="hand"></span>
@@ -113,6 +121,8 @@ export function mountMainScreen(root: HTMLElement): void {
   const board = root.querySelector<HTMLElement>("#board")!;
   const placeholder = root.querySelector<HTMLParagraphElement>("#board-placeholder")!;
   const sfenOut = root.querySelector<HTMLElement>("#sfen")!;
+  const confidenceRow = root.querySelector<HTMLDivElement>("#confidence-row")!;
+  const confidenceOut = root.querySelector<HTMLElement>("#confidence")!;
   const handRow = root.querySelector<HTMLDivElement>("#hand-row")!;
   const handOut = root.querySelector<HTMLElement>("#hand")!;
   const warnings = root.querySelector<HTMLUListElement>("#warnings")!;
@@ -192,6 +202,18 @@ export function mountMainScreen(root: HTMLElement): void {
     placeholder.hidden = true;
   };
 
+  // 盤面検出の信頼度。低いときは「盤が映っていない画面を撮った」可能性のほうが高いので、
+  // 認識結果を疑う入口として出しておく(警告と違い、局面の中身の話ではない)。
+  const showConfidence = (confidence: number, sfen: string) => {
+    if (!sfen) {
+      confidenceRow.hidden = true;
+      return;
+    }
+    confidenceOut.textContent = `${Math.round(confidence * 100)}%`;
+    confidenceOut.classList.toggle("is-low", confidence < LOW_CONFIDENCE);
+    confidenceRow.hidden = false;
+  };
+
   const showHand = (hand: Record<string, number>) => {
     const parts = HAND_ORDER.filter((k) => (hand?.[k] ?? 0) > 0).map(
       (k) => `${HAND_LABEL[k]}${hand[k]}`,
@@ -232,6 +254,7 @@ export function mountMainScreen(root: HTMLElement): void {
 
     sfenOut.textContent = result.sfen || "-";
     showBoard(result.sfen, true);
+    showConfidence(result.confidence, result.sfen);
     showHand(result.handTotal);
     showWarnings(result.warnings);
 
@@ -240,8 +263,15 @@ export function mountMainScreen(root: HTMLElement): void {
       thumbnail.hidden = false;
     }
 
+    // 信頼度が低いのも「見に行くべきもの」に含める。盤が映っていない画面を撮ったときは
+    // 警告が 1 件も出ないことがあり、それだと盤面タブ側では何も起きていないように見える。
+    const lowConfidence = !!result.sfen && result.confidence < LOW_CONFIDENCE;
     markDebug(
-      result.recognizeError ? "error" : (result.warnings?.length ?? 0) > 0 ? "warn" : "",
+      result.recognizeError
+        ? "error"
+        : (result.warnings?.length ?? 0) > 0 || lowConfidence
+          ? "warn"
+          : "",
     );
   };
 

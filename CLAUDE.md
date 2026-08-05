@@ -85,17 +85,39 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **認識の精度はまだ低い**（実測で `L: 11枚（上限4）` のような警告が出る状態）。
 これは Phase 2 の失敗ではない。**「今どれくらいか」が見えるようになったこと自体が成果**で、
-精度は学習データを育てて上げていく。`ValidatePieces` の警告がそのまま
+精度は学習データを育てて上げていく。`Result.Warnings()` がそのまま
 「どれくらい外しているか」の指標になっている。
 
 ### 使う API（`github.com/ShinteLab/suteme`）
 
 | 関数 | 用途 |
 |---|---|
-| `LoadSFEN(img image.Image) (string, error)` | **画像 → SFEN 盤面文字列。これが本命の継ぎ目** |
-| `ValidatePieces(sfenBoard string) *PieceValidation` | **駒数保存則の検証**。`Warnings` と `HandTotal` を返す |
+| `Recognize(img image.Image, opts ...Option) (*Result, error)` | **画像 → 盤面。これが本命の継ぎ目。** 盤面・信頼度・駒数・検証結果まで 1 回で返る |
+| `LoadSFEN(img image.Image, opts ...Option) (string, error)` | 盤面文字列だけでよいとき。`Recognize` の薄い皮 |
 | `LoadPredictor(dir string) (Predictor, error)` | dir から駒種推論器を読む（下記） |
-| `SetPredictor(p Predictor)` | 以後 `LoadSFEN` が使う推論器を差し替える。`nil` で既定探索に戻る |
+| `SetPredictor(p Predictor)` | 以後の認識が使う推論器を差し替える。`nil` で既定探索に戻る |
+
+**`ValidatePieces` / `PieceValidation` は無くなった。** 検証は `Recognize` に統合され、
+`Result.Warnings()`（日本語メッセージ）/ `Result.Violations`（種類つき）/ `Result.HandTotal` で取る。
+
+#### オプション（`suteme.Option`）— ikkyoku は既定のまま呼ぶ
+
+`suteme` の既定は「全部調べるが、エラーにはしない」。**これが ikkyoku の設計原則3
+「段階的に劣化すること」とそのまま一致する**ので、`recognize.FromImage` はオプションを
+何も渡さない。駒数が合わない盤面でも撮った 1 局面は解析させたく、「おかしい」は
+`Warnings` として UI に出して訂正 UI（Phase 5）で直す、という流れになる。
+
+| オプション | 使うか |
+|---|---|
+| `WithErrorOn(c sfen.Check)` / `WithStrict()` | **使わない。** 違反をエラーにすると「撮ったのに何も出ない」になる |
+| `WithHandTo(side)` | **使わない。** 先後の割り振りは盤面から決まらない（設計原則5）。人間が決める |
+| `WithTurn` / `WithMoveNumber` | 未使用。手番を持つのは Phase 3 の局面矯正層の仕事 |
+| `WithPredictor(p)` | 未使用。学習データの指定は `SetPredictor` 側で一括して行っている（下記） |
+| `WithRegion` / `WithRect` | 未使用。ガイド枠で盤だけを切り出している前提。将来ガイド枠の座標を渡す余地はある |
+
+`recognize.FromImage` は `...recognize.Option`（= `suteme.Option` の型エイリアス）を
+受け取るので、必要になった呼び出し側がその場で指定できる。**ikkyoku 側でオプションを
+包み直さないこと**（チェックの種類は `core/sfen` の語彙で、包むと二重定義になる）。
 
 ### ⚠️ 学習データの置き場所は ikkyoku が決める
 
@@ -130,29 +152,40 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### 分かっていること（設計に効く）
 
-- **`ValidatePieces` が駒数保存則で持ち駒を逆算する。**
-  盤上の駒数から「駒台にあるはずの枚数」(`HandTotal`) を出す。つまり
+- **`Recognize` が駒数保存則で持ち駒を逆算する。**
+  盤上の駒数から「駒台にあるはずの枚数」(`Result.HandTotal`) を出す。つまり
   **駒台を画像認識しなくても持ち駒が埋まる。** ただし **先後の割り振りは付かない**
-  （`HandTotal` のコメントに「先後不明」とある）。Phase 3 の設計原則
+  （`WithHandTo` で寄せられるが、それは便宜的な決め打ち）。Phase 3 の設計原則
   「手番は局面から決まらない」と同根の制約で、**どちらも UI で人間が決めるのが最も安い**
-- `PieceValidation.Warnings` がそのまま「ここが怪しい」の提示に使える。
-  **矯正層の第一歩は自前で書くのではなく、これを UI に出すこと**
+- `Result.Warnings()` がそのまま「ここが怪しい」の提示に使える。
+  **矯正層の第一歩は自前で書くのではなく、これを UI に出すこと**。
+  種類で選り分けたいときは `Result.Violations` / `Result.Filter(sfen.Check)`
+- **`Result.Confidence` は「盤を映していない画面を撮った」の検出に効く。**
+  局面の中身がおかしい（＝`Warnings`）のとは別の軸で、認識結果を疑う入口になる
+- **`Result.Black` / `Result.White` は盤上に見えている駒数**（成駒はベース駒に合算）。
+  `HandTotal` の逆算根拠なので、訂正 UI で「どの駒を数え間違えたか」を突き合わせられる
 - **`DetectBoard` はガイド枠の自動フィットに転用できる。** 撮った画像から盤の矩形が出るなら、
   ユーザーが手で合わせた枠を補正できる。Phase 1 の洗練としても効く
 
 ### ikkyoku 側の実装（済み）
 
-- `recognize` パッケージ（ルートモジュール）が `LoadSFEN` + `ValidatePieces` を呼ぶ。
+- `recognize` パッケージ（ルートモジュール）が `suteme.Recognize` を呼び、`Board` にまとめる。
   **認識器はここに書かない**（suteme の責務）。一方、Phase 3 の局面矯正層はここに入る
 - `CaptureService.Capture` が撮った直後に呼び、`CaptureResult` に
-  `sfen` / `warnings` / `handTotal` / `recognizeError` を載せて返す
+  `sfen` / `confidence` / `warnings` / `handTotal` / `recognizeError` を載せて返す
 - **認識に失敗してもキャプチャは成功として扱う**（設計原則3）。PNG の保存は済んでおり、
-  盤が出ない代わりに理由が UI に出るだけ。`recognizeError` がその理由
+  盤が出ない代わりに理由が UI に出るだけ。`recognizeError` がその理由。
+  **既定のオプションでは、`recognizeError` が入るのは「盤そのものが取れなかった」ときだけ**
+  （駒数が合わない程度では `warnings` に載るだけで盤は描かれる）
+- `recognize.FromImage` は `WithErrorOn` 等でエラーにした場合でも `Board` を埋めて返す。
+  「どこがおかしいか」を出しつつ盤も見せられるようにするため
 - メイン画面は **2 タブ**。**盤面タブは `<shogi-board>` と SFEN だけ**で、盤をできるだけ
-  大きく見せる。認識器の状態・再読み込み・駒台の推定枚数（先後不明）・警告・保存先・
-  撮った画像は**デバッグタブ**に寄せてある（認識精度を追うための情報であって、
+  大きく見せる。認識器の状態・再読み込み・検出の信頼度・駒台の推定枚数（先後不明）・
+  警告・保存先・撮った画像は**デバッグタブ**に寄せてある（認識精度を追うための情報であって、
   盤を読むのに要るものではないため）。**盤面タブに項目を足さないこと**。
-  警告・エラーが出るとデバッグタブに点が付く（開けば消える）
+  警告・エラー・信頼度の低下が出るとデバッグタブに点が付く（開けば消える）。
+  信頼度を点の対象に含めているのは、**盤が映っていない画面を撮ると警告が 1 件も出ない
+  ことがある**ため（局面の中身の話ではないので `warnings` には載らない）
 
   ⚠️ **盤は 560px より大きくならない。** `<shogi-board>` の SVG は width 属性が
   固有サイズ（core/web の `CELL*9 + MARGIN*2`）で、CSS は `max-width: 100%` しか
@@ -529,14 +562,20 @@ Start-Process .\_cmd\ikkyoku\bin\ikkyoku.exe
   (終了時に `Position()` を読んでいたため。上記「ウィンドウ状態の永続化」参照)
 - **`CGO_ENABLED=0` でのビルド** … 通る(PureGo 方針の維持を確認)
 
+#### 手動での確認(マウス操作が要るもの。ユーザーによる実機確認済み)
+
+- **ツールバーのドラッグ移動** … 動作する
+- **ウィンドウ端のリサイズ** … 動作する。**ガイド枠 2px のままで塞がれない**
+- **枠を別ウィンドウに重ねた状態でのキャプチャ** … 動作する
+
+> **⚠️ wails3 skill `frameless.md` の「リサイズ領域の確保(必須): ルート要素に 5px の
+> パディングを設けること」は beta.3 では不要。** あれは alpha2.117 前提の記述で、
+> beta.3 のランタイム実装(`drag.ts`)はウィンドウ端 5px(角は +10px)を
+> **座標だけで判定しており要素を見ていない**。ソースを読んだ時点での推測どおりだったことが
+> 実機で確認できた。**このためにレイアウトを歪めないこと。**
+
 **まだ未検証**:
 
-- **ツールバーのドラッグ移動と、ウィンドウ端のリサイズ。**
-  実際にマウスを操作しないと判定できず、自動では確認していない。
-  特に**ガイド枠が 2px のままでリサイズ領域を塞がないか**は要確認
-  (wails3 skill `frameless.md` は「ルート要素に 5px のパディングを設けること」としているが、
-  これは alpha2.117 前提の記述で、**beta.3 のランタイム実装(`drag.ts`)を読む限り
-  リサイズの端検出は座標だけで要素を見ていない**ため、塞がれない可能性が高い)
 - **4K モニタ(150% スケーリング想定)での物理ピクセル一致。**
   検証したのは 100% のモニタのみ。`GetClientRect`+`ClientToScreen` を使っているので
   理屈上は合うはずだが、実測はしていない。
