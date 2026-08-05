@@ -1,4 +1,4 @@
-// 盤面に重ねる透過ガイド枠。
+﻿// 盤面に重ねる透過ガイド枠。
 //
 // Frameless ウィンドウなので OS のタイトルバーが無い。代わりに上部へ自前のツールバーを
 // 置き、そこにドラッグ移動と「撮る」を集約している。ツールバーはキャプチャ領域の外(上)に
@@ -63,14 +63,15 @@ export function mountFrame(root: HTMLElement): void {
   // 内側に描く後者だけが写り込みうる。詳細は playFlyout の ⚠️ を読むこと。
   let flashTimer = 0;
   let flyoutTimer = 0;
+  let warnTimer = 0;
   const flash = (text: string) => {
     window.clearTimeout(flashTimer);
     window.clearTimeout(warnTimer);
     for (const el of [toolbar, guide]) {
       // 連打しても毎回光るよう、アニメーションを付け直す(リフローで巻き戻す)。
-      // is-shake も落とす。同じ border-color を奪い合い、後勝ちで撮影の合図が
+      // is-warn も落とす。同じ border-color を奪い合い、後勝ちで撮影の合図が
       // 出なくなるため(CSS の宣言順)。
-      el.classList.remove("is-shake");
+      el.classList.remove("is-warn");
       el.classList.remove("is-flash");
       void (el as HTMLElement).offsetWidth;
       el.classList.add("is-flash");
@@ -124,28 +125,27 @@ export function mountFrame(root: HTMLElement): void {
   // OS から見れば枠ウィンドウが普通にクリックを受け取っており、後ろへは一切渡らない。
   // 無反応だと「クリックが効かない画面」に見えてしまうので、枠が受け取ったことを返す。
   //
-  // ⚠️ ここでもキャプチャ領域の内側には何も描かない(写り込むため)。合図はツールバーを
-  // 揺らすのと、ガイド枠の線を警告色で明滅させるのだけで出す。**ウィンドウ自体は
-  // 揺らさない** — 枠の位置がそのままキャプチャ領域の定義なので、揺れている最中に
-  // Alt+S が来ると撮る場所がずれる。
-  // アニメーションは CSS 側でツールバーが 0.7s、ガイド枠の明滅が 0.7s×2。
-  // 文字はそれより少し長く残す(見落とさないように)。
-  const warnHoldMs = 1500;
-  let warnTimer = 0;
+  // ⚠️ ここでもキャプチャ領域の内側には何も描かない(写り込むため)。合図はツールバーと
+  // ガイド枠の線を警告色で明滅させるだけ。**何も動かさない** — ウィンドウを揺らすと
+  // 枠の位置がそのままキャプチャ領域の定義なので撮る場所がずれるし、中の要素を揺らすと
+  // はみ出したぶんで水平スクロールバーが出る(実際に試して却下した)。
+  //
+  // アニメーションは CSS 側で 0.22s×2 = 0.44s。文字だけ少し長く残す。
+  const warnHoldMs = 1000;
   const warnClickBlocked = () => {
     window.clearTimeout(warnTimer);
     window.clearTimeout(flashTimer);
     for (const el of [toolbar, guide]) {
-      el.classList.remove("is-shake");
+      el.classList.remove("is-warn");
       el.classList.remove("is-flash"); // 同上。border-color を奪い合わせない
       void (el as HTMLElement).offsetWidth; // 連打しても毎回頭から再生させる
-      el.classList.add("is-shake");
+      el.classList.add("is-warn");
     }
     title.textContent = "クリックは後ろに届きません";
     title.classList.remove("is-error");
     warnTimer = window.setTimeout(() => {
       for (const el of [toolbar, guide]) {
-        el.classList.remove("is-shake");
+        el.classList.remove("is-warn");
       }
       title.textContent = baseTitle;
     }, warnHoldMs);

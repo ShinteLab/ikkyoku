@@ -1,4 +1,4 @@
-* {
+﻿* {
   box-sizing: border-box;
 }
 
@@ -26,6 +26,10 @@ html.is-frame,
 html.is-frame body,
 html.is-frame #app {
   background: transparent;
+  /* スクロールバーを出さない。枠の中身は常にウィンドウぴったりに収まる想定で、
+     はみ出すのは何かがおかしいとき。出てしまうとキャプチャ領域の内側に
+     スクロールバーが描かれて写り込む。 */
+  overflow: hidden;
 }
 
 html.is-frame #app {
@@ -216,60 +220,45 @@ html.is-frame #app {
    後ろの中継を触ったつもりで枠を叩いても、クリックは後ろへ渡らない。無反応だと
    「効かない画面」に見えるので、枠が受け取ったことを返す。
 
-   ⚠️ **ウィンドウ自体は揺らさない。** 枠の位置がそのままキャプチャ領域の定義なので、
-   揺れている最中に Alt+S が来ると撮る場所がずれる。揺らすのはツールバー(領域の外)だけで、
-   ガイド枠は位置を動かさず線の色だけを警告色で明滅させる。撮影の合図(白)とは
-   色で区別する。 */
-@keyframes frame-shake {
-  0%,
-  100% {
-    transform: translateX(0);
-  }
-  15% {
-    transform: translateX(-5px);
-  }
-  30% {
-    transform: translateX(5px);
-  }
-  45% {
-    transform: translateX(-4px);
-  }
-  60% {
-    transform: translateX(3px);
-  }
-  80% {
-    transform: translateX(-2px);
-  }
-}
+   ⚠️ **何も動かさない。色だけで知らせる。** 理由が 2 つある:
 
-.frame-toolbar.is-shake {
-  animation: frame-shake 0.7s ease-in-out;
-}
+   - ウィンドウを揺らすと、枠の位置がそのままキャプチャ領域の定義なので、揺れている
+     最中に Alt+S が来ると撮る場所がずれる
+   - 中の要素(ツールバー)を揺らすのも駄目。はみ出したぶんで水平スクロールバーが出て、
+     見た目もばたつく(実際に試して却下した)
 
+   色を変えるだけならレイアウトが 1px も動かず、どちらも起きない。撮影の合図(白)とは
+   警告色(琥珀)で区別する。 */
 @keyframes guide-warn {
   0%,
   100% {
     border-color: rgba(255, 64, 64, 0.9);
   }
-  25%,
-  75% {
+  50% {
     border-color: #ffc46b;
   }
 }
 
-.capture-guide.is-shake {
-  animation: guide-warn 0.7s ease-in-out 2;
+.capture-guide.is-warn {
+  animation: guide-warn 0.22s ease-in-out 2;
 }
 
-.frame-toolbar.is-shake .frame-title {
-  color: #ffc46b;
-}
-
-/* 動きを抑える設定では、揺らさず色の明滅だけで知らせる。 */
-@media (prefers-reduced-motion: reduce) {
-  .frame-toolbar.is-shake {
-    animation: none;
+@keyframes toolbar-warn {
+  0%,
+  100% {
+    background: #1b1d23;
   }
+  50% {
+    background: #4a3a1c;
+  }
+}
+
+.frame-toolbar.is-warn {
+  animation: toolbar-warn 0.22s ease-in-out 2;
+}
+
+.frame-toolbar.is-warn .frame-title {
+  color: #ffc46b;
 }
 
 /* 寸法の取得に失敗したときだけ、ツールバーにエラーを表示するための高さを与える。
