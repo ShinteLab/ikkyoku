@@ -28,6 +28,9 @@ export function mountFrame(root: HTMLElement): void {
   const title = root.querySelector<HTMLSpanElement>(".frame-title")!;
   const captureBtn = root.querySelector<HTMLButtonElement>("#frame-capture")!;
   const hideBtn = root.querySelector<HTMLButtonElement>("#frame-hide")!;
+  const guide = root.querySelector<HTMLDivElement>(".capture-guide")!;
+  const toolbar = root.querySelector<HTMLDivElement>(".frame-toolbar")!;
+  const baseTitle = title.textContent ?? "";
 
   // 自前の✕は WindowClosing を通らない(wails3 skill tray-hotkey.md 3)ので、
   // ランタイムの Window.Hide() ではなく Go 側の HideFrame() を呼ぶ。閉じるのではなく
@@ -38,13 +41,46 @@ export function mountFrame(root: HTMLElement): void {
     void CaptureService.HideFrame();
   });
 
+  // 「撮った」ことを枠の側でも分かるようにする。
+  //
+  // 撮った結果はメイン画面に出るが、枠は中継の上に重ねて使うので、メイン画面が
+  // 背面や別モニタにあると「押したのに何も起きていない」ように見える。誤って押した
+  // ときに気づけないと、いつの間にか PNG が増えていく。
+  //
+  // ⚠️ エフェクトはツールバーとガイド枠の**線の上だけ**で完結させること。
+  // ガイド枠の内側はキャプチャ領域そのものなので、そこに何か描くと撮った画像に
+  // 写り込む(captureservice.go の captureRegion)。線の色を光らせるだけなら
+  // 太さも領域も変わらないので、写り込みようがない。
+  let flashTimer = 0;
+  const flash = (text: string) => {
+    window.clearTimeout(flashTimer);
+    for (const el of [toolbar, guide]) {
+      // 連打しても毎回光るよう、アニメーションを付け直す(リフローで巻き戻す)。
+      el.classList.remove("is-flash");
+      void (el as HTMLElement).offsetWidth;
+      el.classList.add("is-flash");
+    }
+    title.textContent = text;
+    title.classList.remove("is-error");
+    flashTimer = window.setTimeout(() => {
+      title.textContent = baseTitle;
+    }, 900);
+  };
+
   captureBtn.addEventListener("click", () => {
     void (async () => {
       captureBtn.disabled = true;
+      // 押した直後の反応は文字だけにする。**撮り終える前に光らせてはいけない**
+      // (ツールバーは領域外なので写らないが、ガイド枠の線の色は撮影中に変わると
+      // 境界の見え方が変わる。合図は撮り終えてから出す)。
+      window.clearTimeout(flashTimer);
+      title.textContent = "撮影中…";
       try {
         await CaptureService.Capture();
+        flash("撮りました");
       } catch (err) {
         // 結果の表示はメイン画面の役目。ここではツールバーが狭いので簡潔に出す。
+        window.clearTimeout(flashTimer);
         title.textContent = `失敗: ${String(err)}`;
         title.classList.add("is-error");
       } finally {

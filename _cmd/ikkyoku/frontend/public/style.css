@@ -111,6 +111,53 @@ html.is-frame #app {
   pointer-events: none; /* 透過部分は DOM のヒットテスト対象にしない */
 }
 
+/* 撮ったことを枠の側で知らせるエフェクト(frame.ts の flash)。
+   メイン画面が背面や別モニタにあると「押したのに何も起きていない」ように見えるため。
+
+   ⚠️ 光らせてよいのはツールバーと**ガイド枠の線そのもの**だけ。ガイド枠の内側は
+   キャプチャ領域なので、そこに何か描くと撮った画像に写り込む。border-width は
+   Go 側(guideBorderPx)と一致していないと領域がずれるため、色だけを変える。 */
+@keyframes frame-flash-guide {
+  0% {
+    border-color: #ffffff;
+  }
+  100% {
+    border-color: rgba(255, 64, 64, 0.9);
+  }
+}
+
+.capture-guide.is-flash {
+  animation: frame-flash-guide 0.55s ease-out;
+}
+
+@keyframes frame-flash-toolbar {
+  0% {
+    background: #ffffff;
+    color: #1b1d23;
+  }
+  100% {
+    background: #1b1d23;
+    color: #f2f3f5;
+  }
+}
+
+.frame-toolbar.is-flash {
+  animation: frame-flash-toolbar 0.55s ease-out;
+}
+
+/* エフェクト中は文字色をツールバーの反転に任せる(灰色のままだと白地で読めない)。 */
+.frame-toolbar.is-flash .frame-title {
+  color: inherit;
+}
+
+/* 撮影の合図が「動き」に依存しないようにする。 */
+@media (prefers-reduced-motion: reduce) {
+  .capture-guide.is-flash,
+  .frame-toolbar.is-flash {
+    animation-duration: 0.01s;
+  }
+}
+
 /* 寸法の取得に失敗したときだけ、ツールバーにエラーを表示するための高さを与える。
    この状態ではキャプチャ自体も成立しないので、領域の正しさは問題にならない。 */
 html.is-frame.is-layout-error .frame-toolbar {
