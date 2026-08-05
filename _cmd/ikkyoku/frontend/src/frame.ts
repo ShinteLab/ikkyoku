@@ -13,6 +13,12 @@
 import { Events } from "@wailsio/runtime";
 import { CaptureService } from "../bindings/ikkyoku-app";
 
+// capture:done のうち、枠が使う部分だけ。認識結果はメイン画面の担当なので見ない
+// (CaptureResult の全体は mainscreen.ts に定義がある)。
+interface CaptureDone {
+  thumbnail: string; // data:image/png;base64,... の等倍サムネイル
+}
+
 export function mountFrame(root: HTMLElement): void {
   root.innerHTML = `
     <div class="frame-toolbar">
@@ -23,7 +29,9 @@ export function mountFrame(root: HTMLElement): void {
                 title="枠を隠す(領域は保持され、Alt+S でそのまま撮れます)">✕</button>
       </div>
     </div>
-    <div class="capture-guide"></div>
+    <div class="capture-guide">
+      <img id="frame-flyout" class="capture-flyout" alt="">
+    </div>
   `;
 
   const title = root.querySelector<HTMLSpanElement>(".frame-title")!;
@@ -31,6 +39,7 @@ export function mountFrame(root: HTMLElement): void {
   const hideBtn = root.querySelector<HTMLButtonElement>("#frame-hide")!;
   const guide = root.querySelector<HTMLDivElement>(".capture-guide")!;
   const toolbar = root.querySelector<HTMLDivElement>(".frame-toolbar")!;
+  const flyout = root.querySelector<HTMLImageElement>("#frame-flyout")!;
   const baseTitle = title.textContent ?? "";
 
   // 自前の✕は WindowClosing を通らない(wails3 skill tray-hotkey.md 3)ので、
@@ -49,11 +58,11 @@ export function mountFrame(root: HTMLElement): void {
   // ときに気づけないと、いつの間にか PNG が増えていく。ホットキー(Alt+S)は
   // なおさらで、フォーカスが別アプリにあるまま発火するため気づく手がかりが無い。
   //
-  // ⚠️ エフェクトはツールバーとガイド枠の**線の上だけ**で完結させること。
-  // ガイド枠の内側はキャプチャ領域そのものなので、そこに何か描くと撮った画像に
-  // 写り込む(captureservice.go の captureRegion)。線の色を光らせるだけなら
-  // 太さも領域も変わらないので、写り込みようがない。
+  // 合図は 2 つ。flash がツールバーとガイド枠の**線**を光らせるもの(領域の外なので
+  // 写り込みようがない)、playFlyout が撮れた画像そのものを領域の内側に重ねるもの。
+  // 内側に描く後者だけが写り込みうる。詳細は playFlyout の ⚠️ を読むこと。
   let flashTimer = 0;
+  let flyoutTimer = 0;
   const flash = (text: string) => {
     window.clearTimeout(flashTimer);
     for (const el of [toolbar, guide]) {
@@ -76,12 +85,41 @@ export function mountFrame(root: HTMLElement): void {
     title.classList.add("is-error");
   };
 
+  // 撮れた画像そのものを、撮った位置にそのまま重ねて出し、右下へ縮めながら消す。
+  // ガイド枠の内側は撮った領域と 1:1 で一致するので、一瞬だけ盤が静止して見え、
+  // 「今この範囲が撮れた」がそのまま伝わる。
+  //
+  // ⚠️ これは**キャプチャ領域の内側に描く唯一の要素**。画面の合成結果を撮っている以上、
+  // アニメ中(flyoutMs)に次のキャプチャが走ると縮小画像が写り込む。撮る側を止められる
+  // 経路(ツールバーのボタン)は再生中は無効にしてあるが、**ホットキーは止められない**
+  // ので、連打すると 1 枚目のゴーストが写った PNG ができうる。エフェクトを長くしない
+  // こと。長さを伸ばすほど写り込みの窓が広がる。
+  const flyoutMs = 600;
+  const playFlyout = (thumbnail: string) => {
+    if (!thumbnail) {
+      return; // PNG エンコードに失敗したとき(Go 側で空になる)
+    }
+    flyout.src = thumbnail;
+    // 連続して撮ったときに毎回頭から再生させる(リフローで巻き戻す)。
+    flyout.classList.remove("is-playing");
+    void flyout.offsetWidth;
+    flyout.classList.add("is-playing");
+    captureBtn.disabled = true;
+    window.clearTimeout(flyoutTimer);
+    flyoutTimer = window.setTimeout(() => {
+      flyout.classList.remove("is-playing");
+      flyout.removeAttribute("src"); // 等倍 PNG の data URL を抱えたままにしない
+      captureBtn.disabled = false;
+    }, flyoutMs);
+  };
+
   // **エフェクトの起点はイベント 1 本にする。**「撮る」ボタンとホットキー(Alt+S)は
   // どちらも Go 側の CaptureService.Capture() に入り、成功すると capture:done が
   // 全ウィンドウへ飛ぶ(captureservice.go)。ボタン側の await でも光らせると、
   // クリック時だけ二重に光る(イベントの到着は await の解決と前後する)。
-  Events.On("capture:done", () => {
+  Events.On("capture:done", (event: { data: CaptureDone }) => {
     flash("撮りました");
+    playFlyout(event.data.thumbnail);
   });
   // ホットキー経由の失敗はこちらに来る(main.go の GlobalShortcut ハンドラ)。
   // ボタン経由の失敗は呼び出し元で捕まえるので、ここには来ない。
@@ -102,7 +140,10 @@ export function mountFrame(root: HTMLElement): void {
       } catch (err) {
         showError(String(err));
       } finally {
-        captureBtn.disabled = false;
+        // 再生中なら押せるようにしない(解除は playFlyout のタイマーがやる)。
+        // capture:done の到着が await の解決と前後するため、無条件に戻すと
+        // アニメ中にボタンが生き返り、写り込みの窓が開く。
+        captureBtn.disabled = flyout.classList.contains("is-playing");
       }
     })();
   });

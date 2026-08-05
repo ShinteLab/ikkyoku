@@ -109,6 +109,60 @@ html.is-frame #app {
      この枠線の内側が、そのままキャプチャされる領域になる。 */
   border: var(--guide-border, 0px) solid rgba(255, 64, 64, 0.9);
   pointer-events: none; /* 透過部分は DOM のヒットテスト対象にしない */
+  /* 撮った画像(.capture-flyout)を内側に重ねるための基準。 */
+  position: relative;
+}
+
+/* 撮れた画像を、撮った位置にそのまま重ねて出し、右下へ縮めながら消す(frame.ts)。
+   border-box なので inset:0 は border の内側 = キャプチャ領域そのもの。撮った画像と
+   1:1 で重なるため、一瞬だけ盤が静止して見える。
+
+   ⚠️ **キャプチャ領域の内側に描く唯一の要素。** 画面の合成結果を撮る以上、再生中に
+   次のキャプチャが走れば縮小画像が写り込む。長さを伸ばすほどその窓が広がるので、
+   0.6s より長くしないこと(frame.ts の flyoutMs と一致させる)。 */
+.capture-flyout {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: none;
+}
+
+.capture-flyout.is-playing {
+  display: block;
+  /* 右下隅を固定して縮めるので、そのまま右下へ吸い込まれて見える。 */
+  transform-origin: 100% 100%;
+  animation: capture-flyout 0.6s ease-in forwards;
+}
+
+@keyframes capture-flyout {
+  /* 最初は静止(撮れた瞬間が読み取れる長さ)、そこから縮めて消す。 */
+  0%,
+  25% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(0.14);
+    opacity: 0;
+  }
+}
+
+/* 動きを抑える設定では縮小をやめ、その場でフェードだけさせる。 */
+@media (prefers-reduced-motion: reduce) {
+  .capture-flyout.is-playing {
+    animation-name: capture-flyout-fade;
+  }
+
+  @keyframes capture-flyout-fade {
+    0%,
+    25% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+    }
+  }
 }
 
 /* 撮ったことを枠の側で知らせるエフェクト(frame.ts の flash)。
