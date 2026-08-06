@@ -1,30 +1,14 @@
 package main
 
 import (
-	"log/slog"
 	"strings"
 
 	"github.com/ShinteLab/ikkyoku"
 )
 
-// loadConfig は ikkyoku.Config(os.UserConfigDir()/ikkyoku/config.json)を読む。
-// 読めなければゼロ値を返して起動を続ける(設定が無いのは正常な状態)。
-//
-// ウィンドウの位置・サイズはこれとは別ファイル(app-window.json)に持っている。
+// 設定ファイル(config.json)の読み書きは settings.go(SettingsService)が持っている。
+// ウィンドウの位置・サイズはこれとは別ファイル(app-window.json)。
 // あちらは Wails 依存を避けるための分離で、こちらはアプリ本来の設定。
-func loadConfig(logger *slog.Logger) ikkyoku.Config {
-	path, err := ikkyoku.DefaultConfigPath()
-	if err != nil {
-		logger.Warn("設定ファイルの場所を決められませんでした", "error", err)
-		return ikkyoku.Config{}
-	}
-	cfg, err := ikkyoku.LoadConfig(path)
-	if err != nil {
-		logger.Warn("設定を読み込めませんでした", "path", path, "error", err)
-		return ikkyoku.Config{}
-	}
-	return cfg
-}
 
 // resolveHotkey は GUI 版の既定ホットキーを返す。
 // 今のところ設定 UI は無く常に既定値(alt+s)を使う。

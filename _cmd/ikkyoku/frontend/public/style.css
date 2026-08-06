@@ -380,6 +380,45 @@ html.is-main body {
   overflow: auto;
 }
 
+/* 設定タブ。項目は上から順に積むだけ(1 つしか無いうちは列にしない)。 */
+#panel-settings {
+  overflow: auto;
+  align-items: flex-start;
+}
+
+.setting {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.setting-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.setting-title {
+  font-size: 13px;
+  color: #e6e8ee;
+}
+
+/* 何が起きるかを 1 行で添える。起動時に枠が勝手に動く設定なので、
+   チェックボックスの文言だけでは足りない。 */
+.setting-note {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: #9aa6c0;
+}
+
+.setting-path {
+  margin: 0;
+  font-size: 11.5px;
+  color: #9aa6c0;
+  word-break: break-all;
+}
+
 .debug-row {
   flex: 0 0 auto;
   display: flex;

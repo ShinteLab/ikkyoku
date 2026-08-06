@@ -24,6 +24,16 @@ type Config struct {
 	// あり、古いデータで認識してしまう事故が起きる。開発中は suteme のリポジトリを
 	// 直接指しておけば、データを更新した結果がそのまま反映される。
 	SutemeDataDir string `json:"sutemeDataDir,omitempty"`
+
+	// FitOnStartup は起動時に盤面を探してガイド枠を合わせるか。
+	//
+	// **既定は false(探さない)。** 枠の位置はユーザーが手で合わせたものなので、
+	// 起動のたびに勝手に動かすのを既定の挙動にはしない。有効にすると毎回の起動で
+	// 一度だけ探す(GUI の設定タブから切り替える)。
+	//
+	// omitempty を付けていないのは、**切ってあること自体を設定ファイルに残す**ため。
+	// このファイルは手で編集する前提でもあるので、キーが消えると存在に気づけない。
+	FitOnStartup bool `json:"fitOnStartup"`
 }
 
 // DefaultConfigPath は既定の設定ファイルパスを返す（os.UserConfigDir()/ikkyoku/config.json）。

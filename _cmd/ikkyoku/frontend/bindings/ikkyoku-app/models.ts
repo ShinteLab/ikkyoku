@@ -6,6 +6,26 @@
 import * as recognize$0 from "../github.com/ShinteLab/ikkyoku/recognize/models.js";
 
 /**
+ * AppSettings はメイン画面の設定タブに出す設定。
+ * 
+ * **ikkyoku.Config そのものを返していない。** あちらは CLI 用の項目(領域・ディスプレイ番号)
+ * まで含む「設定ファイルの形」で、画面に出すものとは範囲が違う。ここは
+ * 「設定タブが読み書きするもの」だけを持つ。
+ */
+export interface AppSettings {
+    /**
+     * FitOnStartup は起動時に盤面を探してガイド枠を合わせるか。
+     */
+    "fitOnStartup": boolean;
+
+    /**
+     * Path は設定ファイルの場所。**表示のためだけ。** 手で編集したくなったときに
+     * 探さずに済むよう出しておく(学習データの置き場所もこのファイルにある)。
+     */
+    "path": string;
+}
+
+/**
  * CaptureResult はフロントに返すキャプチャ結果。
  * 
  * 盤面の認識結果も含むが、**認識できなくてもキャプチャは成功**として返す

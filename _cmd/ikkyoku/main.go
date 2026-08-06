@@ -20,6 +20,7 @@ import (
 	"embed"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
@@ -49,7 +50,9 @@ func main() {
 	}))
 	slog.SetDefault(logger)
 
-	captureSvc := NewCaptureService(logger, loadConfig(logger).SutemeDataDir)
+	settingsSvc := NewSettingsService(logger)
+	cfg := settingsSvc.config()
+	captureSvc := NewCaptureService(logger, cfg.SutemeDataDir)
 
 	app := application.New(application.Options{
 		Name:        "ikkyoku",
@@ -57,6 +60,7 @@ func main() {
 		Logger:      logger,
 		Services: []application.Service{
 			application.NewService(captureSvc),
+			application.NewService(settingsSvc),
 		},
 		Assets: assetOptions(),
 		Mac: application.MacOptions{
@@ -78,8 +82,9 @@ func main() {
 	wins.frameGeom.attach(frame)
 	wins.mainGeom.attach(main)
 	captureSvc.bind(app, wins)
+	settingsSvc.bind(app)
 
-	registerFrameHooks(wins, state.Frame, captureSvc)
+	registerFrameHooks(app, wins, state.Frame, captureSvc, cfg.FitOnStartup, logger)
 	registerMainHooks(app, wins, state.Main, logger)
 	registerHotkey(app, captureSvc, logger)
 
@@ -166,7 +171,14 @@ func applyPosition(opts *application.WebviewWindowOptions, st windowState) bool 
 	return true
 }
 
-func registerFrameHooks(wins *appWindows, st windowState, svc *CaptureService) {
+// startupFitDelay は起動時の自動フィットを始めるまでの待ち時間。
+//
+// WindowRuntimeReady は「WebView の準備ができた」であって、枠が画面に描かれ切ったことも、
+// 中継のウィンドウが表示され終わったことも意味しない。**探すのは画面の合成結果**なので、
+// 起動直後の慌ただしい時間を少し外す。
+const startupFitDelay = 700 * time.Millisecond
+
+func registerFrameHooks(app *application.App, wins *appWindows, st windowState, svc *CaptureService, fitOnStartup bool, logger *slog.Logger) {
 	frame := wins.frame
 	// WindowRuntimeReady はウィンドウ単位で発火し、この時点なら ScreenNearestDipPoint も
 	// SetSize/SetPosition も確実に効く(ApplicationStarted では不確実)。
@@ -179,6 +191,10 @@ func registerFrameHooks(wins *appWindows, st windowState, svc *CaptureService) {
 		// 初回起動(中央表示)でも実際の座標を記録しておく。動かさずに終了しても
 		// 次回同じ場所に出るようにするため。
 		wins.frameGeom.record(frame)
+
+		if fitOnStartup {
+			startupFit(app, svc, logger)
+		}
 	})
 
 	// 枠は閉じずに隠す。Alt+F4・タスクバーから閉じる・OS シャットダウンはこの経路を通る
@@ -193,6 +209,31 @@ func registerFrameHooks(wins *appWindows, st windowState, svc *CaptureService) {
 		e.Cancel()
 		svc.HideFrame()
 	})
+}
+
+// startupFit は起動時に一度だけ盤を探して枠を合わせる(設定 fitOnStartup)。
+//
+// **枠を出す前ではなく、出したあとに走らせる。** キャプチャ領域は枠のクライアント矩形
+// そのもの(captureservice.go)なので、枠が無いと基準が取れない。
+//
+// 別 goroutine で走らせるのは、探すのに 1〜3 秒かかるため。ここで待つと
+// WindowRuntimeReady のフックが返らず、起動が止まって見える。
+//
+// 結果はイベントで枠のツールバーへ返す。**押していないのに枠が動く**操作なので、
+// 動いた/動かなかったを黙って済ませない。
+func startupFit(app *application.App, svc *CaptureService, logger *slog.Logger) {
+	go func() {
+		time.Sleep(startupFitDelay)
+
+		result, err := svc.FitFrame()
+		if err != nil {
+			logger.Warn("起動時の自動フィットに失敗しました", "error", err)
+			app.Event.Emit("fit:done", FitResult{Message: "盤を探せませんでした: " + err.Error()})
+			return
+		}
+		logger.Info("起動時の自動フィット", "fitted", result.Fitted, "message", result.Message)
+		app.Event.Emit("fit:done", result)
+	}()
 }
 
 func registerMainHooks(app *application.App, wins *appWindows, st windowState, logger *slog.Logger) {

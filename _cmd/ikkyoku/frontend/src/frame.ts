@@ -241,6 +241,17 @@ export function mountFrame(root: HTMLElement): void {
     showError(event.data);
   });
 
+  // 起動時の自動フィット(設定「起動時に盤面を探す」)の結果。
+  // **押していないのに枠が動く**操作なので、動いた/動かなかったを必ず出す。
+  // ボタン経由のフィットはここを通らない(呼び出し元で結果を受け取る)。
+  Events.On("fit:done", (event: { data: { fitted: boolean; message: string } }) => {
+    if (event.data.fitted) {
+      flash(event.data.message);
+    } else {
+      warn(event.data.message);
+    }
+  });
+
   // 画面に出ている盤を探して、枠をそこへ合わせる。
   //
   // **Go 側は枠を一瞬隠して画面全体を撮ってから探す**(CaptureService.FitFrame)ので、

@@ -15,7 +15,7 @@
 // Go 側が枠の外へ逃がす(captureservice.go の placeMainBesideFrame)。
 import { Clipboard, Events } from "@wailsio/runtime";
 import { FiCopy, FiImage } from "react-icons/fi";
-import { CaptureService } from "../bindings/ikkyoku-app";
+import { CaptureService, SettingsService } from "../bindings/ikkyoku-app";
 import { iconMarkup } from "./icon";
 // 認識の観測情報。**型を手で書き写さない**(Go 側は suteme の型をそのまま通しており、
 // ここで別に定義すると矩形の意味がずれても気づけない)。
@@ -97,6 +97,8 @@ export function mountMainScreen(root: HTMLElement): void {
                   role="tab" aria-selected="true" aria-controls="panel-board">盤面</button>
           <button id="tab-debug" class="tab" type="button"
                   role="tab" aria-selected="false" aria-controls="panel-debug">デバッグ</button>
+          <button id="tab-settings" class="tab" type="button"
+                  role="tab" aria-selected="false" aria-controls="panel-settings">設定</button>
         </div>
         <span class="spacer"></span>
         <span class="hint">撮るのは枠のツールバー、または <span class="hotkey-hint">Alt+S</span></span>
@@ -163,6 +165,21 @@ export function mountMainScreen(root: HTMLElement): void {
           </div>
         </div>
       </div>
+
+      <div id="panel-settings" class="panel" role="tabpanel" aria-labelledby="tab-settings" hidden>
+        <label class="setting">
+          <input id="fit-on-startup" type="checkbox" />
+          <span class="setting-body">
+            <span class="setting-title">起動時に盤面を探す</span>
+            <span class="setting-note">
+              起動のたびに一度だけ画面から盤を探して、ガイド枠を合わせます。
+              見つからなければ枠はそのままです。
+            </span>
+          </span>
+        </label>
+        <p id="settings-status" class="status" role="status" aria-live="polite"></p>
+        <p class="setting-path">設定ファイル: <code id="settings-path">-</code></p>
+      </div>
     </div>
   `;
 
@@ -199,6 +216,7 @@ export function mountMainScreen(root: HTMLElement): void {
   const tabs: { tab: HTMLButtonElement; panel: HTMLElement }[] = [
     { tab: root.querySelector<HTMLButtonElement>("#tab-board")!, panel: root.querySelector<HTMLElement>("#panel-board")! },
     { tab: root.querySelector<HTMLButtonElement>("#tab-debug")!, panel: root.querySelector<HTMLElement>("#panel-debug")! },
+    { tab: root.querySelector<HTMLButtonElement>("#tab-settings")!, panel: root.querySelector<HTMLElement>("#panel-settings")! },
   ];
   const debugTab = tabs[1].tab;
 
@@ -578,6 +596,50 @@ export function mountMainScreen(root: HTMLElement): void {
   overlayToggle.addEventListener("change", () => {
     shot.classList.toggle("no-overlay", !overlayToggle.checked);
   });
+
+  // 設定タブ。今は「起動時に盤面を探す」だけ。
+  //
+  // **切り替えたその場で保存する**(適用ボタンを置かない)。項目が 1 つで、
+  // 効くのは次の起動なので、押し忘れて反映されないほうが分かりにくい。
+  // 保存に失敗したらチェックを元に戻す(画面の状態と設定ファイルを食い違わせない)。
+  const fitOnStartup = root.querySelector<HTMLInputElement>("#fit-on-startup")!;
+  const settingsStatus = root.querySelector<HTMLParagraphElement>("#settings-status")!;
+  const settingsPath = root.querySelector<HTMLElement>("#settings-path")!;
+
+  const showSettings = (s: { fitOnStartup: boolean; path: string }) => {
+    fitOnStartup.checked = s.fitOnStartup;
+    settingsPath.textContent = s.path || "(保存先を決められませんでした)";
+  };
+
+  fitOnStartup.addEventListener("change", () => {
+    void (async () => {
+      const want = fitOnStartup.checked;
+      fitOnStartup.disabled = true;
+      settingsStatus.textContent = "";
+      settingsStatus.classList.remove("is-error");
+      try {
+        showSettings(await SettingsService.SetFitOnStartup(want));
+        settingsStatus.textContent = want
+          ? "次の起動から、盤面を探してガイド枠を合わせます。"
+          : "起動時には探しません。枠のツールバーの □ からはいつでも実行できます。";
+      } catch (err) {
+        fitOnStartup.checked = !want;
+        settingsStatus.textContent = `設定を保存できませんでした: ${String(err)}`;
+        settingsStatus.classList.add("is-error");
+      } finally {
+        fitOnStartup.disabled = false;
+      }
+    })();
+  });
+
+  void (async () => {
+    try {
+      showSettings(await SettingsService.Settings());
+    } catch (err) {
+      settingsStatus.textContent = `設定を読み込めませんでした: ${String(err)}`;
+      settingsStatus.classList.add("is-error");
+    }
+  })();
 
   // 起動時は読み込み直さず、Go 側が起動時に読んだ結果をそのまま出す
   // (表示のためだけに 3.5MB を読み直さない)。
