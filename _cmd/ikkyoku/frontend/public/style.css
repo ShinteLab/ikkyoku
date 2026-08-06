@@ -35,6 +35,8 @@ html.is-frame #app {
 html.is-frame #app {
   display: flex;
   flex-direction: column;
+  /* ツールバーから垂れるメニュー(.frame-menu)の位置の基準。 */
+  position: relative;
 }
 
 .frame-toolbar {
@@ -81,18 +83,43 @@ html.is-frame #app {
   --wails-draggable: no-drag;
 }
 
-/* ▼ のメニュー。**ツールバーの中に横へ開く**(ドロップダウンにしない)。
-   下に垂らすとガイド枠の内側 = キャプチャ領域に重なり、開いたまま Alt+S が来ると
-   メニューごと写り込む(ホットキーは止められない)。ツールバーは高さ固定で
-   overflow: hidden なので、この中に並べる限り領域の外にとどまる。 */
+/* ▼ のメニュー。ツールバーの下に垂れる。
+   `.frame-toolbar` の**外**(#app 直下)に置くこと。ツールバーは高さ固定・
+   overflow: hidden なので、中に入れると垂れた部分が切れる。
+
+   ⚠️ 開いているあいだはガイド枠の内側 = キャプチャ領域に重なる。開いたまま撮ると
+   写り込むので、frame.ts 側で「項目を押したら閉じる / Esc・外のクリックで閉じる /
+   撮れたら閉じる」を入れてある。**開けっぱなしを前提にした置き方をしないこと。** */
 .frame-menu {
+  position: absolute;
+  top: var(--toolbar-height, 0px);
+  left: 4px;
+  z-index: 2;
   display: flex;
-  align-items: center;
-  gap: 4px;
+  flex-direction: column;
+  min-width: 132px;
+  padding: 4px;
+  background: #1b1d23;
+  border: 1px solid #3a3d47;
+  border-radius: 0 0 6px 6px;
+  border-top: none;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
+  /* ツールバーから継承する移動ハンドルの指定は届かないが、念のため明示しておく
+     (メニューをドラッグして枠が動くと、キャプチャ領域が動いたことになる)。 */
+  --wails-draggable: no-drag;
 }
 
 .frame-menu[hidden] {
   display: none;
+}
+
+/* メニューの項目。横幅いっぱい・左寄せで、ボタンらしさは hover まで出さない。 */
+.frame-btn.is-menu {
+  width: 100%;
+  padding: 5px 10px;
+  text-align: left;
+  background: transparent;
+  border-radius: 4px;
 }
 
 .frame-btn {

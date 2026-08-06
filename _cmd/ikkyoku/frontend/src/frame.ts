@@ -30,14 +30,18 @@ export function mountFrame(root: HTMLElement): void {
   // よく押すものは左端に、押し間違えると枠が消えて驚く ✕ だけは右端に離す。
   // 間はメッセージ欄が埋める。
   //
-  // **メニュー(▼)は下に垂らさず、ツールバーの中に横へ開く。** ドロップダウンにすると
-  // 中身がガイド枠の内側に重なり、開いたまま Alt+S を押すとメニューごと写り込む
-  // (ホットキーは止められない)。ツールバーの高さは Go 側の toolbarHeightPx で固定
-  // (overflow: hidden)なので、この中に並べる限りキャプチャ領域の外にとどまり、
-  // 写り込む余地が原理的に無い。**メニューの項目を増やすときもこの形を崩さないこと。**
+  // メニュー(▼)はツールバーの下へ普通に垂らす。
   //
-  // 「盤に合わせる」がメニューではなく独立したボタンなのも同じ理由の名残で、
-  // よく押すものは開かずに押せるところに置く、という住み分けにしてある。
+  // ⚠️ **開いているあいだはキャプチャ領域の内側に重なる**(ガイド枠の中に落ちるため)。
+  // 開いたまま Alt+S(グローバルホットキーなので止められない)を押すとメニューごと
+  // 写り込む。**開けっぱなしにしない**ための手当てが 3 つ:
+  //   - 項目を押したら閉じる / Esc・メニュー外のクリックで閉じる
+  //   - 撮れた(capture:done)ら閉じる。写り込んだ 1 枚があっても続けて撮る 2 枚目は綺麗になる
+  //   - 中身は「開かなくても困らないもの」に限る。よく押すもの(撮る・盤に合わせる)は
+  //     ツールバーに出したままにして、メニューに移さない
+  //
+  // ⚠️ メニューは `.frame-toolbar` の**外**(#app 直下)に置く。ツールバーは高さが
+  // toolbarHeightPx で固定・overflow: hidden なので、中に入れると垂れた部分が切れる。
   //
   // ⚠️ ボタンは必ず `.frame-actions` の中に置くこと。ツールバーは全体が
   // `--wails-draggable: drag`(移動ハンドル)で、それを `no-drag` に戻しているのが
@@ -48,10 +52,6 @@ export function mountFrame(root: HTMLElement): void {
         <button id="frame-menu" class="frame-btn is-icon" type="button"
                 aria-label="メニュー" aria-expanded="false" aria-controls="frame-menu-items"
                 title="メニュー">${iconMarkup(FiChevronDown)}</button>
-        <div id="frame-menu-items" class="frame-menu" hidden>
-          <button id="frame-quit" class="frame-btn is-danger" type="button"
-                  title="ikkyoku を終了します(枠とメイン画面の位置は保存されます)">閉じる</button>
-        </div>
         <button id="frame-fit" class="frame-btn is-icon" type="button"
                 aria-label="盤に合わせる"
                 title="盤に合わせる(画面に出ている盤を探して枠を合わせる)">${iconMarkup(FiCrop)}</button>
@@ -64,6 +64,10 @@ export function mountFrame(root: HTMLElement): void {
                 aria-label="枠を隠す"
                 title="枠を隠す(領域は保持され、Alt+S でそのまま撮れます)">${iconMarkup(FiX)}</button>
       </div>
+    </div>
+    <div id="frame-menu-items" class="frame-menu" role="menu" hidden>
+      <button id="frame-quit" class="frame-btn is-menu is-danger" type="button" role="menuitem"
+              title="ikkyoku を終了します(枠とメイン画面の位置は保存されます)">終了</button>
     </div>
     <div class="capture-guide">
       <img id="frame-flyout" class="capture-flyout" alt="">
@@ -124,12 +128,11 @@ export function mountFrame(root: HTMLElement): void {
     }, 900);
   };
 
-  // ▼ のメニュー。**下に垂らさず、ツールバーの中に横へ開く**(写り込み対策。冒頭参照)。
+  // ▼ のメニュー。ツールバーの下に垂れる(冒頭の ⚠️ を読むこと)。
   //
-  // 今の中身は「閉じる」だけ。枠の✕は隠すだけで終了ではないので、**枠しか出していない
+  // 今の中身は「終了」だけ。枠の✕は隠すだけで終了ではないので、**枠しか出していない
   // ときに終了する手段が無かった**(メイン画面を一度出して閉じるしかなかった)。
-  // よく押すものではないうえ押すとアプリが消えるので、ツールバーに常時出さず
-  // 一段隠したここに置く。
+  // 押すとアプリが消えるので、ツールバーに常時出さず一段隠したここに置く。
   const setMenuOpen = (open: boolean) => {
     menu.hidden = !open;
     menuBtn.setAttribute("aria-expanded", String(open));
@@ -137,8 +140,8 @@ export function mountFrame(root: HTMLElement): void {
   menuBtn.addEventListener("click", () => {
     setMenuOpen(menu.hidden);
   });
-  // 開きっぱなしにしない。ツールバーの幅をメッセージ欄と食い合うので、
-  // 用が済んだら畳む(Esc・他の場所のクリック)。
+  // **開きっぱなしにしない。** 開いているあいだはキャプチャ領域の内側に重なるので、
+  // その状態で撮ると写り込む。用が済んだら畳む(Esc・メニュー外のクリック)。
   root.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
       setMenuOpen(false);
@@ -242,8 +245,8 @@ export function mountFrame(root: HTMLElement): void {
     downY = e.clientY;
   });
   root.addEventListener("click", (e) => {
-    if ((e.target as HTMLElement).closest(".frame-toolbar")) {
-      return; // ツールバーの操作。合図は要らない
+    if ((e.target as HTMLElement).closest(".frame-toolbar, .frame-menu")) {
+      return; // ツールバー(と、そこから垂れたメニュー)の操作。合図は要らない
     }
     if (Math.abs(e.clientX - downX) > dragSlopPx || Math.abs(e.clientY - downY) > dragSlopPx) {
       return; // ドラッグ(リサイズ)の終わり。クリックではない
@@ -264,6 +267,9 @@ export function mountFrame(root: HTMLElement): void {
   // 全ウィンドウへ飛ぶ(captureservice.go)。ボタン側の await でも光らせると、
   // クリック時だけ二重に光る(イベントの到着は await の解決と前後する)。
   Events.On("capture:done", (event: { data: CaptureDone }) => {
+    // 開いたまま撮られていたら畳む。その 1 枚には写り込んでいるが、続けて撮る
+    // 2 枚目には写らない(ホットキーは止められないので、これが唯一できる手当て)。
+    setMenuOpen(false);
     flash("撮りました");
     playFlyout(event.data.thumbnail);
   });
