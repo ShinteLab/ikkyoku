@@ -11,7 +11,7 @@
 // CaptureService.Layout() から受け取って CSS 変数に流し込む。以前はフロントにも同じ
 // 定数を置いていたが、ずれると枠が写り込むという直接的な不具合になるため一本化した。
 import { Events } from "@wailsio/runtime";
-import { FiCamera } from "react-icons/fi";
+import { FiCamera, FiChevronDown, FiX } from "react-icons/fi";
 import { CaptureService } from "../bindings/ikkyoku-app";
 import { iconMarkup } from "./icon";
 
@@ -22,14 +22,23 @@ interface CaptureDone {
 }
 
 export function mountFrame(root: HTMLElement): void {
+  // .frame-title はアプリ名を出す場所ではなく、**状態メッセージの置き場**。
+  // 枠は中継の上に重ねて使うので、常時「ikkyoku」と出ていても邪魔なだけ。
+  // 普段は空で、撮影・失敗・警告のときだけ文字が出る(戻すときも空に戻す)。
+  //
+  // ボタンは ▼(メニュー)・カメラ(撮る)・✕(隠す)の 3 つ。✕ だけは押し間違えると
+  // 枠が消えて驚くので、カメラとの間を空けてある(style.css の .is-detached)。
   root.innerHTML = `
     <div class="frame-toolbar">
-      <span class="frame-title">ikkyoku</span>
+      <span class="frame-title"></span>
       <div class="frame-actions">
+        <button id="frame-menu" class="frame-btn is-icon" type="button"
+                aria-label="メニュー" title="メニュー(準備中)">${iconMarkup(FiChevronDown)}</button>
         <button id="frame-capture" class="frame-btn is-primary is-icon" type="button"
                 aria-label="撮る" title="撮る(Alt+S)">${iconMarkup(FiCamera)}</button>
-        <button id="frame-hide" class="frame-btn" type="button"
-                title="枠を隠す(領域は保持され、Alt+S でそのまま撮れます)">✕</button>
+        <button id="frame-hide" class="frame-btn is-icon is-detached" type="button"
+                aria-label="枠を隠す"
+                title="枠を隠す(領域は保持され、Alt+S でそのまま撮れます)">${iconMarkup(FiX)}</button>
       </div>
     </div>
     <div class="capture-guide">
@@ -38,12 +47,14 @@ export function mountFrame(root: HTMLElement): void {
   `;
 
   const title = root.querySelector<HTMLSpanElement>(".frame-title")!;
+  const menuBtn = root.querySelector<HTMLButtonElement>("#frame-menu")!;
   const captureBtn = root.querySelector<HTMLButtonElement>("#frame-capture")!;
   const hideBtn = root.querySelector<HTMLButtonElement>("#frame-hide")!;
   const guide = root.querySelector<HTMLDivElement>(".capture-guide")!;
   const toolbar = root.querySelector<HTMLDivElement>(".frame-toolbar")!;
   const flyout = root.querySelector<HTMLImageElement>("#frame-flyout")!;
-  const baseTitle = title.textContent ?? "";
+  // メッセージを消したあとの既定の表示 = 空。ここに文字を入れると常時表示に戻る。
+  const baseTitle = "";
 
   // 自前の✕は WindowClosing を通らない(wails3 skill tray-hotkey.md 3)ので、
   // ランタイムの Window.Hide() ではなく Go 側の HideFrame() を呼ぶ。閉じるのではなく
@@ -85,6 +96,18 @@ export function mountFrame(root: HTMLElement): void {
       title.textContent = baseTitle;
     }, 900);
   };
+
+  // ▼ は機能メニューの置き場所を先に確保しただけで、中身は後日。
+  // 無反応だと「壊れている」と読めてしまうので、押されたことだけは返す
+  // (disabled にしないのは、そこに何かが来ると分かる形で見せておきたいため)。
+  menuBtn.addEventListener("click", () => {
+    window.clearTimeout(flashTimer);
+    title.textContent = "メニューは後日追加します";
+    title.classList.remove("is-error");
+    flashTimer = window.setTimeout(() => {
+      title.textContent = baseTitle;
+    }, 1500);
+  });
 
   // 結果の表示はメイン画面の役目。ここではツールバーが狭いので簡潔に出す。
   const showError = (message: string) => {

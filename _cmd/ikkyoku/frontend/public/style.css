@@ -94,13 +94,21 @@ html.is-frame #app {
 
 /* アイコンだけのボタン(react-icons)。SVG は width/height="1em"・色は currentColor の
    まま埋めてあるので、一辺は font-size、色は color にそのまま追従する(icon.ts)。
-   ラベルは aria-label / title が持つ。 */
+   ラベルは aria-label / title が持つ。
+
+   padding は上下左右とも同じ値にする(アイコンが正方形なのでボタンも正方形になる)。
+   左右だけ広げると横長になり、3 つ並んだときに不揃いに見える。 */
 .frame-btn.is-icon {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 3px 9px;
+  padding: 4px;
   font-size: 15px;
+}
+
+/* ✕(枠を隠す)は押し間違えたときの驚きが大きいので、カメラとの間を空ける。 */
+.frame-btn.is-detached {
+  margin-left: 10px;
 }
 
 .frame-btn.is-primary {
