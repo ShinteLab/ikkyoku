@@ -81,6 +81,20 @@ html.is-frame #app {
   --wails-draggable: no-drag;
 }
 
+/* ▼ のメニュー。**ツールバーの中に横へ開く**(ドロップダウンにしない)。
+   下に垂らすとガイド枠の内側 = キャプチャ領域に重なり、開いたまま Alt+S が来ると
+   メニューごと写り込む(ホットキーは止められない)。ツールバーは高さ固定で
+   overflow: hidden なので、この中に並べる限り領域の外にとどまる。 */
+.frame-menu {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.frame-menu[hidden] {
+  display: none;
+}
+
 .frame-btn {
   padding: 3px 10px;
   font-size: 12px;
@@ -117,6 +131,17 @@ html.is-frame #app {
 
 .frame-btn.is-primary:hover {
   background: #ff2d2d;
+}
+
+/* 押すとアプリが終わる項目。押し間違いが取り返しにくいので色で区別する
+   (メニューを開かないと押せない位置にあるのと合わせて二重の歯止め)。 */
+.frame-btn.is-danger {
+  color: #ffb4b4;
+}
+
+.frame-btn.is-danger:hover {
+  color: #ffffff;
+  background: #7a2b2b;
 }
 
 .frame-btn:disabled {

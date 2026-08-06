@@ -275,6 +275,26 @@ func (s *CaptureService) HideFrame() {
 	s.wins.frame.Hide()
 }
 
+// Quit はアプリを終了する。枠のツールバーのメニュー(▼ → 閉じる)から呼ばれる。
+//
+// **枠の✕は「隠す」であって「終了」ではない**(HideFrame。領域の定義を生かすため)。
+// そのため枠しか出ていない状態では終了する手段が無く、メイン画面を一度出してから
+// 閉じるしかなかった。枠だけで使っているときの終了の入口がこれ。
+//
+// メイン画面を閉じたときと同じものを残す必要があるので、**Quit の前に位置・サイズを
+// 保存する**(app.Quit() が WindowClosing のフックを通す保証は無い)。二重に保存されても
+// 同じ記録から書くので害は無い。
+func (s *CaptureService) Quit() {
+	if s.app == nil {
+		return
+	}
+	if s.wins != nil {
+		saveWindowState(s.wins, s.logger)
+	}
+	s.logger.Info("枠のメニューから終了します")
+	s.app.Quit()
+}
+
 // ShowFrame は隠した枠を出し直す。メイン画面のボタンから呼ばれる。
 func (s *CaptureService) ShowFrame() {
 	if s.wins == nil || s.wins.frame == nil {

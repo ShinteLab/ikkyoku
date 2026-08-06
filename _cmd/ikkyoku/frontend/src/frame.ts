@@ -30,10 +30,14 @@ export function mountFrame(root: HTMLElement): void {
   // よく押すものは左端に、押し間違えると枠が消えて驚く ✕ だけは右端に離す。
   // 間はメッセージ欄が埋める。
   //
-  // **「盤に合わせる」をメニュー(▼)の中に入れていない。** ドロップダウンを開くと
-  // その中身がガイド枠の内側に重なり、開いたまま Alt+S を押すとメニューごと写り込む
-  // (ホットキーは止められない)。ツールバーはキャプチャ領域の外にあるので、
-  // ボタンとして並べる限り原理的に写り込まない。
+  // **メニュー(▼)は下に垂らさず、ツールバーの中に横へ開く。** ドロップダウンにすると
+  // 中身がガイド枠の内側に重なり、開いたまま Alt+S を押すとメニューごと写り込む
+  // (ホットキーは止められない)。ツールバーの高さは Go 側の toolbarHeightPx で固定
+  // (overflow: hidden)なので、この中に並べる限りキャプチャ領域の外にとどまり、
+  // 写り込む余地が原理的に無い。**メニューの項目を増やすときもこの形を崩さないこと。**
+  //
+  // 「盤に合わせる」がメニューではなく独立したボタンなのも同じ理由の名残で、
+  // よく押すものは開かずに押せるところに置く、という住み分けにしてある。
   //
   // ⚠️ ボタンは必ず `.frame-actions` の中に置くこと。ツールバーは全体が
   // `--wails-draggable: drag`(移動ハンドル)で、それを `no-drag` に戻しているのが
@@ -42,7 +46,12 @@ export function mountFrame(root: HTMLElement): void {
     <div class="frame-toolbar">
       <div class="frame-actions">
         <button id="frame-menu" class="frame-btn is-icon" type="button"
-                aria-label="メニュー" title="メニュー(準備中)">${iconMarkup(FiChevronDown)}</button>
+                aria-label="メニュー" aria-expanded="false" aria-controls="frame-menu-items"
+                title="メニュー">${iconMarkup(FiChevronDown)}</button>
+        <div id="frame-menu-items" class="frame-menu" hidden>
+          <button id="frame-quit" class="frame-btn is-danger" type="button"
+                  title="ikkyoku を終了します(枠とメイン画面の位置は保存されます)">閉じる</button>
+        </div>
         <button id="frame-fit" class="frame-btn is-icon" type="button"
                 aria-label="盤に合わせる"
                 title="盤に合わせる(画面に出ている盤を探して枠を合わせる)">${iconMarkup(FiCrop)}</button>
@@ -63,6 +72,8 @@ export function mountFrame(root: HTMLElement): void {
 
   const title = root.querySelector<HTMLSpanElement>(".frame-title")!;
   const menuBtn = root.querySelector<HTMLButtonElement>("#frame-menu")!;
+  const menu = root.querySelector<HTMLDivElement>("#frame-menu-items")!;
+  const quitBtn = root.querySelector<HTMLButtonElement>("#frame-quit")!;
   const fitBtn = root.querySelector<HTMLButtonElement>("#frame-fit")!;
   const captureBtn = root.querySelector<HTMLButtonElement>("#frame-capture")!;
   const hideBtn = root.querySelector<HTMLButtonElement>("#frame-hide")!;
@@ -113,16 +124,37 @@ export function mountFrame(root: HTMLElement): void {
     }, 900);
   };
 
-  // ▼ は機能メニューの置き場所を先に確保しただけで、中身は後日。
-  // 無反応だと「壊れている」と読めてしまうので、押されたことだけは返す
-  // (disabled にしないのは、そこに何かが来ると分かる形で見せておきたいため)。
+  // ▼ のメニュー。**下に垂らさず、ツールバーの中に横へ開く**(写り込み対策。冒頭参照)。
+  //
+  // 今の中身は「閉じる」だけ。枠の✕は隠すだけで終了ではないので、**枠しか出していない
+  // ときに終了する手段が無かった**(メイン画面を一度出して閉じるしかなかった)。
+  // よく押すものではないうえ押すとアプリが消えるので、ツールバーに常時出さず
+  // 一段隠したここに置く。
+  const setMenuOpen = (open: boolean) => {
+    menu.hidden = !open;
+    menuBtn.setAttribute("aria-expanded", String(open));
+  };
   menuBtn.addEventListener("click", () => {
-    window.clearTimeout(flashTimer);
-    title.textContent = "メニューは後日追加します";
-    title.classList.remove("is-error");
-    flashTimer = window.setTimeout(() => {
-      title.textContent = baseTitle;
-    }, 1500);
+    setMenuOpen(menu.hidden);
+  });
+  // 開きっぱなしにしない。ツールバーの幅をメッセージ欄と食い合うので、
+  // 用が済んだら畳む(Esc・他の場所のクリック)。
+  root.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      setMenuOpen(false);
+    }
+  });
+  root.addEventListener("pointerdown", (e) => {
+    if (!(e.target as HTMLElement).closest("#frame-menu, #frame-menu-items")) {
+      setMenuOpen(false);
+    }
+  });
+
+  // 終了。**メイン画面を閉じたときと同じ扱い**(Go 側で位置・サイズを保存してから
+  // Quit する)。枠は隠すだけの✕と違い、こちらはプロセスごと終わる。
+  quitBtn.addEventListener("click", () => {
+    setMenuOpen(false);
+    void CaptureService.Quit();
   });
 
   // 結果の表示はメイン画面の役目。ここではツールバーが狭いので簡潔に出す。

@@ -275,18 +275,28 @@ func registerMainHooks(app *application.App, wins *appWindows, st windowState, l
 	// **保存する座標はここで Position() を読んで得たものではない。** この時点では
 	// 破棄が進行中で不正な値が返るため、動いたときに記録しておいた値を使う(geometry.go)。
 	main.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
-		st := appState{
-			Frame: wins.frameGeom.snapshot(),
-			Main:  wins.mainGeom.snapshot(),
-		}
-		if err := saveAppState(st); err != nil {
-			logger.Error("ウィンドウ状態の保存に失敗しました", "error", err)
-		} else {
-			logger.Info("ウィンドウ状態を保存しました",
-				"frame", st.Frame, "main", st.Main)
-		}
+		saveWindowState(wins, logger)
 		app.Quit()
 	})
+}
+
+// saveWindowState は枠とメイン画面の位置・サイズを保存する。
+//
+// 終了の入口が 2 つある(メイン画面を閉じる / 枠のメニューの「閉じる」)ので、
+// **保存はこの 1 本に寄せる。** どちらから終了しても同じものが残る。
+//
+// **ここで Position()/Size() を読まない。** メイン画面を閉じる経路では既に破棄が
+// 進行中で不正な値が返る(geometry.go)。動いたときに記録しておいた値を使う。
+func saveWindowState(wins *appWindows, logger *slog.Logger) {
+	st := appState{
+		Frame: wins.frameGeom.snapshot(),
+		Main:  wins.mainGeom.snapshot(),
+	}
+	if err := saveAppState(st); err != nil {
+		logger.Error("ウィンドウ状態の保存に失敗しました", "error", err)
+		return
+	}
+	logger.Info("ウィンドウ状態を保存しました", "frame", st.Frame, "main", st.Main)
 }
 
 // registerHotkey はグローバルホットキー(既定 alt+s)を登録する。
