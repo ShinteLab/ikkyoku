@@ -3,9 +3,14 @@
 // 撮った画像から割り出した盤面・SFEN・警告を出す画面。起動時は非表示で、最初の
 // キャプチャで現れる。**この画面を閉じるとアプリが終了する**(枠を閉じても終了しない)。
 //
-// 画面は 2 タブ。**盤面タブは盤と SFEN だけ**で、盤をできるだけ大きく見せる。
-// 認識器の状態・駒台の推定・警告・保存先・撮った画像はデバッグタブに寄せてある
+// 画面は 3 タブ。**盤面タブは盤・SFEN・駒台・警告だけ**で、盤をできるだけ大きく見せる。
+// 認識器の状態・検出の信頼度・保存先・撮った画像はデバッグタブに寄せてある
 // (認識精度を追うための情報であって、盤を読むのに要るものではないため)。
+//
+// **駒台と警告だけは両方に出す。** デバッグ側では「認識がどれくらい外したか」だが、
+// 盤面側では**局面を直すために要る情報**(駒台の枚数は駒数保存則の逆算そのもの、
+// 警告は「どこが怪しいか」の提示)。Phase 3 の局面矯正・Phase 5 の訂正 UI は
+// どちらもこの 2 つを見ながら操作することになる。
 //
 // **撮る操作はここには置かない。** 撮るのは盤に枠を合わせている最中の操作なので、
 // 枠のツールバーとホットキーで完結する。ここは撮れたものを見る側。
@@ -114,6 +119,17 @@ export function mountMainScreen(root: HTMLElement): void {
           <span class="field-label">SFEN</span>
           <code id="sfen" class="sfen">-</code>
         </div>
+        <!-- 駒台と警告は**デバッグにも盤面にも出す**。デバッグ側は「認識がどれくらい
+             外したか」の指標として、こちら側は**局面を直すときに要る情報**として置く
+             (駒台の枚数は駒数保存則の逆算そのもので、警告は「どこが怪しいか」の提示。
+             Phase 3 の局面矯正・Phase 5 の訂正 UI はどちらもこの 2 つを見て操作する)。
+             盤を大きく見せる原則は変わらないので、行は 1 行ずつに抑えて下に置く。 -->
+        <div id="board-hand-row" class="hand-row" hidden>
+          <span class="field-label">駒台</span>
+          <span id="board-hand" class="hand"></span>
+          <span class="note">先後不明</span>
+        </div>
+        <ul id="board-warnings" class="warnings is-compact" hidden></ul>
       </div>
 
       <div id="panel-debug" class="panel" role="tabpanel" aria-labelledby="tab-debug" hidden>
@@ -191,9 +207,16 @@ export function mountMainScreen(root: HTMLElement): void {
   const sfenOut = root.querySelector<HTMLElement>("#sfen")!;
   const confidenceRow = root.querySelector<HTMLDivElement>("#confidence-row")!;
   const confidenceOut = root.querySelector<HTMLElement>("#confidence")!;
-  const handRow = root.querySelector<HTMLDivElement>("#hand-row")!;
-  const handOut = root.querySelector<HTMLElement>("#hand")!;
-  const warnings = root.querySelector<HTMLUListElement>("#warnings")!;
+  // 駒台と警告は盤面タブとデバッグタブの両方に出す。**同じ値を 2 か所に描くだけ**で、
+  // 片方だけ更新する経路を作らないこと(食い違うと、どちらが本当か分からなくなる)。
+  const handRows = [
+    { row: root.querySelector<HTMLDivElement>("#hand-row")!, out: root.querySelector<HTMLElement>("#hand")! },
+    { row: root.querySelector<HTMLDivElement>("#board-hand-row")!, out: root.querySelector<HTMLElement>("#board-hand")! },
+  ];
+  const warningLists = [
+    root.querySelector<HTMLUListElement>("#warnings")!,
+    root.querySelector<HTMLUListElement>("#board-warnings")!,
+  ];
   const status = root.querySelector<HTMLParagraphElement>("#status")!;
   const shot = root.querySelector<HTMLDivElement>("#shot")!;
   const shotPath = root.querySelector<HTMLButtonElement>("#shot-path")!;
@@ -207,9 +230,10 @@ export function mountMainScreen(root: HTMLElement): void {
   const predictorRow = root.querySelector<HTMLDivElement>("#predictor-row")!;
   const predictorOut = root.querySelector<HTMLElement>("#predictor")!;
 
-  // タブ。盤面タブは「撮れた盤と SFEN」だけに絞り、認識器の状態・警告・撮った画像
-  // といった突き合わせ用の情報はデバッグタブへ寄せてある。**盤を大きく見せるのが目的**
-  // なので、盤面タブに項目を足すときは本当にそこに要るのかを毎回考えること。
+  // タブ。盤面タブは「盤と SFEN、それに局面を直すのに要る駒台・警告」に絞り、
+  // 認識器の状態・信頼度・撮った画像といった突き合わせ用の情報はデバッグタブへ
+  // 寄せてある。**盤を大きく見せるのが目的**なので、盤面タブに項目を足すときは
+  // 「局面を読む/直すのに要るか」を毎回考えること(認識精度の話ならデバッグ側)。
   //
   // 隠すのは表示だけで、両方のパネルの中身は常に更新する(タブを切り替えた瞬間に
   // 古い内容が出ることが無いように)。
@@ -297,26 +321,24 @@ export function mountMainScreen(root: HTMLElement): void {
     const parts = HAND_ORDER.filter((k) => (hand?.[k] ?? 0) > 0).map(
       (k) => `${HAND_LABEL[k]}${hand[k]}`,
     );
-    if (parts.length === 0) {
-      handRow.hidden = true;
-      return;
+    const text = parts.join(" ");
+    for (const { row, out } of handRows) {
+      out.textContent = text;
+      row.hidden = parts.length === 0;
     }
-    handOut.textContent = parts.join(" ");
-    handRow.hidden = false;
   };
 
   const showWarnings = (list: string[]) => {
-    warnings.innerHTML = "";
-    if (!list || list.length === 0) {
-      warnings.hidden = true;
-      return;
+    const items = list ?? [];
+    for (const ul of warningLists) {
+      ul.innerHTML = "";
+      for (const w of items) {
+        const li = document.createElement("li");
+        li.textContent = w;
+        ul.appendChild(li);
+      }
+      ul.hidden = items.length === 0;
     }
-    for (const w of list) {
-      const li = document.createElement("li");
-      li.textContent = w;
-      warnings.appendChild(li);
-    }
-    warnings.hidden = false;
   };
 
   // 設定で指定した学習データの置き場所(ikkyoku.Config の SutemeDataDir)。

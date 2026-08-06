@@ -655,6 +655,13 @@ html.is-main body {
   color: #ffc46b;
 }
 
+/* 盤面タブ側の警告。件数が増えても盤を押し潰さないよう高さを頭打ちにして送る
+   (全文はデバッグタブに同じものが出ている)。 */
+.warnings.is-compact {
+  max-height: 5.5em;
+  overflow-y: auto;
+}
+
 .debug-shot-head {
   display: flex;
   align-items: center;
