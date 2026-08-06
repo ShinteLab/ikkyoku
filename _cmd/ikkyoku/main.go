@@ -69,7 +69,9 @@ func main() {
 	})
 
 	state := loadAppState()
-	frame := newFrameWindow(app, state.Frame)
+	// 起動時に盤を探す設定なら、**枠は隠したまま作る**。探し終えてから出すことで、
+	// ユーザーには「最初から盤に合った枠」が現れる(startupFit)。
+	frame := newFrameWindow(app, state.Frame, cfg.FitOnStartup)
 	main, mainHasSavedPos := newMainWindow(app, state.Main)
 
 	wins := &appWindows{
@@ -99,10 +101,16 @@ func main() {
 }
 
 // newFrameWindow は盤に重ねる Frameless の透過ウィンドウを作る。
-func newFrameWindow(app *application.App, st windowState) *application.WebviewWindow {
+//
+// hidden は「起動時に盤を探す」設定のときだけ true。**探し終えるまで見せない**ため
+// (見えている枠が判定のあとで飛ぶのを避ける。出すのは startupFit の最後)。
+func newFrameWindow(app *application.App, st windowState, hidden bool) *application.WebviewWindow {
 	w, h := safeFallback(st, defaultFrameWidth, defaultFrameHeight)
 
 	opts := application.WebviewWindowOptions{
+		// 隠していても HWND は生きているので、クライアント矩形も座標の逆算も普通に効く
+		// (枠を✕で隠したあとにそのまま撮れるのと同じ理屈。captureservice.go)。
+		Hidden: hidden,
 		Title:     "ikkyoku",
 		Width:     w,
 		Height:    h,
@@ -173,10 +181,11 @@ func applyPosition(opts *application.WebviewWindowOptions, st windowState) bool 
 
 // startupFitDelay は起動時の自動フィットを始めるまでの待ち時間。
 //
-// WindowRuntimeReady は「WebView の準備ができた」であって、枠が画面に描かれ切ったことも、
-// 中継のウィンドウが表示され終わったことも意味しない。**探すのは画面の合成結果**なので、
-// 起動直後の慌ただしい時間を少し外す。
-const startupFitDelay = 700 * time.Millisecond
+// 直前に `SetSize`/`SetPosition` で枠を復元位置へ動かしているので、その結果が
+// HWND に反映されるのを待つ(**枠の内側を探す一手目がその矩形を基準にする**)。
+// 枠は隠したままなので「描かれ切るのを待つ」必要は無く、短くてよい。
+// **ここを伸ばすと、起動してから枠が出るまでの無言の時間がそのまま伸びる。**
+const startupFitDelay = 200 * time.Millisecond
 
 func registerFrameHooks(app *application.App, wins *appWindows, st windowState, svc *CaptureService, fitOnStartup bool, logger *slog.Logger) {
 	frame := wins.frame
@@ -193,7 +202,7 @@ func registerFrameHooks(app *application.App, wins *appWindows, st windowState, 
 		wins.frameGeom.record(frame)
 
 		if fitOnStartup {
-			startupFit(app, svc, logger)
+			startupFit(app, wins, svc, logger)
 		}
 	})
 
@@ -211,19 +220,28 @@ func registerFrameHooks(app *application.App, wins *appWindows, st windowState, 
 	})
 }
 
-// startupFit は起動時に一度だけ盤を探して枠を合わせる(設定 fitOnStartup)。
+// startupFit は起動時に一度だけ盤を探し、**合わせ終えてから枠を出す**(設定 fitOnStartup)。
 //
-// **枠を出す前ではなく、出したあとに走らせる。** キャプチャ領域は枠のクライアント矩形
-// そのもの(captureservice.go)なので、枠が無いと基準が取れない。
+// 枠は隠した状態で作ってある(newFrameWindow)。**見えている枠を後から動かすのではなく、
+// 最初から合った位置に出す**のが狙い。ボタンを押したときと違って、枠を隠して撮る
+// 手順(captureWithoutSelf)も走らない — 最初から出ていないので隠す必要が無い。
+// メイン画面も起動時は非表示なので、塗り潰し(maskWindows)も要らない。
+// **起動時は画面に自分のウィンドウが 1 枚も無い**状態で探せる。
 //
-// 別 goroutine で走らせるのは、探すのに 1〜3 秒かかるため。ここで待つと
-// WindowRuntimeReady のフックが返らず、起動が止まって見える。
+// 枠そのものは先に作る必要がある。キャプチャ領域は枠のクライアント矩形そのもの
+// (captureservice.go)で、座標の逆算もその矩形との差分で出しているため。
 //
-// 結果はイベントで枠のツールバーへ返す。**押していないのに枠が動く**操作なので、
-// 動いた/動かなかったを黙って済ませない。
-func startupFit(app *application.App, svc *CaptureService, logger *slog.Logger) {
+// 別 goroutine で走らせるのは、探すのに数秒かかるため。ここで待つと
+// WindowRuntimeReady のフックが返らず、起動が止まる。
+//
+// **どの経路を通っても最後に必ず枠を出す。** 盤が見つからなくても、探索が失敗しても、
+// 枠が出ないままではアプリが操作できない。
+func startupFit(app *application.App, wins *appWindows, svc *CaptureService, logger *slog.Logger) {
 	go func() {
+		defer wins.frame.Show()
+
 		time.Sleep(startupFitDelay)
+		started := time.Now()
 
 		result, err := svc.FitFrame()
 		if err != nil {
@@ -231,7 +249,8 @@ func startupFit(app *application.App, svc *CaptureService, logger *slog.Logger) 
 			app.Event.Emit("fit:done", FitResult{Message: "盤を探せませんでした: " + err.Error()})
 			return
 		}
-		logger.Info("起動時の自動フィット", "fitted", result.Fitted, "message", result.Message)
+		logger.Info("起動時の自動フィット",
+			"fitted", result.Fitted, "message", result.Message, "elapsed", time.Since(started))
 		app.Event.Emit("fit:done", result)
 	}()
 }
