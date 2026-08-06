@@ -11,7 +11,7 @@
 // CaptureService.Layout() から受け取って CSS 変数に流し込む。以前はフロントにも同じ
 // 定数を置いていたが、ずれると枠が写り込むという直接的な不具合になるため一本化した。
 import { Events } from "@wailsio/runtime";
-import { FiCamera, FiChevronDown, FiX } from "react-icons/fi";
+import { FiCamera, FiChevronDown, FiCrop, FiX } from "react-icons/fi";
 import { CaptureService } from "../bindings/ikkyoku-app";
 import { iconMarkup } from "./icon";
 
@@ -26,8 +26,14 @@ export function mountFrame(root: HTMLElement): void {
   // 枠は中継の上に重ねて使うので、常時「ikkyoku」と出ていても邪魔なだけ。
   // 普段は空で、撮影・失敗・警告のときだけ文字が出る(戻すときも空に戻す)。
   //
-  // ボタンは ▼(メニュー)・カメラ(撮る)・✕(隠す)の 3 つ。よく押す ▼ とカメラは左端に、
-  // 押し間違えると枠が消えて驚く ✕ だけは右端に離す。間はメッセージ欄が埋める。
+  // ボタンは ▼(メニュー)・□(盤に合わせる)・カメラ(撮る)・✕(隠す)の 4 つ。
+  // よく押すものは左端に、押し間違えると枠が消えて驚く ✕ だけは右端に離す。
+  // 間はメッセージ欄が埋める。
+  //
+  // **「盤に合わせる」をメニュー(▼)の中に入れていない。** ドロップダウンを開くと
+  // その中身がガイド枠の内側に重なり、開いたまま Alt+S を押すとメニューごと写り込む
+  // (ホットキーは止められない)。ツールバーはキャプチャ領域の外にあるので、
+  // ボタンとして並べる限り原理的に写り込まない。
   //
   // ⚠️ ボタンは必ず `.frame-actions` の中に置くこと。ツールバーは全体が
   // `--wails-draggable: drag`(移動ハンドル)で、それを `no-drag` に戻しているのが
@@ -37,6 +43,9 @@ export function mountFrame(root: HTMLElement): void {
       <div class="frame-actions">
         <button id="frame-menu" class="frame-btn is-icon" type="button"
                 aria-label="メニュー" title="メニュー(準備中)">${iconMarkup(FiChevronDown)}</button>
+        <button id="frame-fit" class="frame-btn is-icon" type="button"
+                aria-label="盤に合わせる"
+                title="盤に合わせる(枠の中から盤を探して枠を寄せる)">${iconMarkup(FiCrop)}</button>
         <button id="frame-capture" class="frame-btn is-primary is-icon" type="button"
                 aria-label="撮る" title="撮る(Alt+S)">${iconMarkup(FiCamera)}</button>
       </div>
@@ -54,6 +63,7 @@ export function mountFrame(root: HTMLElement): void {
 
   const title = root.querySelector<HTMLSpanElement>(".frame-title")!;
   const menuBtn = root.querySelector<HTMLButtonElement>("#frame-menu")!;
+  const fitBtn = root.querySelector<HTMLButtonElement>("#frame-fit")!;
   const captureBtn = root.querySelector<HTMLButtonElement>("#frame-capture")!;
   const hideBtn = root.querySelector<HTMLButtonElement>("#frame-hide")!;
   const guide = root.querySelector<HTMLDivElement>(".capture-guide")!;
@@ -141,12 +151,16 @@ export function mountFrame(root: HTMLElement): void {
     flyout.classList.remove("is-playing");
     void flyout.offsetWidth;
     flyout.classList.add("is-playing");
+    // 「盤に合わせる」も止める。あれも領域を 1 枚撮ってから探すので、再生中に
+    // 走らせると縮小中のゴーストを盤だと思って枠を寄せてしまう。
     captureBtn.disabled = true;
+    fitBtn.disabled = true;
     window.clearTimeout(flyoutTimer);
     flyoutTimer = window.setTimeout(() => {
       flyout.classList.remove("is-playing");
       flyout.removeAttribute("src"); // 等倍 PNG の data URL を抱えたままにしない
       captureBtn.disabled = false;
+      fitBtn.disabled = false;
     }, flyoutMs);
   };
 
@@ -164,7 +178,7 @@ export function mountFrame(root: HTMLElement): void {
   //
   // アニメーションは CSS 側で 0.22s×2 = 0.44s。文字だけ少し長く残す。
   const warnHoldMs = 1000;
-  const warnClickBlocked = () => {
+  const warn = (text: string) => {
     window.clearTimeout(warnTimer);
     window.clearTimeout(flashTimer);
     for (const el of [toolbar, guide]) {
@@ -173,7 +187,7 @@ export function mountFrame(root: HTMLElement): void {
       void (el as HTMLElement).offsetWidth; // 連打しても毎回頭から再生させる
       el.classList.add("is-warn");
     }
-    title.textContent = "クリックは後ろに届きません";
+    title.textContent = text;
     title.classList.remove("is-error");
     warnTimer = window.setTimeout(() => {
       for (const el of [toolbar, guide]) {
@@ -182,6 +196,7 @@ export function mountFrame(root: HTMLElement): void {
       title.textContent = baseTitle;
     }, warnHoldMs);
   };
+  const warnClickBlocked = () => warn("クリックは後ろに届きません");
 
   // クリックかどうかの判定。ウィンドウ端(リサイズ)とツールバーは対象外にする。
   // resizeEdgePx は Wails ランタイムがリサイズ判定に使う幅に合わせた値。
@@ -224,6 +239,35 @@ export function mountFrame(root: HTMLElement): void {
   // ボタン経由の失敗は呼び出し元で捕まえるので、ここには来ない。
   Events.On("capture:failed", (event: { data: string }) => {
     showError(event.data);
+  });
+
+  // 枠の中から盤を探して、枠をそこへ寄せる。
+  //
+  // **Go 側は 1 枚撮ってから探す**(CaptureService.FitFrame)ので、押してから
+  // 結果が出るまでに一呼吸ある。撮る操作と同じく、押した直後は文字だけを出して
+  // ガイド枠の線には触らない(検出用の 1 枚に線の色の変化が乗らないように)。
+  //
+  // 盤が見つからなかったのは失敗ではない(枠が盤を囲めていないだけ)。枠は動かず、
+  // 理由だけが出る。エラー表示にせず警告の明滅で返すのはそのため。
+  fitBtn.addEventListener("click", () => {
+    void (async () => {
+      fitBtn.disabled = true;
+      window.clearTimeout(flashTimer);
+      title.textContent = "盤を探しています…";
+      title.classList.remove("is-error");
+      try {
+        const result = await CaptureService.FitFrame();
+        if (result.fitted) {
+          flash(result.message);
+        } else {
+          warn(result.message);
+        }
+      } catch (err) {
+        showError(String(err));
+      } finally {
+        fitBtn.disabled = flyout.classList.contains("is-playing");
+      }
+    })();
   });
 
   captureBtn.addEventListener("click", () => {

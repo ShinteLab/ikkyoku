@@ -62,6 +62,19 @@ export interface CaptureResult {
 }
 
 /**
+ * FitResult はガイド枠の自動フィットの結果。
+ * 
+ * **見つからなかったことはエラーではない。** 盤が映っていない画面に枠を置いている
+ * ことも、認識が外すこともある(設計原則3)。そのときは Fitted=false と理由を返し、
+ * 枠は 1px も動かさない。error になるのはキャプチャ自体ができなかったときだけ。
+ */
+export interface FitResult {
+    "fitted": boolean;
+    "confidence": number;
+    "message": string;
+}
+
+/**
  * GuideLayout は枠ウィンドウの描画寸法(CSS px)をフロントに渡すための型。
  */
 export interface GuideLayout {

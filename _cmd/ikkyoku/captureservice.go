@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"fmt"
+	"image"
 	"image/png"
 	"log/slog"
 	"math"
@@ -46,6 +47,39 @@ const (
 // なお最大化・全画面のときは Wails 側がこの余白を入れないため 1px 余分に内側を撮る
 // ことになるが、盤が 1px 欠けるだけで実害は無い(枠が写り込む方を避ける)。
 const framelessBottomPaddingPx = 1
+
+// fitSlopPx はガイド枠の自動フィットで「もう合っている」とみなすずれ(物理px)。
+//
+// 検出した矩形は 1px 単位で毎回同じにはならない。これを 0 にすると、押すたびに
+// 枠が 1px 動いて「合わせたのにまだ動く」ように見える。
+const fitSlopPx = 2
+
+// fitMinBoardPx は自動フィットで受け入れる盤の最小の一辺(物理px)。
+//
+// 9 マスに割ると 1 マス 10px。これ以下の矩形に枠を合わせると、盤ではない何かを
+// 掴んでいたときに枠が潰れて操作できなくなる。信頼度の判定(MinRegionConfidence)を
+// 通ったあとの最後の歯止め。
+const fitMinBoardPx = 90
+
+// fitMinShrinkRatio は自動フィットで許す縮小の下限(今のキャプチャ領域に対する一辺の比)。
+//
+// **9x9 のグリッド検出には「半分の周期」で 1 校 100 点が出る当たり方がある。**
+// マス 2 つぶんを 1 マスとみなすと格子線が 1 本おきに一致し、盤の内側は
+// どこを切り取っても色が均一なので、信頼度(ValidateBoard)は 1.00 のまま
+// **盤の 1/4 の領域**が返る。撮り溜めた 62 枚のうち 3 枚で実際に起きた
+// (例: 651x700 の盤に対して (10,312) 309x334 で信頼度 1.00)。
+//
+// この当たり方は**縦横の両方がちょうど半分**になるのが特徴なので、両辺ともこの比を
+// 下回る候補は採らない。片辺だけ小さいのは「枠の縦横比が盤と違う」という普通の状態で、
+// これは弾かない。信頼度では区別が付かないため、大きさで見るしかない。
+//
+// 副作用として「盤が枠の半分以下しか占めていない」ときもフィットしなくなるが、
+// これは**枠の中から盤を探す**この機能の想定(盤より少し大きめに枠を置いてから押す)の
+// 外側なので、枠を近づけてから押し直せばよい。
+//
+// **検出そのものを直すのは suteme の仕事。** ここでやっているのは
+// 「アプリとして、ユーザーが手で合わせた枠をどこまで信じて動かすか」の線引き。
+const fitMinShrinkRatio = 0.6
 
 // GuideLayout は枠ウィンドウの描画寸法(CSS px)をフロントに渡すための型。
 type GuideLayout struct {
@@ -270,7 +304,7 @@ type CaptureResult struct {
 // フロントの「撮る」ボタンとグローバルホットキーの両方から呼ばれる。
 // 1 回のキャプチャは他のキャプチャと完全に独立している(状態を持たない)。
 func (s *CaptureService) Capture() (CaptureResult, error) {
-	region, err := s.captureRegion()
+	region, _, err := s.captureRegion()
 	if err != nil {
 		return CaptureResult{}, err
 	}
@@ -340,6 +374,143 @@ func (s *CaptureService) Capture() (CaptureResult, error) {
 	return result, nil
 }
 
+// FitResult はガイド枠の自動フィットの結果。
+//
+// **見つからなかったことはエラーではない。** 盤が映っていない画面に枠を置いている
+// ことも、認識が外すこともある(設計原則3)。そのときは Fitted=false と理由を返し、
+// 枠は 1px も動かさない。error になるのはキャプチャ自体ができなかったときだけ。
+type FitResult struct {
+	Fitted     bool    `json:"fitted"`
+	Confidence float64 `json:"confidence"`
+	Message    string  `json:"message"`
+}
+
+// FitFrame はガイド枠の内側を 1 枚撮り、その中に見つけた盤にガイド枠を合わせる。
+//
+// **枠を盤にぴったり合わせること自体が認識の精度に効く。** suteme は
+// 「盤だけを切り出した画像」なら画像全体を盤とみなす経路(RegionSource=whole)で
+// 素直に解けるので、手で大雑把に合わせた枠を寄せておくほど当たりが良くなる。
+//
+// 探すのは**今の枠の内側だけ**。画面全体から盤を探す方式(枠の外にある盤も掴める)は
+// 撮る前に枠を隠す必要があり、ちらつきと引き換えになる。まずは「盤より少し大きめに
+// 枠を置いてから押す」で成立する範囲に絞ってある。
+//
+// 枠の位置はユーザーが手で合わせたものなので、**怪しい検出結果では動かさない**。
+// 判断は recognize.DetectRegion の信頼度と、下の最小サイズの 2 つ。
+func (s *CaptureService) FitFrame() (FitResult, error) {
+	region, scale, err := s.captureRegion()
+	if err != nil {
+		return FitResult{}, err
+	}
+	img, err := ikkyoku.Capture(region)
+	if err != nil {
+		return FitResult{}, err
+	}
+
+	det, err := recognize.DetectRegion(img)
+	if err != nil {
+		s.logger.Info("ガイド枠を合わせる盤が見つかりませんでした",
+			"region", region.String(), "confidence", det.Confidence, "error", err)
+		return FitResult{
+			Confidence: det.Confidence,
+			Message:    "盤が見つかりませんでした",
+		}, nil
+	}
+
+	b := det.Rect
+	if b.Dx() < fitMinBoardPx || b.Dy() < fitMinBoardPx {
+		s.logger.Info("検出した盤が小さすぎるので合わせませんでした",
+			"width", b.Dx(), "height", b.Dy(), "confidence", det.Confidence)
+		return FitResult{
+			Confidence: det.Confidence,
+			Message:    "検出した盤が小さすぎます",
+		}, nil
+	}
+
+	// 縦横の両方が極端に小さい候補は、盤の一部を掴んでいる可能性が高い
+	// (fitMinShrinkRatio 参照。信頼度 1.00 でも起きる)。
+	if float64(b.Dx()) < float64(region.Width)*fitMinShrinkRatio &&
+		float64(b.Dy()) < float64(region.Height)*fitMinShrinkRatio {
+		s.logger.Info("検出した盤が枠に対して小さすぎるので合わせませんでした",
+			"board", fmt.Sprintf("%dx%d", b.Dx(), b.Dy()),
+			"region", fmt.Sprintf("%dx%d", region.Width, region.Height),
+			"confidence", det.Confidence)
+		return FitResult{
+			Confidence: det.Confidence,
+			Message:    "盤の一部を掴んだようです(枠を盤に近づけて押し直してください)",
+		}, nil
+	}
+
+	// 位置・サイズは記録(frameGeom)ではなく今の値を読む。記録は「終了時に読めない」
+	// 問題への対策で、動作中の値は正しい(geometry.go)。
+	x, y := s.wins.frame.Position()
+	w, h := s.wins.frame.Size()
+	cur := windowState{X: x, Y: y, Width: w, Height: h}
+	next, moved := fitGeometry(cur, region, img.Bounds().Min, b, scale)
+	if !moved {
+		return FitResult{
+			Fitted:     true,
+			Confidence: det.Confidence,
+			Message:    fmt.Sprintf("既に合っています(信頼度 %.2f)", det.Confidence),
+		}, nil
+	}
+	nx, ny, nw, nh := next.X, next.Y, next.Width, next.Height
+
+	s.wins.frame.SetSize(nw, nh)
+	s.wins.frame.SetPosition(nx, ny)
+	// 移動・リサイズのイベントは飛ぶはずだが、保存される値がこの操作を取りこぼすと
+	// 次回起動で元の位置に戻る。ここで明示的に記録しておく。
+	s.wins.frameGeom.record(s.wins.frame)
+
+	s.logger.Info("ガイド枠を盤に合わせました",
+		"confidence", det.Confidence,
+		"from", fmt.Sprintf("%d,%d,%dx%d", x, y, w, h),
+		"to", fmt.Sprintf("%d,%d,%dx%d", nx, ny, nw, nh))
+	return FitResult{
+		Fitted:     true,
+		Confidence: det.Confidence,
+		Message:    fmt.Sprintf("盤に合わせました(信頼度 %.2f)", det.Confidence),
+	}, nil
+}
+
+// fitGeometry は「キャプチャ領域の中の盤の位置」から、枠ウィンドウの新しい
+// 位置・サイズ(DIP)を求める。moved が false なら動かす必要は無い。
+//
+// キャプチャ領域はガイド枠の内側そのものなので、**画像の中でのずれをそのまま
+// ウィンドウに足せば**枠の内側が盤に重なる。ツールバーやガイド枠の太さは
+// 位置とサイズの両方に同じだけ乗っているので、差分にすると消える(足し引き不要)。
+//
+// origin は撮った画像の左上(image.Image の Bounds().Min)。0,0 とは限らないので引く。
+// scale は CSS px → 物理 px の係数で、ウィンドウの座標系(DIP)へ割り戻すのに使う。
+//
+// **サイズは外側に倒す**(scaleUp と同じ理由の裏返し。丸めで縮むと盤の端が欠ける。
+// 1px 広いぶんには盤の外周が少し余分に写るだけで実害が無い)。
+//
+// GUI から切り離してあるのは、符号を 1 つ間違えると枠が逆へ飛ぶのに、
+// 実機で気づくしかなくなるため(fitGeometry のテストがある)。
+func fitGeometry(cur windowState, region ikkyoku.Region, origin image.Point, board image.Rectangle, scale float64) (windowState, bool) {
+	dx := board.Min.X - origin.X
+	dy := board.Min.Y - origin.Y
+	dw := board.Dx() - region.Width
+	dh := board.Dy() - region.Height
+	if abs(dx) <= fitSlopPx && abs(dy) <= fitSlopPx && abs(dw) <= fitSlopPx && abs(dh) <= fitSlopPx {
+		return cur, false
+	}
+	return windowState{
+		X:      cur.X + int(math.Round(float64(dx)/scale)),
+		Y:      cur.Y + int(math.Round(float64(dy)/scale)),
+		Width:  cur.Width + int(math.Ceil(float64(dw)/scale)),
+		Height: cur.Height + int(math.Ceil(float64(dh)/scale)),
+	}, true
+}
+
+func abs(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
+}
+
 // CopyImage は保存済みの PNG をクリップボードへ入れる。デバッグタブから呼ばれる。
 //
 // **撮った画像をメモリに抱えず、保存したファイルを読み直す。** 1 回のキャプチャは
@@ -394,18 +565,22 @@ func (s *CaptureService) CopyImage(path string) error {
 // マルチモニタでスケーリング(150%等)が混在する環境ではそのまま使うと領域がずれる。
 // HWND から Windows API を直接呼べば物理ピクセルで確実に一致する
 // (clientrect_windows.go)。
-func (s *CaptureService) captureRegion() (ikkyoku.Region, error) {
+//
+// scale(CSS px → 物理 px)も返す。**キャプチャ領域から枠の寸法を逆算する側
+// (FitFrame)が同じ係数を要る**ためで、取り直すと DPI が変わった瞬間に
+// 撮った領域と戻す先が食い違う。
+func (s *CaptureService) captureRegion() (ikkyoku.Region, float64, error) {
 	if s.wins == nil || s.wins.frame == nil {
-		return ikkyoku.Region{}, fmt.Errorf("ikkyoku-app: ウィンドウが初期化されていません")
+		return ikkyoku.Region{}, 0, fmt.Errorf("ikkyoku-app: ウィンドウが初期化されていません")
 	}
 	hwnd := s.wins.frame.NativeWindow()
 	if hwnd == nil {
-		return ikkyoku.Region{}, fmt.Errorf("ikkyoku-app: ネイティブウィンドウハンドルを取得できませんでした")
+		return ikkyoku.Region{}, 0, fmt.Errorf("ikkyoku-app: ネイティブウィンドウハンドルを取得できませんでした")
 	}
 
 	rect, scale, err := clientRectPhysical(hwnd)
 	if err != nil {
-		return ikkyoku.Region{}, err
+		return ikkyoku.Region{}, 0, err
 	}
 
 	border := scaleUp(guideBorderPx, scale)
@@ -418,9 +593,9 @@ func (s *CaptureService) captureRegion() (ikkyoku.Region, error) {
 		Height: rect.Height - top - bottom,
 	}
 	if !region.Valid() {
-		return ikkyoku.Region{}, fmt.Errorf("ikkyoku-app: ウィンドウが小さすぎます(ツールバーとガイド枠で領域が無くなります)")
+		return ikkyoku.Region{}, 0, fmt.Errorf("ikkyoku-app: ウィンドウが小さすぎます(ツールバーとガイド枠で領域が無くなります)")
 	}
-	return region, nil
+	return region, scale, nil
 }
 
 // scaleUp は CSS px を物理ピクセルに変換する。**切り上げる。**
