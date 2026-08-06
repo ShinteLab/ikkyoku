@@ -375,6 +375,13 @@ CLI は無い。**
   生成される**（実機で確認したバグ）。そのため `wails3 init -t vanilla` の出力を
   React 抜きの vanilla TypeScript に手作業で作り直してある。将来 CLI を上げたときは
   この制約が直っているか確認すること
+- **UI は素の DOM 操作で書く（React でアプリを組まない）。** ただしアイコンに
+  `react-icons` を使っており、その描画のためだけに `react` / `react-dom` が入っている。
+  react-icons が配るのは React コンポーネントで、SVG 文字列を取り出す公開 API が無いため、
+  `frontend/src/icon.ts` が `react-dom/server` の `renderToStaticMarkup` で
+  **マウント時に一度だけ**静的マークアップへ変換して `innerHTML` に埋める。
+  **React の使用箇所はここだけ**（クライアント側の react-dom ランタイムは読み込まれない）。
+  アイコンを増やすときも `iconMarkup()` を通すこと
 - Wails 依存は `_cmd/ikkyoku/` にのみ置く（ルートパッケージ `ikkyoku` は触らない）。
   `Capture` / `SavePNG` / `DefaultOutDir` / `ParseHotkey` / `DefaultHotkey` を
   そのまま import して使っており、ロジックを再実装していない
@@ -391,6 +398,7 @@ CLI は無い。**
 | `frontend/src/main.ts` | エントリ。**素の `import "@wailsio/runtime"`** と `?window=` による画面分岐 |
 | `frontend/src/frame.ts` | 枠（ツールバー + ガイド枠） |
 | `frontend/src/mainscreen.ts` | メイン画面 |
+| `frontend/src/icon.ts` | `react-icons` のアイコン → SVG 文字列（唯一の React 使用箇所） |
 
 ### ウィンドウ構成(2枚)
 

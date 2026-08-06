@@ -11,7 +11,9 @@
 // CaptureService.Layout() から受け取って CSS 変数に流し込む。以前はフロントにも同じ
 // 定数を置いていたが、ずれると枠が写り込むという直接的な不具合になるため一本化した。
 import { Events } from "@wailsio/runtime";
+import { FiCamera } from "react-icons/fi";
 import { CaptureService } from "../bindings/ikkyoku-app";
+import { iconMarkup } from "./icon";
 
 // capture:done のうち、枠が使う部分だけ。認識結果はメイン画面の担当なので見ない
 // (CaptureResult の全体は mainscreen.ts に定義がある)。
@@ -24,7 +26,8 @@ export function mountFrame(root: HTMLElement): void {
     <div class="frame-toolbar">
       <span class="frame-title">ikkyoku</span>
       <div class="frame-actions">
-        <button id="frame-capture" class="frame-btn is-primary" type="button">撮る</button>
+        <button id="frame-capture" class="frame-btn is-primary is-icon" type="button"
+                aria-label="撮る" title="撮る(Alt+S)">${iconMarkup(FiCamera)}</button>
         <button id="frame-hide" class="frame-btn" type="button"
                 title="枠を隠す(領域は保持され、Alt+S でそのまま撮れます)">✕</button>
       </div>

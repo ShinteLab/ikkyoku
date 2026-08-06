@@ -92,6 +92,17 @@ html.is-frame #app {
   background: #3a3d47;
 }
 
+/* アイコンだけのボタン(react-icons)。SVG は width/height="1em"・色は currentColor の
+   まま埋めてあるので、一辺は font-size、色は color にそのまま追従する(icon.ts)。
+   ラベルは aria-label / title が持つ。 */
+.frame-btn.is-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 9px;
+  font-size: 15px;
+}
+
 .frame-btn.is-primary {
   font-weight: 600;
   background: #ff4d4d;
