@@ -14,7 +14,7 @@
 // ——ただし**枠に重なる位置に動かすと写り込む**(画面の合成結果を撮るため)。初回だけ
 // Go 側が枠の外へ逃がす(captureservice.go の placeMainBesideFrame)。
 import { Clipboard, Events } from "@wailsio/runtime";
-import { FiCopy } from "react-icons/fi";
+import { FiCopy, FiImage } from "react-icons/fi";
 import { CaptureService } from "../bindings/ikkyoku-app";
 import { iconMarkup } from "./icon";
 // 認識の観測情報。**型を手で書き写さない**(Go 側は suteme の型をそのまま通しており、
@@ -149,6 +149,9 @@ export function mountMainScreen(root: HTMLElement): void {
             <button id="shot-path" class="path-btn" type="button" hidden>
               <span class="path-name"></span>${iconMarkup(FiCopy)}
             </button>
+            <button id="shot-copy-image" class="path-btn is-icon-only" type="button" hidden
+                    aria-label="画像をコピー"
+                    title="画像そのものをクリップボードにコピー">${iconMarkup(FiImage)}</button>
             <label class="overlay-toggle">
               <input id="overlay-toggle" type="checkbox" checked />
               認識の重ね表示
@@ -178,6 +181,7 @@ export function mountMainScreen(root: HTMLElement): void {
   const shot = root.querySelector<HTMLDivElement>("#shot")!;
   const shotPath = root.querySelector<HTMLButtonElement>("#shot-path")!;
   const shotPathName = shotPath.querySelector<HTMLSpanElement>(".path-name")!;
+  const shotCopyImage = root.querySelector<HTMLButtonElement>("#shot-copy-image")!;
   const thumbnail = root.querySelector<HTMLImageElement>("#thumbnail")!;
   const overlay = root.querySelector<SVGSVGElement>("#overlay")!;
   const overlayToggle = root.querySelector<HTMLInputElement>("#overlay-toggle")!;
@@ -415,23 +419,44 @@ export function mountMainScreen(root: HTMLElement): void {
   // 手で写す場面がそれなりにある。表示はファイル名だけにして(保存先は毎回同じで、
   // 見て区別が付くのは末尾の時刻の部分だけ)、コピーするのは開くのに使えるフルパス。
   //
-  // クリップボードは Wails ランタイム経由(`Clipboard.SetText`)で入れる。
-  // `navigator.clipboard` は secure context 前提で、カスタムスキームで配信している
-  // この webview では使えるとは限らない。
+  // コピーは 2 通りある。**用途が違うので両方残す。**
+  //
+  //   - パス … 他のツールで開く・suteme の学習データに混ぜる、といったファイル操作向け。
+  //     Wails ランタイムの `Clipboard.SetText` で完結する
+  //     (`navigator.clipboard` は secure context 前提で、カスタムスキームで配信している
+  //     この webview では使えるとは限らない)
+  //   - 画像そのもの … チャットや棋譜ソフトへ直接貼る用。**ランタイムに口が無い**ので
+  //     Go 側(`CaptureService.CopyImage`)で Win32 のクリップボードへ CF_DIB を載せる。
+  //     渡すのはパスで、Go 側が保存済みの PNG を読み直す(clipboard_windows.go)
   let shotFullPath = "";
   let copiedTimer = 0;
   const showPath = (path: string) => {
     shotFullPath = path;
     if (!path) {
       shotPath.hidden = true;
+      shotCopyImage.hidden = true;
       return;
     }
     // Windows の `\` 区切りだが、将来 `/` になっても困らないよう両方で切る。
     shotPathName.textContent = path.split(/[\\/]/).pop() ?? path;
     shotPath.title = `クリックでパスをコピー: ${path}`;
     shotPath.classList.remove("is-copied");
+    shotCopyImage.classList.remove("is-copied");
     shotPath.hidden = false;
+    shotCopyImage.hidden = false;
   };
+
+  // 押しても何も起きないように見えるのを避ける。表示は変えず、色だけ変えて戻す
+  // (ファイル名が「コピーしました」に化けると、何を撮ったのか分からなくなる)。
+  const flashCopied = (btn: HTMLButtonElement) => {
+    btn.classList.add("is-copied");
+    window.clearTimeout(copiedTimer);
+    copiedTimer = window.setTimeout(() => {
+      shotPath.classList.remove("is-copied");
+      shotCopyImage.classList.remove("is-copied");
+    }, 1200);
+  };
+
   shotPath.addEventListener("click", () => {
     void (async () => {
       try {
@@ -440,13 +465,25 @@ export function mountMainScreen(root: HTMLElement): void {
         shotPath.title = `コピーできません: ${String(err)}`;
         return;
       }
-      // 押しても何も起きないように見えるのを避ける。表示は変えず、色だけ変えて戻す
-      // (ファイル名が「コピーしました」に化けると、何を撮ったのか分からなくなる)。
-      shotPath.classList.add("is-copied");
-      window.clearTimeout(copiedTimer);
-      copiedTimer = window.setTimeout(() => {
-        shotPath.classList.remove("is-copied");
-      }, 1200);
+      flashCopied(shotPath);
+    })();
+  });
+
+  shotCopyImage.addEventListener("click", () => {
+    void (async () => {
+      // 数 MB の PNG を読み直して DIB に変換するぶん一瞬かかる。連打を止めておく。
+      shotCopyImage.disabled = true;
+      try {
+        await CaptureService.CopyImage(shotFullPath);
+        shotCopyImage.title = "画像そのものをクリップボードにコピー";
+        flashCopied(shotCopyImage);
+      } catch (err) {
+        // 失敗しても画像は保存されたまま(設計原則3: 段階的に劣化する)。
+        // ここで status を潰すと保存先が読めなくなるので、ボタンの title にだけ出す。
+        shotCopyImage.title = `画像をコピーできません: ${String(err)}`;
+      } finally {
+        shotCopyImage.disabled = false;
+      }
     })();
   });
 

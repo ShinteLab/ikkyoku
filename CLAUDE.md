@@ -208,6 +208,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   だけなのは保存先が毎回同じで区別が付くのは末尾の時刻だけだから。クリップボードは
   **Wails ランタイムの `Clipboard.SetText`** を使う（`navigator.clipboard` は
   secure context 前提で、カスタムスキーム配信のこの webview では当てにできない）
+- その隣のボタンで**画像そのもの**をクリップボードに入れられる（チャットや棋譜ソフトへ
+  直接貼る用）。**用途が違うので両方残すこと。** ランタイムのクリップボードは
+  テキストしか扱えないため、こちらは Go 側（`CaptureService.CopyImage` →
+  `clipboard_windows.go`）で **Win32 の CF_DIB**（24bpp・無圧縮・ボトムアップ）を
+  載せている。cgo は使わない（`clientrect_windows.go` と同じ LazyProc 経由）。
+  フロントから渡すのはパスで、**Go 側が保存済みの PNG を読み直す**（「直近の画像」を
+  メモリに抱えないため。後から一覧を作ってどの 1 枚でもコピーできるようにもできる）
 - **デバッグタブは撮った画像に認識の矩形を重ねて出す**（`Result.Debug`。上記の表を参照）。
   盤面と判定した外枠・9x9 のマス割り・確信度の低いマスを描き、マスにホバーすると
   「マス名・採用した表記・確信度」が出る。トグルで消せる（画像そのものを見たいとき用）
@@ -400,6 +407,7 @@ CLI は無い。**
 | `geometry.go` | ウィンドウ位置の追跡（終了時に `Position()` を読めないため） |
 | `windowstate.go` | `app-window.json` の読み書き・既定値・画面内へのクランプ |
 | `clientrect_windows.go` | HWND からクライアント矩形を物理ピクセルで取得（`clientrect_other.go` はスタブ） |
+| `clipboard_windows.go` | 画像を CF_DIB でクリップボードへ（`clipboard_other.go` はスタブ） |
 | `hotkey.go` | ホットキー文字列 → Wails のアクセラレータ表記 |
 | `frontend/src/main.ts` | エントリ。**素の `import "@wailsio/runtime"`** と `?window=` による画面分岐 |
 | `frontend/src/frame.ts` | 枠（ツールバー + ガイド枠） |
@@ -692,6 +700,13 @@ go test ./...
 - `save_test.go` — タイムスタンプ式ファイル名生成、`SavePNG` の保存先ディレクトリ自動作成
 - `config_test.go` — `Config` の JSON 読み書きの往復、ファイル未存在時の扱い
 - `hotkey_test.go` — `ParseHotkey` の文字列パース
+
+GUI 側（`_cmd/ikkyoku/`。別モジュールなので上の `./...` には含まれない）にも 1 本だけある:
+
+- `clipboard_roundtrip_windows_test.go` — クリップボードに載せた CF_DIB を読み返し、
+  ヘッダ・ボトムアップの行順・BGR の並びを検証する。手で組み立てたバイト列なので、
+  貼り付け先で初めて気づくより往復で確かめるほうが速い。
+  **実行するとクリップボードの中身が置き換わる**（`cd _cmd\ikkyoku; go test .`）
 
 ## 開発上の約束
 

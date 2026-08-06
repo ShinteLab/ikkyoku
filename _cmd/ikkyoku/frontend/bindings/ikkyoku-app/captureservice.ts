@@ -26,6 +26,22 @@ export function Capture(): $CancellablePromise<$models.CaptureResult> {
 }
 
 /**
+ * CopyImage は保存済みの PNG をクリップボードへ入れる。デバッグタブから呼ばれる。
+ * 
+ * **撮った画像をメモリに抱えず、保存したファイルを読み直す。** 1 回のキャプチャは
+ * 他のキャプチャと独立という方針(ikkyoku/CLAUDE.md)に沿って「直近の画像」を
+ * 持たずに済むし、後から一覧を作ってどの 1 枚でもコピーできるようにするときも
+ * そのまま使える。読み直しの費用は数 MB の PNG のデコード 1 回だけ。
+ * 
+ * パスの持ち主はフロント(直前の CaptureResult.Path)。テキストのコピーは Wails
+ * ランタイムの Clipboard.SetText で完結するのでフロント側にあり、画像だけがここに来る
+ * (画像はランタイムに口が無く、Win32 を直接叩く必要があるため。clipboard_windows.go)。
+ */
+export function CopyImage(path: string): $CancellablePromise<void> {
+    return $Call.ByID(1696139771, path);
+}
+
+/**
  * HideFrame は枠を隠す。フロント(ツールバーの✕)と Alt+F4 の両方から呼ばれる。
  * 
  * 閉じずに隠すだけなのは、枠が「見せるための UI」ではなく「撮る領域の定義」だから。

@@ -596,6 +596,17 @@ html.is-main body {
   border-color: #8fdc9b;
 }
 
+/* 画像そのものをコピーするボタン。文字は持たない(ラベルは aria-label / title)。 */
+.path-btn.is-icon-only {
+  padding: 3px 6px;
+  font-size: 13px;
+}
+
+.path-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .path-name {
   overflow: hidden;
   white-space: nowrap;

@@ -7,6 +7,7 @@ import (
 	"image/png"
 	"log/slog"
 	"math"
+	"os"
 	"sync"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -337,6 +338,40 @@ func (s *CaptureService) Capture() (CaptureResult, error) {
 	// 前面に来た時点でメイン画面が最新の結果を持っている状態になる。
 	s.revealMain()
 	return result, nil
+}
+
+// CopyImage は保存済みの PNG をクリップボードへ入れる。デバッグタブから呼ばれる。
+//
+// **撮った画像をメモリに抱えず、保存したファイルを読み直す。** 1 回のキャプチャは
+// 他のキャプチャと独立という方針(ikkyoku/CLAUDE.md)に沿って「直近の画像」を
+// 持たずに済むし、後から一覧を作ってどの 1 枚でもコピーできるようにするときも
+// そのまま使える。読み直しの費用は数 MB の PNG のデコード 1 回だけ。
+//
+// パスの持ち主はフロント(直前の CaptureResult.Path)。テキストのコピーは Wails
+// ランタイムの Clipboard.SetText で完結するのでフロント側にあり、画像だけがここに来る
+// (画像はランタイムに口が無く、Win32 を直接叩く必要があるため。clipboard_windows.go)。
+func (s *CaptureService) CopyImage(path string) error {
+	if path == "" {
+		return fmt.Errorf("ikkyoku-app: コピーする画像がありません")
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		s.logger.Warn("画像を開けませんでした", "path", path, "error", err)
+		return err
+	}
+	defer f.Close()
+
+	img, err := png.Decode(f)
+	if err != nil {
+		s.logger.Warn("画像を読めませんでした", "path", path, "error", err)
+		return err
+	}
+	if err := copyImageToClipboard(img); err != nil {
+		s.logger.Warn("画像をクリップボードに入れられませんでした", "path", path, "error", err)
+		return err
+	}
+	s.logger.Info("画像をクリップボードに入れました", "path", path)
+	return nil
 }
 
 // captureRegion はネイティブウィンドウハンドル(HWND)からクライアント領域を
