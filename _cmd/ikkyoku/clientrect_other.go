@@ -18,3 +18,8 @@ type physicalRect struct {
 func clientRectPhysical(hwnd unsafe.Pointer) (physicalRect, float64, error) {
 	return physicalRect{}, 0, fmt.Errorf("ikkyoku-app: このOSでは未対応です(Windows専用)")
 }
+
+// windowRectPhysical も同様のスタブ。
+func windowRectPhysical(hwnd unsafe.Pointer) (physicalRect, error) {
+	return physicalRect{}, fmt.Errorf("ikkyoku-app: このOSでは未対応です(Windows専用)")
+}

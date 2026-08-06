@@ -5,11 +5,14 @@ import (
 	"encoding/base64"
 	"fmt"
 	"image"
+	"image/color"
+	"image/draw"
 	"image/png"
 	"log/slog"
 	"math"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 
@@ -403,75 +406,65 @@ type FitResult struct {
 	Message    string  `json:"message"`
 }
 
-// FitFrame はガイド枠の内側を 1 枚撮り、その中に見つけた盤にガイド枠を合わせる。
+// FitFrame は**画面に出ている盤**を探して、そこへガイド枠を合わせる。
 //
-// **枠を盤にぴったり合わせること自体が認識の精度に効く。** suteme は
-// 「盤だけを切り出した画像」なら画像全体を盤とみなす経路(RegionSource=whole)で
-// 素直に解けるので、手で大雑把に合わせた枠を寄せておくほど当たりが良くなる。
+// **枠を盤に合わせること自体が認識の精度に効く。** suteme は「盤だけが写っている画像」
+// なら素直に解けるので、枠が盤に合っているほど当たりが良くなる。位置合わせを楽にする
+// だけの機能ではない。
 //
-// 探すのは**今の枠の内側だけ**。画面全体から盤を探す方式(枠の外にある盤も掴める)は
-// 撮る前に枠を隠す必要があり、ちらつきと引き換えになる。まずは「盤より少し大きめに
-// 枠を置いてから押す」で成立する範囲に絞ってある。
+// 探すのは**枠の内側 → 枠がいるディスプレイ全体**の順(findBoard)。「枠の内側だけ」を
+// やめたのは、枠を先に盤へ近づけておく必要があり、**それができるなら手で合わせるのと
+// あまり変わらない**ため。今は「その画面に今出ている盤に合わせる」という機能になっている。
+//
+// 画面全体を撮るときは**自分のウィンドウを画面から消してから撮る**:
+//
+//   - 枠は Hide() して撮り、撮り終えたら戻す。赤いガイド枠が写ると格子の検出を汚す
+//   - メイン画面は消さず、撮った画像の上でその矩形を塗り潰す(maskWindows)。
+//     **メイン画面には `<shogi-board>` が本物の盤を描いている**ので、放っておくと
+//     中継の盤より綺麗なそちらが選ばれる
+//
+// 隠して撮り直すぶん、押してから結果が出るまでに一呼吸ある(枠が一瞬消える)。
+// **撮る操作(Capture)にこの方式を持ち込まないこと。** あちらはタイミングに依存しない
+// 決定論的な領域算出が要点で、こちらはユーザーが押した 1 回きりの操作なので待てる。
 //
 // 枠の位置はユーザーが手で合わせたものなので、**怪しい検出結果では動かさない**。
-// 判断は recognize.DetectRegion の信頼度と、下の最小サイズの 2 つ。
+// 判断は recognize.DetectRegion の信頼度・最小サイズ・「枠の中で半分に縮む候補は採らない」
+// の 3 つ。
 func (s *CaptureService) FitFrame() (FitResult, error) {
 	region, scale, err := s.captureRegion()
 	if err != nil {
 		return FitResult{}, err
 	}
-	img, err := ikkyoku.Capture(region)
+	b, conf, err := s.findBoard(region)
 	if err != nil {
 		return FitResult{}, err
 	}
-
-	det, err := recognize.DetectRegion(img)
-	if err != nil {
-		s.logger.Info("ガイド枠を合わせる盤が見つかりませんでした",
-			"region", region.String(), "confidence", det.Confidence, "error", err)
+	if b.Empty() {
 		return FitResult{
-			Confidence: det.Confidence,
+			Confidence: conf,
 			Message:    "盤が見つかりませんでした",
 		}, nil
 	}
-
-	b := det.Rect
 	if b.Dx() < fitMinBoardPx || b.Dy() < fitMinBoardPx {
 		s.logger.Info("検出した盤が小さすぎるので合わせませんでした",
-			"width", b.Dx(), "height", b.Dy(), "confidence", det.Confidence)
+			"width", b.Dx(), "height", b.Dy(), "confidence", conf)
 		return FitResult{
-			Confidence: det.Confidence,
+			Confidence: conf,
 			Message:    "検出した盤が小さすぎます",
 		}, nil
 	}
-
-	// 縦横の両方が極端に小さい候補は、盤の一部を掴んでいる可能性が高い
-	// (fitMinShrinkRatio 参照。信頼度 1.00 でも起きる)。
-	if float64(b.Dx()) < float64(region.Width)*fitMinShrinkRatio &&
-		float64(b.Dy()) < float64(region.Height)*fitMinShrinkRatio {
-		s.logger.Info("検出した盤が枠に対して小さすぎるので合わせませんでした",
-			"board", fmt.Sprintf("%dx%d", b.Dx(), b.Dy()),
-			"region", fmt.Sprintf("%dx%d", region.Width, region.Height),
-			"confidence", det.Confidence)
-		return FitResult{
-			Confidence: det.Confidence,
-			Message:    "盤の一部を掴んだようです(枠を盤に近づけて押し直してください)",
-		}, nil
-	}
-
 	// 位置・サイズは記録(frameGeom)ではなく今の値を読む。記録は「終了時に読めない」
 	// 問題への対策で、動作中の値は正しい(geometry.go)。
 	x, y := s.wins.frame.Position()
 	w, h := s.wins.frame.Size()
 	cur := windowState{X: x, Y: y, Width: w, Height: h}
 	// **盤ぴったりではなく、少し外側に合わせる**(fitMarginCellRatio 参照)。
-	// 画像をはみ出しても構わない(枠が今より大きくなるだけで、そこには画面の続きが写る)。
-	next, moved := fitGeometry(cur, region, img.Bounds().Min, withFitMargin(b), fitMargin(b), scale)
+	next, moved := fitGeometry(cur, region, withFitMargin(b), fitMargin(b), scale)
 	if !moved {
 		return FitResult{
 			Fitted:     true,
-			Confidence: det.Confidence,
-			Message:    fmt.Sprintf("既に合っています(信頼度 %.2f)", det.Confidence),
+			Confidence: conf,
+			Message:    fmt.Sprintf("既に合っています(信頼度 %.2f)", conf),
 		}, nil
 	}
 	nx, ny, nw, nh := next.X, next.Y, next.Width, next.Height
@@ -483,14 +476,180 @@ func (s *CaptureService) FitFrame() (FitResult, error) {
 	s.wins.frameGeom.record(s.wins.frame)
 
 	s.logger.Info("ガイド枠を盤に合わせました",
-		"confidence", det.Confidence,
+		"confidence", conf,
 		"from", fmt.Sprintf("%d,%d,%dx%d", x, y, w, h),
 		"to", fmt.Sprintf("%d,%d,%dx%d", nx, ny, nw, nh))
 	return FitResult{
 		Fitted:     true,
-		Confidence: det.Confidence,
-		Message:    fmt.Sprintf("盤に合わせました(信頼度 %.2f)", det.Confidence),
+		Confidence: conf,
+		Message:    fmt.Sprintf("盤に合わせました(信頼度 %.2f)", conf),
 	}, nil
+}
+
+// findBoard は盤を探し、**スクリーン座標・物理ピクセル**の矩形と信頼度を返す。
+// 見つからなければ空の矩形を返す(error はキャプチャ自体に失敗したときだけ)。
+//
+// **枠の内側 → 画面全体、の順に探す。**
+//
+// 画面全体だけにしないのは、**小さく切り出した画像のほうが確実に当たる**ため。
+// 実測(デスクトップのスクリーンショットに盤を合成して検出)では、盤だけを切り出せば
+// ほぼ 1.00 で当たるものが、2560x1440 の画面全体では 12 回中 3 回見つからず、
+// 1 回は「半分の周期」の誤検出になった。**枠が既に盤を囲んでいるなら、
+// その中で探すほうが速くて確実。**
+//
+// 逆に画面全体を見ないと、枠を先に盤へ近づけておく必要があり、それができるなら
+// 手で合わせるのと変わらない。両方やるのはそのため。
+func (s *CaptureService) findBoard(region ikkyoku.Region) (image.Rectangle, float64, error) {
+	// 1) 枠の内側。ここは枠を隠す必要が無い(ガイド枠もツールバーも領域の外)。
+	if img, err := ikkyoku.Capture(region); err == nil {
+		det, err := recognize.DetectRegion(img)
+		b := det.Rect.Sub(img.Bounds().Min).Add(image.Pt(region.X, region.Y))
+		switch {
+		case err != nil:
+			s.logger.Debug("枠の内側には盤がありませんでした", "confidence", det.Confidence)
+		case s.looksLikePartOfBoard(b, region, det.Confidence):
+			// 縦横とも半分に縮む候補は「盤の一部」を掴んでいる可能性が高い。
+			// 採らずに画面全体の探索へ回す(そちらで本来の盤が見つかることがある)。
+		default:
+			s.logger.Info("枠の内側で盤を見つけました",
+				"rect", b.String(), "confidence", det.Confidence)
+			return b, det.Confidence, nil
+		}
+	} else {
+		s.logger.Warn("枠の内側を撮れませんでした", "error", err)
+	}
+
+	// 2) 画面全体(枠がいるディスプレイ 1 枚)。
+	disp, err := s.frameDisplay(region)
+	if err != nil {
+		return image.Rectangle{}, 0, err
+	}
+	img, err := s.captureWithoutSelf(disp)
+	if err != nil {
+		return image.Rectangle{}, 0, err
+	}
+	det, err := recognize.DetectRegion(img)
+	if err != nil {
+		s.logger.Info("画面に盤が見つかりませんでした",
+			"display", disp.String(), "confidence", det.Confidence, "error", err)
+		return image.Rectangle{}, det.Confidence, nil
+	}
+	b := det.Rect.Sub(img.Bounds().Min).Add(image.Pt(disp.X, disp.Y))
+	s.logger.Info("画面の中に盤を見つけました", "rect", b.String(), "confidence", det.Confidence)
+	return b, det.Confidence, nil
+}
+
+// looksLikePartOfBoard は「枠が囲んでいる盤の一部」を掴んだ疑いがあるかを返す。
+//
+// 9x9 のグリッド検出には**マス 2 つぶんを 1 マスとみなす**当たり方があり、
+// 格子線が 1 本おきに一致するうえ盤の内側は色が均一なので、信頼度 1.00 のまま
+// 盤の 1/4 が返る(fitMinShrinkRatio 参照)。縦横の**両方**がちょうど半分になるのが
+// 特徴なので、大きさで見分ける。片辺だけ小さいのは「枠の縦横比が盤と違う」という
+// 普通の状態なので弾かない。
+//
+// **枠の内側を探すときだけの判定。** 画面全体から探すときは、見つけた盤が
+// 今の枠と無関係な場所にあるので比べる意味が無い。
+func (s *CaptureService) looksLikePartOfBoard(board image.Rectangle, region ikkyoku.Region, conf float64) bool {
+	if float64(board.Dx()) >= float64(region.Width)*fitMinShrinkRatio ||
+		float64(board.Dy()) >= float64(region.Height)*fitMinShrinkRatio {
+		return false
+	}
+	s.logger.Info("枠の内側で見つけた盤が小さすぎるので採りませんでした",
+		"board", fmt.Sprintf("%dx%d", board.Dx(), board.Dy()),
+		"region", fmt.Sprintf("%dx%d", region.Width, region.Height),
+		"confidence", conf)
+	return true
+}
+
+// frameDisplay は枠がいるディスプレイ全体の領域を返す。
+//
+// **探すのは 1 枚だけ。** 全モニタをまとめて撮ると、ディスプレイごとに DPI が違う
+// 環境で「見つけた盤のあるモニタ」と「枠のいるモニタ」の換算係数が食い違う
+// (scale は枠の HWND から取っているため)。中継とガイド枠は同じ画面にあるのが自然なので、
+// 枠のいるディスプレイに絞る。
+func (s *CaptureService) frameDisplay(region ikkyoku.Region) (ikkyoku.Region, error) {
+	center := image.Pt(region.X+region.Width/2, region.Y+region.Height/2)
+	for _, d := range ikkyoku.ListDisplays() {
+		if center.In(d.Bounds) {
+			return d.Region(), nil
+		}
+	}
+	// モニタ構成の隙間などで中心がどこにも入らないとき。撮れないよりはましなので
+	// プライマリに落とす(見つからなければ「盤が見つかりません」になるだけ)。
+	s.logger.Warn("枠がどのディスプレイにも属していません。プライマリを探します", "region", region.String())
+	return ikkyoku.PrimaryRegion()
+}
+
+// fitHideSettle は枠を隠してから撮るまでの待ち時間。
+//
+// Hide() が返った時点では画面の合成結果に反映されているとは限らない。
+// 60Hz で 3 フレームぶん見ておけば、下にある中継が塗り直される時間としては十分。
+// **短くしすぎると、消したはずの赤い枠が写る。**
+const fitHideSettle = 50 * time.Millisecond
+
+// captureWithoutSelf は自分のウィンドウを取り除いた画面を撮る。
+//
+// 枠は隠して撮り、すぐ戻す。メイン画面は隠さず、撮った画像の上で塗り潰す
+// (maskWindows)。**隠すと z 順やフォーカスが動くので、消す必要があるだけの
+// メイン画面にはやらない。** 枠だけ隠すのは、ガイド枠が「探す対象の上に重なる線」
+// そのもので、塗り潰すと盤まで消えてしまうため。
+func (s *CaptureService) captureWithoutSelf(disp ikkyoku.Region) (image.Image, error) {
+	frame := s.wins.frame
+	hidden := false
+	if frame.IsVisible() {
+		frame.Hide()
+		hidden = true
+		time.Sleep(fitHideSettle)
+	}
+
+	img, err := ikkyoku.Capture(disp)
+
+	if hidden {
+		frame.Show()
+	}
+	if err != nil {
+		return nil, err
+	}
+	s.maskWindows(img, disp)
+	return img, nil
+}
+
+// maskWindows は撮った画像から、まだ写っている自分のウィンドウを塗り潰す。
+//
+// **メイン画面には `<shogi-board>` が本物の将棋盤を描いている。** 中継の盤より
+// 綺麗な格子なので、放っておくと検出はそちらを選ぶ。塗り潰しはウィンドウ全体
+// (タイトルバー込み)で、消し残しを作らない。
+//
+// 画像が *image.RGBA でない(将来キャプチャの実装が変わった)場合は何もしない。
+// 塗り潰せないこと自体は致命的ではなく、検出が外れるだけで枠は動かない。
+func (s *CaptureService) maskWindows(img image.Image, disp ikkyoku.Region) {
+	rgba, ok := img.(*image.RGBA)
+	if !ok {
+		s.logger.Warn("撮った画像を塗り潰せません(*image.RGBA ではありません)")
+		return
+	}
+	main := s.wins.main
+	if main == nil || !main.IsVisible() || main.IsMinimised() {
+		return
+	}
+	hwnd := main.NativeWindow()
+	if hwnd == nil {
+		return
+	}
+	r, err := windowRectPhysical(hwnd)
+	if err != nil {
+		s.logger.Warn("メイン画面の矩形を取得できませんでした", "error", err)
+		return
+	}
+
+	// スクリーン座標 → 撮った画像の座標。
+	off := img.Bounds().Min.Sub(image.Pt(disp.X, disp.Y))
+	rect := image.Rect(r.X, r.Y, r.X+r.Width, r.Y+r.Height).Add(off).Intersect(rgba.Bounds())
+	if rect.Empty() {
+		return // 別のディスプレイにいる
+	}
+	draw.Draw(rgba, rect, image.NewUniform(color.Black), image.Point{}, draw.Src)
+	s.logger.Debug("メイン画面を塗り潰しました", "rect", rect.String())
 }
 
 // fitMargin は盤の外側に残す余白(物理px)。マスの大きさに比例する。
@@ -515,14 +674,17 @@ func withFitMargin(board image.Rectangle) image.Rectangle {
 	return board.Inset(-fitMargin(board))
 }
 
-// fitGeometry は「キャプチャ領域の中の盤の位置」から、枠ウィンドウの新しい
+// fitGeometry は「盤がスクリーンのどこにあるか」から、枠ウィンドウの新しい
 // 位置・サイズ(DIP)を求める。moved が false なら動かす必要は無い。
 //
-// キャプチャ領域はガイド枠の内側そのものなので、**画像の中でのずれをそのまま
+// board は**スクリーン座標・物理ピクセル**の矩形(撮った画像の座標系ではない。
+// 画面全体から探すので、画像の原点とキャプチャ領域の原点が一致しないため)。
+// region は今のキャプチャ領域で、これもスクリーン座標・物理ピクセル。
+//
+// キャプチャ領域はガイド枠の内側そのものなので、**region と board のずれをそのまま
 // ウィンドウに足せば**枠の内側が盤に重なる。ツールバーやガイド枠の太さは
 // 位置とサイズの両方に同じだけ乗っているので、差分にすると消える(足し引き不要)。
 //
-// origin は撮った画像の左上(image.Image の Bounds().Min)。0,0 とは限らないので引く。
 // scale は CSS px → 物理 px の係数で、ウィンドウの座標系(DIP)へ割り戻すのに使う。
 // slop は「もう合っている」とみなすずれ(物理px。呼び出し側は余白と同じ値を渡す)。
 //
@@ -531,9 +693,9 @@ func withFitMargin(board image.Rectangle) image.Rectangle {
 //
 // GUI から切り離してあるのは、符号を 1 つ間違えると枠が逆へ飛ぶのに、
 // 実機で気づくしかなくなるため(fitGeometry のテストがある)。
-func fitGeometry(cur windowState, region ikkyoku.Region, origin image.Point, board image.Rectangle, slop int, scale float64) (windowState, bool) {
-	dx := board.Min.X - origin.X
-	dy := board.Min.Y - origin.Y
+func fitGeometry(cur windowState, region ikkyoku.Region, board image.Rectangle, slop int, scale float64) (windowState, bool) {
+	dx := board.Min.X - region.X
+	dy := board.Min.Y - region.Y
 	dw := board.Dx() - region.Width
 	dh := board.Dy() - region.Height
 	if abs(dx) <= slop && abs(dy) <= slop && abs(dw) <= slop && abs(dh) <= slop {

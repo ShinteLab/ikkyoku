@@ -7,12 +7,14 @@ import (
 	"github.com/ShinteLab/ikkyoku"
 )
 
-// fitGeometry は「撮った画像の中で盤がどこにあったか」を枠ウィンドウの座標に戻す。
+// fitGeometry は「スクリーンのどこに盤があったか」を枠ウィンドウの座標に戻す。
 // **符号を 1 つ間違えると枠が逆方向へ飛ぶ**が、それに気づく手段が実機しか無いので
 // ここで固定しておく。
+//
+// 枠ウィンドウは DIP、キャプチャ領域と盤はスクリーン座標・物理ピクセル。
+// **原点が揃っていない**(枠の位置とキャプチャ領域の位置は別物)ので、
+// テストでもわざと離れた値を使う。
 func TestFitGeometry(t *testing.T) {
-	// 枠ウィンドウ(DIP)と、その内側のキャプチャ領域(物理px)。
-	// 差分だけを使うので、両者の原点が一致している必要はない。
 	cur := windowState{X: 100, Y: 200, Width: 480, Height: 420}
 	region := ikkyoku.Region{X: 402, Y: 936, Width: 476, Height: 384}
 
@@ -24,28 +26,28 @@ func TestFitGeometry(t *testing.T) {
 		moved bool
 	}{
 		{
-			// 盤が右下に 10px ずれていて、20px 小さい。
+			// 盤がキャプチャ領域より右下に 10px ずれていて、20px 小さい。
 			// 枠は右下へ 10 動き、幅と高さが 20 縮む。
 			name:  "等倍",
-			board: image.Rect(10, 10, 466, 374),
+			board: image.Rect(412, 946, 412+456, 946+364),
 			scale: 1.0,
 			want:  windowState{X: 110, Y: 210, Width: 460, Height: 400},
 			moved: true,
 		},
 		{
-			// 盤が左上に寄っている(画像の原点より手前には無いので、
-			// 左上に寄る = 原点のまま盤が小さい)ケース。
-			name:  "原点は同じで盤が小さい",
-			board: image.Rect(0, 0, 400, 300),
+			// 盤がキャプチャ領域の外(左上)にある。画面全体から探すので普通に起きる。
+			// 枠は左上へ大きく動く。
+			name:  "枠の外で見つかった",
+			board: image.Rect(102, 236, 102+476, 236+384),
 			scale: 1.0,
-			want:  windowState{X: 100, Y: 200, Width: 404, Height: 336},
+			want:  windowState{X: -200, Y: -500, Width: 480, Height: 420},
 			moved: true,
 		},
 		{
 			// 150% スケーリング。物理 30px のずれは DIP では 20。
 			// サイズは外側に倒すので、割り切れない縮小は 1px 控えめになる。
 			name:  "150%",
-			board: image.Rect(30, 30, 446, 354),
+			board: image.Rect(432, 966, 432+416, 966+324),
 			scale: 1.5,
 			want:  windowState{X: 120, Y: 220, Width: 440, Height: 380},
 			moved: true,
@@ -53,7 +55,7 @@ func TestFitGeometry(t *testing.T) {
 		{
 			// slop 以内のずれでは動かさない(押すたびに数px 動くのを避ける)。
 			name:  "ずれが小さければ動かさない",
-			board: image.Rect(2, 1, 476, 384),
+			board: image.Rect(404, 937, 404+476, 937+384),
 			scale: 1.0,
 			want:  cur,
 			moved: false,
@@ -62,7 +64,7 @@ func TestFitGeometry(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, moved := fitGeometry(cur, region, image.Point{}, tt.board, 2, tt.scale)
+			got, moved := fitGeometry(cur, region, tt.board, 2, tt.scale)
 			if moved != tt.moved {
 				t.Errorf("moved = %v, want %v", moved, tt.moved)
 			}
@@ -81,10 +83,10 @@ func TestFitGeometrySlop(t *testing.T) {
 	region := ikkyoku.Region{X: 0, Y: 0, Width: 476, Height: 384}
 	board := image.Rect(5, 5, 476+5, 384+5) // 5px ずれているが大きさは同じ
 
-	if _, moved := fitGeometry(cur, region, image.Point{}, board, 7, 1.0); moved {
+	if _, moved := fitGeometry(cur, region, board, 7, 1.0); moved {
 		t.Error("slop=7 で 5px のずれを直しにいっている")
 	}
-	if _, moved := fitGeometry(cur, region, image.Point{}, board, 2, 1.0); !moved {
+	if _, moved := fitGeometry(cur, region, board, 2, 1.0); !moved {
 		t.Error("slop=2 では 5px のずれを直すはず")
 	}
 }
@@ -122,24 +124,5 @@ func TestWithFitMargin(t *testing.T) {
 				t.Errorf("withFitMargin(%v) = %v, want %v", tt.board, got, tt.want)
 			}
 		})
-	}
-}
-
-// 画像の原点が 0,0 とは限らない(image.Image の Bounds().Min)。
-// 原点を引き忘れると、そのぶんだけ枠がずれる。
-func TestFitGeometryOrigin(t *testing.T) {
-	cur := windowState{X: 100, Y: 200, Width: 480, Height: 420}
-	region := ikkyoku.Region{X: 0, Y: 0, Width: 476, Height: 384}
-	origin := image.Point{X: 50, Y: 60}
-
-	// 原点から 10px ずれた位置に、キャプチャ領域と同じ大きさの盤がある。
-	board := image.Rect(60, 70, 60+476, 70+384)
-	got, moved := fitGeometry(cur, region, origin, board, 2, 1.0)
-	if !moved {
-		t.Fatal("moved = false, want true")
-	}
-	want := windowState{X: 110, Y: 210, Width: 480, Height: 420}
-	if got != want {
-		t.Errorf("fitGeometry() = %+v, want %+v", got, want)
 	}
 }

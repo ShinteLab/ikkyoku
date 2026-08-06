@@ -45,7 +45,7 @@ export function mountFrame(root: HTMLElement): void {
                 aria-label="メニュー" title="メニュー(準備中)">${iconMarkup(FiChevronDown)}</button>
         <button id="frame-fit" class="frame-btn is-icon" type="button"
                 aria-label="盤に合わせる"
-                title="盤に合わせる(枠の中から盤を探して枠を寄せる)">${iconMarkup(FiCrop)}</button>
+                title="盤に合わせる(画面に出ている盤を探して枠を合わせる)">${iconMarkup(FiCrop)}</button>
         <button id="frame-capture" class="frame-btn is-primary is-icon" type="button"
                 aria-label="撮る" title="撮る(Alt+S)">${iconMarkup(FiCamera)}</button>
       </div>
@@ -241,13 +241,14 @@ export function mountFrame(root: HTMLElement): void {
     showError(event.data);
   });
 
-  // 枠の中から盤を探して、枠をそこへ寄せる。
+  // 画面に出ている盤を探して、枠をそこへ合わせる。
   //
-  // **Go 側は 1 枚撮ってから探す**(CaptureService.FitFrame)ので、押してから
-  // 結果が出るまでに一呼吸ある。撮る操作と同じく、押した直後は文字だけを出して
-  // ガイド枠の線には触らない(検出用の 1 枚に線の色の変化が乗らないように)。
+  // **Go 側は枠を一瞬隠して画面全体を撮ってから探す**(CaptureService.FitFrame)ので、
+  // 押してから結果が出るまでに一呼吸あり、その間に枠が消えて戻る。撮る操作と同じく、
+  // 押した直後は文字だけを出してガイド枠の線には触らない(探すための 1 枚に
+  // 線の色の変化が乗らないように)。
   //
-  // 盤が見つからなかったのは失敗ではない(枠が盤を囲めていないだけ)。枠は動かず、
+  // 盤が見つからなかったのは失敗ではない(画面に盤が出ていないだけ)。枠は動かず、
   // 理由だけが出る。エラー表示にせず警告の明滅で返すのはそのため。
   fitBtn.addEventListener("click", () => {
     void (async () => {

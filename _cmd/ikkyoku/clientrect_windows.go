@@ -18,9 +18,31 @@ var (
 	user32 = windows.NewLazySystemDLL("user32.dll")
 
 	procGetClientRect   = user32.NewProc("GetClientRect")
+	procGetWindowRect   = user32.NewProc("GetWindowRect")
 	procClientToScreen  = user32.NewProc("ClientToScreen")
 	procGetDpiForWindow = user32.NewProc("GetDpiForWindow") // Windows 10 1607(RS1)以降
 )
+
+// windowRectPhysical は HWND のウィンドウ全体(タイトルバー・枠を含む)を
+// 物理ピクセルのスクリーン座標で返す。
+//
+// 用途は**キャプチャした画面から自分のウィンドウを消すこと**。ガイド枠の自動フィットで
+// 画面全体から盤を探すとき、メイン画面が写っていると `<shogi-board>` が描いている
+// 「本物の将棋盤」を掴んでしまう(中継の盤より綺麗なので、むしろそちらが勝つ)。
+// クライアント領域ではなくウィンドウ全体を使うのは、消し残しを作らないため。
+func windowRectPhysical(hwnd unsafe.Pointer) (physicalRect, error) {
+	var rect win32Rect
+	ret, _, callErr := procGetWindowRect.Call(uintptr(windows.HWND(uintptr(hwnd))), uintptr(unsafe.Pointer(&rect)))
+	if ret == 0 {
+		return physicalRect{}, fmt.Errorf("ikkyoku-app: GetWindowRect に失敗しました: %w", callErr)
+	}
+	return physicalRect{
+		X:      int(rect.Left),
+		Y:      int(rect.Top),
+		Width:  int(rect.Right - rect.Left),
+		Height: int(rect.Bottom - rect.Top),
+	}, nil
+}
 
 // win32Rect は Win32 の RECT に対応するレイアウト(LONG × 4)。
 type win32Rect struct {
