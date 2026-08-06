@@ -13,8 +13,10 @@
 // 枠(frame.ts)とは別ウィンドウなので、ここに置いた要素はキャプチャに写り込まない
 // ——ただし**枠に重なる位置に動かすと写り込む**(画面の合成結果を撮るため)。初回だけ
 // Go 側が枠の外へ逃がす(captureservice.go の placeMainBesideFrame)。
-import { Events } from "@wailsio/runtime";
+import { Clipboard, Events } from "@wailsio/runtime";
+import { FiCopy } from "react-icons/fi";
 import { CaptureService } from "../bindings/ikkyoku-app";
+import { iconMarkup } from "./icon";
 // 認識の観測情報。**型を手で書き写さない**(Go 側は suteme の型をそのまま通しており、
 // ここで別に定義すると矩形の意味がずれても気づけない)。
 import type { Debug } from "../bindings/github.com/ShinteLab/suteme";
@@ -144,6 +146,9 @@ export function mountMainScreen(root: HTMLElement): void {
         <div class="debug-shot">
           <div class="debug-shot-head">
             <span class="field-label">撮った画像</span>
+            <button id="shot-path" class="path-btn" type="button" hidden>
+              <span class="path-name"></span>${iconMarkup(FiCopy)}
+            </button>
             <label class="overlay-toggle">
               <input id="overlay-toggle" type="checkbox" checked />
               認識の重ね表示
@@ -171,6 +176,8 @@ export function mountMainScreen(root: HTMLElement): void {
   const warnings = root.querySelector<HTMLUListElement>("#warnings")!;
   const status = root.querySelector<HTMLParagraphElement>("#status")!;
   const shot = root.querySelector<HTMLDivElement>("#shot")!;
+  const shotPath = root.querySelector<HTMLButtonElement>("#shot-path")!;
+  const shotPathName = shotPath.querySelector<HTMLSpanElement>(".path-name")!;
   const thumbnail = root.querySelector<HTMLImageElement>("#thumbnail")!;
   const overlay = root.querySelector<SVGSVGElement>("#overlay")!;
   const overlayToggle = root.querySelector<HTMLInputElement>("#overlay-toggle")!;
@@ -402,6 +409,47 @@ export function mountMainScreen(root: HTMLElement): void {
     rect(debug.region, "region");
   };
 
+  // 撮った画像のファイル名。押すと**フルパス**をクリップボードへ入れる。
+  //
+  // 撮った PNG は suteme の学習データにも、他のツールで開く対象にもなるので、パスを
+  // 手で写す場面がそれなりにある。表示はファイル名だけにして(保存先は毎回同じで、
+  // 見て区別が付くのは末尾の時刻の部分だけ)、コピーするのは開くのに使えるフルパス。
+  //
+  // クリップボードは Wails ランタイム経由(`Clipboard.SetText`)で入れる。
+  // `navigator.clipboard` は secure context 前提で、カスタムスキームで配信している
+  // この webview では使えるとは限らない。
+  let shotFullPath = "";
+  let copiedTimer = 0;
+  const showPath = (path: string) => {
+    shotFullPath = path;
+    if (!path) {
+      shotPath.hidden = true;
+      return;
+    }
+    // Windows の `\` 区切りだが、将来 `/` になっても困らないよう両方で切る。
+    shotPathName.textContent = path.split(/[\\/]/).pop() ?? path;
+    shotPath.title = `クリックでパスをコピー: ${path}`;
+    shotPath.classList.remove("is-copied");
+    shotPath.hidden = false;
+  };
+  shotPath.addEventListener("click", () => {
+    void (async () => {
+      try {
+        await Clipboard.SetText(shotFullPath);
+      } catch (err) {
+        shotPath.title = `コピーできません: ${String(err)}`;
+        return;
+      }
+      // 押しても何も起きないように見えるのを避ける。表示は変えず、色だけ変えて戻す
+      // (ファイル名が「コピーしました」に化けると、何を撮ったのか分からなくなる)。
+      shotPath.classList.add("is-copied");
+      window.clearTimeout(copiedTimer);
+      copiedTimer = window.setTimeout(() => {
+        shotPath.classList.remove("is-copied");
+      }, 1200);
+    })();
+  });
+
   const showResult = (result: CaptureResult) => {
     // 認識できなくてもキャプチャは成功している(設計原則3: 段階的に劣化する)。
     // 保存できたことと、認識できたかどうかを分けて出す。
@@ -414,6 +462,7 @@ export function mountMainScreen(root: HTMLElement): void {
       status.classList.remove("is-error", "is-warn");
     }
 
+    showPath(result.path);
     sfenOut.textContent = result.sfen || "-";
     showBoard(result.sfen, true);
     showConfidence(result.confidence, result.sfen);

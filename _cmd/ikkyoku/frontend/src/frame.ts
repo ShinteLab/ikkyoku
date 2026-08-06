@@ -26,17 +26,23 @@ export function mountFrame(root: HTMLElement): void {
   // 枠は中継の上に重ねて使うので、常時「ikkyoku」と出ていても邪魔なだけ。
   // 普段は空で、撮影・失敗・警告のときだけ文字が出る(戻すときも空に戻す)。
   //
-  // ボタンは ▼(メニュー)・カメラ(撮る)・✕(隠す)の 3 つ。✕ だけは押し間違えると
-  // 枠が消えて驚くので、カメラとの間を空けてある(style.css の .is-detached)。
+  // ボタンは ▼(メニュー)・カメラ(撮る)・✕(隠す)の 3 つ。よく押す ▼ とカメラは左端に、
+  // 押し間違えると枠が消えて驚く ✕ だけは右端に離す。間はメッセージ欄が埋める。
+  //
+  // ⚠️ ボタンは必ず `.frame-actions` の中に置くこと。ツールバーは全体が
+  // `--wails-draggable: drag`(移動ハンドル)で、それを `no-drag` に戻しているのが
+  // `.frame-actions` 側だけ。外に出すとドラッグ扱いになり、クリックが効かなくなる。
   root.innerHTML = `
     <div class="frame-toolbar">
-      <span class="frame-title"></span>
       <div class="frame-actions">
         <button id="frame-menu" class="frame-btn is-icon" type="button"
                 aria-label="メニュー" title="メニュー(準備中)">${iconMarkup(FiChevronDown)}</button>
         <button id="frame-capture" class="frame-btn is-primary is-icon" type="button"
                 aria-label="撮る" title="撮る(Alt+S)">${iconMarkup(FiCamera)}</button>
-        <button id="frame-hide" class="frame-btn is-icon is-detached" type="button"
+      </div>
+      <span class="frame-title"></span>
+      <div class="frame-actions">
+        <button id="frame-hide" class="frame-btn is-icon" type="button"
                 aria-label="枠を隠す"
                 title="枠を隠す(領域は保持され、Alt+S でそのまま撮れます)">${iconMarkup(FiX)}</button>
       </div>

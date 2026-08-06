@@ -45,9 +45,8 @@ html.is-frame #app {
   overflow: hidden;
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
-  padding: 0 4px 0 10px;
+  padding: 0 4px;
   background: #1b1d23;
   color: #f2f3f5;
   font-size: 12px;
@@ -58,7 +57,12 @@ html.is-frame #app {
   --wails-draggable: drag;
 }
 
+/* 状態メッセージ欄。普段は空で、ボタン群(左)と ✕(右)の間を埋める役目も兼ねる。
+   ここが伸びることで ✕ が右端に寄る(--wails-draggable は継承したままなので、
+   空いている部分はそのままウィンドウの移動ハンドルになる)。 */
 .frame-title {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -104,11 +108,6 @@ html.is-frame #app {
   justify-content: center;
   padding: 4px;
   font-size: 15px;
-}
-
-/* ✕(枠を隠す)は押し間違えたときの驚きが大きいので、カメラとの間を空ける。 */
-.frame-btn.is-detached {
-  margin-left: 10px;
 }
 
 .frame-btn.is-primary {
@@ -562,6 +561,45 @@ html.is-main body {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+/* 撮った画像のファイル名。押すとフルパスをクリップボードへ(mainscreen.ts)。
+   ボタンだと分かる程度の見た目にとどめる(主役は下の画像なので目立たせない)。
+   `display: flex` は UA の `[hidden] { display: none }` より強いので打ち消す。 */
+.path-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 2px 8px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 11.5px;
+  color: #9aa6c0;
+  background: #23262e;
+  border: 1px solid #3a3d47;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.path-btn[hidden] {
+  display: none;
+}
+
+.path-btn:hover {
+  color: #f2f3f5;
+  border-color: #4a4e5a;
+}
+
+/* コピーできたことの合図。表示は変えずに色だけ変える(mainscreen.ts の ⚠️ 参照)。 */
+.path-btn.is-copied {
+  color: #8fdc9b;
+  border-color: #8fdc9b;
+}
+
+.path-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .overlay-toggle {
