@@ -113,6 +113,13 @@ html.is-frame #app {
   display: none;
 }
 
+/* 区切り線。押すとアプリが消える「終了」を、上の項目と地続きにしないための間。 */
+.frame-menu-sep {
+  height: 1px;
+  margin: 4px 2px;
+  background: #3a3d47;
+}
+
 /* メニューの項目。横幅いっぱい・左寄せで、ボタンらしさは hover まで出さない。 */
 .frame-btn.is-menu {
   width: 100%;

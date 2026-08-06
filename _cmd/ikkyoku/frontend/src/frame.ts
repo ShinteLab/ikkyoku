@@ -66,6 +66,9 @@ export function mountFrame(root: HTMLElement): void {
       </div>
     </div>
     <div id="frame-menu-items" class="frame-menu" role="menu" hidden>
+      <button id="frame-settings" class="frame-btn is-menu" type="button" role="menuitem"
+              title="メイン画面の設定タブを開きます">設定</button>
+      <div class="frame-menu-sep" role="separator"></div>
       <button id="frame-quit" class="frame-btn is-menu is-danger" type="button" role="menuitem"
               title="ikkyoku を終了します(枠とメイン画面の位置は保存されます)">終了</button>
     </div>
@@ -77,6 +80,7 @@ export function mountFrame(root: HTMLElement): void {
   const title = root.querySelector<HTMLSpanElement>(".frame-title")!;
   const menuBtn = root.querySelector<HTMLButtonElement>("#frame-menu")!;
   const menu = root.querySelector<HTMLDivElement>("#frame-menu-items")!;
+  const settingsBtn = root.querySelector<HTMLButtonElement>("#frame-settings")!;
   const quitBtn = root.querySelector<HTMLButtonElement>("#frame-quit")!;
   const fitBtn = root.querySelector<HTMLButtonElement>("#frame-fit")!;
   const captureBtn = root.querySelector<HTMLButtonElement>("#frame-capture")!;
@@ -130,9 +134,16 @@ export function mountFrame(root: HTMLElement): void {
 
   // ▼ のメニュー。ツールバーの下に垂れる(冒頭の ⚠️ を読むこと)。
   //
-  // 今の中身は「終了」だけ。枠の✕は隠すだけで終了ではないので、**枠しか出していない
-  // ときに終了する手段が無かった**(メイン画面を一度出して閉じるしかなかった)。
-  // 押すとアプリが消えるので、ツールバーに常時出さず一段隠したここに置く。
+  // 中身は「設定」と「終了」。どちらも**枠だけを出して使っているときに手が無かった**
+  // ものを入口にしたもの:
+  //
+  //   - 設定 … メイン画面を出す手段が「撮る」か「枠を✕で隠す」しか無かった
+  //     (撮りたくないのに撮る / 位置合わせに使う枠が消える、という副作用つき)
+  //   - 終了 … 枠の✕は隠すだけなので、メイン画面を一度出して閉じるしかなかった
+  //
+  // どちらも毎回押すものではないうえ、終了は押すとアプリが消える。ツールバーに
+  // 常時並べず、一段隠したここに置く。**セパレータで終了だけを分けている**のは、
+  // 上の項目を押すつもりで下まで滑らせる事故を減らすため。
   const setMenuOpen = (open: boolean) => {
     menu.hidden = !open;
     menuBtn.setAttribute("aria-expanded", String(open));
@@ -151,6 +162,13 @@ export function mountFrame(root: HTMLElement): void {
     if (!(e.target as HTMLElement).closest("#frame-menu, #frame-menu-items")) {
       setMenuOpen(false);
     }
+  });
+
+  // 設定。メイン画面を出して設定タブを開く(タブの指定は Go 側が main:tab で流す)。
+  // 枠は隠さない。位置合わせの基準そのものなので、設定を見るために消す理由が無い。
+  settingsBtn.addEventListener("click", () => {
+    setMenuOpen(false);
+    void CaptureService.ShowMain("settings");
   });
 
   // 終了。**メイン画面を閉じたときと同じ扱い**(Go 側で位置・サイズを保存してから

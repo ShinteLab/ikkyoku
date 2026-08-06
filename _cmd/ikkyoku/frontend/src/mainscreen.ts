@@ -659,6 +659,15 @@ export function mountMainScreen(root: HTMLElement): void {
   Events.On("capture:failed", (event: { data: string }) => {
     showError(event.data);
   });
+  // 枠のメニュー(▼ → 設定)からこの画面を呼び出したときに、開いてほしいタブが来る
+  // (CaptureService.ShowMain)。**この画面は隠れていてもフロントは動いている**ので、
+  // 前面に出る前に届く。知らないタブ名は無視して今のタブのままにする。
+  Events.On("main:tab", (event: { data: string }) => {
+    const target = root.querySelector<HTMLButtonElement>(`#tab-${event.data}`);
+    if (target && tabs.some(({ tab }) => tab === target)) {
+      selectTab(target);
+    }
+  });
   Events.On("hotkey:register-failed", (event: { data: { hotkey: string; error: string } }) => {
     status.textContent = `グローバルホットキー(${event.data.hotkey})の登録に失敗しました。枠のツールバーの「撮る」は使えます。`;
     status.classList.add("is-error");

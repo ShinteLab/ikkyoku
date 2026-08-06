@@ -135,3 +135,19 @@ export function ReloadRecognizer(): $CancellablePromise<$models.RecognizerStatus
 export function ShowFrame(): $CancellablePromise<void> {
     return $Call.ByID(3510559659);
 }
+
+/**
+ * ShowMain はメイン画面を出して前面に持ってくる。枠のメニューから呼ばれる。
+ * 
+ * **枠からメイン画面を出す手段が「撮る」か「枠を✕で隠す」しか無かった。** どちらも
+ * 副作用が目的とずれている(撮りたくないのに撮る / 位置合わせに使う枠が消える)ので、
+ * メイン画面を見たいときの入口をメニューに作った。
+ * 
+ * tab は開いてほしいタブ("board" / "debug" / "settings")。空なら今のタブのまま。
+ * **イベントは Show の前に出す**(Capture と同じ理由。前面に来た時点で目的のタブが
+ * 開いている状態にする)。メイン画面は隠れていてもフロントは動いているので、
+ * 非表示のあいだに出したイベントも受け取れる。
+ */
+export function ShowMain(tab: string): $CancellablePromise<void> {
+    return $Call.ByID(909839475, tab);
+}
