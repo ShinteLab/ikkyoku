@@ -48,18 +48,36 @@ const (
 // ことになるが、盤が 1px 欠けるだけで実害は無い(枠が写り込む方を避ける)。
 const framelessBottomPaddingPx = 1
 
-// fitSlopPx はガイド枠の自動フィットで「もう合っている」とみなすずれ(物理px)。
-//
-// 検出した矩形は 1px 単位で毎回同じにはならない。これを 0 にすると、押すたびに
-// 枠が 1px 動いて「合わせたのにまだ動く」ように見える。
-const fitSlopPx = 2
-
 // fitMinBoardPx は自動フィットで受け入れる盤の最小の一辺(物理px)。
 //
 // 9 マスに割ると 1 マス 10px。これ以下の矩形に枠を合わせると、盤ではない何かを
 // 掴んでいたときに枠が潰れて操作できなくなる。信頼度の判定(MinRegionConfidence)を
 // 通ったあとの最後の歯止め。
 const fitMinBoardPx = 90
+
+// fitMarginCellRatio は自動フィットで盤の外側に残す余白(マス 1 つの何割か)。
+// fitMinMarginPx はその下限(物理px)。
+//
+// **盤にぴったり合わせると、次に撮った画像が認識しづらくなる。** 盤の外枠の線が
+// 画像の端に来てしまい、検出(DetectBoard)が格子として掴めなくなるため。撮り溜めた
+// PNG を「検出した矩形ぴったり」と「余白つき」で切り出して Recognize に流すと、
+// ぴったり側だけが落ちる(実測: 0.63←0.90 / 0.79←0.99 / 0.86←0.98 / 0.88←1.00 / 0.91←1.00。
+// 悪いものは検出そのものが失敗する)。**フィットの目的は認識を良くすることなので、
+// ここで余白を取らないと機能として本末転倒になる。**
+//
+// 余白はマスの大きさに比例させる(盤の見かけの大きさは中継によって 2 倍以上違う)。
+// 同じ実測で +2〜+8px(マス 70〜100px に対して 2〜11%)がどれも安定していたので、
+// その真ん中を取っている。**大きくしすぎないこと**(余白に写った中継の UI が
+// 盤の格子と競合しうる)。
+//
+// **この余白は「もう合っている」の判定にもそのまま使う**(fitGeometry の slop)。
+// 検出結果は毎回 数px 揺れるので、余白より小さいずれまで直しにいくと押すたびに
+// 枠が動く。余白より小さいずれは**盤が枠に収まっているかどうかを変えない**ので、
+// 直す必要が無い。
+const (
+	fitMarginCellRatio = 0.1
+	fitMinMarginPx     = 2
+)
 
 // fitMinShrinkRatio は自動フィットで許す縮小の下限(今のキャプチャ領域に対する一辺の比)。
 //
@@ -446,7 +464,9 @@ func (s *CaptureService) FitFrame() (FitResult, error) {
 	x, y := s.wins.frame.Position()
 	w, h := s.wins.frame.Size()
 	cur := windowState{X: x, Y: y, Width: w, Height: h}
-	next, moved := fitGeometry(cur, region, img.Bounds().Min, b, scale)
+	// **盤ぴったりではなく、少し外側に合わせる**(fitMarginCellRatio 参照)。
+	// 画像をはみ出しても構わない(枠が今より大きくなるだけで、そこには画面の続きが写る)。
+	next, moved := fitGeometry(cur, region, img.Bounds().Min, withFitMargin(b), fitMargin(b), scale)
 	if !moved {
 		return FitResult{
 			Fitted:     true,
@@ -473,6 +493,28 @@ func (s *CaptureService) FitFrame() (FitResult, error) {
 	}, nil
 }
 
+// fitMargin は盤の外側に残す余白(物理px)。マスの大きさに比例する。
+func fitMargin(board image.Rectangle) int {
+	cell := float64(board.Dx()) / 9
+	if h := float64(board.Dy()) / 9; h < cell {
+		cell = h // 縦横で違う場合は狭いほうに合わせる(余白が過剰にならないように)
+	}
+	m := int(math.Round(cell * fitMarginCellRatio))
+	if m < fitMinMarginPx {
+		m = fitMinMarginPx
+	}
+	return m
+}
+
+// withFitMargin は盤の矩形を余白のぶんだけ広げる。
+//
+// **画像の外にはみ出しても切り詰めない。** 枠は今より大きくなってよく、はみ出した
+// ぶんには画面の続きが写るだけ。ここで image.Bounds() に丸めると、盤が枠の端に
+// 接している(= まさに余白が要る)ときに限って余白が消える。
+func withFitMargin(board image.Rectangle) image.Rectangle {
+	return board.Inset(-fitMargin(board))
+}
+
 // fitGeometry は「キャプチャ領域の中の盤の位置」から、枠ウィンドウの新しい
 // 位置・サイズ(DIP)を求める。moved が false なら動かす必要は無い。
 //
@@ -482,18 +524,19 @@ func (s *CaptureService) FitFrame() (FitResult, error) {
 //
 // origin は撮った画像の左上(image.Image の Bounds().Min)。0,0 とは限らないので引く。
 // scale は CSS px → 物理 px の係数で、ウィンドウの座標系(DIP)へ割り戻すのに使う。
+// slop は「もう合っている」とみなすずれ(物理px。呼び出し側は余白と同じ値を渡す)。
 //
 // **サイズは外側に倒す**(scaleUp と同じ理由の裏返し。丸めで縮むと盤の端が欠ける。
 // 1px 広いぶんには盤の外周が少し余分に写るだけで実害が無い)。
 //
 // GUI から切り離してあるのは、符号を 1 つ間違えると枠が逆へ飛ぶのに、
 // 実機で気づくしかなくなるため(fitGeometry のテストがある)。
-func fitGeometry(cur windowState, region ikkyoku.Region, origin image.Point, board image.Rectangle, scale float64) (windowState, bool) {
+func fitGeometry(cur windowState, region ikkyoku.Region, origin image.Point, board image.Rectangle, slop int, scale float64) (windowState, bool) {
 	dx := board.Min.X - origin.X
 	dy := board.Min.Y - origin.Y
 	dw := board.Dx() - region.Width
 	dh := board.Dy() - region.Height
-	if abs(dx) <= fitSlopPx && abs(dy) <= fitSlopPx && abs(dw) <= fitSlopPx && abs(dh) <= fitSlopPx {
+	if abs(dx) <= slop && abs(dy) <= slop && abs(dw) <= slop && abs(dh) <= slop {
 		return cur, false
 	}
 	return windowState{
