@@ -190,7 +190,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### ikkyoku 側の実装（済み）
 
 - `recognize` パッケージ（ルートモジュール）が `suteme.Recognize` を呼び、`Board` にまとめる。
-  **認識器はここに書かない**（suteme の責務）。一方、Phase 3 の局面矯正層はここに入る
+  **認識器はここに書かない**（suteme の責務）。
+  **⚠️ Phase 3 の局面矯正層をここに入れない**（2026-08-07 に方針変更。以前は「ここに入る」と
+  書いてあった）。`recognize` は**画像を知っている層**で、訂正から先が扱うのは
+  **画像を一切持たない「とある局面」**（誰と誰の対局か・何手目か・そこから何を選んだか）。
+  混ぜると、局面を持ち回るコードが画像とその座標系を引きずる。
+  画像は撮った PNG がディスクに残っていれば足りる（学習への還元もパスを渡すだけ）
 - `CaptureService.Capture` が撮った直後に呼び、`CaptureResult` に
   `sfen` / `confidence` / `warnings` / `handTotal` / `recognizeError` / `debug` を載せて返す
 - **`Debug` は `suteme.Debug` の型エイリアス**（`recognize.Debug`）。`Option` と同じく
@@ -430,7 +435,7 @@ New-Item -ItemType Junction -Path (Join-Path $w 'core')   -Target 'D:\Go\Project
 | `save.go` | `SavePNG` / `DefaultOutDir` / タイムスタンプ式ファイル名生成 |
 | `config.go` | `Config` の JSON 読み書き（`encoding/json` のみ、標準ライブラリで完結）。`SutemeDataDir` / `FitOnStartup` もここ |
 | `hotkey.go` | `ParseHotkey`（`"alt+s"` 文字列 → `golang.design/x/hotkey` の修飾子・キー） |
-| `recognize/` | 画像 → 盤面。`suteme` を呼ぶだけ（`recognize.go`）＋どの学習データを使うかの指定（`predictor.go`）＋盤の矩形だけを探す `DetectRegion`（`detect.go`。ガイド枠の自動フィット用）。**認識器はここに書かない**。Phase 3 の局面矯正層はここに入る |
+| `recognize/` | 画像 → 盤面。`suteme` を呼ぶだけ（`recognize.go`）＋どの学習データを使うかの指定（`predictor.go`）＋盤の矩形だけを探す `DetectRegion`（`detect.go`。ガイド枠の自動フィット用）。**認識器はここに書かない**。**Phase 3 の局面矯正層もここには入れない**（画像を知らない層として別に切る。上記参照） |
 | `_cmd/ikkyoku/` | Wails3 GUI アプリ(独立したネストモジュール)。下記「GUI アプリ(Wails3)」参照 |
 
 **ディレクトリ名は `ikkyoku`、モジュール名は `ikkyoku-app`。** `kicho` が
