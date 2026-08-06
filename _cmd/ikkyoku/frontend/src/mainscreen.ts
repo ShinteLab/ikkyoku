@@ -15,6 +15,9 @@
 // Go 側が枠の外へ逃がす(captureservice.go の placeMainBesideFrame)。
 import { Events } from "@wailsio/runtime";
 import { CaptureService } from "../bindings/ikkyoku-app";
+// 認識の観測情報。**型を手で書き写さない**(Go 側は suteme の型をそのまま通しており、
+// ここで別に定義すると矩形の意味がずれても気づけない)。
+import type { Debug } from "../bindings/github.com/ShinteLab/suteme";
 
 interface CaptureResult {
   path: string;
@@ -26,10 +29,33 @@ interface CaptureResult {
   warnings: string[];
   handTotal: Record<string, number>;
   recognizeError: string;
+  debug?: Debug | null;
 }
 
 // これを下回ったら検出を疑う。盤が映っていない画面を撮ったときにここが落ちる。
 const LOW_CONFIDENCE = 0.75;
+
+// マスの確信度がこれを下回ったら重ね表示で目立たせる。
+//
+// **盤面検出の信頼度(LOW_CONFIDENCE)とは別物。** k-NN の確信度は「上位k件の投票で
+// 勝ったクラスの重み比率」なので、迷いが無ければ 1.0 に張り付く。下がっているマスは
+// 「似た候補が競っている」＝訂正の候補、という読み方になる。
+const LOW_CELL_CONFIDENCE = 0.8;
+
+// 盤面領域の決め方の表示名。**どれも異常ではない。**
+// ikkyoku はガイド枠を盤に合わせて撮るので、盤の縁が画像端に来る whole は
+// むしろ想定どおりの経路(枠が合っているほど whole になる)。
+const REGION_SOURCE_LABEL: Record<string, string> = {
+  detect: "画像内から検出",
+  whole: "画像全体を盤とみなした",
+  option: "座標を明示指定",
+};
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+// 段(row)・筋(col)から人が読めるマス名を作る。row 0 = 一段、col 0 = 9筋。
+const RANK_KANJI = ["一", "二", "三", "四", "五", "六", "七", "八", "九"];
+const cellName = (row: number, col: number) => `${9 - col}${RANK_KANJI[row] ?? "?"}`;
 
 // 駒台の表示順(飛角金銀桂香歩)。SFEN の駒文字をそのまま並べる。
 const HAND_ORDER = ["R", "B", "G", "S", "N", "L", "P"];
@@ -97,6 +123,14 @@ export function mountMainScreen(root: HTMLElement): void {
           <span class="field-label">検出</span>
           <span id="confidence" class="note"></span>
         </div>
+        <div id="region-row" class="hand-row" hidden>
+          <span class="field-label">盤面</span>
+          <span id="region" class="note"></span>
+        </div>
+        <div id="predictor-row" class="hand-row" hidden>
+          <span class="field-label">推論器</span>
+          <span id="predictor" class="note"></span>
+        </div>
         <div id="hand-row" class="hand-row" hidden>
           <span class="field-label">駒台</span>
           <span id="hand" class="hand"></span>
@@ -108,8 +142,17 @@ export function mountMainScreen(root: HTMLElement): void {
         </p>
 
         <div class="debug-shot">
-          <span class="field-label">撮った画像</span>
-          <img id="thumbnail" class="thumbnail" alt="直近のキャプチャ" hidden />
+          <div class="debug-shot-head">
+            <span class="field-label">撮った画像</span>
+            <label class="overlay-toggle">
+              <input id="overlay-toggle" type="checkbox" checked />
+              認識の重ね表示
+            </label>
+          </div>
+          <div id="shot" class="shot" hidden>
+            <img id="thumbnail" class="thumbnail" alt="直近のキャプチャ" />
+            <svg id="overlay" class="overlay" preserveAspectRatio="none" aria-hidden="true"></svg>
+          </div>
         </div>
       </div>
     </div>
@@ -127,7 +170,14 @@ export function mountMainScreen(root: HTMLElement): void {
   const handOut = root.querySelector<HTMLElement>("#hand")!;
   const warnings = root.querySelector<HTMLUListElement>("#warnings")!;
   const status = root.querySelector<HTMLParagraphElement>("#status")!;
+  const shot = root.querySelector<HTMLDivElement>("#shot")!;
   const thumbnail = root.querySelector<HTMLImageElement>("#thumbnail")!;
+  const overlay = root.querySelector<SVGSVGElement>("#overlay")!;
+  const overlayToggle = root.querySelector<HTMLInputElement>("#overlay-toggle")!;
+  const regionRow = root.querySelector<HTMLDivElement>("#region-row")!;
+  const regionOut = root.querySelector<HTMLElement>("#region")!;
+  const predictorRow = root.querySelector<HTMLDivElement>("#predictor-row")!;
+  const predictorOut = root.querySelector<HTMLElement>("#predictor")!;
 
   // タブ。盤面タブは「撮れた盤と SFEN」だけに絞り、認識器の状態・警告・撮った画像
   // といった突き合わせ用の情報はデバッグタブへ寄せてある。**盤を大きく見せるのが目的**
@@ -240,6 +290,118 @@ export function mountMainScreen(root: HTMLElement): void {
     warnings.hidden = false;
   };
 
+  // 設定で指定した学習データの置き場所(ikkyoku.Config の SutemeDataDir)。
+  // 実際に読まれたファイル(debug.predictor.source)と突き合わせるために覚えておく。
+  let configuredDir = "";
+  const normalizePath = (s: string) => s.toLowerCase().replace(/\\/g, "/");
+
+  // 盤面と判定した矩形。**認識が外れたときに、座標の問題か駒種の問題かを切り分ける材料。**
+  // Confidence だけでは「怪しい」までしか言えず、どちらが原因かは分からない。
+  const showRegion = (debug: Debug | null | undefined) => {
+    if (!debug) {
+      regionRow.hidden = true;
+      return;
+    }
+    const r = debug.region;
+    const w = r.Max.X - r.Min.X;
+    const h = r.Max.Y - r.Min.Y;
+    const src = REGION_SOURCE_LABEL[debug.region_source] ?? debug.region_source;
+    regionOut.textContent =
+      `(${r.Min.X},${r.Min.Y})-(${r.Max.X},${r.Max.Y}) ${w}x${h}` +
+      ` / 1マス ${Math.round(w / 9)}x${Math.round(h / 9)} / ${src}`;
+    regionRow.hidden = false;
+  };
+
+  // 実際に使われた駒種推論器。
+  //
+  // **「認識器」の行(設定した置き場所)とは別物。** あちらは config に書いたディレクトリで、
+  // suteme が本当にどのファイルを読んだかまでは言えない。学習データは育て続けるものなので、
+  // 「古いデータで認識していた」に後から気づく事故を防ぐにはこちらが要る。
+  const showPredictor = (debug: Debug | null | undefined) => {
+    if (!debug) {
+      predictorRow.hidden = true;
+      return;
+    }
+    const p = debug.predictor;
+    let text = p.kind + (p.detail ? `(${p.detail})` : "");
+    if (p.source) {
+      text += ` ← ${p.source}`;
+    }
+    // 設定した場所と違うところから読んでいたら、そこだけ色を変えて知らせる。
+    // (SetPredictor が効いておらず suteme 既定の探索に落ちている、など)
+    const mismatched =
+      configuredDir !== "" &&
+      p.source !== undefined &&
+      p.source !== "" &&
+      !normalizePath(p.source).startsWith(normalizePath(configuredDir));
+    if (mismatched) {
+      text += " ※設定と別の場所";
+    }
+    predictorOut.textContent = text;
+    predictorOut.classList.toggle("is-low", mismatched);
+    predictorRow.hidden = false;
+  };
+
+  // 撮った画像に、盤面と判定した矩形とマス割りを重ねる。
+  //
+  // **画像は Go 側で描かずに座標だけを受け取ってここで重ねる。** サムネイルは既に
+  // 等倍 PNG の base64 なので、描き込んだ 2 枚目を送るとペイロードが倍になる。
+  // 重ねるだけならマスごとの確信度をホバーで出せるし、オン/オフも切り替えられる。
+  //
+  // viewBox を入力画像の座標系そのものにしてあるので、矩形は suteme が返した値を
+  // そのまま置ける(表示サイズへの換算は preserveAspectRatio="none" が引き受ける。
+  // .thumbnail は max-width/max-height だけの指定なので、要素の箱＝画像の描画領域)。
+  const drawOverlay = (debug: Debug | null | undefined) => {
+    // 中身を捨てれば何も描かれないので、表示/非表示の切り替えは要らない
+    // (SVG 要素には hidden 属性の型が無い)。
+    overlay.replaceChildren();
+    if (!debug) {
+      return;
+    }
+    const b = debug.image_bounds;
+    overlay.setAttribute(
+      "viewBox",
+      `${b.Min.X} ${b.Min.Y} ${b.Max.X - b.Min.X} ${b.Max.Y - b.Min.Y}`,
+    );
+
+    const rect = (
+      r: { Min: { X: number; Y: number }; Max: { X: number; Y: number } },
+      cls: string,
+      tip?: string,
+    ) => {
+      const el = document.createElementNS(SVG_NS, "rect");
+      el.setAttribute("x", String(r.Min.X));
+      el.setAttribute("y", String(r.Min.Y));
+      el.setAttribute("width", String(r.Max.X - r.Min.X));
+      el.setAttribute("height", String(r.Max.Y - r.Min.Y));
+      el.setAttribute("class", cls);
+      // 線の太さは画像の拡縮に引きずられると見えなくなるので、画面上の px で固定する。
+      el.setAttribute("vector-effect", "non-scaling-stroke");
+      if (tip) {
+        const title = document.createElementNS(SVG_NS, "title");
+        title.textContent = tip;
+        el.appendChild(title);
+      }
+      overlay.appendChild(el);
+    };
+
+    for (const c of debug.cells ?? []) {
+      // category 0 = 空。空マスは枠だけにして、駒のあるマスの確信度を目立たせる。
+      const empty = c.piece === "";
+      const cls =
+        empty ? "cell is-empty"
+        : c.confidence < LOW_CELL_CONFIDENCE ? "cell is-low"
+        : "cell";
+      rect(
+        c.rect,
+        cls,
+        `${cellName(c.row, c.col)} ${c.piece || "空"} ${Math.round(c.confidence * 100)}%`,
+      );
+    }
+    // 外枠は最後に描いて、マスの線の上に来るようにする。
+    rect(debug.region, "region");
+  };
+
   const showResult = (result: CaptureResult) => {
     // 認識できなくてもキャプチャは成功している(設計原則3: 段階的に劣化する)。
     // 保存できたことと、認識できたかどうかを分けて出す。
@@ -255,13 +417,16 @@ export function mountMainScreen(root: HTMLElement): void {
     sfenOut.textContent = result.sfen || "-";
     showBoard(result.sfen, true);
     showConfidence(result.confidence, result.sfen);
+    showRegion(result.debug);
+    showPredictor(result.debug);
     showHand(result.handTotal);
     showWarnings(result.warnings);
 
     if (result.thumbnail) {
       thumbnail.src = result.thumbnail;
-      thumbnail.hidden = false;
+      shot.hidden = false;
     }
+    drawOverlay(result.debug);
 
     // 信頼度が低いのも「見に行くべきもの」に含める。盤が映っていない画面を撮ったときは
     // 警告が 1 件も出ないことがあり、それだと盤面タブ側では何も起きていないように見える。
@@ -290,6 +455,7 @@ export function mountMainScreen(root: HTMLElement): void {
   // 学習データを育てながら使うための入口。suteme は一度読んだ推論器をキャッシュするので、
   // データを更新してもこれを押すまで(あるいは再起動するまで)反映されない。
   const showRecognizer = (st: { source: string; ready: boolean; error: string }) => {
+    configuredDir = st.source ?? "";
     if (st.error) {
       recognizer.textContent = `認識器を読み込めません: ${st.error}`;
       recognizer.className = "recognizer is-error";
@@ -319,6 +485,12 @@ export function mountMainScreen(root: HTMLElement): void {
 
   reloadBtn.addEventListener("click", () => {
     void reload();
+  });
+
+  // 重ね表示は切れるようにしておく。撮った画像そのものを見たい場面(盤が映っていない
+  // 画面を撮ったかどうかの確認)では、線が邪魔になる。
+  overlayToggle.addEventListener("change", () => {
+    shot.classList.toggle("no-overlay", !overlayToggle.checked);
   });
 
   // 起動時は読み込み直さず、Go 側が起動時に読んだ結果をそのまま出す

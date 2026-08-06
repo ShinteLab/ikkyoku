@@ -539,11 +539,75 @@ html.is-main body {
   color: #ffc46b;
 }
 
+.debug-shot-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.overlay-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  color: #9aa6c0;
+  cursor: pointer;
+}
+
 /* 撮った画像そのものは盤を読むのに要らない。認識結果と突き合わせるためのもの。 */
 .thumbnail {
+  display: block;
   max-width: 100%;
-  max-height: 240px;
-  object-fit: contain;
+  max-height: 360px;
   border: 1px solid #3a3d47;
   border-radius: 6px;
+}
+
+/* 認識の重ね表示。画像に「盤面と判定した矩形」と「マス割り」を重ねる枠。
+   ⚠️ .thumbnail に width/height を与えないこと。max-* だけなら要素の箱が
+   画像の描画領域と一致するので、inset:0 の SVG がそのまま重なる。 */
+.shot {
+  position: relative;
+  display: inline-block;
+  line-height: 0;
+}
+
+.shot[hidden] {
+  display: none;
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.shot.no-overlay .overlay {
+  display: none;
+}
+
+/* 盤面と判定した外枠。ここがずれていれば座標の問題、合っていて駒が違えば
+   認識器の問題、と切り分けられる。 */
+.overlay .region {
+  fill: none;
+  stroke: #6ad3ff;
+  stroke-width: 2;
+}
+
+/* マス割り。1マスぶんのずれは外枠だけでは見えないので格子まで描く。 */
+.overlay .cell {
+  fill: none;
+  stroke: rgba(106, 211, 255, 0.35);
+  stroke-width: 1;
+}
+
+.overlay .cell.is-empty {
+  stroke: rgba(154, 166, 192, 0.18);
+}
+
+/* 確信度が低いマス。候補が競っている＝訂正の候補。 */
+.overlay .cell.is-low {
+  fill: rgba(255, 196, 107, 0.28);
+  stroke: #ffc46b;
 }

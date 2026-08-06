@@ -123,7 +123,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `LoadSFEN` は駒種推論器を必要とし、`suteme` は既定で
 **カレントディレクトリ → 実行ファイルのディレクトリ**の順に
-`training_data_v2.json`（k-NN 優先）/ `model_v2.json` を探す。
+`training_data_v3.json`（k-NN 優先）/ `model_v3.json` を探す。
 どちらも 3.5MB 級で、**しかも育て続けるファイル**。
 
 **実行ファイルの隣にコピーを置く運用は取らない。** 更新のたびにコピーし直す必要があり、
@@ -166,13 +166,29 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   `HandTotal` の逆算根拠なので、訂正 UI で「どの駒を数え間違えたか」を突き合わせられる
 - **`DetectBoard` はガイド枠の自動フィットに転用できる。** 撮った画像から盤の矩形が出るなら、
   ユーザーが手で合わせた枠を補正できる。Phase 1 の洗練としても効く
+- **`Result.Debug` が「その答えをどう出したか」を返す。**（`Recognize` が常に埋める）
+  `Confidence` は「怪しい」までしか言えず、**座標がずれているのか駒種を外しているのかを
+  切り分けられない**。`Debug` はそこに要る材料で、ikkyoku は次を使っている:
+
+  | フィールド | ikkyoku での使い道 |
+  |---|---|
+  | `Region` / `Cells[].Rect` | **撮った画像に重ねる**（デバッグタブ）。外枠だけだと 1 マスのずれが見えないので格子まで描く |
+  | `RegionSource` | 領域の決め方。**`whole` は異常ではない**（ガイド枠が盤にぴったり合っているほどこの経路になる）ので警告にしない |
+  | `Cells[].Confidence` | 低いマスを重ね表示で目立たせる。`Warnings` は結果しか言わないので、**どの駒が犯人か**はこれでしか出せない。訂正 UI（Phase 5）で最初に直す候補にもなる |
+  | `Predictor` | **実際に読まれた学習データ**（種別・パス・サンプル数）。config に書いたディレクトリと違って「本当に何を読んだか」なので、育て続けるデータで**古いまま認識していた事故**に気づける |
+
+  `ImageBounds` は重ね表示の座標系に、`Confidence` は `Result.Confidence` と同値。
+  `BoardColor` は今のところ使っていない。**認識の判断には使わないこと**（観測用）
 
 ### ikkyoku 側の実装（済み）
 
 - `recognize` パッケージ（ルートモジュール）が `suteme.Recognize` を呼び、`Board` にまとめる。
   **認識器はここに書かない**（suteme の責務）。一方、Phase 3 の局面矯正層はここに入る
 - `CaptureService.Capture` が撮った直後に呼び、`CaptureResult` に
-  `sfen` / `confidence` / `warnings` / `handTotal` / `recognizeError` を載せて返す
+  `sfen` / `confidence` / `warnings` / `handTotal` / `recognizeError` / `debug` を載せて返す
+- **`Debug` は `suteme.Debug` の型エイリアス**（`recognize.Debug`）。`Option` と同じく
+  **包み直さない**。矩形もクラスも suteme が出した値そのもので、同じ形の型を定義し直すと
+  変換のぶんだけ嘘が入る余地が増える。フロントも生成された bindings の型をそのまま使う
 - **認識に失敗してもキャプチャは成功として扱う**（設計原則3）。PNG の保存は済んでおり、
   盤が出ない代わりに理由が UI に出るだけ。`recognizeError` がその理由。
   **既定のオプションでは、`recognizeError` が入るのは「盤そのものが取れなかった」ときだけ**
@@ -186,6 +202,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   警告・エラー・信頼度の低下が出るとデバッグタブに点が付く（開けば消える）。
   信頼度を点の対象に含めているのは、**盤が映っていない画面を撮ると警告が 1 件も出ない
   ことがある**ため（局面の中身の話ではないので `warnings` には載らない）
+- **デバッグタブは撮った画像に認識の矩形を重ねて出す**（`Result.Debug`。上記の表を参照）。
+  盤面と判定した外枠・9x9 のマス割り・確信度の低いマスを描き、マスにホバーすると
+  「マス名・採用した表記・確信度」が出る。トグルで消せる（画像そのものを見たいとき用）
+
+  **描いた画像を Go 側から返していない。** サムネイルは既に等倍 PNG の base64 なので、
+  描き込んだ 2 枚目を積むとイベントのペイロードが倍になる。座標だけを渡して
+  SVG を重ねれば 81 マスで 10KB 程度で済み、ホバーもオン/オフも後から足せる。
+  SVG の `viewBox` を入力画像の座標系そのものにし、`preserveAspectRatio="none"` で
+  表示サイズへの換算を任せている（**`.thumbnail` に `width`/`height` を与えないこと**。
+  `max-*` だけなら要素の箱が画像の描画領域と一致し、`inset: 0` の SVG がそのまま重なる）
 
   ⚠️ **盤は 560px より大きくならない。** `<shogi-board>` の SVG は width 属性が
   固有サイズ（core/web の `CELL*9 + MARGIN*2`）で、CSS は `max-width: 100%` しか

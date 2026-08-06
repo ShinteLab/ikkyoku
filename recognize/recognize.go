@@ -25,6 +25,16 @@ import (
 // 使う側は `recognize.FromImage(img, suteme.WithErrorOn(sfen.CheckKing))` と書く。
 type Option = suteme.Option
 
+// Debug は認識1回分の観測情報(盤面と判定した矩形・その決め方・使った推論器・
+// マスごとの分類と確信度)。**Option と同じくエイリアスで、包み直さない。**
+// 矩形もクラスも suteme が出した値そのものなので、ikkyoku 側で同じ形の型を
+// 定義し直すと変換のぶんだけ嘘が入る余地が増える。
+//
+// 用途は「認識が外れたときの切り分け」。撮った画像に Region と Cells[].Rect を
+// 重ねれば、座標がずれているのか駒種を外しているのかが一目で分かる。
+// **認識の判断には使わない**(あくまで観測用)。
+type Debug = suteme.Debug
+
 // Board は 1 枚の画像から割り出した盤面。
 //
 // 1 回の認識は他の認識と完全に独立している(履歴に依存しない)。
@@ -51,6 +61,15 @@ type Board struct {
 	// 突き合わせるのに要る。
 	Black map[string]int `json:"black"`
 	White map[string]int `json:"white"`
+
+	// Debug は「その答えをどう出したか」の観測情報。**表示用**であって、
+	// ここまでの各フィールドのように局面の内容を表すものではない。
+	// 撮った画像に重ねて「盤をどこだと思ったか」を見せるのが主な使い道
+	// (Confidence が低いときに、座標の問題か認識器の問題かを切り分けられる)。
+	//
+	// suteme が埋めなかった場合は nil。**無くても動くこと**
+	// (設計原則3。デバッグ情報が欠けても盤は描ける)。
+	Debug *Debug `json:"debug,omitempty"`
 }
 
 // FromImage は画像から盤面を割り出す。
@@ -88,6 +107,7 @@ func FromImage(img image.Image, opts ...Option) (Board, error) {
 		HandTotal:  nonNil(r.HandTotal),
 		Black:      nonNil(r.Black),
 		White:      nonNil(r.White),
+		Debug:      r.Debug,
 	}
 	if err != nil {
 		// WithErrorOn / WithStrict でエラー扱いにした違反。Board は埋めたまま返す。

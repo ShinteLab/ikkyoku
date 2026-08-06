@@ -238,6 +238,15 @@ type CaptureResult struct {
 	// RecognizeError は「撮れたが認識できなかった」ときの理由。
 	// キャプチャ自体の失敗はこれではなく Capture のエラーで表す。
 	RecognizeError string `json:"recognizeError"`
+
+	// Debug は認識の観測情報(盤面と判定した矩形・マス割り・使った推論器)。
+	// **デバッグタブ専用。** 撮った画像にこの矩形を重ねることで、認識が外れたときに
+	// 「座標がずれているのか、駒種を外しているのか」を切り分けられる。
+	//
+	// 画像を Go 側で描いて返さないのは、サムネイルが既に等倍 PNG の base64 で、
+	// 描き込んだ 2 枚目を積むとイベントのペイロードが倍になるため。矩形の座標だけを
+	// 渡してフロントで重ねれば軽く、マスごとの確信度をホバーで出すこともできる。
+	Debug *recognize.Debug `json:"debug,omitempty"`
 }
 
 // Capture はガイド枠の内側を撮って PNG 保存し、保存先パスとサムネイルを返す。
@@ -298,8 +307,12 @@ func (s *CaptureService) Capture() (CaptureResult, error) {
 		result.Confidence = board.Confidence
 		result.Warnings = board.Warnings
 		result.HandTotal = board.HandTotal
+		result.Debug = board.Debug
 		s.logger.Info("盤面を認識しました",
-			"sfen", board.SFEN, "confidence", board.Confidence, "warnings", len(board.Warnings))
+			"sfen", board.SFEN, "confidence", board.Confidence, "warnings", len(board.Warnings),
+			// 盤面と判定した矩形・その決め方・使った推論器の 1 行要約。
+			// 撮り溜めたログから「いつから外し始めたか」を追えるようにしておく。
+			"detail", board.Debug.String())
 	}
 	if s.app != nil {
 		s.app.Event.Emit("capture:done", result)
