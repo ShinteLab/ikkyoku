@@ -76,8 +76,9 @@ type CaptureService struct {
 	recognizerDir string
 
 	mu sync.Mutex
-	// mainShown はメイン画面を一度でも出したか。2 回目以降のキャプチャで
-	// 前面に出し直さないための記録(観戦中にフォーカスを奪わない)。
+	// mainShown はメイン画面を一度でも出したか。**初回だけやること**
+	// (枠の外への配置・表示位置の記録)を 2 回目以降に繰り返さないための記録。
+	// 前面に出す(Show/Focus)のは毎回。revealMain 参照。
 	mainShown bool
 	// recognizerStatus は直近の読み込み結果。表示のためだけに 3.5MB を
 	// 読み直さなくて済むよう覚えておく。
@@ -139,29 +140,44 @@ func (s *CaptureService) bind(app *application.App, wins *appWindows) {
 	s.wins = wins
 }
 
-// revealMain はメイン画面をまだ出していなければ出す。
+// revealMain はメイン画面を出し、前面に持ってくる(アクティブにする)。
 //
-// 起動直後は枠だけを見せ、最初のキャプチャでメイン画面が現れる、という導線のため。
-// 2 回目以降は何もしない(中継を観ている最中にフォーカスを奪わない)。
+// 起動直後は枠だけを見せ、最初のキャプチャでメイン画面が現れる、という導線。
+// **撮るたびに毎回アクティブにする。** 撮った結果(盤・SFEN・警告)を見るのが
+// 撮った直後にやることなので、最小化していても背面にいても出てくるのが速い。
+// 引き換えに中継の再生画面からフォーカスが外れる。動画の再生は続くが、
+// 中継側のキーボード操作(シークなど)はメイン画面をクリックし直すまで効かなくなる
+// (Alt+S はグローバルホットキーなので、フォーカスがどこにあっても撮れる)。
+//
+// ⚠️ **前面に出るのは撮り終えた後**。Capture() の最後で呼んでいるので、
+// メイン画面が枠に重なっていてもその 1 枚には写らない。ただし重なったまま
+// 次を撮ると写り込むので、初回の配置(placeMainBesideFrame)で枠の外へ逃がしている。
+//
 // ホットキー経由のキャプチャは別 goroutine から来るのでロックで保護する
-// (Show 自体は Wails が内部で InvokeSync するのでスレッドは問わない)。
+// (Show/Focus 自体は Wails が内部で InvokeSync するのでスレッドは問わない)。
 func (s *CaptureService) revealMain() {
 	if s.wins == nil || s.wins.main == nil {
 		return
 	}
 	s.mu.Lock()
-	if s.mainShown {
-		s.mu.Unlock()
-		return
-	}
+	first := !s.mainShown
 	s.mainShown = true
 	s.mu.Unlock()
 
-	s.placeMainBesideFrame()
+	if first {
+		s.placeMainBesideFrame()
+	}
 	s.wins.main.Show()
-	// 表示されて初めて位置が確定するので、ここで記録しておく
-	// (非表示のあいだの座標は当てにならない。geometry.go 参照)。
-	s.wins.mainGeom.record(s.wins.main)
+	// 最小化されていると Show() だけでは畳まれたまま。Focus() の前に戻す。
+	if s.wins.main.IsMinimised() {
+		s.wins.main.UnMinimise()
+	}
+	s.wins.main.Focus()
+	if first {
+		// 表示されて初めて位置が確定するので、ここで記録しておく
+		// (非表示のあいだの座標は当てにならない。geometry.go 参照)。
+		s.wins.mainGeom.record(s.wins.main)
+	}
 }
 
 // placeMainBesideFrame はメイン画面を枠に重ならない位置へ置く。
@@ -317,8 +333,8 @@ func (s *CaptureService) Capture() (CaptureResult, error) {
 	if s.app != nil {
 		s.app.Event.Emit("capture:done", result)
 	}
-	// 撮れたらメイン画面を出す(初回のみ)。イベントを先に出しておくことで、
-	// 表示された時点でメイン画面が最新の結果を持っている状態になる。
+	// 撮れたらメイン画面を出してアクティブにする。イベントを先に出しておくことで、
+	// 前面に来た時点でメイン画面が最新の結果を持っている状態になる。
 	s.revealMain()
 	return result, nil
 }
