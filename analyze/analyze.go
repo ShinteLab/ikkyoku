@@ -3,7 +3,7 @@
 // **画像を知らない**（position と同じ側）。受け取るのは局面の SFEN 文字列だけで、
 // 返すのは評価値と読み筋だけ。撮った画像も、その座標系も、ここには入れないこと。
 //
-// **エンジンは USI を話す相手**（`ikkyoku/usi`）。Go の関数として import しない。
+// **エンジンは USI を話す相手**（`core/usi/client`）。Go の関数として import しない。
 // 繋ぎ先はやねうら王でも `prokishi.exe` でも自作 `engine` でもよく、
 // **ここから上のコードは違いを知らない**（`_docs/phase4-engine-usi.md` の案 B）。
 //
@@ -25,7 +25,8 @@ import (
 
 	"github.com/ShinteLab/core/sfen"
 	coreusi "github.com/ShinteLab/core/usi"
-	"github.com/ShinteLab/ikkyoku/usi"
+	"github.com/ShinteLab/core/usi/client"
+	localusi "github.com/ShinteLab/ikkyoku/usi"
 )
 
 // DefaultMovetime は既定の打ち切り時間。
@@ -126,16 +127,16 @@ type Result struct {
 // **同時に 1 つの解析しか流せない**（USI がそういう作り）。検討ツリーで複数の枝を
 // 並べたくなったら Session を増やす。
 type Session struct {
-	// open はエンジンを開く関数。**Step 2 ではここを os/exec 版に差し替えるだけ。**
-	open func(context.Context) (*usi.Session, error)
+	// open はエンジンを開く関数。**Step 2 ではここを `client.Exec` に差し替えるだけ。**
+	open func(context.Context) (*client.Session, error)
 
 	mu  sync.Mutex
-	eng *usi.Session
+	eng *client.Session
 }
 
 // NewLocalSession は同梱の `engine` を USI で話す相手として使うセッションを作る
 // （Step 1）。**接続は最初の解析まで開かない。**
-func NewLocalSession() *Session { return &Session{open: usi.Local} }
+func NewLocalSession() *Session { return &Session{open: localusi.Local} }
 
 // EngineName は繋がっているエンジンの名前を返す（未接続なら空）。
 func (s *Session) EngineName() string {
@@ -188,7 +189,7 @@ func (s *Session) Analyze(ctx context.Context, positionSFEN string, opt Options,
 	started := time.Now()
 	acc := &accumulator{black: black, started: started}
 	res, err := eng.Analyze(ctx, strings.Join(fields, " "),
-		usi.GoOptions{Movetime: movetime, MultiPV: opt.MultiPV},
+		client.GoOptions{Movetime: movetime, MultiPV: opt.MultiPV},
 		func(in coreusi.Info) {
 			if p, ok := acc.add(in); ok && info != nil {
 				info(p)
@@ -212,7 +213,7 @@ func (s *Session) Analyze(ctx context.Context, positionSFEN string, opt Options,
 }
 
 // engine は接続を返す（無ければ開く）。
-func (s *Session) engine(ctx context.Context) (*usi.Session, error) {
+func (s *Session) engine(ctx context.Context) (*client.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.eng != nil {
@@ -227,7 +228,7 @@ func (s *Session) engine(ctx context.Context) (*usi.Session, error) {
 }
 
 // drop は壊れた接続を捨てる。**別の接続に差し替わっていたら何もしない。**
-func (s *Session) drop(eng *usi.Session) {
+func (s *Session) drop(eng *client.Session) {
 	s.mu.Lock()
 	if s.eng == eng {
 		s.eng = nil

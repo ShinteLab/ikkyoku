@@ -10,8 +10,8 @@
 
 | Step | 状態 |
 |---|---|
-| Step 1（`io.Pipe` で同一プロセスの `engine`） | **完了**。`ikkyoku/usi/local.go` |
-| Step 2（`os/exec` で外部エンジンの exe） | 未着手。`usi.Transport` を差し替えるだけ |
+| Step 1（`io.Pipe` で同一プロセスの `engine`） | **完了**。`ikkyoku/usi/local.go`（クライアント本体は `core/usi/client`） |
+| Step 2（`os/exec` で外部エンジンの exe） | `client.Exec` は core に実装済み。ikkyoku 側の設定と実機確認がこれから |
 | Step 3（`prokishi.exe`） | 未着手。設定でパスを変えるだけ |
 
 この決定を受けて `engine` 側に積み残しを整理した（**MultiPV が無いのが最大の穴**）:
@@ -158,7 +158,13 @@ Step 3  ikkyoku(USIクライアント) ──os/exec──> prokishi.exe        
 
 - ~~案 A / 案 B（+ Step 方式）のどれを取るか~~ → **案 B の Step 方式。** Step 1 実装済み
 - ~~`core/usi` にプロトコルの語彙を足すか、ikkyoku 内に閉じるか~~ → **`core/usi` に足した**
-  （`protocol.go`。`info` 行と `bestmove` 行の読み取り）。**JS 側（`core/web`）には
+  （`protocol.go`。`info` 行と `bestmove` 行の読み取り）。**クライアント本体も
+  `core/usi/client` に置いた**（2026-08-08。セッション管理と `os/exec` での起動）。
+  `engine` に置くと、やねうら王を起動したいだけの UI が探索エンジン一式を import
+  することになり依存が裏返るため。**`prokishi/server` も同じことをしているので
+  統合の候補だが、今は触らない。**
+  ⚠️ `io.Pipe` で同一プロセスの `engine` を繋ぐ Step 1 の足場だけは core に置けない
+  （`core → engine` の依存になる）ので `ikkyoku/usi` に残る。**JS 側（`core/web`）には
   対応物を置いていない** —— USI を話すのはデスクトップアプリの Go 側で、ブラウザは
   構造化された結果しか見ないため。ブラウザから USI を扱う必要が出たら、そのときに揃える
 - 千日手・連続王手の判定ができない件（履歴のない局面を渡すため）→ **仕様として受け入れる。**
@@ -176,3 +182,7 @@ Step 3  ikkyoku(USIクライアント) ──os/exec──> prokishi.exe        
   **`score mate` を返すエンジンではそちらを優先する**（`engine/TODO.md` の 2）
 - **エンジンが送受信した行を全部 `slog.Info` に出す。** テストでは捨てているが、
   アプリでは解析のたびに info 行が全部ログに流れる（`engine/TODO.md` の 4）
+- ⚠️ **前の探索の残りを捨てないと固まる。** エンジンは bestmove のあとにも info を
+  吐く。溜めたままにすると、**溜まりきった時点でエンジン側の書き込みがブロックし、
+  `stop` にも応答できなくなる**（同じ Session で 4 局面続けて解析して踏んだ）。
+  `client` は探索を始める前に読み捨てる

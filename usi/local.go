@@ -1,3 +1,18 @@
+// Package usi は同梱の `engine` を USI で話す相手として立ち上げる（Phase 4 の Step 1）。
+//
+// ⚠️ **このパッケージは Step 2 で消える足場。**
+//
+// USI クライアントの本体は **`core/usi/client`** にある（セッション管理・`os/exec` での
+// エンジン起動）。ここに残っているのは「同一プロセスの `engine` を `io.Pipe` で繋ぐ」
+// 部分だけで、**これは core には置けない**（`core → engine` の依存になってしまう。
+// 依存の向きは `engine → core`）。
+//
+//	Step 1  ikkyoku ──io.Pipe──> engine.NewUSI(...).Start()   ※同一プロセス（ここ）
+//	Step 2  ikkyoku ──os/exec──> 外部エンジン .exe            ※client.Exec に差し替え
+//	Step 3  ikkyoku ──os/exec──> prokishi.exe                 ※設定でパスを変えるだけ
+//
+// **`ikkyoku → engine` の Go 依存はこのパッケージだけ。** Step 2 で消せば依存も切れ、
+// `engine` は「USI を話す exe」として繋がる相手の 1 つになる（engine/TODO.md）。
 package usi
 
 import (
@@ -5,24 +20,10 @@ import (
 	"io"
 	"log/slog"
 
+	"github.com/ShinteLab/core/usi/client"
 	shogi "github.com/ShinteLab/engine"
 	"github.com/ShinteLab/engine/search"
 )
-
-// ⚠️ **このファイルは Step 2 で消える足場。**
-//
-// 案 B（ikkyoku を USI クライアントにする）の Step 1 は、**プロセスを起こさずに**
-// 同一プロセスの `engine` を `io.Pipe` で直結する（`_docs/phase4-engine-usi.md`）。
-// 狙いは「案 A と同じコストで案 B の形を手に入れる」ことで、
-// **ikkyoku 側のコードは最初から USI クライアント**になっている。
-//
-//	Step 1  ikkyoku ──io.Pipe──> engine.NewUSI(...).Start()   ※同一プロセス（ここ）
-//	Step 2  ikkyoku ──os/exec──> 外部エンジン .exe
-//	Step 3  ikkyoku ──os/exec──> prokishi.exe                 ※設定のみ
-//
-// **Step 2 に進んだら、このファイルごと消して `os/exec` の Transport に差し替える。**
-// `ikkyoku → engine` の Go 依存が残っているのはここだけなので、消せば依存も切れる
-// （`engine` は「USI を話す exe」として繋がる相手の 1 つになる。engine/TODO.md）。
 
 // localDepth は同梱エンジンの探索深さ。
 //
@@ -30,11 +31,11 @@ import (
 // **打ち切りは stop 側が握る**ので、ここは「時間内に届けば嬉しい深さ」でよい。
 const localDepth = 8
 
-// Local は同一プロセスの `engine` を USI で話す相手として立ち上げる（Step 1）。
+// Local は同一プロセスの `engine` を USI で話す相手として立ち上げる。
 //
 // **プロセス管理は一切要らない。** 起動・終了・タイムアウト・異常終了の処理が
-// 出てくるのは Step 2 から。
-func Local(ctx context.Context) (*Session, error) {
+// 出てくるのは Step 2（`client.Exec`）から。
+func Local(ctx context.Context) (*client.Session, error) {
 	// ikkyoku → engine（コマンド）
 	cmdR, cmdW := io.Pipe()
 	// engine → ikkyoku（応答）
@@ -51,7 +52,7 @@ func Local(ctx context.Context) (*Session, error) {
 		_ = cmdR.Close()
 	}()
 
-	s, err := Open(ctx, Transport{
+	s, err := client.Open(ctx, client.Transport{
 		In:  outR,
 		Out: cmdW,
 		Close: func() error {

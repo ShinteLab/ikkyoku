@@ -763,13 +763,21 @@ Step 3  ikkyoku ──os/exec──> prokishi.exe                 ※設定で�
 | 置き場所 | 持つもの |
 |---|---|
 | `core/usi` | **プロトコルの語彙。** `info` 行 / `bestmove` 行の読み取り（`protocol.go`）と手表記 |
-| `ikkyoku/usi` | **セッション管理。** ハンドシェイク・`position`/`go`/`stop`・行の振り分け |
+| `core/usi/client` | **USI クライアント本体。** ハンドシェイク・`position`/`go`/`stop`・`os/exec` での起動 |
+| `ikkyoku/usi` | **Step 1 の足場だけ。** 同一プロセスの `engine` を `io.Pipe` で繋ぐ |
 | `ikkyoku/analyze` | **評価値の意味づけ。** 先手視点への符号変換・候補手の畳み込み・接続の持ち回り |
 
+- **クライアントは `core` に置いた**（2026-08-08 決定）。`engine` に置くと、
+  やねうら王を起動したいだけの UI が**探索エンジン一式を import する**ことになり、
+  依存が裏返る。`core` なら `ikkyoku` からも `prokishi` からも引ける
 - **`core/usi` の JS 側（`core/web`）には対応物を置いていない。** USI を話すのは
   デスクトップアプリの Go 側で、ブラウザは構造化された結果しか見ないため。
   **ブラウザから USI を扱う必要が出たら、そのときに JS 側も揃えること**
-- `prokishi/usi` にも似たものがあるが、**`ikkyoku → prokishi` の依存は踏まない**
+- `prokishi/server` も `prokishi/usi.Sender` で同じことをしている（実運用でエンジンを
+  起動している）。**今は触らない**が、重複しているので統合の候補
+- ⚠️ **`io.Pipe` で同一プロセスの `engine` を繋ぐ部分は core に置けない**
+  （`core → engine` の依存になる。向きは `engine → core`）。だから
+  `ikkyoku/usi` に残っている
 
 ### 決まっていること（**崩さないこと**。テストで固定してある）
 
@@ -810,8 +818,9 @@ Step 3  ikkyoku ──os/exec──> prokishi.exe                 ※設定で�
 ### Step 1 の足場（**Step 2 で消える**）
 
 `ikkyoku/usi/local.go` が同一プロセスの `engine` を `io.Pipe` で繋いでいる。
-**`ikkyoku → engine` の Go 依存が残っているのはこのファイルだけ**なので、
-Step 2 で `os/exec` の `Transport` に差し替えれば依存ごと消える。
+**`ikkyoku → engine` の Go 依存が残っているのはこのパッケージだけ**なので、
+Step 2 で `client.Exec` に差し替えれば依存ごと消える
+（`analyze.Session.open` を差し替えるだけ）。
 
 - `localEngine` は `engine.ContextEngine` の実装（**これがあるから `stop` が効く**）。
   `engine/_samples` は import しない（`_` 始まりのサンプルで深さ 4 固定・オプション無し）
@@ -849,8 +858,9 @@ Step 2 で `os/exec` の `Transport` に差し替えれば依存ごと消える�
   まとめて入れ替える）を足して、`analyze` に渡す直前で 1 回だけ使う。
   **表示は絶対に反転しない。** ⚠️ ここで詰まるのは「UI の手番トグルが指すのは
   対局の先後か、画面の上下か」で、**同じ `Turn` フィールドに 2 つの意味を持たせないこと**
-- **Step 2（外部エンジンの exe）。** `usi.Transport` を `os/exec` 版にして、
-  エンジンのパスを設定に足す。ここで初めてプロセス管理（起動・異常終了・応答なし）が要る
+- **Step 2（外部エンジンの exe）。** `client.Exec` は core に**実装済み**なので、
+  ikkyoku 側は「エンジンのパスを設定に足して `analyze.Session.open` を差し替える」だけ。
+  実機のエンジンで通すのはこれから
 - **選んだ手で局面を進める**（→ Phase 5 の検討ツリー）
 - **手の表記が USI のまま**（"7g7f"）。日本語表記（▲7六歩）にするには動かす駒種が要るので、
   盤面（`position`）と突き合わせる必要がある。**変換は `core` に足すのが筋**
@@ -961,7 +971,7 @@ New-Item -ItemType Junction -Path (Join-Path $w 'engine') -Target 'D:\Go\Project
 | `training/` | **訂正した局面を `suteme` の学習用サーバへ登録するクライアント**（`POST /api/register` / `GET /api/status`）。標準ライブラリのみ。**サンプルの作り方は書かない**（81 マスの切り出しは suteme の責務） |
 | `hotkey.go` | `ParseHotkey`（`"alt+s"` 文字列 → `golang.design/x/hotkey` の修飾子・キー） |
 | `analyze/` | **確定した局面 → 評価値**（Phase 4）。エンジンとの接続を持ち回り、評価値を先手視点に直す。**画像を知らない**（`position` と同じ側）。**正式な SFEN を要求するのはここだけ**で、視点の反転もこの境界で行う |
-| `usi/` | **USI を話す相手とのセッション管理**（Phase 4）。ハンドシェイク・`position`/`go`/`stop`。**プロトコルの語彙は書かない**（`core/usi`）。`local.go` は Step 1 の足場で、**Step 2 で消える** |
+| `usi/` | **Step 1 の足場**（Phase 4）。同一プロセスの `engine` を `io.Pipe` で USI として繋ぐ。**クライアント本体は `core/usi/client`**（ここに書かない）。**Step 2 で消える** |
 | `position/` | **「とある局面」を扱う層**（Phase 3/5）。1 マスずつ直せる `Board`・手番・駒台の先後の割り振り・SFEN の組み立て・警告。**画像を知らない**。検証は `core/sfen` に投げる |
 | `recognize/` | 画像 → 盤面。`suteme` を呼ぶだけ（`recognize.go`）＋どの学習データを使うかの指定（`predictor.go`）＋盤の矩形だけを探す `DetectRegion`（`detect.go`。ガイド枠の自動フィット用）。**認識器はここに書かない**。**Phase 3 の局面矯正層もここには入れない**（画像を知らない層として別に切る。上記参照） |
 | `_cmd/ikkyoku/` | Wails3 GUI アプリ(独立したネストモジュール)。下記「GUI アプリ(Wails3)」参照 |
