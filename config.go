@@ -34,6 +34,31 @@ type Config struct {
 	// omitempty を付けていないのは、**切ってあること自体を設定ファイルに残す**ため。
 	// このファイルは手で編集する前提でもあるので、キーが消えると存在に気づけない。
 	FitOnStartup bool `json:"fitOnStartup"`
+
+	// Training は訂正した局面を suteme の学習用サーバへ送る設定。
+	Training TrainingConfig `json:"training"`
+}
+
+// TrainingConfig は訂正済みの局面を suteme に登録するための接続設定。
+//
+// **既定は無効。** 訂正結果の還元は 2026-08-07 に決めた方針だが、
+// **自動では送らない**（人間が直したのは 1 マスで残り 80 マスは推論結果のまま、
+// という「自分の出力を正解として食う」形になるため）。設定で有効にしたうえで、
+// 局面ごとにボタンを押したときだけ送る。
+type TrainingConfig struct {
+	// Enabled は「訂正盤面を suteme に登録する」を使うか。
+	// **これは送信ボタンを出すかどうかであって、自動送信のスイッチではない。**
+	//
+	// omitempty を付けないのは FitOnStartup と同じ理由（切ってあること自体を残す）。
+	Enabled bool `json:"enabled"`
+	// Host は suteme の学習用サーバのホスト。空なら 127.0.0.1。
+	Host string `json:"host,omitempty"`
+	// Port は同ポート。0 なら 8080（suteme-training の既定）。
+	Port int `json:"port,omitempty"`
+	// Token は Bearer トークン。**同じマシンで動かすなら不要**
+	// （suteme はループバックからのアクセスを認証免除にしている）。
+	// 別のマシンへ送るときだけ、suteme の APIタブで発行したものを入れる。
+	Token string `json:"token,omitempty"`
 }
 
 // DefaultConfigPath は既定の設定ファイルパスを返す（os.UserConfigDir()/ikkyoku/config.json）。

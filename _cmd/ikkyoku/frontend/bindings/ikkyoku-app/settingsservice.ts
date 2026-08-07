@@ -19,13 +19,20 @@ import * as $models from "./models.js";
 
 /**
  * SetFitOnStartup は「起動時に盤面を探す」を切り替えて保存する。
- * 
- * **保存の前にファイルを読み直す。** 設定ファイルは手で編集する前提でもあり、
- * アプリ起動中に足された項目(学習データの置き場所など)を、こちらが抱えている
- * 古い内容で上書きしてしまわないようにするため。
  */
 export function SetFitOnStartup(v: boolean): $CancellablePromise<$models.AppSettings> {
     return $Call.ByID(2836646091, v);
+}
+
+/**
+ * SetTraining は「訂正盤面を suteme に登録する」の設定を保存する。
+ * 
+ * **接続の確認はしない。** 設定を保存する操作と、相手が受け付けているかを見る操作
+ * (TrainingService.Status)は別。書けないサーバでも設定は保存できたほうがよい
+ * (先に設定を入れてから suteme を起動する、という順序が普通にある)。
+ */
+export function SetTraining(enabled: boolean, host: string, port: number, token: string): $CancellablePromise<$models.AppSettings> {
+    return $Call.ByID(798401026, enabled, host, port, token);
 }
 
 /**

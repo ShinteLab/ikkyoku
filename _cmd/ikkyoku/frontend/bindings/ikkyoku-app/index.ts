@@ -4,10 +4,12 @@
 import * as CaptureService from "./captureservice.js";
 import * as PositionService from "./positionservice.js";
 import * as SettingsService from "./settingsservice.js";
+import * as TrainingService from "./trainingservice.js";
 export {
     CaptureService,
     PositionService,
-    SettingsService
+    SettingsService,
+    TrainingService
 };
 
 export type {
@@ -17,5 +19,8 @@ export type {
     EditState,
     FitResult,
     GuideLayout,
-    RecognizerStatus
+    RecognizerStatus,
+    TrainingSendResult,
+    TrainingSettings,
+    TrainingStatus
 } from "./models.js";

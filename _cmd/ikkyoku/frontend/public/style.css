@@ -487,6 +487,66 @@ html.is-main body {
   word-break: break-all;
 }
 
+/* 「訂正盤面を suteme に登録する」のように、トグルと付随する入力欄が
+   ひとまとまりになる設定。区切り線で上の項目と分ける。 */
+.setting-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-self: stretch;
+  padding-top: 10px;
+  border-top: 1px solid #2a2d36;
+}
+
+/* 接続先の入力欄。トグルの本文に揃えてぶら下げる(チェックボックスぶんの字下げ)。 */
+.setting-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding-left: 22px;
+}
+
+.setting-fields .field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.setting-fields input {
+  padding: 5px 8px;
+  font-size: 12.5px;
+  color: #f2f3f5;
+  background: #23262e;
+  border: 1px solid #3a3d47;
+  border-radius: 5px;
+}
+
+.setting-fields input:focus {
+  outline: none;
+  border-color: #6ad3ff;
+}
+
+.setting-fields .port {
+  width: 76px;
+}
+
+/* 訂正データの送信。**確定してから出る行**なので、訂正中は場所を取らない。 */
+.train-row {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.train-row[hidden] {
+  display: none;
+}
+
+.note.is-error {
+  color: #ff7a7a;
+}
+
 .debug-row {
   flex: 0 0 auto;
   display: flex;

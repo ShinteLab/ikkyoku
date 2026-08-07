@@ -22,6 +22,11 @@ export interface AppSettings {
     "fitOnStartup": boolean;
 
     /**
+     * Training は訂正した局面を suteme へ登録する設定。
+     */
+    "training": TrainingSettings;
+
+    /**
      * Path は設定ファイルの場所。**表示のためだけ。** 手で編集したくなったときに
      * 探さずに済むよう出しておく(学習データの置き場所もこのファイルにある)。
      */
@@ -189,4 +194,88 @@ export interface RecognizerStatus {
     "source": string;
     "ready": boolean;
     "error": string;
+}
+
+/**
+ * TrainingSendResult は登録の結果。
+ */
+export interface TrainingSendResult {
+    "id": string;
+
+    /**
+     * Duplicate は同じ画像が既に登録されていたか。**失敗ではない**
+     * （suteme は画像のハッシュで再送を弾き、既存の ID を返す）。
+     */
+    "duplicate": boolean;
+    "entries": number;
+}
+
+/**
+ * TrainingSettings は「訂正盤面を suteme に登録する」の設定。
+ * 
+ * **ikkyoku.TrainingConfig をそのまま返していない。** 画面に出すのは
+ * 「実際に送る先(Target)」まで組み立てた形で、Host/Port の既定値の解決を
+ * フロントに持たせないため(既定は training パッケージが持つ)。
+ */
+export interface TrainingSettings {
+    "enabled": boolean;
+    "host": string;
+    "port": number;
+    "token": string;
+
+    /**
+     * Target は上の設定から組み立てた接続先("http://host:port")。**表示用。**
+     */
+    "target": string;
+}
+
+/**
+ * TrainingStatus は「今このサーバに送ってよいか」の問い合わせ結果。
+ * 
+ * **エラーも値として返す**（error にしない）。設定タブに出す情報であって、
+ * 呼び出しが失敗したわけではない。相手が起動していないのは普通の状態。
+ */
+export interface TrainingStatus {
+    /**
+     * Configured は「訂正盤面を suteme に登録する」が有効か。
+     */
+    "configured": boolean;
+
+    /**
+     * Target は問い合わせ先("http://host:port")。
+     */
+    "target": string;
+
+    /**
+     * Reachable は応答があったか。
+     */
+    "reachable": boolean;
+
+    /**
+     * Error は応答が無い・受け付けられない場合の理由（日本語）。
+     */
+    "error": string;
+
+    /**
+     * Accepting は suteme 側で登録受付が有効になっているか。
+     * 
+     * ⚠️ **false でも、同じマシン（ループバック）からは送れる。** suteme は
+     * ループバックを認証・受付判定の手前で素通しにしている。**送信の可否として
+     * 使わないこと**（送れるのに送れないと表示することになる）。表示に留める。
+     */
+    "accepting": boolean;
+
+    /**
+     * Detailed 以下は、相手が素性を明かした場合だけ入る（ループバックか、
+     * 正しいトークンを持っている場合）。
+     */
+    "detailed": boolean;
+    "entries": number;
+    "capacity": number;
+    "dataVersion": string;
+
+    /**
+     * Note は「そのまま送れるとは限らない」ことを伝える補足（空なら無し）。
+     */
+    "note": string;
 }

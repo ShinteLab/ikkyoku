@@ -54,6 +54,7 @@ func main() {
 	cfg := settingsSvc.config()
 	captureSvc := NewCaptureService(logger, cfg.SutemeDataDir)
 	positionSvc := NewPositionService(logger)
+	trainingSvc := NewTrainingService(logger, settingsSvc)
 
 	app := application.New(application.Options{
 		Name:        "ikkyoku",
@@ -63,6 +64,7 @@ func main() {
 			application.NewService(captureSvc),
 			application.NewService(settingsSvc),
 			application.NewService(positionSvc),
+			application.NewService(trainingSvc),
 		},
 		Assets: assetOptions(),
 		Mac: application.MacOptions{

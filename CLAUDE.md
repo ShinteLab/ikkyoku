@@ -208,9 +208,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `recognize.FromImage` は `WithErrorOn` 等でエラーにした場合でも `Board` を埋めて返す。
   「どこがおかしいか」を出しつつ盤も見せられるようにするため
 - メイン画面は **3 タブ**（盤面 / デバッグ / 設定）。
-  設定タブは今のところ
-  「起動時に盤面を探す」だけで、**切り替えたその場で保存する**（項目が 1 つで、効くのは
-  次の起動なので、適用ボタンは押し忘れのほうが害になる）。
+  設定タブは
+  「起動時に盤面を探す」と「訂正盤面を suteme に登録する」（接続先・トークン）で、
+  **変えたその場で保存する**（適用ボタンを置かない。押し忘れて反映されないほうが
+  分かりにくい）。テキスト欄は `change`（確定時）で拾うので 1 文字ごとには書かない。
   警告・エラー・信頼度の低下が出るとデバッグタブに点が付く（開けば消える）。
   信頼度を点の対象に含めているのは、**盤が映っていない画面を撮ると警告が 1 件も出ない
   ことがある**ため（局面の中身の話ではないので `warnings` には載らない）
@@ -310,6 +311,63 @@ suteme の学習用サーバと同じパス・同じ方式。フロントは実�
   推論結果のまま、という自分の出力を正解として食う形になり、間違いが固定される
 - **画面に見えていない駒を知識で補った訂正は送らない**（テロップで盤が隠れている等）。
   ラベルが画素と一致しなくなる。これも自動送信にしない理由
+
+#### 実装（2026-08-08・`training` パッケージ + `TrainingService`）
+
+送り口は **`suteme` の `POST /api/register`**（`suteme/training/api.go`）。
+ikkyoku 側は HTTP クライアント（`ikkyoku/training`）と Wails Service
+（`_cmd/ikkyoku/trainingservice.go`）だけを持つ。**サンプルの作り方は書かない**
+（81 マスの切り出しは向こうの `samplesFromRegion`）。
+
+```
+POST /api/register   multipart/form-data
+  image        撮った PNG（**再エンコードせずそのまま送る**）
+  sfen         訂正した局面（盤面部分だけでも、手番・持ち駒つきの完全形でもよい）
+  x1,y1,x2,y2  画像の中での盤面の外枠（**必須**。Debug.Region そのもの）
+GET  /api/status     今このサーバに送ってよいか（**/api/health ではない**）
+```
+
+- **設定は `config.json` の `training`**（`Enabled` / `Host` / `Port` / `Token`）。
+  既定は無効・`127.0.0.1:8080`（`suteme-training` の既定ポート）。
+  **既定値の解決は Go 側（`training.DefaultHost` / `DefaultPort`）に置き、
+  フロントに書かない**（2 か所に持つと既定を変えたときに食い違う）
+- **設定の「有効」は送信ボタンを出すかどうかであって、自動送信のスイッチではない。**
+  送るのは確定後にボタンを押したときだけ
+- **矩形は必須。** 座標なしのエントリは向こうが `DetectBoard` に頼るうえ、ずらしによる
+  水増しも作れないので学習価値が 1/5 になる（向こうは 400 で断る）。
+  **認識に失敗した画像は送れない**（矩形が無いので送信ボタンを出さない）
+- **画像は再エンコードしない。** suteme は画像そのもののハッシュで再送を弾くので、
+  バイト列を変えるとリトライのたびに増える
+- ⚠️ **座標系は「保存した PNG 基準」に直して送る。** 認識はメモリ上の画像の座標系で
+  答えるが、PNG は原点が (0,0) に正規化される（`Debug.ImageBounds.Min` を引く）。
+  実測では常に一致するが、ずれると**学習サンプルの切り出しが黙って 1 マスずれる**
+- **PNG は 3.5MB 級になりうる。** `Register` のタイムアウトは 30 秒、
+  `Status` は 8 秒（相手が居ないときに UI が固まらない程度）
+
+#### ⚠️ ループバックからは「登録受付: 無効」でも送れる
+
+**suteme はループバックを `withAccessControl` の入口で素通しにしている**
+（同じサーバが配信している UI が素の fetch を投げるため）。つまり
+`Enabled` の判定もトークンの判定も**そもそも通らない**。実測でも、
+`/api/status` が `enabled:false` を返す状態で `/api/register` が普通に通った。
+
+- **`/api/status` の結果で送信を止めないこと。** 止めると「送れるのに送れないと
+  表示する」ことになる。`TrainingStatus.Accepting` は**表示用**
+- 逆に言えば、**別のマシンへ送るときだけ** suteme の APIタブで「登録を受け付ける」と
+  「外部公開」を有効にし、トークンを発行する必要がある。同じマシンなら設定は要らない
+- 公開オフのときの非ループバックは **404**（403 ではない。存在自体を伏せる仕様）なので、
+  「宛先が違う」と見分けが付かない。エラー文言は両方の可能性を書いてある
+
+#### ⚠️ 送る SFEN は「手前が先手」の規約に従う
+
+suteme 側の要求（`suteme/CLAUDE.md`「先後の割り当ては『手前が先手』で固定」）。
+実際の対局で後手が手前に映っていても、**画像に見えているとおり**＝手前側を先手として
+表現した SFEN を送る。規約を外れた SFEN は向き正規化（`if !black { Rotate180 }`）を
+狂わせ、**その出所だけ上下反転したサンプルを作る**。機械には検出できない。
+
+**ikkyoku は取り込みでも訂正でも盤を反転しない**（「視点」の節）ので、
+普通に使っている限りこの規約は自然に守られる。**視点トグルを入れるときも、
+反転するのはエンジンへ渡す境界だけで、ここへ送る SFEN は反転しないこと。**
 
 #### ⚠️ 駒台の情報は「意味が無い」のではない
 
@@ -734,7 +792,8 @@ New-Item -ItemType Junction -Path (Join-Path $w 'core')   -Target 'D:\Go\Project
 | `capture.go` | `Region` / `DisplayInfo` / `ListDisplays` / `Capture` など、キャプチャの中核 |
 | `region.go` | `ParseRegion`（`"x,y,width,height"` 文字列 → `Region`） |
 | `save.go` | `SavePNG` / `DefaultOutDir` / タイムスタンプ式ファイル名生成 |
-| `config.go` | `Config` の JSON 読み書き（`encoding/json` のみ、標準ライブラリで完結）。`SutemeDataDir` / `FitOnStartup` もここ |
+| `config.go` | `Config` の JSON 読み書き（`encoding/json` のみ、標準ライブラリで完結）。`SutemeDataDir` / `FitOnStartup` / `Training`（suteme への登録先）もここ |
+| `training/` | **訂正した局面を `suteme` の学習用サーバへ登録するクライアント**（`POST /api/register` / `GET /api/status`）。標準ライブラリのみ。**サンプルの作り方は書かない**（81 マスの切り出しは suteme の責務） |
 | `hotkey.go` | `ParseHotkey`（`"alt+s"` 文字列 → `golang.design/x/hotkey` の修飾子・キー） |
 | `position/` | **「とある局面」を扱う層**（Phase 3/5）。1 マスずつ直せる `Board`・手番・駒台の先後の割り振り・SFEN の組み立て・警告。**画像を知らない**。検証は `core/sfen` に投げる |
 | `recognize/` | 画像 → 盤面。`suteme` を呼ぶだけ（`recognize.go`）＋どの学習データを使うかの指定（`predictor.go`）＋盤の矩形だけを探す `DetectRegion`（`detect.go`。ガイド枠の自動フィット用）。**認識器はここに書かない**。**Phase 3 の局面矯正層もここには入れない**（画像を知らない層として別に切る。上記参照） |
@@ -784,6 +843,7 @@ CLI は無い。**
 | `frontend/src/main.ts` | エントリ。**素の `import "@wailsio/runtime"`** と `?window=` による画面分岐 |
 | `frontend/src/frame.ts` | 枠（ツールバー + ガイド枠） |
 | `positionservice.go` | 訂正中の局面を持つ Service。操作のたびに `EditState` を丸ごと返す |
+| `trainingservice.go` | 訂正した局面を suteme へ登録する Service（`Status` / `Send`）。**状態を持たない**（送るものはフロントが渡す） |
 | `frontend/src/mainscreen.ts` | メイン画面 |
 | `frontend/src/editor.ts` | 訂正 UI（盤に重ねる 9x9 のグリッド・駒箱・手番・手数） |
 | `frontend/src/icon.ts` | `react-icons` のアイコン → SVG 文字列（唯一の React 使用箇所） |
@@ -1214,6 +1274,12 @@ Start-Process .\_cmd\ikkyoku\bin\ikkyoku.exe
 
 **まだ未検証**:
 
+- **「訂正データを送信」の UI。** **API そのものは実サーバ相手に確認済み**
+  (2026-08-08。一時ディレクトリで `suteme-training 8099` を起動し、撮り溜めた PNG を
+  `recognize.FromImage` → `training.Register` で登録 → `history.json` に
+  `source:"api"` / 座標つきで入ること、再送が同じ ID で `duplicate` になること、
+  `enabled:false` のままループバックから通ることを確認)。**未検証なのは画面側**で、
+  設定タブの入力・「接続を確認」・確定後に送信ボタンが出るかは実機で押していない
 - **訂正中に盤の左へ出す撮った画像(`.capture-ref`)。** ビルドは通っているが実機では
   見ていない。**画像の読み込み完了で盤が横へ動かないか**(＝訂正グリッドがずれないか)と、
   ウィンドウを狭めたときに盤が欠けないかが要確認
@@ -1288,6 +1354,11 @@ go test ./...
 - `save_test.go` — タイムスタンプ式ファイル名生成、`SavePNG` の保存先ディレクトリ自動作成
 - `config_test.go` — `Config` の JSON 読み書きの往復、ファイル未存在時の扱い
 - `hotkey_test.go` — `ParseHotkey` の文字列パース
+- `training/client_test.go` — `POST /api/register` に**画像・SFEN・盤面座標が正しく載るか**
+  （httptest のスタブ。**フィールド名も応答の形も suteme 側の実装が正**なので、
+  向こうが変わったらこちらを直す）。座標が画像からはみ出す場合は**送る前に**弾くこと、
+  再送が重複として通ること、`/api/status` が項目を絞って返しても壊れないこと、
+  エラーが**何をすればよいか分かる日本語**になること
 - `position/board_test.go` — 盤面 SFEN の往復（**訂正の土台。ここが崩れると直した結果が
   別の局面になる**）、`Set` の反映、**ゼロ値の `Cell` が空マスであること**、範囲外、
   壊れた盤面でも読めた分が入ること

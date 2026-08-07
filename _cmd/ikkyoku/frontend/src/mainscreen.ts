@@ -26,7 +26,7 @@
 // Go 側が枠の外へ逃がす(captureservice.go の placeMainBesideFrame)。
 import { Clipboard, Events } from "@wailsio/runtime";
 import { FiCopy, FiImage } from "react-icons/fi";
-import { CaptureService, SettingsService } from "../bindings/ikkyoku-app";
+import { CaptureService, SettingsService, TrainingService } from "../bindings/ikkyoku-app";
 import { iconMarkup } from "./icon";
 import { mountEditor } from "./editor";
 import type { Stock } from "../bindings/github.com/ShinteLab/ikkyoku/position/models";
@@ -161,6 +161,14 @@ export function mountMainScreen(root: HTMLElement): void {
           <p id="board-placeholder" class="board-placeholder">まだ撮っていません。</p>
         </div>
         <div id="editor" class="editor"></div>
+        <!-- 訂正した局面を suteme の学習データとして送る。**確定してから出す**
+             (訂正の途中の盤面を送る意味が無い)。設定で有効にしていないときは
+             行ごと出さない。**押したときだけ送る**(自動送信はしない)。 -->
+        <div id="train-row" class="train-row" hidden>
+          <button id="train-send" class="ghost-btn" type="button"
+                  title="この画像と訂正した盤面を、suteme の学習データとして登録します">訂正データを送信</button>
+          <span id="train-send-status" class="note"></span>
+        </div>
         <div class="sfen-row">
           <span class="field-label">SFEN</span>
           <code id="sfen" class="sfen">-</code>
@@ -236,6 +244,48 @@ export function mountMainScreen(root: HTMLElement): void {
           </span>
         </label>
         <p id="settings-status" class="status" role="status" aria-live="polite"></p>
+
+        <!-- 訂正結果を suteme の学習データに戻す設定。**自動送信のスイッチではない**
+             (2026-08-07 の決定: 自動で送ると、人が直した 1 マス以外は推論結果のまま
+             なので自分の出力を正解として食う)。ここで有効にすると、確定した局面ごとに
+             「訂正データを送信」が出るだけ。 -->
+        <div class="setting-group">
+          <label class="setting">
+            <input id="train-enabled" type="checkbox" />
+            <span class="setting-body">
+              <span class="setting-title">訂正盤面を suteme に登録する</span>
+              <span class="setting-note">
+                確定した盤面を suteme の学習データとして送れるようにします。
+                <strong>送るのはボタンを押したときだけ</strong>で、自動では送りません。
+                向こうには「未確認」として入り、suteme の解析タブで人が確認するまで
+                学習には使われません。
+                <strong>画面に見えていない駒を知識で補った局面は送らないでください</strong>
+                （テロップで盤が隠れているときなど。ラベルが画素と一致しなくなります）。
+              </span>
+            </span>
+          </label>
+          <div class="setting-fields">
+            <label class="field">
+              <span class="field-label">サーバ</span>
+              <input id="train-host" type="text" placeholder="127.0.0.1" spellcheck="false" />
+            </label>
+            <label class="field">
+              <span class="field-label">ポート</span>
+              <input id="train-port" class="port" type="number" min="1" max="65535" />
+            </label>
+            <!-- トークンは**同じマシンなら要らない**(suteme はループバックを
+                 認証免除にしている)。別のマシンへ送るときだけ入れる。 -->
+            <label class="field">
+              <span class="field-label">トークン</span>
+              <input id="train-token" type="password" placeholder="同じマシンなら不要"
+                     spellcheck="false" autocomplete="off" />
+            </label>
+            <button id="train-check" class="ghost-btn" type="button"
+                    title="suteme が登録を受け付けられる状態か確かめます">接続を確認</button>
+          </div>
+          <p id="train-check-status" class="status" role="status" aria-live="polite"></p>
+        </div>
+
         <p class="setting-path">設定ファイル: <code id="settings-path">-</code></p>
       </div>
     </div>
@@ -353,6 +403,67 @@ export function mountMainScreen(root: HTMLElement): void {
     captureRef.hidden = !editingNow || !hasShot;
   };
 
+  // ---- 訂正データの送信（suteme への還元） --------------------------------
+  //
+  // **確定してから出す。** 訂正の途中の盤面を送る意味が無いので、訂正モードを
+  // 抜けたときだけボタンが現れる。設定で有効にしていなければ行ごと出さない。
+  //
+  // 送るのに要るのは 3 点組（撮った PNG のパス・正解 SFEN・**画像の中での盤面の矩形**）。
+  // 矩形は認識結果の `Debug.Region` そのもの。**認識に失敗した画像は送れない**
+  // （盤の位置が分からないと suteme が学習サンプルを切り出せない）。
+  const trainRow = root.querySelector<HTMLDivElement>("#train-row")!;
+  const trainSend = root.querySelector<HTMLButtonElement>("#train-send")!;
+  const trainSendStatus = root.querySelector<HTMLElement>("#train-send-status")!;
+  let trainEnabled = false;
+  // 今の局面（EditState 由来）と、撮ったときの盤面矩形（CaptureResult 由来）。
+  // **出所が違うので別々に持つ**（訂正しても矩形は変わらない。画像は同じ 1 枚）。
+  let editSfen = "";
+  let editLoaded = false;
+  let lastRegion: { x1: number; y1: number; x2: number; y2: number } | null = null;
+
+  const syncTrain = () => {
+    const ready = !editingNow && editLoaded && !!shotFullPath && !!lastRegion;
+    trainRow.hidden = !trainEnabled || !ready;
+    if (trainRow.hidden) {
+      return;
+    }
+    // 送れる状態でも、盤面しか確定していない（手番・駒台の先後が未決）ことはある。
+    // **止めない**（学習に使うのは盤面部分なので、それでも価値がある。設計原則3）。
+    trainSend.disabled = false;
+  };
+
+  const sendTraining = async () => {
+    if (!lastRegion) {
+      return;
+    }
+    trainSend.disabled = true;
+    trainSendStatus.classList.remove("is-error");
+    trainSendStatus.textContent = "送信しています…";
+    try {
+      const r = await TrainingService.Send(
+        shotFullPath,
+        editSfen,
+        lastRegion.x1,
+        lastRegion.y1,
+        lastRegion.x2,
+        lastRegion.y2,
+      );
+      // **重複は失敗ではない**（suteme は画像のハッシュで再送を弾き、既存の ID を返す）。
+      trainSendStatus.textContent = r.duplicate
+        ? `この画像は登録済みです (${r.id})`
+        : `登録しました (${r.id})。suteme の解析タブで確認すると学習に使われます`;
+    } catch (err) {
+      trainSendStatus.textContent = `登録できませんでした: ${String(err instanceof Error ? err.message : err)}`;
+      trainSendStatus.classList.add("is-error");
+    } finally {
+      trainSend.disabled = false;
+    }
+  };
+
+  trainSend.addEventListener("click", () => {
+    void sendTraining();
+  });
+
   const editor = mountEditor({
     stage: boardStage,
     handSlots: {
@@ -363,6 +474,11 @@ export function mountMainScreen(root: HTMLElement): void {
     resetButton: root.querySelector<HTMLButtonElement>("#edit-reset")!,
     panel: root.querySelector<HTMLElement>("#editor")!,
     onState: (st) => {
+      // suteme に送るのは**今の局面**。手番が決まっていれば完全形、決まっていなければ
+      // 盤面部分だけ（学習に使われるのは盤面部分なので、それでも足りる）。
+      editLoaded = !!st?.loaded;
+      editSfen = st ? st.sfen || st.boardSfen : "";
+      syncTrain();
       if (!st?.loaded) {
         boardHandRow.hidden = true;
         fillWarnings(boardWarnings, []);
@@ -376,6 +492,7 @@ export function mountMainScreen(root: HTMLElement): void {
     onEditing: (on) => {
       editingNow = on;
       syncCaptureRef();
+      syncTrain();
     },
     onError: (message) => {
       status.textContent = `訂正できませんでした: ${message}`;
@@ -694,6 +811,22 @@ export function mountMainScreen(root: HTMLElement): void {
       captureRefImg.title = result.path;
     }
     syncCaptureRef();
+    // 前の 1 枚の送信結果を残さない（別の画像の話になるため）。
+    trainSendStatus.textContent = "";
+    trainSendStatus.classList.remove("is-error");
+    // suteme へ送るときの盤面矩形。**保存した PNG の座標系に直して覚える**
+    // （認識はメモリ上の画像の座標系で答えるが、PNG は原点 (0,0) に正規化される。
+    //  今は常に一致するはずだが、ずれると学習サンプルの切り出しが黙って 1 マスずれる）。
+    const dbg = result.debug;
+    lastRegion = dbg
+      ? {
+          x1: dbg.region.Min.X - dbg.image_bounds.Min.X,
+          y1: dbg.region.Min.Y - dbg.image_bounds.Min.Y,
+          x2: dbg.region.Max.X - dbg.image_bounds.Min.X,
+          y2: dbg.region.Max.Y - dbg.image_bounds.Min.Y,
+        }
+      : null;
+    syncTrain();
     drawOverlay(result.debug);
 
     // 信頼度が低いのも「見に行くべきもの」に含める。盤が映っていない画面を撮ったときは
@@ -761,19 +894,115 @@ export function mountMainScreen(root: HTMLElement): void {
     shot.classList.toggle("no-overlay", !overlayToggle.checked);
   });
 
-  // 設定タブ。今は「起動時に盤面を探す」だけ。
+  // 設定タブ。「起動時に盤面を探す」と「訂正盤面を suteme に登録する」。
   //
-  // **切り替えたその場で保存する**(適用ボタンを置かない)。項目が 1 つで、
-  // 効くのは次の起動なので、押し忘れて反映されないほうが分かりにくい。
-  // 保存に失敗したらチェックを元に戻す(画面の状態と設定ファイルを食い違わせない)。
+  // **変えたその場で保存する**(適用ボタンを置かない)。押し忘れて反映されないほうが
+  // 分かりにくいため。保存に失敗したら画面の値を元に戻す(画面の状態と設定ファイルを
+  // 食い違わせない)。テキスト欄は change(確定時)で拾うので、1 文字ごとには書かない。
   const fitOnStartup = root.querySelector<HTMLInputElement>("#fit-on-startup")!;
   const settingsStatus = root.querySelector<HTMLParagraphElement>("#settings-status")!;
   const settingsPath = root.querySelector<HTMLElement>("#settings-path")!;
+  const trainEnabledInput = root.querySelector<HTMLInputElement>("#train-enabled")!;
+  const trainHost = root.querySelector<HTMLInputElement>("#train-host")!;
+  const trainPort = root.querySelector<HTMLInputElement>("#train-port")!;
+  const trainToken = root.querySelector<HTMLInputElement>("#train-token")!;
+  const trainCheck = root.querySelector<HTMLButtonElement>("#train-check")!;
+  const trainCheckStatus = root.querySelector<HTMLParagraphElement>("#train-check-status")!;
 
-  const showSettings = (s: { fitOnStartup: boolean; path: string }) => {
+  const showSettings = (s: {
+    fitOnStartup: boolean;
+    path: string;
+    training: { enabled: boolean; host: string; port: number; token: string; target: string };
+  }) => {
     fitOnStartup.checked = s.fitOnStartup;
     settingsPath.textContent = s.path || "(保存先を決められませんでした)";
+    // 既定値の解決は Go 側(training パッケージ)が済ませて返す。**フロントに
+    // 既定値を書かないこと**(2 か所に持つと、既定を変えたときに食い違う)。
+    const t = s.training;
+    trainEnabledInput.checked = t.enabled;
+    trainHost.value = t.host;
+    trainPort.value = String(t.port);
+    trainToken.value = t.token;
+    // 送信ボタンを出すかどうかはこの設定で決まる。
+    trainEnabled = t.enabled;
+    syncTrain();
   };
+
+  // 接続設定の保存。**接続の確認はしない**(保存と疎通は別の操作)。
+  // 先に設定を入れてから suteme を起動する、という順序が普通にあるため。
+  const saveTraining = async () => {
+    const port = Number(trainPort.value);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      settingsStatus.textContent = "ポート番号は 1〜65535 で指定してください。";
+      settingsStatus.classList.add("is-error");
+      return;
+    }
+    settingsStatus.textContent = "";
+    settingsStatus.classList.remove("is-error");
+    try {
+      showSettings(
+        await SettingsService.SetTraining(
+          trainEnabledInput.checked,
+          trainHost.value,
+          port,
+          trainToken.value,
+        ),
+      );
+    } catch (err) {
+      settingsStatus.textContent = `設定を保存できませんでした: ${String(err)}`;
+      settingsStatus.classList.add("is-error");
+      // 画面を設定ファイルの内容に戻す(食い違ったまま使わせない)。
+      try {
+        showSettings(await SettingsService.Settings());
+      } catch {
+        /* 読み直せないなら画面はそのまま。理由は上に出ている。 */
+      }
+    }
+  };
+
+  for (const el of [trainEnabledInput, trainHost, trainPort, trainToken]) {
+    el.addEventListener("change", () => {
+      void saveTraining();
+    });
+  }
+
+  // 「今このサーバに送ってよいか」の問い合わせ(`GET /api/status`)。
+  //
+  // ⚠️ **結果で送信を止めない。** suteme はループバックからのアクセスを受付判定の
+  // 手前で素通しにするので、「登録受付は無効」でも同じマシンからなら送れる。
+  // ここに出すのは状態であって、可否の判定ではない。
+  trainCheck.addEventListener("click", () => {
+    void (async () => {
+      trainCheck.disabled = true;
+      trainCheckStatus.classList.remove("is-error", "is-warn");
+      trainCheckStatus.textContent = "確認しています…";
+      try {
+        const st = await TrainingService.Status();
+        if (!st.reachable) {
+          trainCheckStatus.textContent = `つながりません: ${st.error}`;
+          trainCheckStatus.classList.add("is-error");
+          return;
+        }
+        const parts = [`${st.target} に接続できました`];
+        parts.push(st.accepting ? "登録受付: 有効" : "登録受付: 無効");
+        if (st.detailed) {
+          parts.push(`履歴 ${st.entries}/${st.capacity} 件`);
+          if (st.dataVersion) {
+            parts.push(st.dataVersion);
+          }
+        }
+        trainCheckStatus.textContent = parts.join(" / ") + (st.note ? `。${st.note}` : "");
+        if (st.note) {
+          trainCheckStatus.classList.add("is-warn");
+        }
+      } catch (err) {
+        trainCheckStatus.textContent = `確認できませんでした: ${String(err)}`;
+        trainCheckStatus.classList.add("is-error");
+      } finally {
+        trainCheck.disabled = false;
+      }
+    })();
+  });
 
   fitOnStartup.addEventListener("change", () => {
     void (async () => {
