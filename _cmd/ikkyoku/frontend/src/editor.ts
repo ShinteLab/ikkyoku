@@ -103,30 +103,47 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   }
   stage.appendChild(grid);
 
-  // 盤の外周が全体に占める割合（core/web の MARGIN=28 / CELL*9+MARGIN*2=560）。
-  const BOARD_MARGIN_RATIO = 28 / 560;
+  // 盤の SVG 座標（core/web の shogi-board.js）。マス目は (MARGIN, MARGIN) から
+  // CELL*9 の正方形。**向こうが変わったらここも直す。**
+  const SVG_MARGIN = 28;
+  const SVG_CELL = 56;
 
-  // グリッドを SVG の実寸に合わせる。**サイズが変わりうる場面すべてで呼ぶこと**
+  // グリッドを盤のマス目に合わせる。**サイズが変わりうる場面すべてで呼ぶこと**
   // （ウィンドウのリサイズ・盤の描き直し・訂正モードの切り替え）。
+  //
+  // ⚠️ **SVG の要素の矩形ではなく、SVG 座標を画面座標へ変換して使う**
+  // （`getScreenCTM`）。`<shogi-board>` の SVG は `preserveAspectRatio` が既定
+  // （`xMidYMid meet`）なので、**要素の箱が正方形でないと絵は箱の中で中央寄せになり、
+  // 左右に余白ができる**。箱の左端から測ると、その余白のぶんだけ横にずれる
+  // （実際にそうなっていた）。CTM なら余白も拡大率もまとめて解決される。
   const layoutGrid = () => {
     const svg = stage.querySelector("shogi-board")?.shadowRoot?.querySelector("svg");
-    if (!svg) {
+    const ctm = svg?.getScreenCTM();
+    if (!svg || !ctm) {
       // まだ <shogi-board> が読み込まれていない。描き直しのときに再度呼ばれる。
       grid.style.display = "none";
       return;
     }
-    const s = svg.getBoundingClientRect();
+    const at = (x: number, y: number) => {
+      const p = svg.createSVGPoint();
+      p.x = x;
+      p.y = y;
+      return p.matrixTransform(ctm);
+    };
+    const topLeft = at(SVG_MARGIN, SVG_MARGIN);
+    const bottomRight = at(SVG_MARGIN + SVG_CELL * 9, SVG_MARGIN + SVG_CELL * 9);
     const base = stage.getBoundingClientRect();
-    if (s.width === 0 || s.height === 0) {
+    const w = bottomRight.x - topLeft.x;
+    const h = bottomRight.y - topLeft.y;
+    if (w <= 0 || h <= 0) {
       grid.style.display = "none";
       return;
     }
-    const inset = s.width * BOARD_MARGIN_RATIO;
     grid.style.display = "";
-    grid.style.left = `${s.left - base.left + inset}px`;
-    grid.style.top = `${s.top - base.top + inset}px`;
-    grid.style.width = `${s.width - inset * 2}px`;
-    grid.style.height = `${s.height - inset * 2}px`;
+    grid.style.left = `${topLeft.x - base.left}px`;
+    grid.style.top = `${topLeft.y - base.top}px`;
+    grid.style.width = `${w}px`;
+    grid.style.height = `${h}px`;
   };
 
   // 盤の大きさは「ウィンドウの高さ」でも変わる（CSS の min(...) に 100vh が入る）ので、
@@ -322,6 +339,9 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
 
   // 駒台。**盤に無い駒のうち、持ち主が決まったもの**を並べる。
   // ここからは盤へ打てるし、反対側の駒台へ移せる。
+  //
+  // **枚数は数字ではなく駒そのものの数で見せる**（歩 5 枚なら駒を 5 枚並べる）。
+  // 「歩5」と書くより、実際の駒台と同じで一目で分かるため。
   function renderHands(inv: Stock[]) {
     for (const zone of handZones) {
       const black = zone.dataset.black === "true";
@@ -330,22 +350,17 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
       let total = 0;
       for (const s of inv) {
         const n = black ? s.handBlack : s.handWhite;
-        if (n <= 0) {
-          continue;
+        for (let i = 0; i < n; i++) {
+          total++;
+          const chip = document.createElement("div");
+          chip.className = black ? "stock-chip" : "stock-chip is-white";
+          chip.draggable = true;
+          chip.dataset.piece = String(s.piece);
+          chip.dataset.hand = "true";
+          chip.textContent = black ? s.letter : s.letter.toLowerCase();
+          chip.title = `${black ? "先手" : "後手"}の${s.name}（${n}枚）`;
+          chips.appendChild(chip);
         }
-        total += n;
-        const chip = document.createElement("div");
-        chip.className = black ? "stock-chip" : "stock-chip is-white";
-        chip.draggable = true;
-        chip.dataset.piece = String(s.piece);
-        chip.dataset.hand = "true";
-        chip.textContent = black ? s.letter : s.letter.toLowerCase();
-        chip.title = `${black ? "先手" : "後手"}の${s.name} ${n}枚`;
-        const badge = document.createElement("span");
-        badge.className = "chip-badge";
-        badge.textContent = n > 1 ? String(n) : "";
-        chip.appendChild(badge);
-        chips.appendChild(chip);
       }
       zone.classList.toggle("is-empty", total === 0);
     }
@@ -514,11 +529,7 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
         return;
       }
       setDrag(e, { from: "hand", piece: Number(chip.dataset.piece), black });
-      e.dataTransfer?.setDragImage(
-        makeGhost(chip.firstChild?.textContent ?? "", black),
-        20,
-        20,
-      );
+      e.dataTransfer?.setDragImage(makeGhost(chip.textContent ?? "", black), 20, 20);
     });
     zone.addEventListener("dragend", dropGhost);
 

@@ -606,16 +606,19 @@ html.is-main body {
   grid-row: 1 / span 2;
 }
 
+/* 駒台は**盤の高さの半分ぶん**を使う(1 行が盤の半分になる)。
+   駒を枚数ぶん並べるので、狭いとすぐ溢れる。 */
 #hand-white-slot {
   grid-column: 1;
   grid-row: 1;
   justify-self: end;
+  align-self: stretch;
 }
 
 #hand-black-slot {
   grid-column: 3;
   grid-row: 2;
-  align-self: end;
+  align-self: stretch;
 }
 
 .hand-slot[hidden] {
@@ -950,8 +953,9 @@ html.is-main body {
   flex-direction: column;
   align-items: center;
   gap: 6px;
-  width: 76px;
-  min-height: 96px;
+  width: 104px;
+  height: 100%;
+  min-height: 120px;
   padding: 6px 4px;
   border: 1px dashed #3a3d47;
   border-radius: 6px;
@@ -969,26 +973,25 @@ html.is-main body {
   color: #6f7787;
 }
 
+/* **駒は枚数ぶん並べる**(数字で「歩5」と書かない)。実際の駒台と同じ見え方に
+   なるので、何枚あるかが一目で分かる。溢れたらスクロールさせる。 */
 .hand-chips {
+  flex: 1 1 auto;
+  align-content: flex-start;
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
   gap: 3px;
+  width: 100%;
+  min-height: 0;
+  overflow-y: auto;
 }
 
-/* 駒台のチップは「駒種ごとに 1 枚 + 枚数」で出す(9 枚の歩を 9 個並べない)。 */
-.chip-badge {
-  position: absolute;
-  right: -2px;
-  bottom: -4px;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  font-size: 10px;
-  color: #d7e3ff;
-  text-shadow: 0 0 3px #000;
-}
-
+/* 駒台の駒は盤の駒に近い大きさにする(見本より少し大きい)。 */
 .hand-chips .stock-chip {
-  position: relative;
+  width: 30px;
+  height: 30px;
+  font-size: 26px;
 }
 
 /* 未決が残っているあいだは局面が確定しない(SFEN が組み上がらない)ので、
