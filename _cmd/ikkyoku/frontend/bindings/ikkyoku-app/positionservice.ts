@@ -94,6 +94,9 @@ export function Reset(): $CancellablePromise<$models.EditState> {
  * SetHand は駒台のうち片側の枚数を n 枚にする。
  * **駒台の先後も盤面からは決まらない**ので、これも人間の入口。
  * ドラッグ以外の入口（未割り当てを一括で寄せる操作）として残してある。
+ * 
+ * **既に足りている駒でも載せられる**（Place が在庫を見ないのと同じ。
+ * 止めると駒台から先後を決める操作が詰む）。多すぎるぶんは Warnings に出る。
  */
 export function SetHand(piece: number, black: boolean, n: number): $CancellablePromise<$models.EditState> {
     return $Call.ByID(1543092003, piece, black, n);

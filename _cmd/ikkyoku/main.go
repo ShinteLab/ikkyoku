@@ -11,7 +11,6 @@
 // アプリの寿命を握る画面ではない。ただし**キャプチャ領域の基準は枠のまま**で、これは
 // 移せない(領域は枠のクライアント矩形そのもの。captureservice.go 参照)。
 //
-// 将棋のロジック(SFEN・盤面・駒)はまだ持たない。撮って保存するだけ。
 // 実処理は親パッケージ github.com/ShinteLab/ikkyoku をそのまま呼ぶ。Wails 依存のコードは
 // このディレクトリ(_cmd/ikkyoku)にのみ置く(wails3 skill の architecture 方針)。
 package main
@@ -55,6 +54,9 @@ func main() {
 	captureSvc := NewCaptureService(logger, cfg.SutemeDataDir)
 	positionSvc := NewPositionService(logger)
 	trainingSvc := NewTrainingService(logger, settingsSvc)
+	// 解析は**確定した局面**にだけかかる。局面を持っているのは PositionService なので、
+	// フロントから SFEN を渡してもらうのではなく、あちらから読む。
+	analyzeSvc := NewAnalyzeService(logger, positionSvc)
 
 	app := application.New(application.Options{
 		Name:        "ikkyoku",
@@ -65,6 +67,7 @@ func main() {
 			application.NewService(settingsSvc),
 			application.NewService(positionSvc),
 			application.NewService(trainingSvc),
+			application.NewService(analyzeSvc),
 		},
 		Assets: assetOptions(),
 		Mac: application.MacOptions{
@@ -89,6 +92,7 @@ func main() {
 	wins.mainGeom.attach(main)
 	captureSvc.bind(app, wins)
 	settingsSvc.bind(app)
+	analyzeSvc.bind(app)
 
 	registerFrameHooks(app, wins, state.Frame, captureSvc, cfg.FitOnStartup, logger)
 	registerMainHooks(app, wins, state.Main, logger)

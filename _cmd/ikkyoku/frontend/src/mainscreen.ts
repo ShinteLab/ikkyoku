@@ -26,7 +26,7 @@
 // Go 側が枠の外へ逃がす(captureservice.go の placeMainBesideFrame)。
 import { Clipboard, Events } from "@wailsio/runtime";
 import { FiCopy, FiImage } from "react-icons/fi";
-import { CaptureService, SettingsService, TrainingService } from "../bindings/ikkyoku-app";
+import { AnalyzeService, CaptureService, SettingsService, TrainingService } from "../bindings/ikkyoku-app";
 import { iconMarkup } from "./icon";
 import { mountEditor } from "./editor";
 import type { Stock } from "../bindings/github.com/ShinteLab/ikkyoku/position/models";
@@ -45,6 +45,30 @@ interface CaptureResult {
   handTotal: Record<string, number>;
   recognizeError: string;
   debug?: Debug | null;
+}
+
+// 解析の途中経過（Go 側 AnalyzeProgress / analyze.Progress）。
+//
+// **bindings から取れない。** これはメソッドの戻り値ではなくイベントのペイロードなので、
+// 生成の対象外（CaptureResult と同じ事情）。**Go 側を変えたらここも直すこと。**
+//
+// ⚠️ **score.cp / score.mate は先手視点で、label は Go 側が組み立てた文字列。**
+// フロントで符号をいじったり書式を作り直したりしないこと（2 か所に散る）。
+interface AnalyzeProgress {
+  seq: number;
+  done: boolean;
+  progress: {
+    depth: number;
+    score: { cp: number; mate: number; label: string };
+    nodes: number;
+    best: string;
+    elapsedMs: number;
+  };
+}
+
+interface AnalyzeFailure {
+  seq: number;
+  error: string;
 }
 
 // これを下回ったら検出を疑う。盤が映っていない画面を撮ったときにここが落ちる。
@@ -161,6 +185,27 @@ export function mountMainScreen(root: HTMLElement): void {
           <p id="board-placeholder" class="board-placeholder">まだ撮っていません。</p>
         </div>
         <div id="editor" class="editor"></div>
+        <!-- エンジン解析（Phase 4）。**確定した局面にだけかかる。**
+             手番と駒台の先後が決まらないと SFEN が組み上がらないので、それまでは
+             ボタンを押せなくして理由を出す（決めていないことを勝手に決めない。設計原則5）。
+
+             ⚠️ **局面を直したら結果を消す。** 評価値は「その局面の」値なので、
+             盤が変わったあとも残っていると、別の局面の値を今の盤の評価だと読ませる。 -->
+        <div id="analyze-row" class="analyze-row" hidden>
+          <button id="analyze-run" class="ghost-btn" type="button">解析</button>
+          <label class="analyze-time">
+            <select id="analyze-seconds" title="考える時間。途中で切っても、そこまでの評価値は出ます">
+              <option value="1">1秒</option>
+              <option value="3" selected>3秒</option>
+              <option value="10">10秒</option>
+              <option value="30">30秒</option>
+            </select>
+          </label>
+          <span id="analyze-score" class="analyze-score"></span>
+          <span id="analyze-best" class="analyze-best"></span>
+          <span id="analyze-meta" class="note"></span>
+        </div>
+        <p id="analyze-status" class="note is-caution" hidden></p>
         <!-- 訂正した局面を suteme の学習データとして送る。**確定してから出す**
              (訂正の途中の盤面を送る意味が無い)。設定で有効にしていないときは
              行ごと出さない。**押したときだけ送る**(自動送信はしない)。 -->
@@ -473,6 +518,138 @@ export function mountMainScreen(root: HTMLElement): void {
     void sendTraining();
   });
 
+  // ---- エンジン解析（Phase 4） --------------------------------------------
+  //
+  // **確定した局面にだけかかる。** 手番か駒台の先後が未決だと SFEN が組み上がらず、
+  // Go 側が始める前に断る（決めていないことを勝手に決めない。設計原則5）。
+  //
+  // 反復深化なので**深さが 1 つ終わるたびに答えが更新される**。終わるまで黙って
+  // いると数秒固まって見えるので、途中経過をそのまま出して育つ様子を見せる。
+  //
+  // ⚠️ **局面を直したら結果を消す。** 評価値は「その局面の」値で、盤が変わったあとも
+  // 残っていると別の局面の値を今の盤の評価として読ませることになる。
+  const analyzeRow = root.querySelector<HTMLDivElement>("#analyze-row")!;
+  const analyzeRun = root.querySelector<HTMLButtonElement>("#analyze-run")!;
+  const analyzeSeconds = root.querySelector<HTMLSelectElement>("#analyze-seconds")!;
+  const analyzeScore = root.querySelector<HTMLElement>("#analyze-score")!;
+  const analyzeBest = root.querySelector<HTMLElement>("#analyze-best")!;
+  const analyzeMeta = root.querySelector<HTMLElement>("#analyze-meta")!;
+  const analyzeStatus = root.querySelector<HTMLParagraphElement>("#analyze-status")!;
+
+  // 今の解析の世代。**打ち切った解析の途中経過は後から届く**ので、これで捨てる。
+  let analyzeSeq = -1;
+  let analyzeRunning = false;
+  // 何を解析した値なのか。今の局面と食い違ったら表示を消す。
+  let analyzedSfen = "";
+  // 解析できる局面か（EditState.sfen が埋まっているか）。
+  let analyzeReady = false;
+
+  const syncAnalyzeButton = () => {
+    analyzeRun.textContent = analyzeRunning ? "停止" : "解析";
+    analyzeRun.classList.toggle("is-active", analyzeRunning);
+    analyzeRun.disabled = !analyzeRunning && !analyzeReady;
+    analyzeRun.title = analyzeRunning
+      ? "ここまでの結果で打ち切ります"
+      : analyzeReady
+        ? "この局面をエンジンに解析させます"
+        : "手番と駒台の先後を決めると解析できます";
+  };
+
+  const clearAnalyzeResult = () => {
+    analyzedSfen = "";
+    analyzeScore.textContent = "";
+    analyzeScore.className = "analyze-score";
+    analyzeBest.textContent = "";
+    analyzeMeta.textContent = "";
+    analyzeStatus.hidden = true;
+    analyzeStatus.textContent = "";
+  };
+
+  const showAnalyzeProgress = (p: AnalyzeProgress["progress"]) => {
+    analyzeScore.textContent = p.score.label;
+    // 先手が良ければ青、後手が良ければ橙。**符号は Go 側が先手視点に揃えてある。**
+    const side = p.score.mate !== 0 ? p.score.mate : p.score.cp;
+    analyzeScore.className =
+      "analyze-score" + (side > 0 ? " is-black" : side < 0 ? " is-white" : "");
+    // ⚠️ **読み筋ではなく最善手 1 手。** engine は今のところ PV を返さないので、
+    // 深い読み筋があるかのように出さないこと。
+    analyzeBest.textContent = p.best ? `最善 ${p.best}` : "";
+    const parts = [`深さ ${p.depth}`];
+    if (p.nodes > 0) {
+      parts.push(`${p.nodes.toLocaleString()} ノード`);
+    }
+    parts.push(`${(p.elapsedMs / 1000).toFixed(1)} 秒`);
+    analyzeMeta.textContent = parts.join(" / ");
+  };
+
+  const startAnalyze = async () => {
+    analyzeStatus.hidden = true;
+    analyzeStatus.textContent = "";
+    analyzeScore.textContent = "…";
+    analyzeScore.className = "analyze-score";
+    analyzeBest.textContent = "";
+    analyzeMeta.textContent = "考えています…";
+    try {
+      const st = await AnalyzeService.Start(Number(analyzeSeconds.value) || 0);
+      analyzeSeq = st.seq;
+      analyzedSfen = st.sfen;
+      analyzeRunning = true;
+    } catch (err) {
+      clearAnalyzeResult();
+      analyzeStatus.textContent = `解析できません: ${String(err instanceof Error ? err.message : err)}`;
+      analyzeStatus.hidden = false;
+    } finally {
+      syncAnalyzeButton();
+    }
+  };
+
+  analyzeRun.addEventListener("click", () => {
+    if (analyzeRunning) {
+      // **打ち切っても、そこまでの評価値は残る**（設計原則3）。捨てる操作ではない。
+      void AnalyzeService.Stop();
+      return;
+    }
+    void startAnalyze();
+  });
+
+  // 局面が変わったら解析の可否と表示を追随させる。**結果は局面と紐づける。**
+  const syncAnalyze = (sfen: string, loaded: boolean) => {
+    analyzeRow.hidden = !loaded;
+    analyzeReady = !!sfen;
+    if (analyzedSfen && sfen !== analyzedSfen) {
+      // 直したので、前の評価値は今の盤の値ではなくなった。
+      clearAnalyzeResult();
+      analyzeSeq = -1;
+      analyzeRunning = false;
+    }
+    syncAnalyzeButton();
+  };
+
+  Events.On("analyze:info", (event: { data: AnalyzeProgress }) => {
+    if (event.data.seq !== analyzeSeq) {
+      return; // 打ち切った解析の遅れてきた途中経過
+    }
+    showAnalyzeProgress(event.data.progress);
+  });
+  Events.On("analyze:done", (event: { data: AnalyzeProgress }) => {
+    if (event.data.seq !== analyzeSeq) {
+      return;
+    }
+    analyzeRunning = false;
+    showAnalyzeProgress(event.data.progress);
+    syncAnalyzeButton();
+  });
+  Events.On("analyze:failed", (event: { data: AnalyzeFailure }) => {
+    if (event.data.seq !== analyzeSeq) {
+      return;
+    }
+    analyzeRunning = false;
+    clearAnalyzeResult();
+    analyzeStatus.textContent = `解析できません: ${event.data.error}`;
+    analyzeStatus.hidden = false;
+    syncAnalyzeButton();
+  });
+
   const editor = mountEditor({
     stage: boardStage,
     handSlots: {
@@ -493,6 +670,7 @@ export function mountMainScreen(root: HTMLElement): void {
       editSfen = st?.labelSfen ?? "";
       editNotes = st?.labelNotes ?? [];
       syncTrain();
+      syncAnalyze(st?.sfen ?? "", !!st?.loaded);
       if (!st?.loaded) {
         boardHandRow.hidden = true;
         fillWarnings(boardWarnings, []);

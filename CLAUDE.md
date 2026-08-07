@@ -5,7 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## このプロジェクトが目指すもの（**最初に読むこと**）
 
 **`ikkyoku` は「将棋中継を観ながら、その場で盤面を解析して遊ぶ」という構想そのものを
-実現する場所。** 現状はまだキャプチャしかできていないが、**キャプチャツールではない。**
+実現する場所。** 撮る → 認識する → 訂正する → 評価値を出す、までは繋がっている。
+**キャプチャツールではない。**
 
 > オンライン中継の画面から盤面を割り出し、エンジンで解析して、
 > **「次善手を選んだらどう転ぶか」を対話的に辿れるようにする。**
@@ -29,7 +30,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | 2 | 盤面認識（`suteme`）。持ち駒の認識も要る | **完了・今ここ**。動くが精度はこれから（下記） |
 | 3 | 局面矯正層（駒数保存則・静的合法性・手番の決定） | **着手**。Go 側の土台は `position` に入っている（下記）。UI はこれから |
 | 3.5 | 棋譜組み立て層（局面を日和見的に繋ぐ。**任意**） | 未着手 |
-| 4 | エンジン接続（`engine` を直接 import） | 未着手 |
+| 4 | エンジン接続（`engine` を直接 import） | **着手・今ここ**。単発の解析が通っている（下記）。視点トグルはこれから |
 | 5 | 検討 UI（訂正・MultiPV・分岐ツリー） | 未着手。**ikkyoku に入る**（ツリーは `position`。下記） |
 | 6 | リアルタイムモード（盤面固定の放送のみ。**任意**） | 未着手 |
 
@@ -70,7 +71,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   **認識器**であって、それらを使う**アプリケーションのロジックは ikkyoku に書く。**
   Phase 3 の局面矯正層も Phase 5 の検討 UI も、core にも suteme にも置けないのでここに入る
 - 依存の向きは `ikkyoku → core / suteme / engine`。**逆参照はしない**
-- 現時点ではまだキャプチャしかしていないので、`core`/`suteme`/`engine` への依存は**無い**
+- 現時点で `core`（仕様）・`suteme`（認識）・`engine`（解析）の 3 つとも繋がっている
 
 ### 構想の全文
 
@@ -732,6 +733,82 @@ SFEN の `40` は「次が 40 手目」だが、**ユーザが「40」と入れ�
   保存は**シリアライズするだけ**で済み、設計のやり直しにならない。
   ここが、永続化の判断を先送りしても損しない条件
 
+## Phase 4: エンジン接続（**単発の解析が動いている**。2026-08-08）
+
+確定した局面を `engine` に渡して評価値と最善手を出すところまで通っている
+（`analyze` パッケージ → `AnalyzeService` → 盤面タブ）。
+
+### 使う API（`github.com/ShinteLab/engine`）
+
+| 呼ぶもの | 用途 |
+|---|---|
+| `shogi.NewBoard("sfen " + SFEN)` | 局面の読み込み。**USI の `position` コマンドと同じ書式**を読む |
+| `search.BestContext(ctx, b, search.Options{...})` | 探索。`Result{Action, Score, Nodes}` |
+| `search.Options.Info` | **反復深化の各深さで呼ばれる**。途中経過はこれで取る |
+| `search.MateScore` | 詰みスコアの基準値（`MateScore - ply`） |
+| `search.ErrNoMoves` | 合法手が 1 つも無い（＝詰んでいる） |
+
+### 決まっていること（**崩さないこと**。テストで固定してある）
+
+- ⚠️ **評価値は先手視点に直して返す。** engine が返すのは negamax の値
+  （**手番側**から見た評価）なので、そのまま出すと**後手番のときだけ符号が逆に見える**。
+  符号を決めるのは `analyze` の責務で、**表示側で符号をいじらないこと**。
+  `Score.Label`（"+230" / "先手の詰み 5手"）も Go 側で組み立てる（書式が 2 か所に散る）
+- ⚠️ **玉の欠けた局面は engine に渡さない**（`ensurePlayable`）。合法手生成が玉の位置を
+  前提にしているので落ちる。**訂正 UI 側でこれを禁止しないこと**——詰将棋のような
+  「玉が 1 枚しかない局面」も確定できるのが訂正 UI の要件。止めるのは**エンジンに渡す
+  瞬間だけ**で、盤を見ることも訂正することも学習に送ることもできる
+- **それでも `recover` する。** 想定外の局面で engine が落ちても、撮った 1 枚と
+  訂正した局面は残す（設計原則3）。**そのため `Parallel`（Lazy SMP）は既定で使わない**
+  ——worker の goroutine で起きた panic は拾えず、アプリごと落ちる。速さより落ちないこと
+- **正式な SFEN を要求するのはここだけ。** 手番か駒台の先後が未決なら
+  `position.Position.SFEN()` がエラーを返すので、解析は始められない
+  （設計原則5。ここで先手に倒すと、決めていない手番でエンジンが読む）。
+  **これは警告ではなくエラー**——決めてもらう以外に手が無い
+- **打ち切っても評価値は出る**（設計原則3）。反復深化なので「最後に完走した深さ」の
+  結果が返る。`Stop` は「やめる」ではなく「ここまでで良い」
+- ⚠️ **読み筋（PV）は無い。** `search.Info.PV` は今のところ**最善手 1 手だけ**で、
+  置換表から読み筋を復元する経路が engine に無い。**深い読み筋があるかのように
+  出さないこと。** MultiPV も無い（`Result` は単一手、除外手リストも無い）
+- **評価値の絶対値は当てにしない。** engine の PST は手作り・未調整
+  （`engine/CLAUDE.md` の Known gaps）。画面でも大きく出しすぎない
+
+### `AnalyzeService`（`_cmd/ikkyoku/analyzeservice.go`）
+
+- **局面を持たない。** 解析するのは常に「今 `PositionService` が持っている局面」で、
+  **フロントから SFEN を受け取らない**。渡してもらう形にすると、訂正した直後に
+  古い局面を解析する経路ができる（フロントに局面の写しを持たせない方針と同じ）
+- **同時に走るのは 1 本。** 新しく始めると前を打ち切る。打ち切った解析の途中経過は
+  **後から届く**ので、`Seq`（解析の世代）でフロントが捨てる。
+  **この仕組みを外さないこと**（古い局面の評価値が新しい盤の上に出る）
+- 途中経過はイベント。`analyze:info` / `analyze:done` / `analyze:failed`。
+  ⚠️ **ペイロードの型は bindings に出ない**（メソッドの戻り値ではないため）。
+  `CaptureResult` と同じで `mainscreen.ts` が手で書いているので、**Go 側を変えたら
+  そちらも直す**
+
+### 盤面タブの表示
+
+盤のすぐ下に **1 行だけ**（`.analyze-row`）。「解析」ボタン・考える秒数・評価値・
+最善手・深さ/ノード数/経過。**盤をできるだけ大きく見せたい**ので行を増やさないこと。
+
+- ⚠️ **局面を直したら結果を消す**（`syncAnalyze`）。評価値は「その局面の」値なので、
+  盤が変わったあとも残っていると、**別の局面の値を今の盤の評価として読ませる**
+- 確定していないあいだはボタンを押せなくして、理由を `title` に出す
+  （「手番と駒台の先後を決めると解析できます」）
+
+### これから
+
+- **視点トグル（手前が先手 / 手前が後手）。** 「視点」の節のとおり、反転するのは
+  **エンジンに渡す境界だけ**。`position.Position` に 180 度回転（盤・先後・駒台・手番を
+  まとめて入れ替える）を足して、`analyze` に渡す直前で 1 回だけ使う。
+  **表示は絶対に反転しない。** ⚠️ ここで詰まるのは「UI の手番トグルが指すのは
+  対局の先後か、画面の上下か」で、**同じ `Turn` フィールドに 2 つの意味を持たせないこと**
+- **選んだ手で局面を進める**（→ Phase 5 の検討ツリー）。engine に MultiPV は無いが、
+  構想の「次善手を選んだらどう転ぶか」は**選んだ手を指した局面を解析する**形で成立する
+  ので、MultiPV は必須ではない
+- **最善手の表記が USI のまま**（"7g7f"）。日本語表記（▲7六歩）にするには動かす駒種が
+  要る。engine は知っているので、出すなら向こうの I/O 境界に足すのが筋
+
 ## 経緯: なぜ Chrome 拡張ではなくネイティブなのか
 
 **もともとは Chrome 拡張だった。** Phase 0 の検証で ABEMA が Widevine DRM により
@@ -771,7 +848,10 @@ DRM を素通りする。そのため入口を Chrome 拡張からネイティ�
   「main thread でイベントを処理する」制約は Windows には無い）
 - `github.com/ShinteLab/suteme` — 盤面認識（`recognize` パッケージが使う）。
   `core` も間接的に入る
-- `github.com/ShinteLab/core` — `_cmd/ikkyoku` が `core/web` の embed（`<shogi-board>`）を配信する
+- `github.com/ShinteLab/engine` / `github.com/ShinteLab/engine/search` — 局面の解析
+  （`analyze` パッケージが使う）。PureGo
+- `github.com/ShinteLab/core` — `_cmd/ikkyoku` が `core/web` の embed（`<shogi-board>`）を配信する。
+  `analyze` は `core/sfen` で「エンジンに渡せる局面か」を確かめる
 
 ワークスペース（`ShinteLab/shinte`）に置いた場合、そのルートに go.mod は無いので
 `go` コマンドは必ずこの `ikkyoku/` ディレクトリで実行すること。
@@ -780,8 +860,8 @@ DRM を素通りする。そのため入口を Chrome 拡張からネイティ�
 ワークスペースに並んでいる状態では `replace` の相対パス参照になる（他のサブプロジェクトと同じ運用）:
 
 ```
-go.mod                    replace .../suteme => ../suteme,       .../core => ../core
-_cmd/ikkyoku/go.mod       replace .../suteme => ../../../suteme, .../core => ../../../core
+go.mod                    replace .../suteme => ../suteme,       .../core => ../core,       .../engine => ../engine
+_cmd/ikkyoku/go.mod       replace .../suteme => ../../../suteme, .../core => ../../../core, .../engine => ../../../engine
 ```
 
 `_cmd/ikkyoku` にも同じ replace が要る。**path 置換されたモジュール自身の replace は
@@ -798,6 +878,7 @@ _cmd/ikkyoku/go.mod       replace .../suteme => ../../../suteme, .../core => ../
 $w = 'D:\Go\Projects\shinte\ikkyoku\.claude\worktrees'
 New-Item -ItemType Junction -Path (Join-Path $w 'suteme') -Target 'D:\Go\Projects\shinte\suteme'
 New-Item -ItemType Junction -Path (Join-Path $w 'core')   -Target 'D:\Go\Projects\shinte\core'
+New-Item -ItemType Junction -Path (Join-Path $w 'engine') -Target 'D:\Go\Projects\shinte\engine'
 ```
 
 `.gitignore` が `.*` を無視するので git には見えない。
@@ -831,6 +912,7 @@ New-Item -ItemType Junction -Path (Join-Path $w 'core')   -Target 'D:\Go\Project
 | `config.go` | `Config` の JSON 読み書き（`encoding/json` のみ、標準ライブラリで完結）。`SutemeDataDir` / `FitOnStartup` / `Training`（suteme への登録先）もここ |
 | `training/` | **訂正した局面を `suteme` の学習用サーバへ登録するクライアント**（`POST /api/register` / `GET /api/status`）。標準ライブラリのみ。**サンプルの作り方は書かない**（81 マスの切り出しは suteme の責務） |
 | `hotkey.go` | `ParseHotkey`（`"alt+s"` 文字列 → `golang.design/x/hotkey` の修飾子・キー） |
+| `analyze/` | **確定した局面 → 評価値**（Phase 4）。`engine`/`engine/search` を呼ぶだけ。**画像を知らない**（`position` と同じ側）。**正式な SFEN を要求するのはここだけ**で、視点の反転もこの境界で行う |
 | `position/` | **「とある局面」を扱う層**（Phase 3/5）。1 マスずつ直せる `Board`・手番・駒台の先後の割り振り・SFEN の組み立て・警告。**画像を知らない**。検証は `core/sfen` に投げる |
 | `recognize/` | 画像 → 盤面。`suteme` を呼ぶだけ（`recognize.go`）＋どの学習データを使うかの指定（`predictor.go`）＋盤の矩形だけを探す `DetectRegion`（`detect.go`。ガイド枠の自動フィット用）。**認識器はここに書かない**。**Phase 3 の局面矯正層もここには入れない**（画像を知らない層として別に切る。上記参照） |
 | `_cmd/ikkyoku/` | Wails3 GUI アプリ(独立したネストモジュール)。下記「GUI アプリ(Wails3)」参照 |
@@ -879,6 +961,7 @@ CLI は無い。**
 | `frontend/src/main.ts` | エントリ。**素の `import "@wailsio/runtime"`** と `?window=` による画面分岐 |
 | `frontend/src/frame.ts` | 枠（ツールバー + ガイド枠） |
 | `positionservice.go` | 訂正中の局面を持つ Service。操作のたびに `EditState` を丸ごと返す |
+| `analyzeservice.go` | 確定した局面を解析する Service（`Start` / `Stop` / `State`）。**局面は持たない**（`PositionService` から読む）。途中経過はイベント |
 | `trainingservice.go` | 訂正した局面を suteme へ登録する Service（`Status` / `Send`）。**状態を持たない**（送るものはフロントが渡す） |
 | `frontend/src/mainscreen.ts` | メイン画面 |
 | `frontend/src/editor.ts` | 訂正 UI（盤に重ねる 9x9 のグリッド・駒箱・手番・手数） |
@@ -1310,6 +1393,10 @@ Start-Process .\_cmd\ikkyoku\bin\ikkyoku.exe
 
 **まだ未検証**:
 
+- **エンジン解析の UI。** Go 側（`analyze`）はテストで通っており、`AnalyzeService` と
+  盤面タブの行はビルドが通っているが、**実機で押していない**。要確認は
+  「確定するまでボタンが押せないこと」「途中経過が深さごとに更新されること」
+  「停止してもそこまでの評価値が残ること」「**局面を直すと結果が消えること**」の 4 つ
 - **「訂正データを送信」の UI。** **API そのものは実サーバ相手に確認済み**
   (2026-08-08。一時ディレクトリで `suteme-training 8099` を起動し、撮り溜めた PNG を
   `recognize.FromImage` → `training.Register` で登録 → `history.json` に
@@ -1396,6 +1483,13 @@ go test ./...
   向こうが変わったらこちらを直す）。座標が画像からはみ出す場合は**送る前に**弾くこと、
   再送が重複として通ること、`/api/status` が項目を絞って返しても壊れないこと、
   エラーが**何をすればよいか分かる日本語**になること
+- `analyze/analyze_test.go` — **評価値が先手視点であること**（`newScore` の単体と、
+  「駒得している側が有利に出る」を**手番を変えながら**見る実地の 4 ケース。
+  engine が返すのは手番側視点なので、**後手番のときだけ符号が逆になる**のが一番
+  ありがちな壊れ方で、画面を見ても気づきにくい）、詰みスコアが手数として出ること、
+  **玉の欠けた局面を弾くこと**（渡すと engine が落ちる）、**盤面だけの SFEN を
+  黙って先手番として解析しないこと**、途中経過が深さ順に届くこと、
+  **打ち切っても最善手は返すこと**（設計原則3）
 - `position/board_test.go` — 盤面 SFEN の往復（**訂正の土台。ここが崩れると直した結果が
   別の局面になる**）、`Set` の反映、**ゼロ値の `Cell` が空マスであること**、範囲外、
   壊れた盤面でも読めた分が入ること

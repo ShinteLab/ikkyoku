@@ -531,6 +531,53 @@ html.is-main body {
   width: 76px;
 }
 
+/* エンジン解析の行（Phase 4）。盤のすぐ下に 1 行だけ。
+   **評価値はこの画面の主役の 1 つ**なので、他の行より大きく出す。
+   盤をできるだけ大きく見せたいので、行そのものは増やさないこと。 */
+.analyze-row {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.analyze-row[hidden] {
+  display: none;
+}
+
+.analyze-time select {
+  padding: 4px 6px;
+  font-size: 12.5px;
+  color: #f2f3f5;
+  background: #23262e;
+  border: 1px solid #3a3d47;
+  border-radius: 5px;
+}
+
+/* 評価値。**符号は Go 側が先手視点に揃えている**ので、色は値の符号を見るだけ。 */
+.analyze-score {
+  font-size: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  min-width: 5em;
+  color: #c9ccd3;
+}
+
+.analyze-score.is-black {
+  color: #6ad3ff;
+}
+
+.analyze-score.is-white {
+  color: #ffc46b;
+}
+
+/* 最善手。⚠️ **読み筋ではなく 1 手だけ**（engine が PV を返さない）。 */
+.analyze-best {
+  font-size: 13.5px;
+  font-family: "Consolas", "Menlo", monospace;
+  color: #f2f3f5;
+}
+
 /* 訂正データの送信。**確定してから出る行**なので、訂正中は場所を取らない。 */
 .train-row {
   flex: 0 0 auto;

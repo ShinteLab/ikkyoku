@@ -205,6 +205,23 @@ func (s *PositionService) SetHand(piece int, black bool, n int) (EditState, erro
 	return s.edit(func(p *position.Position) error { return p.SetHand(piece, black, n) })
 }
 
+// positionSFEN は今の局面の**確定した** SFEN を返す（AnalyzeService 用）。
+//
+// ⚠️ **手番や駒台の先後が未決ならエラー。** エンジンに渡せるのは確定した局面だけで、
+// ここで先手に倒すと「決めていない手番でエンジンが読んだ」ことになる（設計原則5）。
+// 盤を見るだけ・訂正するだけなら未決のままでよいので、止めるのはこの経路だけ。
+//
+// **局面はフロントを経由させない。** 解析するのは常に「今ここが持っている局面」で、
+// SFEN を渡してもらう形にすると、訂正した直後に古い局面を解析する経路ができる。
+func (s *PositionService) positionSFEN() (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.pos == nil {
+		return "", fmt.Errorf("まだ局面がありません")
+	}
+	return s.pos.SFEN()
+}
+
 // edit は 1 操作を適用して新しい状態を返す共通処理。
 // **操作が失敗しても状態は返す**（フロントが画面を更新できないと、何が起きたか
 // 分からないまま古い盤が残る）。

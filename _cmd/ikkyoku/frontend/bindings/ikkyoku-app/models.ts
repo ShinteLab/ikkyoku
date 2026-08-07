@@ -9,6 +9,19 @@ import * as position$0 from "../github.com/ShinteLab/ikkyoku/position/models.js"
 import * as recognize$0 from "../github.com/ShinteLab/ikkyoku/recognize/models.js";
 
 /**
+ * AnalyzeState は今解析中かどうか。フロントの初期表示と、開始・停止の応答に使う。
+ */
+export interface AnalyzeState {
+    "running": boolean;
+    "seq": number;
+
+    /**
+     * SFEN は解析にかけた局面（開始時のみ入る）。何を評価した値なのかを示す。
+     */
+    "sfen": string;
+}
+
+/**
  * AppSettings はメイン画面の設定タブに出す設定。
  * 
  * **ikkyoku.Config そのものを返していない。** あちらは CLI 用の項目(領域・ディスプレイ番号)

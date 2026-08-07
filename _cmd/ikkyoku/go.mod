@@ -10,6 +10,7 @@ require (
 )
 
 require (
+	github.com/ShinteLab/engine v0.0.0-20260725200156-de4523939d66 // indirect
 	github.com/ShinteLab/suteme v0.0.0-00010101000000-000000000000 // indirect
 	github.com/adrg/xdg v0.5.3 // indirect
 	github.com/coder/websocket v1.8.14 // indirect
@@ -24,6 +25,7 @@ require (
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	golang.design/x/hotkey v0.6.1 // indirect
+	golang.org/x/xerrors v0.0.0-20231012003039-104605ab7028 // indirect
 )
 
 // ikkyoku はタグ未発行のため相対パスの replace で参照する(親 CLAUDE.md の運用に準拠)。
@@ -32,3 +34,5 @@ replace github.com/ShinteLab/ikkyoku => ../../
 replace github.com/ShinteLab/suteme => ../../../suteme
 
 replace github.com/ShinteLab/core => ../../../core
+
+replace github.com/ShinteLab/engine => ../../../engine
