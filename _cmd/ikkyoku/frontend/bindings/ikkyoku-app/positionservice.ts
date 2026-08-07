@@ -33,6 +33,14 @@ export function FlipSide(rank: number, file: number): $CancellablePromise<$model
 }
 
 /**
+ * FromHand は駒台の駒を盤へ置く（駒台 → 盤のドラッグ＆ドロップ）。
+ * **その側の駒台に無ければエラー**（見本から置く Place とはそこが違う）。
+ */
+export function FromHand(rank: number, file: number, piece: number, black: boolean): $CancellablePromise<$models.EditState> {
+    return $Call.ByID(1528633255, rank, file, piece, black);
+}
+
+/**
  * Load は認識結果（盤面部分の SFEN）を読み込んで訂正を始める。
  * 
  * **撮るたびに呼ぶ。** 1 回のキャプチャは他と独立している（設計原則1）ので、
@@ -61,7 +69,7 @@ export function Place(rank: number, file: number, piece: number, black: boolean,
 
 /**
  * Remove はマスを空にする（盤 → 駒箱のドラッグ＆ドロップ）。
- * **認識が作った余計な駒を外す操作。**
+ * **認識が作った余計な駒を外す操作。** 先後は決めない（駒台の未割り当てに入る）。
  */
 export function Remove(rank: number, file: number): $CancellablePromise<$models.EditState> {
     return $Call.ByID(876291842, rank, file);
@@ -75,11 +83,12 @@ export function Reset(): $CancellablePromise<$models.EditState> {
 }
 
 /**
- * SetHandBlack は駒台のうち先手のものを n 枚にする（残りは後手）。
+ * SetHand は駒台のうち片側の枚数を n 枚にする。
  * **駒台の先後も盤面からは決まらない**ので、これも人間の入口。
+ * ドラッグ以外の入口（未割り当てを一括で寄せる操作）として残してある。
  */
-export function SetHandBlack(piece: number, n: number): $CancellablePromise<$models.EditState> {
-    return $Call.ByID(1921420490, piece, n);
+export function SetHand(piece: number, black: boolean, n: number): $CancellablePromise<$models.EditState> {
+    return $Call.ByID(1543092003, piece, black, n);
 }
 
 /**
@@ -103,6 +112,14 @@ export function SetTurn(turn: number): $CancellablePromise<$models.EditState> {
  */
 export function State(): $CancellablePromise<$models.EditState> {
     return $Call.ByID(280258907);
+}
+
+/**
+ * ToHand は盤の駒を駒台へ移す（盤 → 先手/後手の駒台のドラッグ＆ドロップ）。
+ * **外すのと先後を決めるのが 1 操作。**
+ */
+export function ToHand(rank: number, file: number, black: boolean): $CancellablePromise<$models.EditState> {
+    return $Call.ByID(246306642, rank, file, black);
 }
 
 /**

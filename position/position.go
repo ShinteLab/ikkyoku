@@ -2,6 +2,7 @@ package position
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/ShinteLab/core/kifu"
 	"github.com/ShinteLab/core/sfen"
@@ -64,12 +65,17 @@ type Position struct {
 	// 分からなくても解析はできる（千日手・連続王手の判定ができないだけ）。
 	MoveNumber int
 
-	// handBlack は駒台のうち先手に割り振った枚数（ベース駒コード → 枚数）。
+	// handBlack / handWhite は駒台に割り振った枚数（ベース駒コード → 枚数）。
 	//
 	// **合計は持たない。** 駒台の合計は盤上の駒数から逆算されるもので、盤を直すたびに
-	// 変わる。ここが持つのは「そのうち何枚が先手のものか」だけなので、
+	// 変わる。ここが持つのは「そのうち何枚を先手/後手に決めたか」だけなので、
 	// **訂正で合計が変わっても割り振りが合計を超えられない**（Hands で丸める）。
+	//
+	// **残りを片方に寄せない。** 割り振っていないぶんは「先後不明」のまま残る
+	// （設計原則5。手番と同じく、盤面からは決まらないものを勝手に決めない）。
+	// 未割り当ては Unassigned で取れる。
 	handBlack map[int]int
+	handWhite map[int]int
 }
 
 // New は盤面から局面を作る。手番は未決、手数は不明。
@@ -77,7 +83,7 @@ func New(b *Board) *Position {
 	if b == nil {
 		b = NewBoard()
 	}
-	return &Position{Board: b, handBlack: map[int]int{}}
+	return &Position{Board: b, handBlack: map[int]int{}, handWhite: map[int]int{}}
 }
 
 // FromBoardSFEN は盤面部分の SFEN から局面を作る。
@@ -99,54 +105,97 @@ func (p *Position) HandTotal() map[int]int {
 
 // Hands は先後に割り振った駒台を返す。
 //
-// 先手は SetHandBlack で決めた枚数（合計を超えていれば合計まで丸める）、
-// **後手は残り全部**。この形にしてあるので、**割り振りで合計が壊れることが無い**
-// （UI 側は「先手に何枚」を動かすだけでよく、後手側は勝手に辻褄が合う）。
+// **割り振っていないぶんは含まれない**（どちらの持ち駒か決まっていないので、
+// 先手にも後手にも入れられない）。合計を超えていれば丸める（盤を直して
+// 駒台の合計が減ったとき。先手を先に取り、余った枠を後手に回す）。
 func (p *Position) Hands() (black, white map[int]int) {
-	total := p.HandTotal()
 	black = map[int]int{}
 	white = map[int]int{}
-	for base, n := range total {
-		if n <= 0 {
-			continue
-		}
-		b := p.handBlack[base]
-		if b < 0 {
-			b = 0
-		}
-		if b > n {
-			b = n
-		}
+	for base, total := range p.HandTotal() {
+		b, w := p.assigned(base, total)
 		if b > 0 {
 			black[base] = b
 		}
-		if n-b > 0 {
-			white[base] = n - b
+		if w > 0 {
+			white[base] = w
 		}
 	}
 	return black, white
 }
 
-// SetHandBlack は駒台のうち先手のものを n 枚にする（残りは後手）。
+// assigned は駒種 1 つぶんの割り振りを合計 total に収めて返す。
+func (p *Position) assigned(base, total int) (black, white int) {
+	if total <= 0 {
+		return 0, 0
+	}
+	black = clamp(p.handBlack[base], 0, total)
+	white = clamp(p.handWhite[base], 0, total-black)
+	return black, white
+}
+
+// Unassigned はまだ先後を決めていない駒台の枚数を返す（ベース駒コード → 枚数）。
+//
+// **これが 0 になるまで局面は確定しない**（SFEN は持ち駒を先後に分けて書くため）。
+// 訂正 UI は「どちらの駒台か」をここから減らしていく操作として作る。
+func (p *Position) Unassigned() map[int]int {
+	out := map[int]int{}
+	for base, total := range p.HandTotal() {
+		b, w := p.assigned(base, total)
+		if rest := total - b - w; rest > 0 {
+			out[base] = rest
+		}
+	}
+	return out
+}
+
+// SetHand は駒台のうち片側の枚数を n 枚にする。
 //
 // **どちらの持ち駒かは局面からは決まらない**ので、決めるのは人間。
-// 合計を超える指定はエラー（黙って丸めない。UI の操作は意図なので）。
-func (p *Position) SetHandBlack(base, n int) error {
+// もう一方に割り振ったぶんを含めて合計を超える指定はエラー
+// （黙って丸めない。UI の操作は意図なので）。
+func (p *Position) SetHand(base int, black bool, n int) error {
 	if sfen.Letter(base) == "None" || base == sfen.King {
 		return fmt.Errorf("ikkyoku/position: 駒台に持てない駒です: %d", base)
 	}
 	if n < 0 {
 		return fmt.Errorf("ikkyoku/position: 枚数が負です: %d", n)
 	}
-	if total := p.HandTotal()[base]; n > total {
-		return fmt.Errorf("ikkyoku/position: %s は駒台に %d 枚しかありません: %d",
-			sfen.Name(base), total, n)
+	total := p.HandTotal()[base]
+	other := p.handWhite[base]
+	if !black {
+		other = p.handBlack[base]
 	}
-	if p.handBlack == nil {
-		p.handBlack = map[int]int{}
+	other = clamp(other, 0, total)
+	if n > total-other {
+		return fmt.Errorf("ikkyoku/position: %s は駒台に %d 枚しかありません（相手側に %d 枚）",
+			sfen.Name(base), total, other)
 	}
-	p.handBlack[base] = n
+	p.hand(black)[base] = n
 	return nil
+}
+
+// hand は片側の駒台のマップを返す（nil なら作る）。
+func (p *Position) hand(black bool) map[int]int {
+	if black {
+		if p.handBlack == nil {
+			p.handBlack = map[int]int{}
+		}
+		return p.handBlack
+	}
+	if p.handWhite == nil {
+		p.handWhite = map[int]int{}
+	}
+	return p.handWhite
+}
+
+func clamp(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
 }
 
 // BoardSFEN は盤面部分だけの SFEN を返す。手番が未決でも使える。
@@ -158,11 +207,25 @@ func (p *Position) BoardSFEN() string { return p.Board.SFEN() }
 // ここで先手に倒して文字列を作ると、決めていない手番が決まったことになってしまう
 // （エンジンに渡ってからでは、どちらの手番として読まれたのかが分からない）。
 //
+// **駒台の割り振りが残っていてもエラー。** SFEN は持ち駒を先後に分けて書くので、
+// 「どちらの駒台か決まっていない駒」を書き表せない。手番と同じで、
+// **決めていないことを黙って決めない**。
+//
 // 手数は 0（不明）でも 1 と書く。SFEN の書式が手数を必須にしているためで、
 // 手番と違って**局面の解釈を変えない**（履歴を持たない以上どのみち使えない）。
 func (p *Position) SFEN() (string, error) {
 	if p.Turn == TurnUnknown {
 		return "", fmt.Errorf("ikkyoku/position: 手番が決まっていません")
+	}
+	if rest := p.Unassigned(); len(rest) > 0 {
+		names := make([]string, 0, len(rest))
+		for _, base := range sfen.HandOrder {
+			if n := rest[base]; n > 0 {
+				names = append(names, fmt.Sprintf("%s%d", sfen.Name(base), n))
+			}
+		}
+		return "", fmt.Errorf("ikkyoku/position: 駒台の先後が決まっていません: %s",
+			strings.Join(names, " "))
 	}
 	black, white := p.Hands()
 	num := p.MoveNumber
@@ -193,9 +256,13 @@ func (p *Position) Clone() *Position {
 		Turn:       p.Turn,
 		MoveNumber: p.MoveNumber,
 		handBlack:  make(map[int]int, len(p.handBlack)),
+		handWhite:  make(map[int]int, len(p.handWhite)),
 	}
 	for k, v := range p.handBlack {
 		c.handBlack[k] = v
+	}
+	for k, v := range p.handWhite {
+		c.handWhite[k] = v
 	}
 	return c
 }

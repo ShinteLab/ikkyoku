@@ -874,33 +874,84 @@ html.is-main body {
   color: #ff7a7a;
 }
 
-.stock-split {
+/* まだ先後を決めていない駒。**盤に無い駒はどちらかの駒台にあるはずだが、
+   どちらかは盤面からは決まらない**(設計原則5)ので、決まるまでここに居る。
+   駒台へドラッグすると持ち主が決まる。 */
+.stock-pool {
   display: flex;
-  align-items: center;
-  gap: 4px;
+  flex-wrap: wrap;
+  gap: 2px;
   margin-left: auto;
 }
 
-.split-btn {
+.pool-chip {
   width: 20px;
   height: 20px;
-  padding: 0;
-  font-size: 11px;
-  color: #9aa6c0;
-  background: #23262e;
-  border: 1px solid #3a3d47;
-  border-radius: 4px;
-  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "ShogiSFEN", serif;
+  font-size: 17px;
+  color: #1a1a1a;
+  background: #e8c07a;
+  border: 1px dashed #8a6a33;
+  border-radius: 3px;
+  cursor: grab;
 }
 
-.split-btn:disabled {
-  color: #4a4f5c;
-  cursor: default;
+.stock-row.is-unassigned .stock-count {
+  color: #ffc46b;
 }
 
-.split-label {
+/* 駒台。盤から外した駒の行き先であり、盤へ打つドラッグ元でもある。
+   **外すのと持ち主を決めるのが 1 操作**になるのがこのゾーンの意味。 */
+.hand-zone {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 4px 8px;
+  border: 1px dashed #3a3d47;
+  border-radius: 6px;
+}
+
+.hand-zone.is-over {
+  border-color: #5ea0ff;
+  border-style: solid;
+  background: rgba(94, 160, 255, 0.1);
+}
+
+.hand-zone-label {
+  flex: 0 0 auto;
   font-size: 11.5px;
-  color: #9aa6c0;
+  color: #6f7787;
+}
+
+.hand-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+/* 駒台のチップは「駒種ごとに 1 枚 + 枚数」で出す(9 枚の歩を 9 個並べない)。 */
+.chip-badge {
+  position: absolute;
+  right: -2px;
+  bottom: -4px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 10px;
+  color: #d7e3ff;
+  text-shadow: 0 0 3px #000;
+}
+
+.hand-chips .stock-chip {
+  position: relative;
+}
+
+/* 未決が残っているあいだは局面が確定しない(SFEN が組み上がらない)ので、
+   盤面タブの駒台行でも色を変えて知らせる。 */
+.hand.is-unassigned {
+  color: #ffc46b;
 }
 
 /* 盤面タブ側の警告。件数が増えても盤を押し潰さないよう高さを頭打ちにして送る

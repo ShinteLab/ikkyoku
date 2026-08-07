@@ -34,8 +34,12 @@ type Stock struct {
 	// Rest は残り = Limit - 盤上。**負なら過剰**（認識が余計な駒を作った状態）。
 	// 正の値はそのまま「駒台にあるはずの枚数」（先後の区別は付かない）。
 	Rest int `json:"rest"`
-	// HandBlack は Rest のうち先手に割り振った枚数（残りは後手）。
+	// HandBlack / HandWhite は Rest のうち先後に割り振った枚数。
 	HandBlack int `json:"handBlack"`
+	HandWhite int `json:"handWhite"`
+	// Unassigned は Rest のうち**まだ先後を決めていない**枚数。
+	// **これが残っているあいだ局面は確定しない**（SFEN が書けない）。
+	Unassigned int `json:"unassigned"`
 }
 
 // Over は過剰かを返す（盤上が上限を超えている）。
@@ -54,19 +58,11 @@ func (p *Position) Inventory() []Stock {
 		black, white := info.Black[base], info.White[base]
 		limit := sfen.PieceLimit(base)
 		rest := limit - black - white
-		hb := p.handBlack[base]
-		if hb < 0 {
-			hb = 0
-		}
-		if rest > 0 && hb > rest {
-			hb = rest
-		}
-		if rest <= 0 {
-			hb = 0
-		}
+		hb, hw := p.assigned(base, rest)
 		out = append(out, Stock{
 			Piece: base, Letter: sfen.Letter(base), Name: sfen.Name(base),
-			Limit: limit, Black: black, White: white, Rest: rest, HandBlack: hb,
+			Limit: limit, Black: black, White: white, Rest: rest,
+			HandBlack: hb, HandWhite: hw, Unassigned: max(rest, 0) - hb - hw,
 		})
 	}
 	return out
@@ -107,6 +103,63 @@ func (p *Position) Move(fromRank, fromFile, toRank, toFile int) error {
 		return err
 	}
 	return p.Board.Set(fromRank, fromFile, Cell{})
+}
+
+// ToHand は盤の駒を駒台へ移す。**盤 → 駒台のドラッグ＆ドロップ。**
+//
+// 盤から外すのと「どちらの駒台か決める」のを 1 操作にしてある。外すだけなら Remove で、
+// そちらは**先後を決めずに**「駒台にあるはず（先後不明）」へ戻る。
+//
+// 成駒は**元の駒に戻る**（と金を駒台に載せれば歩）。ベース駒コードで持っているので
+// 自然にそうなるが、**訂正の意味としても正しい**（駒台に成駒は無い）。
+func (p *Position) ToHand(rank, file int, black bool) error {
+	c, err := p.Board.At(rank, file)
+	if err != nil {
+		return err
+	}
+	if c.IsEmpty() {
+		return fmt.Errorf("ikkyoku/position: 空マスです")
+	}
+	if c.piece == sfen.King {
+		return fmt.Errorf("ikkyoku/position: 玉は駒台に載りません")
+	}
+	if err := p.Board.Set(rank, file, Cell{}); err != nil {
+		return err
+	}
+	// 盤から抜いたぶん駒台の合計が 1 増えるので、その 1 枚をこちら側に足す。
+	p.hand(black)[c.piece]++
+	return nil
+}
+
+// FromHand は駒台の駒を盤へ置く。**駒台 → 盤のドラッグ＆ドロップ。**
+//
+// **その側の駒台に無ければエラー。** 見本（駒箱）から置くのは Place で、
+// あちらは在庫を見ない。ここは「持っている駒を打つ」に相当するので数を守る。
+func (p *Position) FromHand(rank, file, piece int, black bool) error {
+	total := p.HandTotal()[piece]
+	b, w := p.assigned(piece, total)
+	have := w
+	if black {
+		have = b
+	}
+	if have <= 0 {
+		return fmt.Errorf("ikkyoku/position: %sの駒台に%sがありません",
+			sideName(black), sfen.Name(piece))
+	}
+	if err := p.Place(rank, file, piece, black, false); err != nil {
+		return err
+	}
+	// 盤に置いたぶん合計が 1 減るので、この側の割り振りも 1 減らす
+	// （減らさないと、置いた 1 枚がもう一方の側から引かれてしまう）。
+	p.hand(black)[piece] = have - 1
+	return nil
+}
+
+func sideName(black bool) string {
+	if black {
+		return "先手"
+	}
+	return "後手"
 }
 
 // TogglePromoted は成/不成を切り替える。**認識は成駒の "+" を落としやすい。**

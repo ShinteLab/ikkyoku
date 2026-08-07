@@ -128,9 +128,21 @@ func (s *PositionService) Place(rank, file, piece int, black, promoted bool) (Ed
 }
 
 // Remove はマスを空にする（盤 → 駒箱のドラッグ＆ドロップ）。
-// **認識が作った余計な駒を外す操作。**
+// **認識が作った余計な駒を外す操作。** 先後は決めない（駒台の未割り当てに入る）。
 func (s *PositionService) Remove(rank, file int) (EditState, error) {
 	return s.edit(func(p *position.Position) error { return p.Remove(rank, file) })
+}
+
+// ToHand は盤の駒を駒台へ移す（盤 → 先手/後手の駒台のドラッグ＆ドロップ）。
+// **外すのと先後を決めるのが 1 操作。**
+func (s *PositionService) ToHand(rank, file int, black bool) (EditState, error) {
+	return s.edit(func(p *position.Position) error { return p.ToHand(rank, file, black) })
+}
+
+// FromHand は駒台の駒を盤へ置く（駒台 → 盤のドラッグ＆ドロップ）。
+// **その側の駒台に無ければエラー**（見本から置く Place とはそこが違う）。
+func (s *PositionService) FromHand(rank, file, piece int, black bool) (EditState, error) {
+	return s.edit(func(p *position.Position) error { return p.FromHand(rank, file, piece, black) })
 }
 
 // TogglePromoted は成/不成を切り替える。
@@ -168,10 +180,11 @@ func (s *PositionService) SetMoveNumber(n int) (EditState, error) {
 	})
 }
 
-// SetHandBlack は駒台のうち先手のものを n 枚にする（残りは後手）。
+// SetHand は駒台のうち片側の枚数を n 枚にする。
 // **駒台の先後も盤面からは決まらない**ので、これも人間の入口。
-func (s *PositionService) SetHandBlack(piece, n int) (EditState, error) {
-	return s.edit(func(p *position.Position) error { return p.SetHandBlack(piece, n) })
+// ドラッグ以外の入口（未割り当てを一括で寄せる操作）として残してある。
+func (s *PositionService) SetHand(piece int, black bool, n int) (EditState, error) {
+	return s.edit(func(p *position.Position) error { return p.SetHand(piece, black, n) })
 }
 
 // edit は 1 操作を適用して新しい状態を返す共通処理。

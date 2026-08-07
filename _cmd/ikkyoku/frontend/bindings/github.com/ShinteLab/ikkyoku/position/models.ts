@@ -38,7 +38,14 @@ export interface Stock {
     "rest": number;
 
     /**
-     * HandBlack は Rest のうち先手に割り振った枚数（残りは後手）。
+     * HandBlack / HandWhite は Rest のうち先後に割り振った枚数。
      */
     "handBlack": number;
+    "handWhite": number;
+
+    /**
+     * Unassigned は Rest のうち**まだ先後を決めていない**枚数。
+     * **これが残っているあいだ局面は確定しない**（SFEN が書けない）。
+     */
+    "unassigned": number;
 }

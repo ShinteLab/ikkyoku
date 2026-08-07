@@ -74,21 +74,32 @@ func TestHandsSplit(t *testing.T) {
 		t.Fatalf("HandTotal[歩] = %d, want 2", n)
 	}
 
-	// 既定では全部後手側（先手に 0 枚）。**先後不明を先手に寄せない。**
+	// 既定はどちらにも入らない。**先後不明を片側に寄せない**（設計原則5）。
 	black, white := p.Hands()
-	if black[sfen.Pawn] != 0 || white[sfen.Pawn] != 2 {
-		t.Errorf("既定の割り振り = 先手%d/後手%d, want 0/2", black[sfen.Pawn], white[sfen.Pawn])
+	if black[sfen.Pawn] != 0 || white[sfen.Pawn] != 0 {
+		t.Errorf("既定の割り振り = 先手%d/後手%d, want 0/0", black[sfen.Pawn], white[sfen.Pawn])
+	}
+	if n := p.Unassigned()[sfen.Pawn]; n != 2 {
+		t.Errorf("未割り当て = %d, want 2", n)
 	}
 
-	if err := p.SetHandBlack(sfen.Pawn, 2); err != nil {
+	// 割り振りが残っているあいだは SFEN を組み立てない。
+	p.Turn = TurnBlack
+	if _, err := p.SFEN(); err == nil {
+		t.Fatal("駒台の先後が未決なのに SFEN が返りました")
+	}
+
+	if err := p.SetHand(sfen.Pawn, true, 2); err != nil {
 		t.Fatal(err)
 	}
 	black, white = p.Hands()
 	if black[sfen.Pawn] != 2 || white[sfen.Pawn] != 0 {
 		t.Errorf("割り振り = 先手%d/後手%d, want 2/0", black[sfen.Pawn], white[sfen.Pawn])
 	}
+	if len(p.Unassigned()) != 0 {
+		t.Errorf("未割り当てが残っています: %v", p.Unassigned())
+	}
 
-	p.Turn = TurnBlack
 	got, err := p.SFEN()
 	if err != nil {
 		t.Fatal(err)
@@ -97,11 +108,11 @@ func TestHandsSplit(t *testing.T) {
 		t.Errorf("SFEN() = %q に先手の歩 2 枚が出ていません", got)
 	}
 
-	// 合計を超える指定は通らない。
-	if err := p.SetHandBlack(sfen.Pawn, 3); err == nil {
+	// 反対側に割り振ろうとしても、合計を超えるぶんは通らない。
+	if err := p.SetHand(sfen.Pawn, false, 1); err == nil {
 		t.Error("合計を超える割り振りが通りました")
 	}
-	if err := p.SetHandBlack(sfen.King, 1); err == nil {
+	if err := p.SetHand(sfen.King, true, 1); err == nil {
 		t.Error("玉が駒台に入りました")
 	}
 
@@ -109,7 +120,7 @@ func TestHandsSplit(t *testing.T) {
 	if err := p.Board.Set(6, 0, Cell{}); err != nil { // 歩をもう 1 枚消す → 合計 3
 		t.Fatal(err)
 	}
-	if err := p.SetHandBlack(sfen.Pawn, 3); err != nil {
+	if err := p.SetHand(sfen.Pawn, false, 1); err != nil {
 		t.Fatal(err)
 	}
 	pawn, err := NewCell(sfen.Pawn, true, false)
@@ -164,12 +175,12 @@ func TestClone(t *testing.T) {
 		t.Fatal(err)
 	}
 	p.Turn = TurnBlack
-	if err := p.SetHandBlack(sfen.Pawn, 2); err != nil {
+	if err := p.SetHand(sfen.Pawn, true, 2); err != nil {
 		t.Fatal(err)
 	}
 
 	c := p.Clone()
-	if err := c.SetHandBlack(sfen.Pawn, 0); err != nil {
+	if err := c.SetHand(sfen.Pawn, true, 0); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.Board.Set(0, 0, Cell{}); err != nil {

@@ -10,9 +10,16 @@
 //   駒箱 → 盤   置く（在庫が尽きていても置ける。**余計な駒を外す前に正しい駒を
 //               置けないと詰む**ため。上限超過は警告と駒箱の赤い数字に出る）
 //   盤   → 盤   動かす（移動先の駒は置き換わる。取るのではない）
-//   盤   → 駒箱 外す（**認識が作った余計な駒を消す操作**）
+//   盤   → 駒台 外して、その側の持ち駒にする（**外すのと先後を決めるのが 1 操作**）
+//   駒台 → 盤   打つ（その側の駒台にある駒だけ）
+//   盤   → 駒箱 先後を決めずに外す（**認識が作った余計な駒を消す操作**）
+//   駒台 ⇄ 駒台 持ち主を変える
 //   クリック     成/不成
 //   右クリック   先後の反転（認識は駒の向きを外す）
+//
+// **駒台は 2 つ（先手・後手）、駒箱は「まだ先後を決めていない駒」。** 盤に無い駒は
+// 駒数保存則からどちらかの駒台にあるはずだが、**どちらかは盤面からは決まらない**
+// （設計原則5）。決めるまで駒箱に居座り、決まるまで SFEN は組み上がらない。
 //
 // **盤の描画は `<shogi-board>`（core/web）のまま。** 訂正用に盤を描き直さない
 // （描画が 2 実装になると、訂正中と確定後で見た目が変わる）。当たり判定は
@@ -33,8 +40,12 @@ const TURN_WHITE = 2;
 
 // ドラッグの中身。dataTransfer に JSON で載せる。
 type Drag =
+  // 盤のマスから
   | { from: "cell"; rank: number; file: number }
-  | { from: "stock"; piece: number; black: boolean };
+  // 駒箱の見本から（在庫を見ずに置く）
+  | { from: "stock"; piece: number; black: boolean }
+  // 駒台から（その側が持っている駒）
+  | { from: "hand"; piece: number; black: boolean };
 
 const DRAG_TYPE = "application/x-ikkyoku-piece";
 
@@ -87,7 +98,7 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     <div class="edit-bar">
       <button id="edit-toggle" class="ghost-btn" type="button" aria-pressed="false">訂正する</button>
       <span class="edit-hint">
-        駒箱から盤へドラッグして置く / 盤から駒箱へドラッグして外す /
+        盤 ⇄ 駒台をドラッグ（外すと同時に持ち主が決まる） / 駒箱は先後未決の置き場 /
         クリックで成・不成 / 右クリックで先後
       </span>
       <span class="spacer"></span>
@@ -107,7 +118,15 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
                title="0 なら不明。撮った 1 枚からは分からないのが普通です" />
         <span class="note">盤面からは決まりません</span>
       </div>
+      <div class="hand-zone" id="hand-white" data-black="false">
+        <span class="hand-zone-label">後手の駒台</span>
+        <div class="hand-chips"></div>
+      </div>
       <div id="stock-rail" class="stock-rail"></div>
+      <div class="hand-zone" id="hand-black" data-black="true">
+        <span class="hand-zone-label">先手の駒台</span>
+        <div class="hand-chips"></div>
+      </div>
     </div>
   `;
 
@@ -115,6 +134,10 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   const resetBtn = panel.querySelector<HTMLButtonElement>("#edit-reset")!;
   const body = panel.querySelector<HTMLDivElement>("#edit-body")!;
   const rail = panel.querySelector<HTMLDivElement>("#stock-rail")!;
+  const handZones = [
+    panel.querySelector<HTMLDivElement>("#hand-black")!,
+    panel.querySelector<HTMLDivElement>("#hand-white")!,
+  ];
   const moveNum = panel.querySelector<HTMLInputElement>("#edit-movenum")!;
   const turnBtns = Array.from(panel.querySelectorAll<HTMLButtonElement>(".turn-btn"));
 
@@ -177,14 +200,17 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     if (document.activeElement !== moveNum) {
       moveNum.value = String(next.moveNumber ?? 0);
     }
-    renderRail(next.inventory ?? []);
+    const inv = next.inventory ?? [];
+    renderRail(inv);
+    renderHands(inv);
     onState(next);
   }
 
-  // ---- 駒箱 ---------------------------------------------------------------
+  // ---- 駒箱と駒台 ---------------------------------------------------------
   //
-  // 1 行 1 駒種。**出すのは盤上の枚数ではなく「残り」**（存在するはずの総数 − 盤上）。
-  // 正なら駒台にあるはずの枚数、負なら認識が作った余計な駒。
+  // 駒箱は 1 行 1 駒種。**出すのは盤上の枚数ではなく「残り」**（存在するはずの
+  // 総数 − 盤上）で、正なら盤の外にあるはずの枚数、負なら認識が作った余計な駒。
+  // 駒台に割り振ったぶんは駒箱から減り、**残っているのが「先後未決」の駒**。
   function renderRail(inv: Stock[]) {
     rail.replaceChildren();
     for (const s of inv) {
@@ -192,9 +218,12 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
       row.className = "stock-row";
       if (s.rest < 0) {
         row.classList.add("is-over");
+      } else if (s.unassigned > 0) {
+        row.classList.add("is-unassigned");
       }
 
-      // ドラッグ元は先手・後手の 2 つ。**枚数は共有**（上限が先後合計なので）。
+      // 見本。**在庫を見ずに置ける**ので、残りが 0 でも 過剰でもドラッグできる
+      // （間違った駒を外す前に正しい駒を置きたい場面があるため）。
       for (const black of [true, false]) {
         const chip = document.createElement("div");
         chip.className = black ? "stock-chip" : "stock-chip is-white";
@@ -202,7 +231,7 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
         chip.dataset.piece = String(s.piece);
         chip.dataset.black = String(black);
         chip.textContent = black ? s.letter : s.letter.toLowerCase();
-        chip.title = `${black ? "先手" : "後手"}の${s.name}を盤に置く`;
+        chip.title = `${black ? "先手" : "後手"}の${s.name}を盤に置く（在庫を見ません）`;
         row.appendChild(chip);
       }
 
@@ -210,46 +239,63 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
       count.className = "stock-count";
       if (s.rest < 0) {
         count.textContent = `${-s.rest}枚多い`;
-        count.title = `${s.name}が上限（${s.limit}枚）より多く盤にあります。余分を駒箱へドラッグして外してください`;
+        count.title =
+          `${s.name}が上限（${s.limit}枚）より多く盤にあります。` +
+          `余分を駒箱か駒台へドラッグして外してください`;
       } else {
-        count.textContent = `${s.rest}`;
-        count.title = `${s.name}は残り ${s.rest} 枚（上限 ${s.limit}・盤上 ${s.black + s.white}）`;
+        count.textContent = s.unassigned > 0 ? `未決 ${s.unassigned}` : `${s.rest}`;
+        count.title =
+          `${s.name}: 上限 ${s.limit} / 盤上 ${s.black + s.white} / ` +
+          `駒台 先${s.handBlack} 後${s.handWhite} / 先後未決 ${s.unassigned}`;
       }
       row.appendChild(count);
 
-      // 駒台の先後の割り振り。**盤面からは決まらない**ので人が決める。
-      // 残りが 0 のときは出さない（割り振る対象が無い）。
-      const split = document.createElement("div");
-      split.className = "stock-split";
-      if (s.rest > 0) {
-        const dec = document.createElement("button");
-        dec.type = "button";
-        dec.className = "split-btn";
-        dec.textContent = "◂";
-        dec.title = "先手の駒台を減らす（後手へ）";
-        dec.disabled = s.handBlack <= 0;
-        dec.addEventListener("click", () => {
-          void apply(() => PositionService.SetHandBlack(s.piece, s.handBlack - 1));
-        });
-
-        const label = document.createElement("span");
-        label.className = "split-label";
-        label.textContent = `先${s.handBlack} / 後${s.rest - s.handBlack}`;
-
-        const inc = document.createElement("button");
-        inc.type = "button";
-        inc.className = "split-btn";
-        inc.textContent = "▸";
-        inc.title = "先手の駒台を増やす（後手から）";
-        inc.disabled = s.handBlack >= s.rest;
-        inc.addEventListener("click", () => {
-          void apply(() => PositionService.SetHandBlack(s.piece, s.handBlack + 1));
-        });
-
-        split.append(dec, label, inc);
+      // 未割り当ての駒。**どちらの駒台かは盤面からは決まらない**ので、
+      // ここから駒台へドラッグして人が決める。
+      const pool = document.createElement("div");
+      pool.className = "stock-pool";
+      for (let i = 0; i < s.unassigned; i++) {
+        const chip = document.createElement("div");
+        chip.className = "pool-chip";
+        chip.draggable = true;
+        chip.dataset.piece = String(s.piece);
+        chip.textContent = s.letter;
+        chip.title = `${s.name}（どちらの駒台か未決）。先手か後手の駒台へドラッグしてください`;
+        pool.appendChild(chip);
       }
-      row.appendChild(split);
+      row.appendChild(pool);
       rail.appendChild(row);
+    }
+  }
+
+  // 駒台。**盤に無い駒のうち、持ち主が決まったもの**を並べる。
+  // ここからは盤へ打てるし、反対側の駒台へ移せる。
+  function renderHands(inv: Stock[]) {
+    for (const zone of handZones) {
+      const black = zone.dataset.black === "true";
+      const chips = zone.querySelector<HTMLDivElement>(".hand-chips")!;
+      chips.replaceChildren();
+      let total = 0;
+      for (const s of inv) {
+        const n = black ? s.handBlack : s.handWhite;
+        if (n <= 0) {
+          continue;
+        }
+        total += n;
+        const chip = document.createElement("div");
+        chip.className = black ? "stock-chip" : "stock-chip is-white";
+        chip.draggable = true;
+        chip.dataset.piece = String(s.piece);
+        chip.dataset.hand = "true";
+        chip.textContent = black ? s.letter : s.letter.toLowerCase();
+        chip.title = `${black ? "先手" : "後手"}の${s.name} ${n}枚`;
+        const badge = document.createElement("span");
+        badge.className = "chip-badge";
+        badge.textContent = n > 1 ? String(n) : "";
+        chip.appendChild(badge);
+        chips.appendChild(chip);
+      }
+      zone.classList.toggle("is-empty", total === 0);
     }
   }
 
@@ -339,8 +385,11 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     const file = Number(el.dataset.file);
     if (data.from === "cell") {
       void apply(() => PositionService.Move(data.rank, data.file, rank, file));
+    } else if (data.from === "hand") {
+      // 駒台から打つ。**その側の駒台に無ければ Go 側で弾かれる。**
+      void apply(() => PositionService.FromHand(rank, file, data.piece, data.black));
     } else {
-      // 駒箱からは常に不成で置く（成っているかはクリックで切り替える）。
+      // 駒箱の見本からは常に不成で置く（成っているかはクリックで切り替える）。
       void apply(() => PositionService.Place(rank, file, data.piece, data.black, false));
     }
   });
@@ -368,44 +417,132 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     );
   });
 
-  // 駒箱側。盤から外すドロップ先でもある。
+  // 駒箱。見本と「先後未決の駒」のドラッグ元であり、
+  // **盤から先後を決めずに外すドロップ先**でもある。
   rail.addEventListener("dragstart", (e) => {
-    const chip = (e.target as HTMLElement)?.closest<HTMLElement>(".stock-chip");
-    if (!editing || !chip) {
+    const target = e.target as HTMLElement | null;
+    const sample = target?.closest<HTMLElement>(".stock-chip");
+    const pooled = target?.closest<HTMLElement>(".pool-chip");
+    if (!editing || (!sample && !pooled)) {
       e.preventDefault();
       return;
     }
-    const piece = Number(chip.dataset.piece);
-    const black = chip.dataset.black === "true";
-    setDrag(e, { from: "stock", piece, black });
-    e.dataTransfer?.setDragImage(makeGhost(chip.textContent ?? "", black), 20, 20);
+    if (sample) {
+      const black = sample.dataset.black === "true";
+      setDrag(e, { from: "stock", piece: Number(sample.dataset.piece), black });
+      e.dataTransfer?.setDragImage(makeGhost(sample.textContent ?? "", black), 20, 20);
+      return;
+    }
+    // 未決の駒。持ち主が決まっていないので、置き先の駒台が先後を決める。
+    // 盤に落とされたときは先手の駒として置く（見本と同じ扱い。右クリックで直せる）。
+    setDrag(e, { from: "stock", piece: Number(pooled!.dataset.piece), black: true });
+    e.dataTransfer?.setDragImage(makeGhost(pooled!.textContent ?? "", true), 20, 20);
   });
 
   rail.addEventListener("dragend", dropGhost);
-
-  rail.addEventListener("dragover", (e) => {
-    if (!editing || !e.dataTransfer?.types.includes(DRAG_TYPE)) {
-      return;
+  makeDropZone(rail, (data) => {
+    // 盤から: 先後を決めずに外す。駒台から: 持ち主を未決に戻す。
+    if (data.from === "cell") {
+      return PositionService.Remove(data.rank, data.file);
     }
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-    rail.classList.add("is-over");
+    if (data.from === "hand") {
+      return setHandDelta(data.piece, data.black, -1);
+    }
+    return null;
   });
 
-  rail.addEventListener("dragleave", () => rail.classList.remove("is-over"));
+  // 駒台（先手・後手）。**外すのと先後を決めるのが 1 操作**になるドロップ先。
+  for (const zone of handZones) {
+    const black = zone.dataset.black === "true";
 
-  rail.addEventListener("drop", (e) => {
-    if (!editing) {
-      return;
+    zone.addEventListener("dragstart", (e) => {
+      const chip = (e.target as HTMLElement)?.closest<HTMLElement>(".stock-chip");
+      if (!editing || !chip) {
+        e.preventDefault();
+        return;
+      }
+      setDrag(e, { from: "hand", piece: Number(chip.dataset.piece), black });
+      e.dataTransfer?.setDragImage(
+        makeGhost(chip.firstChild?.textContent ?? "", black),
+        20,
+        20,
+      );
+    });
+    zone.addEventListener("dragend", dropGhost);
+
+    makeDropZone(zone, (data) => {
+      if (data.from === "cell") {
+        return PositionService.ToHand(data.rank, data.file, black);
+      }
+      if (data.from === "hand") {
+        // 反対側の駒台から。**同じ側なら何もしない。**
+        if (data.black === black) {
+          return null;
+        }
+        return moveBetweenHands(data.piece, data.black, black);
+      }
+      // 駒箱の見本・未決の駒から: この側の駒台に 1 枚足す。
+      return setHandDelta(data.piece, black, +1);
+    });
+  }
+
+  // makeDropZone はドロップ先の共通処理（ハイライトと dragover の許可）。
+  // handler が null を返したら何もしない。
+  function makeDropZone(el: HTMLElement, handler: (data: Drag) => Promise<EditState> | null) {
+    el.addEventListener("dragover", (e) => {
+      if (!editing || !e.dataTransfer?.types.includes(DRAG_TYPE)) {
+        return;
+      }
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      el.classList.add("is-over");
+    });
+    el.addEventListener("dragleave", (e) => {
+      // 中の要素へ移っただけの dragleave では消さない。
+      if (!el.contains(e.relatedTarget as Node | null)) {
+        el.classList.remove("is-over");
+      }
+    });
+    el.addEventListener("drop", (e) => {
+      if (!editing) {
+        return;
+      }
+      e.preventDefault();
+      el.classList.remove("is-over");
+      const data = readDrag(e);
+      if (!data) {
+        return;
+      }
+      const p = handler(data);
+      if (p) {
+        void apply(() => p);
+      }
+    });
+  }
+
+  // 駒台の枚数を 1 増減する。**枚数は状態から読み直す**（フロントで数えない）。
+  function setHandDelta(piece: number, black: boolean, delta: number): Promise<EditState> | null {
+    const s = state?.inventory?.find((x) => x.piece === piece);
+    if (!s) {
+      return null;
     }
-    e.preventDefault();
-    rail.classList.remove("is-over");
-    const data = readDrag(e);
-    // 駒箱から駒箱へのドロップは何もしない（元から盤に無い）。
-    if (data?.from === "cell") {
-      void apply(() => PositionService.Remove(data.rank, data.file));
+    const now = black ? s.handBlack : s.handWhite;
+    const next = now + delta;
+    if (next < 0) {
+      return null;
     }
-  });
+    return PositionService.SetHand(piece, black, next);
+  }
+
+  // 片方の駒台からもう片方へ 1 枚移す。**先に減らしてから増やす**
+  // （増やす側が「相手側に割り振り済み」で弾かれないように）。
+  async function moveBetweenHands(piece: number, from: boolean, to: boolean): Promise<EditState> {
+    const s = state?.inventory?.find((x) => x.piece === piece);
+    const fromNow = s ? (from ? s.handBlack : s.handWhite) : 0;
+    const toNow = s ? (to ? s.handBlack : s.handWhite) : 0;
+    await PositionService.SetHand(piece, from, Math.max(fromNow - 1, 0));
+    return PositionService.SetHand(piece, to, toNow + 1);
+  }
 
   // ---- 手番・手数・トグル -------------------------------------------------
 

@@ -137,10 +137,11 @@ export function mountMainScreen(root: HTMLElement): void {
              外したか」の指標として、こちら側は**局面を直すときに要る情報**として置く
              (駒台の枚数は駒数保存則の逆算そのもので、警告は「どこが怪しいか」の提示)。
              訂正 UI が乗るのはこの面なので、盤の近くに置く。 -->
+        <!-- 駒台。**訂正中の局面の値**なので先後の割り振りが出る
+             (デバッグタブ側は認識した時点の推定枚数で「先後不明」のまま)。 -->
         <div id="board-hand-row" class="hand-row" hidden>
           <span class="field-label">駒台</span>
           <span id="board-hand" class="hand"></span>
-          <span class="note">先後不明</span>
         </div>
         <ul id="board-warnings" class="warnings is-compact" hidden></ul>
       </div>
@@ -329,20 +330,33 @@ export function mountMainScreen(root: HTMLElement): void {
     },
   });
 
-  // 盤面タブの駒台。**訂正中の局面の値**で、先後の割り振りまで出す
+  // 盤面タブの駒台。**訂正中の局面の値**で、先後の割り振りと**未決のぶん**まで出す
   // (デバッグタブ側は認識した時点の推定枚数のまま)。
+  //
+  // 未決が残っているあいだは局面が確定しない(SFEN が組み上がらない)ので、
+  // **訂正モードを開いていなくても見えるようにしておく**。
   const showEditHand = (inv: Stock[]) => {
-    const parts = inv
-      .filter((s) => s.rest > 0)
-      .map((s) => {
-        const black = s.handBlack;
-        const white = s.rest - black;
-        if (black > 0 && white > 0) {
-          return `${s.name}先${black}後${white}`;
-        }
-        return `${black > 0 ? "先" : "後"}${s.name}${black > 0 ? black : white}`;
-      });
-    boardHandOut.textContent = parts.join(" ");
+    const fmt = (pick: (s: Stock) => number) =>
+      inv
+        .filter((s) => pick(s) > 0)
+        .map((s) => `${s.name}${pick(s)}`)
+        .join(" ");
+    const black = fmt((s) => s.handBlack);
+    const white = fmt((s) => s.handWhite);
+    const rest = fmt((s) => s.unassigned);
+
+    const parts: string[] = [];
+    if (black) {
+      parts.push(`先手 ${black}`);
+    }
+    if (white) {
+      parts.push(`後手 ${white}`);
+    }
+    if (rest) {
+      parts.push(`先後未決 ${rest}`);
+    }
+    boardHandOut.textContent = parts.join(" / ");
+    boardHandOut.classList.toggle("is-unassigned", !!rest);
     boardHandRow.hidden = parts.length === 0;
   };
 

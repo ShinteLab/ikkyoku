@@ -141,6 +141,90 @@ func TestRemoveGoesBackToStock(t *testing.T) {
 	}
 }
 
+// 盤 → 駒台 → 盤の往復。**駒台への出し入れはドラッグ 1 回で完結すること**が要点で、
+// 「外す」と「どちらの駒台か決める」が別操作だと、割り振りが未決のまま溜まる。
+func TestToHandAndFromHand(t *testing.T) {
+	p, err := FromBoardSFEN(initialBoard)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 先手の歩を先手の駒台へ。
+	if err := p.ToHand(6, 0, true); err != nil {
+		t.Fatal(err)
+	}
+	black, _ := p.Hands()
+	if black[sfen.Pawn] != 1 {
+		t.Errorf("先手の駒台の歩 = %d, want 1", black[sfen.Pawn])
+	}
+	// **未割り当てにしない**（ドラッグ先で先後が決まっている）。
+	if len(p.Unassigned()) != 0 {
+		t.Errorf("未割り当てが残っています: %v", p.Unassigned())
+	}
+	if s := stockOf(p.Inventory(), sfen.Pawn); s.HandBlack != 1 || s.Unassigned != 0 {
+		t.Errorf("在庫 = %+v, want HandBlack1 Unassigned0", s)
+	}
+
+	// 駒台から盤へ戻す。**割り振りも 1 減る**（減らないと、置いた 1 枚が
+	// もう一方の側から引かれてしまう）。
+	if err := p.FromHand(5, 0, sfen.Pawn, true); err != nil {
+		t.Fatal(err)
+	}
+	black, white := p.Hands()
+	if black[sfen.Pawn] != 0 || white[sfen.Pawn] != 0 {
+		t.Errorf("駒台 = 先手%d/後手%d, want 0/0", black[sfen.Pawn], white[sfen.Pawn])
+	}
+	if len(p.Unassigned()) != 0 {
+		t.Errorf("未割り当てが残っています: %v", p.Unassigned())
+	}
+
+	// 持っていない側からは置けない。
+	if err := p.FromHand(4, 4, sfen.Pawn, false); err == nil {
+		t.Error("駒台に無い駒が置けました")
+	}
+	// 玉は駒台に載らない。
+	if err := p.ToHand(8, 4, true); err == nil {
+		t.Error("玉が駒台に載りました")
+	}
+	if err := p.ToHand(4, 4, true); err == nil {
+		t.Error("空マスから駒台へ移せました")
+	}
+}
+
+// 成駒を駒台に載せると元の駒に戻ること（駒台に成駒は無い）。
+func TestToHandDemotes(t *testing.T) {
+	p, err := FromBoardSFEN("9/9/9/9/9/9/9/9/+P8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.ToHand(8, 0, true); err != nil {
+		t.Fatal(err)
+	}
+	black, _ := p.Hands()
+	if black[sfen.Pawn] != 1 {
+		t.Errorf("先手の駒台の歩 = %d, want 1（と金は歩として載る）", black[sfen.Pawn])
+	}
+}
+
+// 「外すだけ」は先後を決めない。**どちらの駒台か分からないまま外したいことがある。**
+func TestRemoveLeavesUnassigned(t *testing.T) {
+	p, err := FromBoardSFEN(initialBoard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Remove(6, 0); err != nil {
+		t.Fatal(err)
+	}
+	if n := p.Unassigned()[sfen.Pawn]; n != 1 {
+		t.Errorf("未割り当て = %d, want 1", n)
+	}
+	black, white := p.Hands()
+	if black[sfen.Pawn] != 0 || white[sfen.Pawn] != 0 {
+		t.Errorf("駒台 = 先手%d/後手%d, want 0/0（決めていない）",
+			black[sfen.Pawn], white[sfen.Pawn])
+	}
+}
+
 func TestTogglePromotedAndFlipSide(t *testing.T) {
 	p, err := FromBoardSFEN(initialBoard)
 	if err != nil {
