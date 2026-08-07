@@ -27,7 +27,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | 0 | 中継から盤面を取れるか検証 | **完了**。OS レベルの画面キャプチャ一本と確定（下記） |
 | 1 | 取り込み層（透過ウィンドウで領域指定 → PNG） | **完了** |
 | 2 | 盤面認識（`suteme`）。持ち駒の認識も要る | **完了・今ここ**。動くが精度はこれから（下記） |
-| 3 | 局面矯正層（駒数保存則・静的合法性・手番の決定） | 未着手。**ikkyoku の `position` に入る**（下記） |
+| 3 | 局面矯正層（駒数保存則・静的合法性・手番の決定） | **着手**。Go 側の土台は `position` に入っている（下記）。UI はこれから |
 | 3.5 | 棋譜組み立て層（局面を日和見的に繋ぐ。**任意**） | 未着手 |
 | 4 | エンジン接続（`engine` を直接 import） | 未着手 |
 | 5 | 検討 UI（訂正・MultiPV・分岐ツリー） | 未着手。**ikkyoku に入る**（ツリーは `position`。下記） |
@@ -337,9 +337,10 @@ suteme の学習用サーバと同じパス・同じ方式。フロントは実�
 - 実盤のカメラ映像（対局室の俯瞰）と CG 盤は**難易度が桁違い**。
   同じパイプラインに押し込まず、まず CG 盤で成立させること
 
-## Phase 3/5: 局面を扱う層（`position`）— **未着手・方針だけ決まっている**
+## Phase 3/5: 局面を扱う層（`position`）— **着手済み。UI はこれから**
 
-**2026-08-07 決定。まだコードは無い。** 訂正 UI から着手する前にここを読むこと。
+**2026-08-07 決定。** Go 側の土台（`position` パッケージ）は入っており、
+**訂正 UI（Phase 5）と検討ツリーはまだ無い。**
 
 ### `position` パッケージ（画像を知らない層）
 
@@ -359,6 +360,32 @@ suteme の学習用サーバと同じパス・同じ方式。フロントは実�
 | 誰と誰の対局か・棋戦名・日時 | **`core/kifu` の `Document`**（`Black`/`White`/`Event`/`StartedAt`…） | **ikkyoku で対局者フィールドを定義し直さない** |
 | 何手目か・手番 | **SFEN**（手番と手数を含む） | 局面と別に持たない。「手番は局面から決まらない」は**盤の絵からは**決まらないという意味で、確定した局面には入っている |
 | そこから何を選んだか（分岐） | **`core/kifu` の分岐ツリー拡張**（未実装） | 今の `kifu.Document` は `Moves []Move` の本譜一直線。**木の形は core で決める**（kicho の保存形式に波及するため）。入るまでは `position` に薄く仮置きする |
+
+### 入っているもの（`board.go` / `position.go`）
+
+継ぎ目は **`recognize.Board.SFEN` → `position.FromBoardSFEN`**。ここから先は画像を見ない。
+
+| 型 / 関数 | 役割 |
+|---|---|
+| `Cell` | 1 マス。`NewCell(piece, black, promoted)` で作る。**ゼロ値が空マス** |
+| `Board` | 9x9。`At` / `Set`（訂正の入口）/ `SFEN()` / `Inspect(checks)` / `Clone()` |
+| `Position` | 盤面 + `Turn` + `MoveNumber` + 駒台の割り振り。`SFEN()` / `Warnings()` / `Violations()` |
+| `Game` | 対局の素性。**`core/kifu.Document` のエイリアス**（対局者を定義し直さない） |
+
+**壊さないこと（テストで固定してある）**:
+
+- **`Cell` のフィールドは非公開のまま。** 公開すると `Cell{}` が「先手の歩」になる
+  （`sfen.Pawn == 0`）。ゼロ値は空マスでなければならない
+- **駒台は「合計」を持たず「先手に何枚か」だけを持つ**（`SetHandBlack`）。合計は
+  盤上の駒数からの逆算（`core/sfen`）で、訂正のたびに変わる。この形なら
+  **割り振りが合計を壊せない**（残りは自動的に後手）。既定は先手 0 枚＝**先後不明を
+  先手に寄せない**
+- **手番が未決なら `SFEN()` はエラー。** 盤面だけ要るなら `BoardSFEN()`。ここで先手に
+  倒すと、決めていない手番が決まったことになる（設計原則5）。
+  手数だけは 0（不明）でも `1` と書く（SFEN の書式が必須にしているだけで、
+  局面の解釈を変えないため）
+- **検証を自前で書かない。** 二歩も行き所のない駒も駒数上限も `core/sfen` の `Inspect`。
+  `Warnings()` は直している最中に当然出るもので、**エラーとして扱わない**（設計原則3）
 
 ### 永続化は前提にしない（メモリのみ＋クラッシュ対策の自動保存）
 
@@ -471,6 +498,7 @@ New-Item -ItemType Junction -Path (Join-Path $w 'core')   -Target 'D:\Go\Project
 | `save.go` | `SavePNG` / `DefaultOutDir` / タイムスタンプ式ファイル名生成 |
 | `config.go` | `Config` の JSON 読み書き（`encoding/json` のみ、標準ライブラリで完結）。`SutemeDataDir` / `FitOnStartup` もここ |
 | `hotkey.go` | `ParseHotkey`（`"alt+s"` 文字列 → `golang.design/x/hotkey` の修飾子・キー） |
+| `position/` | **「とある局面」を扱う層**（Phase 3/5）。1 マスずつ直せる `Board`・手番・駒台の先後の割り振り・SFEN の組み立て・警告。**画像を知らない**。検証は `core/sfen` に投げる |
 | `recognize/` | 画像 → 盤面。`suteme` を呼ぶだけ（`recognize.go`）＋どの学習データを使うかの指定（`predictor.go`）＋盤の矩形だけを探す `DetectRegion`（`detect.go`。ガイド枠の自動フィット用）。**認識器はここに書かない**。**Phase 3 の局面矯正層もここには入れない**（画像を知らない層として別に切る。上記参照） |
 | `_cmd/ikkyoku/` | Wails3 GUI アプリ(独立したネストモジュール)。下記「GUI アプリ(Wails3)」参照 |
 
@@ -1012,6 +1040,12 @@ go test ./...
 - `save_test.go` — タイムスタンプ式ファイル名生成、`SavePNG` の保存先ディレクトリ自動作成
 - `config_test.go` — `Config` の JSON 読み書きの往復、ファイル未存在時の扱い
 - `hotkey_test.go` — `ParseHotkey` の文字列パース
+- `position/board_test.go` — 盤面 SFEN の往復（**訂正の土台。ここが崩れると直した結果が
+  別の局面になる**）、`Set` の反映、**ゼロ値の `Cell` が空マスであること**、範囲外、
+  壊れた盤面でも読めた分が入ること
+- `position/position_test.go` — 手番未決で `SFEN()` がエラーになること、駒台の逆算が
+  盤に追随すること、**割り振りが逆算した合計を超えられないこと**（訂正で合計が減る
+  場合も含む）、警告と `Clone`
 
 GUI 側（`_cmd/ikkyoku/`。別モジュールなので上の `./...` には含まれない）にも 2 本ある:
 
