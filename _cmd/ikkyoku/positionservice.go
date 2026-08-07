@@ -198,6 +198,9 @@ func (s *PositionService) SetMoveNumber(n int) (EditState, error) {
 // SetHand は駒台のうち片側の枚数を n 枚にする。
 // **駒台の先後も盤面からは決まらない**ので、これも人間の入口。
 // ドラッグ以外の入口（未割り当てを一括で寄せる操作）として残してある。
+//
+// **既に足りている駒でも載せられる**（Place が在庫を見ないのと同じ。
+// 止めると駒台から先後を決める操作が詰む）。多すぎるぶんは Warnings に出る。
 func (s *PositionService) SetHand(piece int, black bool, n int) (EditState, error) {
 	return s.edit(func(p *position.Position) error { return p.SetHand(piece, black, n) })
 }

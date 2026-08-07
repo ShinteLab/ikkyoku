@@ -108,33 +108,45 @@ func TestHandsSplit(t *testing.T) {
 		t.Errorf("SFEN() = %q に先手の歩 2 枚が出ていません", got)
 	}
 
-	// 反対側に割り振ろうとしても、合計を超えるぶんは通らない。
-	if err := p.SetHand(sfen.Pawn, false, 1); err == nil {
-		t.Error("合計を超える割り振りが通りました")
-	}
 	if err := p.SetHand(sfen.King, true, 1); err == nil {
 		t.Error("玉が駒台に入りました")
 	}
 
-	// 訂正で合計が減っても、割り振りが合計を超えたままにならない。
-	if err := p.Board.Set(6, 0, Cell{}); err != nil { // 歩をもう 1 枚消す → 合計 3
-		t.Fatal(err)
-	}
+	// **足りている駒でも駒台に載せられること。** ここで止めると、余計な駒を盤から
+	// 外す前に正しい持ち駒を載せられず、駒台から先後を決める操作が詰む。
 	if err := p.SetHand(sfen.Pawn, false, 1); err != nil {
-		t.Fatal(err)
+		t.Fatalf("足りている駒を駒台に載せられませんでした: %v", err)
 	}
-	pawn, err := NewCell(sfen.Pawn, true, false)
-	if err != nil {
-		t.Fatal(err)
+	black, white = p.Hands()
+	if black[sfen.Pawn] != 2 || white[sfen.Pawn] != 1 {
+		t.Errorf("割り振り = 先手%d/後手%d, want 2/1（丸めてはいけない）",
+			black[sfen.Pawn], white[sfen.Pawn])
 	}
-	if err := p.Board.Set(6, 0, pawn); err != nil { // 戻す → 合計 2
+	// 多すぎることは警告に出す（止めない。設計原則3・4）。
+	if !hasWarning(p.Warnings(), "歩が 19枚あります") {
+		t.Errorf("駒台まで数えた超過が警告に出ていません: %v", p.Warnings())
+	}
+
+	// 訂正で盤の枚数が変わっても、割り振りは人が決めたまま残る。
+	if err := p.Board.Set(6, 0, Cell{}); err != nil { // 歩をもう 1 枚消す → 逆算 3
 		t.Fatal(err)
 	}
 	black, white = p.Hands()
-	if black[sfen.Pawn]+white[sfen.Pawn] != 2 {
-		t.Errorf("割り振りの合計 = %d, want 2（逆算した合計を超えている）",
-			black[sfen.Pawn]+white[sfen.Pawn])
+	if black[sfen.Pawn]+white[sfen.Pawn] != 3 {
+		t.Errorf("割り振りの合計 = %d, want 3", black[sfen.Pawn]+white[sfen.Pawn])
 	}
+	if len(p.Warnings()) != 0 {
+		t.Errorf("盤上 15 + 駒台 3 = 上限内なのに警告が出ました: %v", p.Warnings())
+	}
+}
+
+func hasWarning(ws []string, sub string) bool {
+	for _, w := range ws {
+		if strings.Contains(w, sub) {
+			return true
+		}
+	}
+	return false
 }
 
 // LabelSFEN は suteme への登録用。**局面が確定していなくても持ち駒を落とさない。**

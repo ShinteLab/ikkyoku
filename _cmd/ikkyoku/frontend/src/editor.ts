@@ -350,7 +350,8 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
         s.unassigned > 0
           ? `${s.name} ${s.unassigned}枚（どちらの駒台か未決）。` +
             `駒台へドラッグすると持ち主が決まり、盤へドラッグすると先手の駒として置きます`
-          : `${s.name}は足りています。それでも盤に置けます（置くと多すぎる警告が出ます）`;
+          : `${s.name}は足りています。それでも盤にも駒台にも置けます` +
+            `（置くと多すぎる警告が出ます）`;
       row.append(chip, count);
       missingChips.appendChild(row);
     }

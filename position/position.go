@@ -68,8 +68,13 @@ type Position struct {
 	// handBlack / handWhite は駒台に割り振った枚数（ベース駒コード → 枚数）。
 	//
 	// **合計は持たない。** 駒台の合計は盤上の駒数から逆算されるもので、盤を直すたびに
-	// 変わる。ここが持つのは「そのうち何枚を先手/後手に決めたか」だけなので、
-	// **訂正で合計が変わっても割り振りが合計を超えられない**（Hands で丸める）。
+	// 変わる。ここが持つのは「人間が先手/後手に決めた枚数」そのもの。
+	//
+	// ⚠️ **逆算した合計で丸めない。** 以前は Hands / assigned が合計に収まるよう
+	// 切り詰めていたが、そのせいで**既に足りている駒を駒台に載せられなかった**
+	// （載せても表示に出ないので、駒台から先後を決める操作が途中で詰む）。
+	// 上限を超えるのは Place が在庫を見ないのと同じで、**警告に出すだけ**にする
+	// （設計原則3・4）。
 	//
 	// **残りを片方に寄せない。** 割り振っていないぶんは「先後不明」のまま残る
 	// （設計原則5。手番と同じく、盤面からは決まらないものを勝手に決めない）。
@@ -106,31 +111,29 @@ func (p *Position) HandTotal() map[int]int {
 // Hands は先後に割り振った駒台を返す。
 //
 // **割り振っていないぶんは含まれない**（どちらの持ち駒か決まっていないので、
-// 先手にも後手にも入れられない）。合計を超えていれば丸める（盤を直して
-// 駒台の合計が減ったとき。先手を先に取り、余った枠を後手に回す）。
+// 先手にも後手にも入れられない）。
+//
+// ⚠️ **逆算した合計で丸めない。** 人間が決めた枚数をそのまま返す（多すぎるぶんは
+// Warnings に出る）。丸めると、駒台に載せた駒が黙って消える。
 func (p *Position) Hands() (black, white map[int]int) {
 	black = map[int]int{}
 	white = map[int]int{}
-	for base, total := range p.HandTotal() {
-		b, w := p.assigned(base, total)
-		if b > 0 {
-			black[base] = b
+	for base := range p.handBlack {
+		if n := p.handBlack[base]; n > 0 {
+			black[base] = n
 		}
-		if w > 0 {
-			white[base] = w
+	}
+	for base := range p.handWhite {
+		if n := p.handWhite[base]; n > 0 {
+			white[base] = n
 		}
 	}
 	return black, white
 }
 
-// assigned は駒種 1 つぶんの割り振りを合計 total に収めて返す。
-func (p *Position) assigned(base, total int) (black, white int) {
-	if total <= 0 {
-		return 0, 0
-	}
-	black = clamp(p.handBlack[base], 0, total)
-	white = clamp(p.handWhite[base], 0, total-black)
-	return black, white
+// assigned は駒種 1 つぶんの割り振り（人間が決めた枚数）を返す。
+func (p *Position) assigned(base int) (black, white int) {
+	return max(p.handBlack[base], 0), max(p.handWhite[base], 0)
 }
 
 // Unassigned はまだ先後を決めていない駒台の枚数を返す（ベース駒コード → 枚数）。
@@ -140,7 +143,7 @@ func (p *Position) assigned(base, total int) (black, white int) {
 func (p *Position) Unassigned() map[int]int {
 	out := map[int]int{}
 	for base, total := range p.HandTotal() {
-		b, w := p.assigned(base, total)
+		b, w := p.assigned(base)
 		if rest := total - b - w; rest > 0 {
 			out[base] = rest
 		}
@@ -151,24 +154,17 @@ func (p *Position) Unassigned() map[int]int {
 // SetHand は駒台のうち片側の枚数を n 枚にする。
 //
 // **どちらの持ち駒かは局面からは決まらない**ので、決めるのは人間。
-// もう一方に割り振ったぶんを含めて合計を超える指定はエラー
-// （黙って丸めない。UI の操作は意図なので）。
+//
+// ⚠️ **逆算した合計を超える指定も通す。** 「もう足りている駒は駒台に載せられない」
+// にすると、**駒台から先後を決める操作が途中で詰む**（余計な駒を盤から外す前に、
+// 正しい持ち駒を載せられない）。Place が在庫を見ないのと同じ理由で、
+// 多すぎることは Warnings に出すだけにする（設計原則3・4）。
 func (p *Position) SetHand(base int, black bool, n int) error {
 	if sfen.Letter(base) == "None" || base == sfen.King {
 		return fmt.Errorf("ikkyoku/position: 駒台に持てない駒です: %d", base)
 	}
 	if n < 0 {
 		return fmt.Errorf("ikkyoku/position: 枚数が負です: %d", n)
-	}
-	total := p.HandTotal()[base]
-	other := p.handWhite[base]
-	if !black {
-		other = p.handBlack[base]
-	}
-	other = clamp(other, 0, total)
-	if n > total-other {
-		return fmt.Errorf("ikkyoku/position: %s は駒台に %d 枚しかありません（相手側に %d 枚）",
-			sfen.Name(base), total, other)
 	}
 	p.hand(black)[base] = n
 	return nil
@@ -186,16 +182,6 @@ func (p *Position) hand(black bool) map[int]int {
 		p.handWhite = map[int]int{}
 	}
 	return p.handWhite
-}
-
-func clamp(v, lo, hi int) int {
-	if v < lo {
-		return lo
-	}
-	if v > hi {
-		return hi
-	}
-	return v
 }
 
 // BoardSFEN は盤面部分だけの SFEN を返す。手番が未決でも使える。
@@ -286,8 +272,37 @@ func (p *Position) LabelSFEN() (string, []string) {
 //
 // **訂正 UI が「ここが怪しい」を出すための入口。** 直している最中の盤は当然
 // 途中で壊れるので、**エラーとして扱わないこと**（設計原則3）。
+//
+// 盤面の検証は core/sfen（自前で書かない）。ここが足すのは**駒台まで数えた枚数**の
+// 超過だけで、これは盤面だけを見る Inspect には出せない
+// （SetHand は逆算した合計を超える指定も通すので、その行き先がこの警告）。
 func (p *Position) Warnings() []string {
-	return p.Board.Inspect(sfen.CheckAll).Messages()
+	return append(p.Board.Inspect(sfen.CheckAll).Messages(), p.handWarnings()...)
+}
+
+// handWarnings は「盤上 + 駒台」が上限を超えた駒種の警告を返す。
+//
+// **盤上だけで超えているぶんは core/sfen が既に言っている**ので、ここでは
+// 二重に言わない（駒台を足して初めて超えるものだけ）。
+func (p *Position) handWarnings() []string {
+	info := p.Board.Inspect(sfen.CheckSyntax)
+	var out []string
+	for _, base := range inventoryOrder {
+		if base == sfen.King {
+			continue // 玉は駒台に載らない（枚数は CheckKing の担当）
+		}
+		onBoard := info.Black[base] + info.White[base]
+		limit := sfen.PieceLimit(base)
+		if onBoard > limit {
+			continue // 盤上だけで超過。core/sfen が報告済み
+		}
+		b, w := p.assigned(base)
+		if total := onBoard + b + w; total > limit {
+			out = append(out, fmt.Sprintf("%sが %d枚あります(上限 %d枚。盤上 %d枚・駒台 %d枚)",
+				sfen.Name(base), total, limit, onBoard, b+w))
+		}
+	}
+	return out
 }
 
 // Violations は違反を種類つきで返す。どの駒・どのマスかで選り分けたいとき用。

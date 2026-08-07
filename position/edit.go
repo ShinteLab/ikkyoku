@@ -67,11 +67,15 @@ func (p *Position) Inventory() []Stock {
 		black, white := info.Black[base], info.White[base]
 		limit := sfen.PieceLimit(base)
 		rest := limit - black - white
-		hb, hw := p.assigned(base, rest)
+		hb, hw := p.assigned(base)
 		out = append(out, Stock{
 			Piece: base, Letter: sfen.Letter(base), Name: sfen.Name(base),
 			Limit: limit, Black: black, White: white, Rest: rest,
-			HandBlack: hb, HandWhite: hw, Unassigned: max(rest, 0) - hb - hw,
+			HandBlack: hb, HandWhite: hw,
+			// 割り振りが逆算した残りを超えていたら未割り当ては 0（負にはしない）。
+			// **駒台の枚数のほうを丸めない**（人が決めた枚数なので消さない。
+			// 多すぎることは Warnings に出る）。
+			Unassigned: max(max(rest, 0)-hb-hw, 0),
 		})
 	}
 	return out
@@ -145,8 +149,7 @@ func (p *Position) ToHand(rank, file int, black bool) error {
 // **その側の駒台に無ければエラー。** 見本（駒箱）から置くのは Place で、
 // あちらは在庫を見ない。ここは「持っている駒を打つ」に相当するので数を守る。
 func (p *Position) FromHand(rank, file, piece int, black bool) error {
-	total := p.HandTotal()[piece]
-	b, w := p.assigned(piece, total)
+	b, w := p.assigned(piece)
 	have := w
 	if black {
 		have = b
