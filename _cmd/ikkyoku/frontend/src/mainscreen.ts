@@ -141,6 +141,9 @@ export function mountMainScreen(root: HTMLElement): void {
             <div id="board-stage" class="board-stage">
               <shogi-board id="board" hidden></shogi-board>
             </div>
+            <!-- 「足りない駒」は先手の駒台の**上**（後手の駒台と左右対称の位置）。
+                 縦 1 列に 8 種を並べるので、盤の半分の高さが要る。 -->
+            <div id="missing-slot" class="hand-slot"></div>
             <div id="hand-black-slot" class="hand-slot"></div>
           </div>
           <p id="board-placeholder" class="board-placeholder">まだ撮っていません。</p>
@@ -328,6 +331,7 @@ export function mountMainScreen(root: HTMLElement): void {
     handSlots: {
       black: root.querySelector<HTMLElement>("#hand-black-slot")!,
       white: root.querySelector<HTMLElement>("#hand-white-slot")!,
+      missing: root.querySelector<HTMLElement>("#missing-slot")!,
     },
     resetButton: root.querySelector<HTMLButtonElement>("#edit-reset")!,
     panel: root.querySelector<HTMLElement>("#editor")!,

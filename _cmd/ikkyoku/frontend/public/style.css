@@ -615,6 +615,14 @@ html.is-main body {
   align-self: stretch;
 }
 
+/* 足りない駒は先手の駒台の**上**（後手の駒台と左右対称）。縦 1 列に 8 種を
+   並べるので、こちらも盤の半分の高さを使う。 */
+#missing-slot {
+  grid-column: 3;
+  grid-row: 1;
+  align-self: stretch;
+}
+
 #hand-black-slot {
   grid-column: 3;
   grid-row: 2;
@@ -646,9 +654,6 @@ html.is-main body {
   border-color: #2f333c;
 }
 
-.hand-slot.is-static .missing-zone {
-  display: none;
-}
 
 /* .board-stage は盤とぴったり同じ大きさの箱。訂正 UI の 9x9 グリッドをここに重ねる。
    **盤の固有サイズ(--board-max)で頭打ちにすること。** SVG はそれ以上大きくならないので、
@@ -897,6 +902,7 @@ html.is-main body {
   align-items: center;
   gap: 4px;
   width: 104px;
+  height: 100%;
   padding: 4px;
   border: 1px dashed #6a5a33;
   border-radius: 6px;
@@ -908,12 +914,35 @@ html.is-main body {
   background: rgba(94, 160, 255, 0.1);
 }
 
+/* **縦 1 列に並べる。** 駒種は常に全部出ているので、位置が固定されて探さずに掴める。 */
 .missing-chips {
+  flex: 1 1 auto;
   display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 3px;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
   width: 100%;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.missing-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+}
+
+/* 足りない枚数。**訂正で次に何をすればよいか**を示す数なので目立たせる。
+   赤は「捨てる/危険」(.danger-btn・過剰の警告)で使っているので、
+   ここは操作を促す青にする。 */
+.missing-count {
+  min-width: 1.2em;
+  font-size: 16px;
+  font-weight: 700;
+  color: #5ea0ff;
+  text-align: left;
 }
 
 /* 持ち主が決まっていないことが見て分かるように、駒台の駒とは色を変える。
@@ -930,18 +959,6 @@ html.is-main body {
 /* 足りている駒。**掴めなくはしない**(在庫が尽きていても置ける)。見た目だけ落とす。 */
 .stock-chip.is-missing.is-spare {
   opacity: 0.3;
-}
-
-/* 足りない枚数。1 枚でも数字を出す(0 のときだけ空にする)。 */
-.chip-badge {
-  position: absolute;
-  right: -3px;
-  bottom: -5px;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  font-size: 11px;
-  font-weight: 600;
-  color: #ffd88a;
-  text-shadow: 0 0 3px #000, 0 0 2px #000;
 }
 
 /* 訂正していないときは掴めない（見せるだけ）。 */

@@ -66,10 +66,10 @@ export interface EditorHandle {
 export interface EditorOptions {
   // stage は <shogi-board> を包む要素。ここにグリッドを重ねる。
   stage: HTMLElement;
-  // handSlots は駒台を置く場所。**後手は盤の左上、先手は右下**(実際の将棋盤と
-  // 同じ並び)。位置は CSS(.board-with-hands のグリッド)が決めるので、
-  // ここは中身を入れるだけ。
-  handSlots: { black: HTMLElement; white: HTMLElement };
+  // handSlots は駒台と「足りない駒」を置く場所。**後手は盤の左上、先手は右下**
+  // (実際の将棋盤と同じ並び)で、足りない駒は**先手の駒台の上**。
+  // 位置は CSS(.board-with-hands のグリッド)が決めるので、ここは中身を入れるだけ。
+  handSlots: { black: HTMLElement; white: HTMLElement; missing: HTMLElement };
   // panel は訂正ツールバーを置く場所。
   panel: HTMLElement;
   // resetButton は「認識結果に戻す」。**訂正した内容を捨てる操作**なので、盤の近くの
@@ -212,7 +212,7 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   missing.className = "missing-zone";
   missing.innerHTML =
     `<span class="hand-zone-label">足りない駒</span><div class="missing-chips"></div>`;
-  handSlots.black.insertBefore(missing, handSlots.black.firstChild);
+  handSlots.missing.appendChild(missing);
   const missingChips = missing.querySelector<HTMLDivElement>(".missing-chips")!;
 
   const toggle = panel.querySelector<HTMLButtonElement>("#edit-toggle")!;
@@ -245,6 +245,9 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     handSlots.white.hidden = !loaded;
     handSlots.black.classList.toggle("is-static", !editing);
     handSlots.white.classList.toggle("is-static", !editing);
+    // 「足りない駒」は**訂正のための置き場**なので、訂正中だけ出す
+    // （駒台と違い、局面の一部ではない）。
+    handSlots.missing.hidden = !loaded || !editing;
     // 駒台の出し入れで盤の位置が動く（グリッドの並びが変わる）。
     layoutGrid();
   };
@@ -316,6 +319,11 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   function renderMissing(inv: Stock[]) {
     missingChips.replaceChildren();
     for (const s of inv) {
+      // 縦 1 列。**並びは Inventory の順（歩香桂銀金角飛王）のまま**で、
+      // 足りていても消さない（位置が動くと、どこを掴むかが毎回変わる）。
+      const row = document.createElement("div");
+      row.className = "missing-row";
+
       const chip = document.createElement("div");
       chip.className = "stock-chip is-missing";
       // **足りていても掴める。** 上限で止めると「余計な駒を外す前に正しい駒を
@@ -325,17 +333,17 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
       chip.textContent = s.letter;
       chip.classList.toggle("is-spare", s.unassigned <= 0);
 
-      const badge = document.createElement("span");
-      badge.className = "chip-badge";
-      badge.textContent = s.unassigned > 0 ? String(s.unassigned) : "";
-      chip.appendChild(badge);
+      const count = document.createElement("span");
+      count.className = "missing-count";
+      count.textContent = s.unassigned > 0 ? String(s.unassigned) : "";
 
-      chip.title =
+      row.title =
         s.unassigned > 0
           ? `${s.name} ${s.unassigned}枚（どちらの駒台か未決）。` +
             `駒台へドラッグすると持ち主が決まり、盤へドラッグすると先手の駒として置きます`
           : `${s.name}は足りています。それでも盤に置けます（置くと多すぎる警告が出ます）`;
-      missingChips.appendChild(chip);
+      row.append(chip, count);
+      missingChips.appendChild(row);
     }
   }
 
@@ -350,7 +358,10 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
       const chips = zone.querySelector<HTMLDivElement>(".hand-chips")!;
       chips.replaceChildren();
       let total = 0;
-      for (const s of inv) {
+      // 並びは駒台に置く順（歩香桂銀金角飛王。Go 側の Inventory がその順で返す）。
+      // **後手は逆順に並べる。** 駒が 180 度回っているので、そちら側から読んだときに
+      // 同じ並びに見えるのはこの向き。
+      for (const s of black ? inv : [...inv].reverse()) {
         const n = black ? s.handBlack : s.handWhite;
         for (let i = 0; i < n; i++) {
           total++;
