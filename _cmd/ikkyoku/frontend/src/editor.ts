@@ -79,10 +79,15 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
 
   // ---- 盤に重ねるグリッド -------------------------------------------------
   //
-  // <shogi-board> の SVG は 560x560 で、盤の中身は外周 28px を除いた内側
-  // （core/web の MARGIN=28 / CELL=56 / 9 マス）。**同じ比率で重ねれば表示サイズに
-  // 依存しない**ので、px を測らずに済む（5% = 28/560、90% = 504/560）。
-  // 盤が 560px より大きくならないことは CSS 側（--board-max）で担保している。
+  // ⚠️ **SVG の実寸を測って置く。** 以前は「箱に対する割合(inset: 5%)」で重ねていたが、
+  // それは**箱と SVG が必ず同じ大きさである**ことに依存していて、ウィンドウの高さを
+  // 変えると崩れた（SVG は `max-width` と固有サイズ 560 で決まるので、箱のほうだけが
+  // 先に変わる瞬間がある）。**駒の見た目とクリック領域がずれるという最悪の壊れ方**を
+  // するので、箱の大きさを当てにしないこと。
+  //
+  // 測るのは SVG の描画領域そのもので、そこから外周（MARGIN/全体 = 28/560）を除いた
+  // 内側が 9x9 のマス。この比率だけは core/web の定数（CELL=56 / MARGIN=28）に
+  // 由来するので、**向こうが変わったらここも直す**。
   const grid = document.createElement("div");
   grid.className = "edit-grid";
   const cells: HTMLDivElement[] = [];
@@ -97,6 +102,38 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     }
   }
   stage.appendChild(grid);
+
+  // 盤の外周が全体に占める割合（core/web の MARGIN=28 / CELL*9+MARGIN*2=560）。
+  const BOARD_MARGIN_RATIO = 28 / 560;
+
+  // グリッドを SVG の実寸に合わせる。**サイズが変わりうる場面すべてで呼ぶこと**
+  // （ウィンドウのリサイズ・盤の描き直し・訂正モードの切り替え）。
+  const layoutGrid = () => {
+    const svg = stage.querySelector("shogi-board")?.shadowRoot?.querySelector("svg");
+    if (!svg) {
+      // まだ <shogi-board> が読み込まれていない。描き直しのときに再度呼ばれる。
+      grid.style.display = "none";
+      return;
+    }
+    const s = svg.getBoundingClientRect();
+    const base = stage.getBoundingClientRect();
+    if (s.width === 0 || s.height === 0) {
+      grid.style.display = "none";
+      return;
+    }
+    const inset = s.width * BOARD_MARGIN_RATIO;
+    grid.style.display = "";
+    grid.style.left = `${s.left - base.left + inset}px`;
+    grid.style.top = `${s.top - base.top + inset}px`;
+    grid.style.width = `${s.width - inset * 2}px`;
+    grid.style.height = `${s.height - inset * 2}px`;
+  };
+
+  // 盤の大きさは「ウィンドウの高さ」でも変わる（CSS の min(...) に 100vh が入る）ので、
+  // 箱の観測だけでは足りない。ResizeObserver は箱、resize はウィンドウを見る。
+  const observer = new ResizeObserver(() => layoutGrid());
+  observer.observe(stage);
+  window.addEventListener("resize", layoutGrid);
 
   panel.innerHTML = `
     <div class="edit-bar">
@@ -162,6 +199,8 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     // 駒台の中身は盤面タブの「駒台」行に文字で出ている)。
     handSlots.black.hidden = !editing;
     handSlots.white.hidden = !editing;
+    // 駒台の出し入れで盤の位置が動く（グリッドの並びが変わる）。
+    layoutGrid();
   };
 
   // 操作の結果を反映する。**失敗しても状態は返ってくる**ので、まず描いてから
@@ -213,7 +252,10 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     const inv = next.inventory ?? [];
     renderRail(inv);
     renderHands(inv);
+    // onState が盤の sfen 属性を書き換える（= <shogi-board> が SVG を描き直す）ので、
+    // グリッドの位置合わせはそのあと。
     onState(next);
+    layoutGrid();
   }
 
   // ---- 駒箱と駒台 ---------------------------------------------------------

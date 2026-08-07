@@ -9,9 +9,6 @@
      重ねる必要があるので、**箱のほうもここで頭打ちにする**(ずれると 1 マス違う
      マスを編集してしまう)。core/web 側の定数が変わったらここも直すこと。 */
   --board-max: 560px;
-  /* 盤の外周(SVG の MARGIN)が全体に占める割合。28/560 = 5%。
-     グリッドはこのぶんだけ内側に置く。 */
-  --board-inset: 5%;
 }
 
 html,
@@ -629,12 +626,16 @@ html.is-main body {
    **盤の固有サイズ(--board-max)で頭打ちにすること。** SVG はそれ以上大きくならないので、
    箱だけが広がるとグリッドが盤からずれ、1 マス違うところを編集してしまう。 */
    ⚠️ 幅に % を使わないこと。grid の auto トラックの中では % が中身の大きさに
-   依存して決まらなくなり、箱が潰れる(= 盤とグリッドがずれる)。 */
+   依存して決まらなくなり、箱が潰れる。
+
+   高さは指定しない(中の SVG がそのまま押し広げる)。**箱の大きさを当てにしない**
+   のが要点で、訂正 UI のグリッドは SVG の実寸を測って重ねている(editor.ts)。
+   以前は箱に対する割合(inset: 5%)で重ねていたため、ウィンドウの高さを変えると
+   駒の見た目とクリック領域がずれた。 */
 .board-stage {
   position: relative;
   width: min(calc(100vh - 260px), var(--board-max));
   max-width: 100%;
-  aspect-ratio: 1;
   line-height: 0;
 }
 
@@ -722,8 +723,10 @@ html.is-main body {
    **座標は px で持たずパーセントで置く**ので、盤の表示サイズが変わっても付いてくる
    (外周 --board-inset を除いた内側を 9 等分するだけ)。 */
 .edit-grid {
+  /* 位置と大きさは editor.ts が SVG の実寸から px で入れる。
+     **ここで inset や % を指定しないこと**(箱と SVG がずれた瞬間に、
+     駒の見た目とクリック領域が食い違う)。 */
   position: absolute;
-  inset: var(--board-inset);
   display: grid;
   grid-template-columns: repeat(9, 1fr);
   grid-template-rows: repeat(9, 1fr);
