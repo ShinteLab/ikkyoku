@@ -1008,6 +1008,43 @@ html.is-main body {
   color: #ffc46b;
 }
 
+/* 盤面タブの上段。左に警告、右に「認識結果に戻す」。 */
+.board-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.board-head .warnings {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 訂正した内容を捨てるボタン。**押し間違えると作業が消える**ので、盤の近くの
+   ツールバーではなく右上に離し、色で危険を示す。 */
+.danger-btn {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 3px 10px;
+  font-size: 12px;
+  color: #ff9b9b;
+  background: #2e2326;
+  border: 1px solid #6d3535;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.danger-btn:hover {
+  color: #fff;
+  background: #7a2f2f;
+  border-color: #a04747;
+}
+
+.danger-btn[hidden] {
+  display: none;
+}
+
 /* 盤面タブ側の警告。件数が増えても盤を押し潰さないよう高さを頭打ちにして送る
    (全文はデバッグタブに同じものが出ている)。 */
 .warnings.is-compact {

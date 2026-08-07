@@ -119,10 +119,17 @@ export function mountMainScreen(root: HTMLElement): void {
       </div>
 
       <div id="panel-board" class="panel is-active" role="tabpanel" aria-labelledby="tab-board">
-        <!-- 局面として成立していない点。**盤より上に出す。** 訂正しながら見るものなので、
-             盤の下だと見落とすし、件数で下の行が動く。中身は**今の局面**(EditState)の値で、
-             デバッグタブ側の同じ見出しとは別物(あちらは認識した時点の記録)。 -->
-        <ul id="board-warnings" class="warnings is-compact" hidden></ul>
+        <!-- 上段。左に警告、右に「認識結果に戻す」。
+             局面として成立していない点は**盤より上に出す**(訂正しながら見るものなので、
+             盤の下だと見落とすし、件数で下の行が動く)。中身は**今の局面**(EditState)の
+             値で、デバッグタブ側の同じ見出しとは別物(あちらは認識した時点の記録)。
+             やり直しのボタンは**訂正した内容を捨てる操作**なので、押し間違えないよう
+             盤から遠い右上に離し、赤くしてある。 -->
+        <div class="board-head">
+          <ul id="board-warnings" class="warnings is-compact" hidden></ul>
+          <button id="edit-reset" class="danger-btn" type="button" hidden
+                  title="訂正を捨てて、認識したときの盤面に戻します">認識結果に戻す</button>
+        </div>
         <div class="board-area">
           <!-- 盤と駒台の配置。**後手の駒台は盤の左上、先手の駒台は右下**
                (実際の将棋盤と同じ並び)。訂正モードのときだけ出る。 -->
@@ -322,6 +329,7 @@ export function mountMainScreen(root: HTMLElement): void {
       black: root.querySelector<HTMLElement>("#hand-black-slot")!,
       white: root.querySelector<HTMLElement>("#hand-white-slot")!,
     },
+    resetButton: root.querySelector<HTMLButtonElement>("#edit-reset")!,
     panel: root.querySelector<HTMLElement>("#editor")!,
     onState: (st) => {
       if (!st?.loaded) {

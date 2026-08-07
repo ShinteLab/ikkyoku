@@ -68,8 +68,11 @@ export interface EditorOptions {
   // 同じ並び)。位置は CSS(.board-with-hands のグリッド)が決めるので、
   // ここは中身を入れるだけ。
   handSlots: { black: HTMLElement; white: HTMLElement };
-  // panel は駒箱と訂正ツールバーを置く場所。
+  // panel は訂正ツールバーを置く場所。
   panel: HTMLElement;
+  // resetButton は「認識結果に戻す」。**訂正した内容を捨てる操作**なので、盤の近くの
+  // ツールバーではなく右上に離してある(押し間違い対策)。置き場所は呼び出し側が持つ。
+  resetButton: HTMLButtonElement;
   // onState は操作のたびに呼ばれる。盤・SFEN・警告の表示は呼び出し側（mainscreen）が持つ。
   onState(state: EditState | null): void;
   // onError は操作が通らなかったときの理由（「移動元が空マスです」など）。
@@ -77,7 +80,7 @@ export interface EditorOptions {
 }
 
 export function mountEditor(opts: EditorOptions): EditorHandle {
-  const { stage, panel, handSlots, onState, onError } = opts;
+  const { stage, panel, handSlots, resetButton: resetBtn, onState, onError } = opts;
 
   // ---- 盤に重ねるグリッド -------------------------------------------------
   //
@@ -169,9 +172,6 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
         盤 ⇄ 駒台をドラッグ（外すと同時に持ち主が決まる） /
         「足りない駒」は先後未決の置き場 / クリックで成・不成 / 右クリックで先後
       </span>
-      <span class="spacer"></span>
-      <button id="edit-reset" class="ghost-btn" type="button" hidden
-              title="訂正を捨てて、認識したときの盤面に戻します">認識結果に戻す</button>
     </div>
     <div id="edit-body" class="edit-body" hidden>
       <div class="edit-meta">
@@ -213,7 +213,6 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   const missingChips = missing.querySelector<HTMLDivElement>(".missing-chips")!;
 
   const toggle = panel.querySelector<HTMLButtonElement>("#edit-toggle")!;
-  const resetBtn = panel.querySelector<HTMLButtonElement>("#edit-reset")!;
   const body = panel.querySelector<HTMLDivElement>("#edit-body")!;
   const handZones = [handZone(true), handZone(false)];
   const moveNum = panel.querySelector<HTMLInputElement>("#edit-movenum")!;
@@ -226,7 +225,12 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     editing = on && !!state?.loaded;
     toggle.classList.toggle("is-active", editing);
     toggle.setAttribute("aria-pressed", String(editing));
-    toggle.textContent = editing ? "訂正をやめる" : "訂正する";
+    // **「やめる」ではなく「確定する」。** 訂正は撮ったあとの既定の状態で、
+    // 出口は「この局面でよい」と決めること（そこから先が解析・検討）。
+    toggle.textContent = editing ? "盤面を確定する" : "訂正する";
+    toggle.title = editing
+      ? "この局面でよければ確定します（あとから訂正し直せます）"
+      : "盤面を直します";
     body.hidden = !editing;
     stage.classList.toggle("is-editing", editing);
     grid.classList.toggle("is-active", editing);
@@ -590,7 +594,19 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
 
   // ---- 手番・手数・トグル -------------------------------------------------
 
-  toggle.addEventListener("click", () => setEditing(!editing));
+  // 確定するとき、局面としてまだ足りないものがあれば知らせる。
+  // **止めはしない**（設計原則3。決められないまま盤だけ見たい場面はある）。
+  toggle.addEventListener("click", () => {
+    const confirming = editing;
+    setEditing(!editing);
+    if (confirming && state?.loaded && !state.sfen) {
+      onError(
+        state.turn === TURN_UNKNOWN
+          ? "手番が決まっていないので、まだ局面として確定していません。"
+          : "駒台の先後が決まっていないので、まだ局面として確定していません。",
+      );
+    }
+  });
 
   resetBtn.addEventListener("click", () => {
     void apply(() => PositionService.Reset());
