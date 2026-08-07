@@ -77,12 +77,18 @@ export interface EditorOptions {
   resetButton: HTMLButtonElement;
   // onState は操作のたびに呼ばれる。盤・SFEN・警告の表示は呼び出し側（mainscreen）が持つ。
   onState(state: EditState | null): void;
+  // onEditing は訂正モードの出入りで呼ばれる。**訂正中だけ出すもの**（撮った画像の
+  // 参照表示など）を呼び出し側が出し入れするための通知で、ここが状態を持つわけではない。
+  //
+  // ⚠️ **この中で盤の横幅を変える要素を出し入れすると盤の位置が動く。** 呼ぶのは
+  // layoutGrid() の前で、位置合わせがそのあとに走ることを前提にしている。
+  onEditing?(editing: boolean): void;
   // onError は操作が通らなかったときの理由（「移動元が空マスです」など）。
   onError(message: string): void;
 }
 
 export function mountEditor(opts: EditorOptions): EditorHandle {
-  const { stage, panel, handSlots, resetButton: resetBtn, onState, onError } = opts;
+  const { stage, panel, handSlots, resetButton: resetBtn, onState, onEditing, onError } = opts;
 
   // ---- 盤に重ねるグリッド -------------------------------------------------
   //
@@ -248,7 +254,10 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     // 「足りない駒」は**訂正のための置き場**なので、訂正中だけ出す
     // （駒台と違い、局面の一部ではない）。
     handSlots.missing.hidden = !loaded || !editing;
-    // 駒台の出し入れで盤の位置が動く（グリッドの並びが変わる）。
+    // 撮った画像の参照表示など、訂正中だけ出るものを呼び出し側に出し入れさせる。
+    // **layoutGrid より先に呼ぶ**（盤の左に列が増えると盤の位置が動くため）。
+    onEditing?.(editing);
+    // 駒台や参照画像の出し入れで盤の位置が動く（グリッドの並びが変わる）。
     layoutGrid();
   };
 

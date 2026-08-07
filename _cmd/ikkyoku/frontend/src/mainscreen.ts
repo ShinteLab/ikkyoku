@@ -131,6 +131,18 @@ export function mountMainScreen(root: HTMLElement): void {
                   title="訂正を捨てて、認識したときの盤面に戻します">認識結果に戻す</button>
         </div>
         <div class="board-area">
+          <!-- 撮った画像。**訂正中だけ盤の左に出す**(確定したら畳む)。
+               訂正は「原本を見ながら 1 マスずつ直す」作業なので、原本がデバッグタブの
+               向こう側にあると成立しない。**盤は 560px より大きくならない**ので、
+               左の余白はもともと遊んでおり、ここに置くのは盤を狭めない。
+
+               ⚠️ **出すのは画像そのものだけ。** 重ね表示・信頼度・保存先は
+               「認識がどれくらい外したか」の情報なのでデバッグタブに残す
+               (盤面タブの基準は「局面を読む・直す・動かすのに要るか」)。
+               画像の src はデバッグ側と**同じ CaptureResult.thumbnail**。 -->
+          <div id="capture-ref" class="capture-ref" hidden>
+            <img id="capture-ref-img" class="capture-ref-img" alt="訂正のもとになった画像" />
+          </div>
           <!-- 盤と駒台の配置。**後手の駒台は盤の左上、先手の駒台は右下**
                (実際の将棋盤と同じ並び)。訂正モードのときだけ出る。 -->
           <div id="board-with-hands" class="board-with-hands">
@@ -326,6 +338,21 @@ export function mountMainScreen(root: HTMLElement): void {
   // 撮った直後は認識結果そのものが入っているので見た目は同じだが、訂正すると
   // 盤・SFEN・駒台・警告がその場で追従する。**2 つの出所を混ぜないこと。**
   const boardStage = root.querySelector<HTMLElement>("#board-stage")!;
+
+  // 訂正中に盤の左へ出す「撮った画像」。**デバッグタブのサムネイルと同じ値**を描くだけで、
+  // 別の経路で取り直さない(片方だけ更新されると、どちらが今の 1 枚か分からなくなる)。
+  //
+  // 出す条件は「訂正中」かつ「画像がある」の両方。撮る前と、確定したあとは畳む。
+  const captureRef = root.querySelector<HTMLDivElement>("#capture-ref")!;
+  const captureRefImg = root.querySelector<HTMLImageElement>("#capture-ref-img")!;
+  let editingNow = false;
+  // 画像の有無は自前で覚える。**`img.src` は空文字を入れてもページの URL に解決される**
+  // ので、要素から「画像が入っているか」は読めない。
+  let hasShot = false;
+  const syncCaptureRef = () => {
+    captureRef.hidden = !editingNow || !hasShot;
+  };
+
   const editor = mountEditor({
     stage: boardStage,
     handSlots: {
@@ -345,6 +372,10 @@ export function mountMainScreen(root: HTMLElement): void {
       sfenOut.textContent = st.sfen || st.boardSfen || "-";
       showEditHand(st.inventory ?? []);
       fillWarnings(boardWarnings, st.warnings ?? []);
+    },
+    onEditing: (on) => {
+      editingNow = on;
+      syncCaptureRef();
     },
     onError: (message) => {
       status.textContent = `訂正できませんでした: ${message}`;
@@ -655,6 +686,14 @@ export function mountMainScreen(root: HTMLElement): void {
       thumbnail.src = result.thumbnail;
       shot.hidden = false;
     }
+    // 訂正中に盤の左へ出す参照画像。**同じ 1 枚を 2 か所に描くだけ**にすること
+    // (別々に更新すると、どちらが今の画像か分からなくなる)。
+    hasShot = !!result.thumbnail;
+    if (hasShot) {
+      captureRefImg.src = result.thumbnail;
+      captureRefImg.title = result.path;
+    }
+    syncCaptureRef();
     drawOverlay(result.debug);
 
     // 信頼度が低いのも「見に行くべきもの」に含める。盤が映っていない画面を撮ったときは

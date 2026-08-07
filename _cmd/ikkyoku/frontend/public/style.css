@@ -578,6 +578,42 @@ html.is-main body {
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 12px;
+}
+
+/* 訂正中に盤の左へ出す「撮った画像」。訂正は原本を見ながら 1 マスずつ直す作業なので、
+   原本がデバッグタブの向こう側にあると成立しない。**盤は 560px より大きくならない**
+   ので、ここに置いても盤は狭くならない(左の余白はもともと遊んでいる)。
+
+   ⚠️ **幅は画像の大きさに依存させないこと**(幅を明示する)。画像は data URL の
+   非同期読み込みなので、中身で幅が決まると**読み込み完了の瞬間に盤が横へ動き**、
+   訂正グリッドだけが元の位置に取り残される(layoutGrid はそのとき呼ばれない)。
+   縮むのはこちらだけ(盤は flex: 0 0 auto)なので、狭いウィンドウでも盤は欠けない。 */
+.capture-ref {
+  flex: 0 1 auto;
+  width: min(46%, 480px);
+  min-width: 0;
+  align-self: stretch;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.capture-ref[hidden] {
+  display: none;
+}
+
+.capture-ref-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border: 1px solid #3a3d47;
+  border-radius: 6px;
+}
+
+.board-area > .board-with-hands {
+  flex: 0 0 auto;
 }
 
 /* ⚠️ 盤の大きさは**幅でしか決まらない**。<shogi-board> の SVG は
