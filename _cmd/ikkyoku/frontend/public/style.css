@@ -621,6 +621,19 @@ html.is-main body {
   align-self: stretch;
 }
 
+/* 先手側のスロットには「足りない駒」と駒台が縦に積まれる(足りない駒が上)。
+   駒台が残りの高さを取る。 */
+.hand-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.hand-slot > .hand-zone {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 .hand-slot[hidden] {
   display: none;
 }
@@ -864,27 +877,44 @@ html.is-main body {
   border-radius: 5px;
 }
 
-/* 駒箱。**「存在するはずの駒」の残り**を並べる。盤から外した駒はここに戻り、
-   盤に置きすぎた駒は赤い「n枚多い」になる。盤からのドロップ先でもある。 */
-.stock-rail {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(196px, 1fr));
-  gap: 4px 12px;
-  padding: 6px;
-  border: 1px dashed #3a3d47;
+/* 足りない駒。**存在するはずなのに盤にも駒台にも無い駒**(先後未決)を並べる。
+   先手の駒台の上に置く。盤からのドロップ先(先後を決めずに外す)でもある。 */
+.missing-zone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 104px;
+  padding: 4px;
+  border: 1px dashed #6a5a33;
   border-radius: 6px;
 }
 
-.stock-rail.is-over {
+.missing-zone.is-over {
   border-color: #5ea0ff;
   border-style: solid;
   background: rgba(94, 160, 255, 0.1);
 }
 
-.stock-row {
+.missing-zone.is-empty {
+  opacity: 0.45;
+}
+
+.missing-chips {
   display: flex;
-  align-items: center;
-  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 3px;
+  width: 100%;
+}
+
+/* 持ち主が決まっていないことが見て分かるように、駒台の駒とは色を変える。 */
+.stock-chip.is-missing {
+  width: 30px;
+  height: 30px;
+  font-size: 26px;
+  background: #e8c07a;
+  border-style: dashed;
 }
 
 .stock-chip {
@@ -904,46 +934,6 @@ html.is-main body {
 
 .stock-chip.is-white {
   transform: rotate(180deg);
-}
-
-.stock-count {
-  min-width: 4.5em;
-  font-size: 12px;
-  color: #9aa6c0;
-}
-
-/* 過剰。**認識が余計な駒を作った状態**で、訂正の最初の手がかりになる。 */
-.stock-row.is-over .stock-count {
-  color: #ff7a7a;
-}
-
-/* まだ先後を決めていない駒。**盤に無い駒はどちらかの駒台にあるはずだが、
-   どちらかは盤面からは決まらない**(設計原則5)ので、決まるまでここに居る。
-   駒台へドラッグすると持ち主が決まる。 */
-.stock-pool {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px;
-  margin-left: auto;
-}
-
-.pool-chip {
-  width: 20px;
-  height: 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: "ShogiSFEN", serif;
-  font-size: 17px;
-  color: #1a1a1a;
-  background: #e8c07a;
-  border: 1px dashed #8a6a33;
-  border-radius: 3px;
-  cursor: grab;
-}
-
-.stock-row.is-unassigned .stock-count {
-  color: #ffc46b;
 }
 
 /* 駒台。盤から外した駒の行き先であり、盤へ打つドラッグ元でもある。
