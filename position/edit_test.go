@@ -225,6 +225,61 @@ func TestRemoveLeavesUnassigned(t *testing.T) {
 	}
 }
 
+// 1 マスを回す。**訂正でマスにやりたいことはこの 4 通りしかない**ので、
+// 操作を左右のクリックに分けずに 1 つで回す。
+func TestCycleCell(t *testing.T) {
+	p, err := FromBoardSFEN("9/9/9/9/9/9/9/9/P8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"+P", "p", "+p", "P"}
+	for i, w := range want {
+		if err := p.CycleCell(8, 0); err != nil {
+			t.Fatal(err)
+		}
+		c, err := p.Board.At(8, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := c.Mark(); got != w {
+			t.Fatalf("%d 回目 = %q, want %q", i+1, got, w)
+		}
+	}
+}
+
+// 成れない駒（金・玉）は先後の 2 状態だけを回る。
+func TestCycleCellUnpromotable(t *testing.T) {
+	for _, tc := range []struct{ start, next string }{
+		{"G8", "g"},
+		{"K8", "k"},
+		{"9/9/9/9/9/9/9/9/g8", "G"},
+	} {
+		p, err := FromBoardSFEN(func() string {
+			if len(tc.start) > 3 {
+				return tc.start
+			}
+			return tc.start + "/9/9/9/9/9/9/9/9"
+		}())
+		if err != nil {
+			t.Fatal(err)
+		}
+		rank := 0
+		if len(tc.start) > 3 {
+			rank = 8
+		}
+		if err := p.CycleCell(rank, 0); err != nil {
+			t.Fatal(err)
+		}
+		c, err := p.Board.At(rank, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := c.Mark(); got != tc.next {
+			t.Errorf("%s を回すと %q, want %q", tc.start, got, tc.next)
+		}
+	}
+}
+
 func TestTogglePromotedAndFlipSide(t *testing.T) {
 	p, err := FromBoardSFEN(initialBoard)
 	if err != nil {

@@ -13,8 +13,10 @@
 //   駒台 → 盤         打つ（その側の駒台にある駒だけ）
 //   盤 → 足りない駒   先後を決めずに外す（**認識が作った余計な駒を消す操作**）
 //   駒台 ⇄ 駒台       持ち主を変える
-//   クリック          成/不成
-//   右クリック        先後の反転（認識は駒の向きを外す）
+//   右クリック        1 マスを回す（先手不成 → 先手成 → 後手不成 → 後手成 → …）
+//
+// **先後と成/不成を左右のクリックに分けない。** マスに対してやりたいことはこの
+// 4 通りしかないので、1 つの操作で回すほうが覚えることが少ない。
 //
 // **置き場は 3 つ: 先手の駒台・後手の駒台・「足りない駒」。** 盤に無い駒は駒数保存則から
 // どちらかの駒台にあるはずだが、**どちらかは盤面からは決まらない**（設計原則5）ので、
@@ -170,7 +172,8 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
       <button id="edit-toggle" class="ghost-btn" type="button" aria-pressed="false">訂正する</button>
       <span class="edit-hint">
         盤 ⇄ 駒台をドラッグ（外すと同時に持ち主が決まる） /
-        「足りない駒」は先後未決の置き場 / クリックで成・不成 / 右クリックで先後
+        「足りない駒」から盤へドラッグして置く /
+        右クリックで先後と成・不成を切り替え
       </span>
     </div>
     <div id="edit-body" class="edit-body" hidden>
@@ -307,27 +310,33 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   // 駒数保存則からどちらかの駒台にあるはずだが、**どちらかは盤面からは決まらない**
   // ので、決まるまでここに置く（設計原則5）。決めるのは駒台へのドラッグ。
   //
-  // **駒種ごとの見本は出さない。** 置きたい駒は必ずここに「足りない駒」として
-  // 現れる（認識が駒種を間違えていれば、正しい駒が足りなくなる）ので、見本は要らない。
-  // 逆に多すぎる駒は盤から外す側で、それは警告に出る。
+  // **駒種は常に全部（表のみ）並べる。** 足りている駒は非活性の見た目にするだけで、
+  // **掴めなくはしない**（在庫が尽きていても置ける。設計原則3・4）。並びが毎回同じに
+  // なるので、どこを掴めばよいかが変わらないのも利点。枚数はバッジで出す。
   function renderMissing(inv: Stock[]) {
     missingChips.replaceChildren();
-    let total = 0;
     for (const s of inv) {
-      for (let i = 0; i < s.unassigned; i++) {
-        total++;
-        const chip = document.createElement("div");
-        chip.className = "stock-chip is-missing";
-        chip.draggable = true;
-        chip.dataset.piece = String(s.piece);
-        chip.textContent = s.letter;
-        chip.title =
-          `${s.name}（どちらの駒台か未決）。駒台へドラッグすると持ち主が決まり、` +
-          `盤へドラッグすると先手の駒として置きます（右クリックで後手に）`;
-        missingChips.appendChild(chip);
-      }
+      const chip = document.createElement("div");
+      chip.className = "stock-chip is-missing";
+      // **足りていても掴める。** 上限で止めると「余計な駒を外す前に正しい駒を
+      // 置けない」という詰みが起きる（設計原則3・4）。見た目だけ非活性にする。
+      chip.draggable = true;
+      chip.dataset.piece = String(s.piece);
+      chip.textContent = s.letter;
+      chip.classList.toggle("is-spare", s.unassigned <= 0);
+
+      const badge = document.createElement("span");
+      badge.className = "chip-badge";
+      badge.textContent = s.unassigned > 0 ? String(s.unassigned) : "";
+      chip.appendChild(badge);
+
+      chip.title =
+        s.unassigned > 0
+          ? `${s.name} ${s.unassigned}枚（どちらの駒台か未決）。` +
+            `駒台へドラッグすると持ち主が決まり、盤へドラッグすると先手の駒として置きます`
+          : `${s.name}は足りています。それでも盤に置けます（置くと多すぎる警告が出ます）`;
+      missingChips.appendChild(chip);
     }
-    missing.classList.toggle("is-empty", total === 0);
   }
 
   // 駒台。**盤に無い駒のうち、持ち主が決まったもの**を並べる。
@@ -454,18 +463,11 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     }
   });
 
-  // クリックで成/不成。空マスでは何もしない。
-  grid.addEventListener("click", (e) => {
-    const el = (e.target as HTMLElement)?.closest<HTMLElement>(".edit-cell");
-    if (!editing || !el || el.classList.contains("is-empty")) {
-      return;
-    }
-    void apply(() =>
-      PositionService.TogglePromoted(Number(el.dataset.rank), Number(el.dataset.file)),
-    );
-  });
-
-  // 右クリックで先後の反転。**認識は駒の向きを外す**ので、これが要る。
+  // 右クリックで 1 マスを回す（先手不成 → 先手成 → 後手不成 → 後手成 → …）。
+  //
+  // **先後と成/不成を左右のクリックに分けない。** マスに対してやりたいことは
+  // この 4 通りしかないので、1 つの操作で回したほうが「どっちがどっちだったか」を
+  // 覚えずに済む。認識は**駒の向きも "+" も外す**ので、どちらも同じ頻度で要る。
   grid.addEventListener("contextmenu", (e) => {
     const el = (e.target as HTMLElement)?.closest<HTMLElement>(".edit-cell");
     if (!editing || !el || el.classList.contains("is-empty")) {
@@ -473,7 +475,7 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     }
     e.preventDefault();
     void apply(() =>
-      PositionService.FlipSide(Number(el.dataset.rank), Number(el.dataset.file)),
+      PositionService.CycleCell(Number(el.dataset.rank), Number(el.dataset.file)),
     );
   });
 

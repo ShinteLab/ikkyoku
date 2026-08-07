@@ -145,6 +145,12 @@ func (s *PositionService) FromHand(rank, file, piece int, black bool) (EditState
 	return s.edit(func(p *position.Position) error { return p.FromHand(rank, file, piece, black) })
 }
 
+// CycleCell は 1 マスを「先手不成 → 先手成 → 後手不成 → 後手成 → …」と回す。
+// **訂正 UI の右クリックはこれ 1 つ**（先後と成/不成を左右のクリックで分けない）。
+func (s *PositionService) CycleCell(rank, file int) (EditState, error) {
+	return s.edit(func(p *position.Position) error { return p.CycleCell(rank, file) })
+}
+
 // TogglePromoted は成/不成を切り替える。
 func (s *PositionService) TogglePromoted(rank, file int) (EditState, error) {
 	return s.edit(func(p *position.Position) error { return p.TogglePromoted(rank, file) })
