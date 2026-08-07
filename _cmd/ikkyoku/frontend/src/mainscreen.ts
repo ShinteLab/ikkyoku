@@ -54,15 +54,25 @@ interface CaptureResult {
 //
 // ⚠️ **score.cp / score.mate は先手視点で、label は Go 側が組み立てた文字列。**
 // フロントで符号をいじったり書式を作り直したりしないこと（2 か所に散る）。
+//
+// ⚠️ **lines は候補手の配列**（MultiPV）。**「最善手 1 個」に畳まないこと** ——
+// 次善手を辿るのが構想の中心で、ここが複数本になれることが Phase 5 の前提。
+// 今の自作 engine は MultiPV を持たないので 1 本しか来ないが、**それを異常扱いしない**
+// （engine/TODO.md の 1 が入れば増える）。
+interface AnalyzeLine {
+  rank: number;
+  score: { cp: number; mate: number; label: string };
+  moves: string[];
+}
+
 interface AnalyzeProgress {
   seq: number;
   done: boolean;
   progress: {
     depth: number;
-    score: { cp: number; mate: number; label: string };
     nodes: number;
-    best: string;
     elapsedMs: number;
+    lines: AnalyzeLine[];
   };
 }
 
@@ -201,10 +211,11 @@ export function mountMainScreen(root: HTMLElement): void {
               <option value="30">30秒</option>
             </select>
           </label>
-          <span id="analyze-score" class="analyze-score"></span>
-          <span id="analyze-best" class="analyze-best"></span>
           <span id="analyze-meta" class="note"></span>
         </div>
+        <!-- 候補手（MultiPV）。**1 本しか来なくても一覧の形で出す** ——
+             次善手を辿るのが構想の中心なので、ここが複数本になるのが前提の作り。 -->
+        <ol id="analyze-lines" class="analyze-lines" hidden></ol>
         <p id="analyze-status" class="note is-caution" hidden></p>
         <!-- 訂正した局面を suteme の学習データとして送る。**確定してから出す**
              (訂正の途中の盤面を送る意味が無い)。設定で有効にしていないときは
@@ -531,8 +542,7 @@ export function mountMainScreen(root: HTMLElement): void {
   const analyzeRow = root.querySelector<HTMLDivElement>("#analyze-row")!;
   const analyzeRun = root.querySelector<HTMLButtonElement>("#analyze-run")!;
   const analyzeSeconds = root.querySelector<HTMLSelectElement>("#analyze-seconds")!;
-  const analyzeScore = root.querySelector<HTMLElement>("#analyze-score")!;
-  const analyzeBest = root.querySelector<HTMLElement>("#analyze-best")!;
+  const analyzeLines = root.querySelector<HTMLOListElement>("#analyze-lines")!;
   const analyzeMeta = root.querySelector<HTMLElement>("#analyze-meta")!;
   const analyzeStatus = root.querySelector<HTMLParagraphElement>("#analyze-status")!;
 
@@ -543,6 +553,9 @@ export function mountMainScreen(root: HTMLElement): void {
   let analyzedSfen = "";
   // 解析できる局面か（EditState.sfen が埋まっているか）。
   let analyzeReady = false;
+  // 答えたエンジンの名前。**何が出した評価値なのかは見せる**（繋ぎ先を差し替えられる以上、
+  // 出所を伏せると比べようがない）。
+  let analyzeEngine = "";
 
   const syncAnalyzeButton = () => {
     analyzeRun.textContent = analyzeRunning ? "停止" : "解析";
@@ -557,42 +570,60 @@ export function mountMainScreen(root: HTMLElement): void {
 
   const clearAnalyzeResult = () => {
     analyzedSfen = "";
-    analyzeScore.textContent = "";
-    analyzeScore.className = "analyze-score";
-    analyzeBest.textContent = "";
+    analyzeLines.replaceChildren();
+    analyzeLines.hidden = true;
     analyzeMeta.textContent = "";
     analyzeStatus.hidden = true;
     analyzeStatus.textContent = "";
   };
 
   const showAnalyzeProgress = (p: AnalyzeProgress["progress"]) => {
-    analyzeScore.textContent = p.score.label;
-    // 先手が良ければ青、後手が良ければ橙。**符号は Go 側が先手視点に揃えてある。**
-    const side = p.score.mate !== 0 ? p.score.mate : p.score.cp;
-    analyzeScore.className =
-      "analyze-score" + (side > 0 ? " is-black" : side < 0 ? " is-white" : "");
-    // ⚠️ **読み筋ではなく最善手 1 手。** engine は今のところ PV を返さないので、
-    // 深い読み筋があるかのように出さないこと。
-    analyzeBest.textContent = p.best ? `最善 ${p.best}` : "";
+    const lines = p.lines ?? [];
+    analyzeLines.replaceChildren();
+    for (const l of lines) {
+      const li = document.createElement("li");
+      li.className = "analyze-line";
+
+      const score = document.createElement("span");
+      score.textContent = l.score.label;
+      // 先手が良ければ青、後手が良ければ橙。**符号は Go 側が先手視点に揃えてある。**
+      const side = l.score.mate !== 0 ? l.score.mate : l.score.cp;
+      score.className =
+        "analyze-score" + (side > 0 ? " is-black" : side < 0 ? " is-white" : "");
+
+      const moves = document.createElement("span");
+      moves.className = "analyze-moves";
+      // ⚠️ **読み筋の長さはエンジン次第。** 自作 engine は 1 手しか返さないので、
+      // 深い読み筋があるかのように見せないこと（無ければ何も出さない）。
+      moves.textContent = l.moves?.join(" ") ?? "";
+
+      li.append(score, moves);
+      analyzeLines.appendChild(li);
+    }
+    analyzeLines.hidden = lines.length === 0;
+
     const parts = [`深さ ${p.depth}`];
     if (p.nodes > 0) {
       parts.push(`${p.nodes.toLocaleString()} ノード`);
     }
     parts.push(`${(p.elapsedMs / 1000).toFixed(1)} 秒`);
+    if (analyzeEngine) {
+      parts.push(analyzeEngine);
+    }
     analyzeMeta.textContent = parts.join(" / ");
   };
 
   const startAnalyze = async () => {
     analyzeStatus.hidden = true;
     analyzeStatus.textContent = "";
-    analyzeScore.textContent = "…";
-    analyzeScore.className = "analyze-score";
-    analyzeBest.textContent = "";
+    analyzeLines.replaceChildren();
+    analyzeLines.hidden = true;
     analyzeMeta.textContent = "考えています…";
     try {
       const st = await AnalyzeService.Start(Number(analyzeSeconds.value) || 0);
       analyzeSeq = st.seq;
       analyzedSfen = st.sfen;
+      analyzeEngine = st.engine;
       analyzeRunning = true;
     } catch (err) {
       clearAnalyzeResult();

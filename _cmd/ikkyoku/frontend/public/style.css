@@ -554,6 +554,41 @@ html.is-main body {
   border-radius: 5px;
 }
 
+/* 候補手（MultiPV）。**1 本しか来なくても一覧の形**にしておく
+   （次善手を辿るのが構想の中心で、複数本になるのが前提）。 */
+.analyze-lines {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  /* 候補が増えても盤を押し出さない。盤はできるだけ大きく見せたい。 */
+  max-height: 96px;
+  overflow-y: auto;
+}
+
+.analyze-lines[hidden] {
+  display: none;
+}
+
+.analyze-line {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+/* 読み筋。⚠️ **長さはエンジン次第**（自作 engine は 1 手だけ）。 */
+.analyze-moves {
+  font-size: 13px;
+  font-family: "Consolas", "Menlo", monospace;
+  color: #c9ccd3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* 評価値。**符号は Go 側が先手視点に揃えている**ので、色は値の符号を見るだけ。 */
 .analyze-score {
   font-size: 20px;
@@ -569,13 +604,6 @@ html.is-main body {
 
 .analyze-score.is-white {
   color: #ffc46b;
-}
-
-/* 最善手。⚠️ **読み筋ではなく 1 手だけ**（engine が PV を返さない）。 */
-.analyze-best {
-  font-size: 13.5px;
-  font-family: "Consolas", "Menlo", monospace;
-  color: #f2f3f5;
 }
 
 /* 訂正データの送信。**確定してから出る行**なので、訂正中は場所を取らない。 */

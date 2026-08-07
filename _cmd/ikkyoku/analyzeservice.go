@@ -10,7 +10,11 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
-// AnalyzeService は確定した局面を engine に渡して評価値を出す Service（Phase 4）。
+// AnalyzeService は確定した局面をエンジンに解析させる Service（Phase 4）。
+//
+// **エンジンは USI を話す相手**（`analyze` → `ikkyoku/usi`）。今は同梱の `engine` を
+// 同一プロセスで動かしているが（Step 1）、外部エンジンの exe や `prokishi.exe` に
+// 差し替わってもここは変わらない（`_docs/phase4-engine-usi.md`）。
 //
 // **局面はここが持たない。** 解析するのは常に「今 PositionService が持っている局面」で、
 // フロントから SFEN を受け取らない（フロントに局面の写しを持たせない、という
@@ -32,6 +36,8 @@ type AnalyzeService struct {
 	logger *slog.Logger
 	pos    *PositionService
 	app    *application.App
+	// session はエンジンとの接続。**使い回す**（接続は最初の解析まで開かない）。
+	session *analyze.Session
 
 	mu sync.Mutex
 	// cancel は走っている解析の打ち切り。走っていなければ nil。
@@ -42,7 +48,17 @@ type AnalyzeService struct {
 }
 
 func NewAnalyzeService(logger *slog.Logger, pos *PositionService) *AnalyzeService {
-	return &AnalyzeService{logger: logger, pos: pos}
+	return &AnalyzeService{logger: logger, pos: pos, session: analyze.NewLocalSession()}
+}
+
+// close はエンジンとの接続を閉じる（終了時に呼ぶ）。
+//
+// 今は同一プロセスなので閉じなくても道連れで終わるが、**Step 2 で外部プロセスに
+// なったら閉じないと残る。** 経路は今のうちに通しておく。
+func (s *AnalyzeService) close() {
+	if err := s.session.Close(); err != nil {
+		s.logger.Warn("エンジンとの接続を閉じられませんでした", "error", err)
+	}
 }
 
 func (s *AnalyzeService) bind(app *application.App) { s.app = app }
@@ -73,6 +89,11 @@ type AnalyzeState struct {
 	Seq     int  `json:"seq"`
 	// SFEN は解析にかけた局面（開始時のみ入る）。何を評価した値なのかを示す。
 	SFEN string `json:"sfen"`
+	// Engine は繋がっているエンジンの名前（未接続なら空）。
+	//
+	// **何が出した評価値なのかは見せること。** 繋ぎ先を差し替えられる以上、
+	// 評価値だけ出して出所を伏せると比べようがない。
+	Engine string `json:"engine"`
 }
 
 // Start は今の局面の解析を始める。
@@ -110,7 +131,7 @@ func (s *AnalyzeService) Start(seconds int) (AnalyzeState, error) {
 		defer cancel()
 		defer s.finish(seq)
 
-		res, err := analyze.Analyze(ctx, sfen, opt, func(p analyze.Progress) {
+		res, err := s.session.Analyze(ctx, sfen, opt, func(p analyze.Progress) {
 			s.emit("analyze:info", AnalyzeProgress{Seq: seq, Progress: p})
 		})
 		if err != nil {
@@ -119,12 +140,13 @@ func (s *AnalyzeService) Start(seconds int) (AnalyzeState, error) {
 			return
 		}
 		s.logger.Info("解析しました",
-			"sfen", sfen, "depth", res.Depth, "score", res.Score.Label,
-			"best", res.Best, "nodes", res.Nodes, "elapsedMs", res.ElapsedMS)
+			"engine", res.Engine, "sfen", sfen, "depth", res.Depth,
+			"best", res.Bestmove, "nodes", res.Nodes,
+			"elapsedMs", res.ElapsedMS, "stopped", res.Stopped)
 		s.emit("analyze:done", AnalyzeProgress{Seq: seq, Progress: res.Progress, Done: true})
 	}()
 
-	return AnalyzeState{Running: true, Seq: seq, SFEN: sfen}, nil
+	return AnalyzeState{Running: true, Seq: seq, SFEN: sfen, Engine: s.session.EngineName()}, nil
 }
 
 // Stop は走っている解析を打ち切る。**打ち切っても評価値は出る**ので、
@@ -135,14 +157,14 @@ func (s *AnalyzeService) Stop() AnalyzeState {
 	if s.cancel != nil {
 		s.cancel()
 	}
-	return AnalyzeState{Running: s.cancel != nil, Seq: s.seq}
+	return AnalyzeState{Running: s.cancel != nil, Seq: s.seq, Engine: s.session.EngineName()}
 }
 
 // State は今の状態を返す（何も始めない）。フロントの初期表示用。
 func (s *AnalyzeService) State() AnalyzeState {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return AnalyzeState{Running: s.cancel != nil, Seq: s.seq}
+	return AnalyzeState{Running: s.cancel != nil, Seq: s.seq, Engine: s.session.EngineName()}
 }
 
 // finish は解析が終わったことを記録する。**自分より新しい解析が始まっていたら

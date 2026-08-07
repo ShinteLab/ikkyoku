@@ -127,6 +127,11 @@ type CaptureService struct {
 	wins   *appWindows
 	logger *slog.Logger
 
+	// beforeQuit は枠のメニューの「終了」から呼ぶ後始末（ウィンドウ位置の保存・
+	// エンジンとの接続の close）。**終了の入口が 2 つある**ので、中身は
+	// メイン画面を閉じる経路と同じものを main.go で 1 本にしてある。
+	beforeQuit func()
+
 	// recognizerDir は駒種推論器の学習データの置き場所(ikkyoku.Config の SutemeDataDir)。
 	// 空なら suteme 既定の探索(カレントディレクトリ → 実行ファイルのディレクトリ)に任せる。
 	recognizerDir string
@@ -305,8 +310,8 @@ func (s *CaptureService) Quit() {
 	if s.app == nil {
 		return
 	}
-	if s.wins != nil {
-		saveWindowState(s.wins, s.logger)
+	if s.beforeQuit != nil {
+		s.beforeQuit()
 	}
 	s.logger.Info("枠のメニューから終了します")
 	s.app.Quit()

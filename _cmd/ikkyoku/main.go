@@ -94,8 +94,16 @@ func main() {
 	settingsSvc.bind(app)
 	analyzeSvc.bind(app)
 
+	// 終了の入口は 2 つ（メイン画面を閉じる / 枠のメニューの「終了」）。
+	// **後始末はこの 1 本に寄せる**（保存の経路を 1 本にしてあるのと同じ理由）。
+	quit := func() {
+		saveWindowState(wins, logger)
+		analyzeSvc.close()
+	}
+	captureSvc.beforeQuit = quit
+
 	registerFrameHooks(app, wins, state.Frame, captureSvc, cfg.FitOnStartup, logger)
-	registerMainHooks(app, wins, state.Main, logger)
+	registerMainHooks(app, wins, state.Main, quit)
 	registerHotkey(app, captureSvc, logger)
 
 	// 駒種推論器(suteme)を先に用意しておく。3.5MB の学習データを読むので、
@@ -263,7 +271,7 @@ func startupFit(app *application.App, wins *appWindows, svc *CaptureService, log
 	}()
 }
 
-func registerMainHooks(app *application.App, wins *appWindows, st windowState, logger *slog.Logger) {
+func registerMainHooks(app *application.App, wins *appWindows, st windowState, quit func()) {
 	main := wins.main
 	if st.X != unsetPosition || st.Y != unsetPosition {
 		main.RegisterHook(events.Common.WindowRuntimeReady, func(e *application.WindowEvent) {
@@ -283,7 +291,7 @@ func registerMainHooks(app *application.App, wins *appWindows, st windowState, l
 	// **保存する座標はここで Position() を読んで得たものではない。** この時点では
 	// 破棄が進行中で不正な値が返るため、動いたときに記録しておいた値を使う(geometry.go)。
 	main.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
-		saveWindowState(wins, logger)
+		quit()
 		app.Quit()
 	})
 }
