@@ -230,10 +230,14 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     body.hidden = !editing;
     stage.classList.toggle("is-editing", editing);
     grid.classList.toggle("is-active", editing);
-    // 駒台は訂正中だけ出す。**盤の脇に空の箱を常設しない**(訂正していないときは
-    // 駒台の中身は盤面タブの「駒台」行に文字で出ている)。
-    handSlots.black.hidden = !editing;
-    handSlots.white.hidden = !editing;
+    // **駒台は訂正をやめても出したままにする。** 駒台は局面の一部（どちらが何を
+    // 持っているか）であって訂正の道具ではないので、見えなくなると局面が読めない。
+    // 出し入れするのはドラッグの受け付けだけ（.is-static）。
+    const loaded = !!state?.loaded;
+    handSlots.black.hidden = !loaded;
+    handSlots.white.hidden = !loaded;
+    handSlots.black.classList.toggle("is-static", !editing);
+    handSlots.white.classList.toggle("is-static", !editing);
     // 駒台の出し入れで盤の位置が動く（グリッドの並びが変わる）。
     layoutGrid();
   };
@@ -612,8 +616,11 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   });
 
   return {
+    // 撮ったら**訂正モードで始まる**。認識結果はまず直すものなので、そこが既定の
+    // 状態（「訂正する」を押させない）。読むだけにしたければ止められる。
     async load(boardSFEN: string) {
       await apply(() => PositionService.Load(boardSFEN));
+      setEditing(true);
     },
     clear() {
       state = null;

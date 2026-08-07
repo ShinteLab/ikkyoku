@@ -638,6 +638,18 @@ html.is-main body {
   display: none;
 }
 
+/* 訂正をやめているあいだ。**駒台は出したまま**(局面の一部なので)だが、
+   ドロップ先ではなくなるので枠を実線の控えめな見た目にする。
+   「足りない駒」は訂正のための置き場なので、こちらは畳む。 */
+.hand-slot.is-static .hand-zone {
+  border-style: solid;
+  border-color: #2f333c;
+}
+
+.hand-slot.is-static .missing-zone {
+  display: none;
+}
+
 /* .board-stage は盤とぴったり同じ大きさの箱。訂正 UI の 9x9 グリッドをここに重ねる。
    **盤の固有サイズ(--board-max)で頭打ちにすること。** SVG はそれ以上大きくならないので、
    箱だけが広がるとグリッドが盤からずれ、1 マス違うところを編集してしまう。
@@ -915,6 +927,11 @@ html.is-main body {
   font-size: 26px;
   background: #e8c07a;
   border-style: dashed;
+}
+
+/* 訂正していないときは掴めない（見せるだけ）。 */
+.hand-slot.is-static .stock-chip {
+  cursor: default;
 }
 
 .stock-chip {
