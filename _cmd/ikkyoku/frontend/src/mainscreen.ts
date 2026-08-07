@@ -120,11 +120,17 @@ export function mountMainScreen(root: HTMLElement): void {
 
       <div id="panel-board" class="panel is-active" role="tabpanel" aria-labelledby="tab-board">
         <div class="board-area">
-          <!-- .board-stage は盤と同じ大きさの箱。訂正 UI の 9x9 グリッドを
-               ここに重ねる(editor.ts)。**幅の上限は盤の固有サイズと揃えること**
-               (--board-max。ずれるとマスの当たり判定が 1 マスずれる)。 -->
-          <div id="board-stage" class="board-stage">
-            <shogi-board id="board" hidden></shogi-board>
+          <!-- 盤と駒台の配置。**後手の駒台は盤の左上、先手の駒台は右下**
+               (実際の将棋盤と同じ並び)。訂正モードのときだけ出る。 -->
+          <div id="board-with-hands" class="board-with-hands">
+            <div id="hand-white-slot" class="hand-slot"></div>
+            <!-- .board-stage は盤と同じ大きさの箱。訂正 UI の 9x9 グリッドを
+                 ここに重ねる(editor.ts)。**幅の上限は盤の固有サイズと揃えること**
+                 (--board-max。ずれるとマスの当たり判定が 1 マスずれる)。 -->
+            <div id="board-stage" class="board-stage">
+              <shogi-board id="board" hidden></shogi-board>
+            </div>
+            <div id="hand-black-slot" class="hand-slot"></div>
           </div>
           <p id="board-placeholder" class="board-placeholder">まだ撮っていません。</p>
         </div>
@@ -312,6 +318,10 @@ export function mountMainScreen(root: HTMLElement): void {
   const boardStage = root.querySelector<HTMLElement>("#board-stage")!;
   const editor = mountEditor({
     stage: boardStage,
+    handSlots: {
+      black: root.querySelector<HTMLElement>("#hand-black-slot")!,
+      white: root.querySelector<HTMLElement>("#hand-white-slot")!,
+    },
     panel: root.querySelector<HTMLElement>("#editor")!,
     onState: (st) => {
       if (!st?.loaded) {

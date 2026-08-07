@@ -62,6 +62,10 @@ export interface EditorHandle {
 export interface EditorOptions {
   // stage は <shogi-board> を包む要素。ここにグリッドを重ねる。
   stage: HTMLElement;
+  // handSlots は駒台を置く場所。**後手は盤の左上、先手は右下**(実際の将棋盤と
+  // 同じ並び)。位置は CSS(.board-with-hands のグリッド)が決めるので、
+  // ここは中身を入れるだけ。
+  handSlots: { black: HTMLElement; white: HTMLElement };
   // panel は駒箱と訂正ツールバーを置く場所。
   panel: HTMLElement;
   // onState は操作のたびに呼ばれる。盤・SFEN・警告の表示は呼び出し側（mainscreen）が持つ。
@@ -71,7 +75,7 @@ export interface EditorOptions {
 }
 
 export function mountEditor(opts: EditorOptions): EditorHandle {
-  const { stage, panel, onState, onError } = opts;
+  const { stage, panel, handSlots, onState, onError } = opts;
 
   // ---- 盤に重ねるグリッド -------------------------------------------------
   //
@@ -118,26 +122,28 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
                title="0 なら不明。撮った 1 枚からは分からないのが普通です" />
         <span class="note">盤面からは決まりません</span>
       </div>
-      <div class="hand-zone" id="hand-white" data-black="false">
-        <span class="hand-zone-label">後手の駒台</span>
-        <div class="hand-chips"></div>
-      </div>
       <div id="stock-rail" class="stock-rail"></div>
-      <div class="hand-zone" id="hand-black" data-black="true">
-        <span class="hand-zone-label">先手の駒台</span>
-        <div class="hand-chips"></div>
-      </div>
     </div>
   `;
+
+  // 駒台は盤の脇（後手=左上 / 先手=右下）に置く。**訂正ツールバーの中ではない。**
+  // 盤との位置関係そのものが「どちらの駒台か」の説明になるので、離さないこと。
+  const handZone = (black: boolean) => {
+    const zone = document.createElement("div");
+    zone.className = "hand-zone";
+    zone.dataset.black = String(black);
+    zone.innerHTML =
+      `<span class="hand-zone-label">${black ? "先手" : "後手"}の駒台</span>` +
+      `<div class="hand-chips"></div>`;
+    (black ? handSlots.black : handSlots.white).appendChild(zone);
+    return zone;
+  };
 
   const toggle = panel.querySelector<HTMLButtonElement>("#edit-toggle")!;
   const resetBtn = panel.querySelector<HTMLButtonElement>("#edit-reset")!;
   const body = panel.querySelector<HTMLDivElement>("#edit-body")!;
   const rail = panel.querySelector<HTMLDivElement>("#stock-rail")!;
-  const handZones = [
-    panel.querySelector<HTMLDivElement>("#hand-black")!,
-    panel.querySelector<HTMLDivElement>("#hand-white")!,
-  ];
+  const handZones = [handZone(true), handZone(false)];
   const moveNum = panel.querySelector<HTMLInputElement>("#edit-movenum")!;
   const turnBtns = Array.from(panel.querySelectorAll<HTMLButtonElement>(".turn-btn"));
 
@@ -152,6 +158,10 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     body.hidden = !editing;
     stage.classList.toggle("is-editing", editing);
     grid.classList.toggle("is-active", editing);
+    // 駒台は訂正中だけ出す。**盤の脇に空の箱を常設しない**(訂正していないときは
+    // 駒台の中身は盤面タブの「駒台」行に文字で出ている)。
+    handSlots.black.hidden = !editing;
+    handSlots.white.hidden = !editing;
   };
 
   // 操作の結果を反映する。**失敗しても状態は返ってくる**ので、まず描いてから

@@ -592,12 +592,48 @@ html.is-main body {
    `CELL*9 + MARGIN*2` = 560)で、指定されているのは `max-width` だけなので、
    host を広げても縮まないだけで伸びはしない。これ以上大きくするには core/web 側の
    svg に `width: 100%` が要る(= 他の利用側にも効く変更)なので、ここではやらない。 */
+/* 盤と駒台の配置。**後手の駒台は盤の左上、先手の駒台は右下**(実際の将棋盤と同じ)。
+   盤を 2 行ぶんまたがせ、左列の上段に後手・右列の下段に先手を置くだけで、
+   高さの計算をせずにこの並びになる。駒台は訂正中だけ出る(スロットごと hidden)。 */
+.board-with-hands {
+  display: grid;
+  grid-template-columns: auto auto auto;
+  grid-template-rows: auto auto;
+  gap: 6px;
+  align-items: start;
+  justify-content: center;
+}
+
+.board-with-hands > .board-stage {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+
+#hand-white-slot {
+  grid-column: 1;
+  grid-row: 1;
+  justify-self: end;
+}
+
+#hand-black-slot {
+  grid-column: 3;
+  grid-row: 2;
+  align-self: end;
+}
+
+.hand-slot[hidden] {
+  display: none;
+}
+
 /* .board-stage は盤とぴったり同じ大きさの箱。訂正 UI の 9x9 グリッドをここに重ねる。
    **盤の固有サイズ(--board-max)で頭打ちにすること。** SVG はそれ以上大きくならないので、
    箱だけが広がるとグリッドが盤からずれ、1 マス違うところを編集してしまう。 */
+   ⚠️ 幅に % を使わないこと。grid の auto トラックの中では % が中身の大きさに
+   依存して決まらなくなり、箱が潰れる(= 盤とグリッドがずれる)。 */
 .board-stage {
   position: relative;
-  width: min(100%, calc(100vh - 260px), var(--board-max));
+  width: min(calc(100vh - 260px), var(--board-max));
+  max-width: 100%;
   aspect-ratio: 1;
   line-height: 0;
 }
@@ -904,13 +940,16 @@ html.is-main body {
 }
 
 /* 駒台。盤から外した駒の行き先であり、盤へ打つドラッグ元でもある。
-   **外すのと持ち主を決めるのが 1 操作**になるのがこのゾーンの意味。 */
+   **外すのと持ち主を決めるのが 1 操作**になるのがこのゾーンの意味。
+   盤の脇(後手=左上 / 先手=右下)に置くので縦積み。 */
 .hand-zone {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 8px;
-  min-height: 34px;
-  padding: 4px 8px;
+  gap: 6px;
+  width: 76px;
+  min-height: 96px;
+  padding: 6px 4px;
   border: 1px dashed #3a3d47;
   border-radius: 6px;
 }
@@ -930,6 +969,7 @@ html.is-main body {
 .hand-chips {
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: 3px;
 }
 
