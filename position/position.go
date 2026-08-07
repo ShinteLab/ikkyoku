@@ -236,6 +236,52 @@ func (p *Position) SFEN() (string, error) {
 		p.Board.SFEN(), p.Turn.mark(), sfen.FormatHands(black, white), num), nil
 }
 
+// LabelSFEN は「**画像に付けるラベル**」としての SFEN を best-effort で組み立てて返す。
+// 2 つめの戻り値は、そのために妥協した点（無ければ空）。
+//
+// ⚠️ **SFEN() の代わりに使わないこと。** これは suteme への学習データ登録専用で、
+// **エンジンに渡してよい局面ではない。** 使い分けは次のとおり:
+//
+//	SFEN()      … 局面として確定したもの。未決があればエラー（決めていないことを決めない）
+//	LabelSFEN() … 画像のラベル。**必ず何かを返す**（撮った 1 枚は捨てない。設計原則3）
+//
+// **持ち駒は決まっているぶんを必ず書く。** 手番が未決だからといって持ち駒まで
+// 落とさない（駒台の枚数は駒数保存則の逆算そのもので、画像に写っていない情報を
+// 人が入れた成果でもある。SFEN は位置で意味が決まる書式なので、持ち駒を書くには
+// 手番の欄を埋めるしかない）。
+//
+// 妥協しているのは 2 点だけで、**どちらも notes に出す**（黙って捨てない）:
+//
+//   - **手番が未決なら b と書く。** suteme 側は手番の欄が無い SFEN を読むときも
+//     先手として扱う（`setTurn(f[1] || 'b')`）ので、**書いても書かなくても向こうの
+//     見え方は変わらない**。学習は盤面部分（fields[0]）しか見ないので影響もしない
+//   - **先後が未決の持ち駒は書かない。** どちらの駒台か決まっていないものを
+//     片側に寄せると、そちらの持ち駒として記録される（こちらは見え方が変わるので
+//     推測しない）
+func (p *Position) LabelSFEN() (string, []string) {
+	var notes []string
+	if p.Turn == TurnUnknown {
+		notes = append(notes, "手番が未決なので先手番として送ります（学習には使われません）")
+	}
+	if rest := p.Unassigned(); len(rest) > 0 {
+		names := make([]string, 0, len(rest))
+		for _, base := range sfen.HandOrder {
+			if n := rest[base]; n > 0 {
+				names = append(names, fmt.Sprintf("%s%d", sfen.Name(base), n))
+			}
+		}
+		notes = append(notes,
+			"先後が未決の駒は持ち駒に含まれません: "+strings.Join(names, " "))
+	}
+	black, white := p.Hands()
+	num := p.MoveNumber
+	if num <= 0 {
+		num = 1
+	}
+	return fmt.Sprintf("%s %s %s %d",
+		p.Board.SFEN(), p.Turn.mark(), sfen.FormatHands(black, white), num), notes
+}
+
 // Warnings は局面として成立していない点を日本語で返す（無ければ空）。
 //
 // **訂正 UI が「ここが怪しい」を出すための入口。** 直している最中の盤は当然

@@ -547,6 +547,11 @@ html.is-main body {
   color: #ff7a7a;
 }
 
+/* 送る前に知らせる妥協点。エラーではないので赤にはしない。 */
+.note.is-caution {
+  color: #ffc46b;
+}
+
 .debug-row {
   flex: 0 0 auto;
   display: flex;

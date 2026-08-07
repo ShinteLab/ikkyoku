@@ -137,6 +137,58 @@ func TestHandsSplit(t *testing.T) {
 	}
 }
 
+// LabelSFEN は suteme への登録用。**局面が確定していなくても持ち駒を落とさない。**
+//
+// 以前これを `SFEN()` で作っていて、手番か駒台の先後が未決だと空になり、
+// 呼び出し側が盤面部分だけにフォールバックしていた（＝**持ち駒が黙って落ちていた**）。
+// 学習に使われるのは盤面部分だけだが、送った持ち駒は suteme 側に保持されるので
+// 落としてよい情報ではない。
+func TestLabelSFENKeepsHands(t *testing.T) {
+	// 歩を 2 枚、盤から抜いた局面。
+	p, err := FromBoardSFEN("lnsgkgsnl/1r5b1/1ppppppp1/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.SetHand(sfen.Pawn, true, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	// 手番も残り 1 枚の持ち主も未決。**それでも組み上がること**が要点。
+	got, notes := p.LabelSFEN()
+	if _, err := p.SFEN(); err == nil {
+		t.Fatal("この時点では SFEN() は組み上がらないはず（前提が変わっている）")
+	}
+	if !strings.Contains(got, " P ") {
+		t.Errorf("LabelSFEN() = %q に先手の歩 1 枚が出ていません", got)
+	}
+	// 手番が未決なら b と書く（SFEN は位置で意味が決まるので、持ち駒を書くには要る）。
+	if f := strings.Fields(got); len(f) != 4 || f[1] != "b" || f[3] != "1" {
+		t.Errorf("LabelSFEN() = %q（4 フィールド・手番 b・手数 1 を期待）", got)
+	}
+	// **妥協した点は必ず出す**（黙って捨てない）。手番と未決の持ち駒で 2 件。
+	if len(notes) != 2 {
+		t.Errorf("notes = %v, want 2 件（手番未決 / 先後未決の持ち駒）", notes)
+	}
+
+	// 全部決めれば SFEN() と一致する。**2 つの組み立てが食い違わないこと。**
+	p.Turn = TurnWhite
+	p.MoveNumber = 42
+	if err := p.SetHand(sfen.Pawn, false, 1); err != nil {
+		t.Fatal(err)
+	}
+	full, err := p.SFEN()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, notes = p.LabelSFEN()
+	if got != full {
+		t.Errorf("LabelSFEN() = %q, SFEN() = %q（確定後は一致すること）", got, full)
+	}
+	if len(notes) != 0 {
+		t.Errorf("確定しているのに妥協点が出ています: %v", notes)
+	}
+}
+
 // 直している最中の盤は壊れて当たり前。**エラーではなく警告として出す**（設計原則3）。
 func TestWarnings(t *testing.T) {
 	p, err := FromBoardSFEN(initialBoard)

@@ -55,6 +55,15 @@ type EditState struct {
 	// SFEN は局面全体の SFEN。**手番が未決なら空**（決めていない手番を勝手に
 	// 先手へ倒さないため。position.Position.SFEN と同じ理由）。
 	SFEN string `json:"sfen"`
+	// LabelSFEN は**画像のラベルとしての** SFEN。**局面が確定していなくても必ず入る。**
+	//
+	// ⚠️ **表示にも解析にも使わないこと。** 用途は suteme への学習データ登録だけで、
+	// 手番が未決でも `b` と書き、決まっているぶんの持ち駒を必ず載せる
+	// （`position.Position.LabelSFEN` の注記を読むこと）。**画面に出すのは SFEN**。
+	LabelSFEN string `json:"labelSfen"`
+	// LabelNotes は LabelSFEN を組み立てるために妥協した点（手番を先手にした・
+	// 先後未決の持ち駒を落とした）。**送る前にユーザーへ出す**（黙って捨てない）。
+	LabelNotes []string `json:"labelNotes"`
 	// Turn は 0=不明 / 1=先手番 / 2=後手番。
 	Turn      int    `json:"turn"`
 	TurnLabel string `json:"turnLabel"`
@@ -209,7 +218,10 @@ func (s *PositionService) edit(fn func(*position.Position) error) (EditState, er
 // state はロックを取った状態で呼ぶこと。
 func (s *PositionService) state() EditState {
 	if s.pos == nil {
-		return EditState{Cells: []EditCell{}, Inventory: []position.Stock{}, Warnings: []string{}}
+		return EditState{
+			Cells: []EditCell{}, Inventory: []position.Stock{},
+			Warnings: []string{}, LabelNotes: []string{},
+		}
 	}
 	cells := make([]EditCell, 0, 81)
 	for rank := 0; rank < 9; rank++ {
@@ -223,6 +235,10 @@ func (s *PositionService) state() EditState {
 		}
 	}
 	full, _ := s.pos.SFEN() // 手番が未決なら空のまま返す(エラーは状態そのもの)
+	label, labelNotes := s.pos.LabelSFEN()
+	if labelNotes == nil {
+		labelNotes = []string{}
+	}
 	warnings := s.pos.Warnings()
 	if warnings == nil {
 		warnings = []string{}
@@ -232,6 +248,8 @@ func (s *PositionService) state() EditState {
 		Loaded:     true,
 		BoardSFEN:  board,
 		SFEN:       full,
+		LabelSFEN:  label,
+		LabelNotes: labelNotes,
 		Turn:       int(s.pos.Turn),
 		TurnLabel:  s.pos.Turn.String(),
 		MoveNumber: s.pos.MoveNumber,

@@ -131,6 +131,21 @@ export interface EditState {
     "sfen": string;
 
     /**
+     * LabelSFEN は**画像のラベルとしての** SFEN。**局面が確定していなくても必ず入る。**
+     * 
+     * ⚠️ **表示にも解析にも使わないこと。** 用途は suteme への学習データ登録だけで、
+     * 手番が未決でも `b` と書き、決まっているぶんの持ち駒を必ず載せる
+     * （`position.Position.LabelSFEN` の注記を読むこと）。**画面に出すのは SFEN**。
+     */
+    "labelSfen": string;
+
+    /**
+     * LabelNotes は LabelSFEN を組み立てるために妥協した点（手番を先手にした・
+     * 先後未決の持ち駒を落とした）。**送る前にユーザーへ出す**（黙って捨てない）。
+     */
+    "labelNotes": string[] | null;
+
+    /**
      * Turn は 0=不明 / 1=先手番 / 2=後手番。
      */
     "turn": number;

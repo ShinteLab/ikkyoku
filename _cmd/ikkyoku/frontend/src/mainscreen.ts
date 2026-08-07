@@ -167,6 +167,9 @@ export function mountMainScreen(root: HTMLElement): void {
         <div id="train-row" class="train-row" hidden>
           <button id="train-send" class="ghost-btn" type="button"
                   title="この画像と訂正した盤面を、suteme の学習データとして登録します">訂正データを送信</button>
+          <!-- 送る SFEN のために妥協した点(手番が未決・先後未決の持ち駒)。
+               **送る前に出す**(何が落ちるか分からないまま送らせない)。 -->
+          <span id="train-note" class="note is-caution"></span>
           <span id="train-send-status" class="note"></span>
         </div>
         <div class="sfen-row">
@@ -413,11 +416,15 @@ export function mountMainScreen(root: HTMLElement): void {
   // （盤の位置が分からないと suteme が学習サンプルを切り出せない）。
   const trainRow = root.querySelector<HTMLDivElement>("#train-row")!;
   const trainSend = root.querySelector<HTMLButtonElement>("#train-send")!;
+  const trainNote = root.querySelector<HTMLElement>("#train-note")!;
   const trainSendStatus = root.querySelector<HTMLElement>("#train-send-status")!;
   let trainEnabled = false;
   // 今の局面（EditState 由来）と、撮ったときの盤面矩形（CaptureResult 由来）。
   // **出所が違うので別々に持つ**（訂正しても矩形は変わらない。画像は同じ 1 枚）。
   let editSfen = "";
+  // editNotes は「送る SFEN のために妥協した点」（手番を先手にした・先後未決の
+  // 持ち駒を落とした）。**送る前に出す**（何が落ちるか分からないまま送らせない）。
+  let editNotes: string[] = [];
   let editLoaded = false;
   let lastRegion: { x1: number; y1: number; x2: number; y2: number } | null = null;
 
@@ -427,9 +434,11 @@ export function mountMainScreen(root: HTMLElement): void {
     if (trainRow.hidden) {
       return;
     }
-    // 送れる状態でも、盤面しか確定していない（手番・駒台の先後が未決）ことはある。
-    // **止めない**（学習に使うのは盤面部分なので、それでも価値がある。設計原則3）。
+    // 送れる状態でも、手番や駒台の先後が未決のことはある。**止めない**
+    // （学習に使うのは盤面部分なので、それでも価値がある。設計原則3）。
+    // ただし**何が落ちるかは先に出す**（持ち駒が黙って落ちるのを一度やっている）。
     trainSend.disabled = false;
+    trainNote.textContent = editNotes.join(" / ");
   };
 
   const sendTraining = async () => {
@@ -474,10 +483,15 @@ export function mountMainScreen(root: HTMLElement): void {
     resetButton: root.querySelector<HTMLButtonElement>("#edit-reset")!,
     panel: root.querySelector<HTMLElement>("#editor")!,
     onState: (st) => {
-      // suteme に送るのは**今の局面**。手番が決まっていれば完全形、決まっていなければ
-      // 盤面部分だけ（学習に使われるのは盤面部分なので、それでも足りる）。
+      // suteme に送るのは **LabelSFEN**（画像のラベルとしての SFEN）。
+      //
+      // ⚠️ **`sfen` を送らないこと。** あちらは局面が確定したときだけ埋まるので、
+      // 手番や駒台の先後が未決だと空になり、**盤面部分だけ送って持ち駒が落ちる**
+      // （実際にそうなっていた）。`labelSfen` は決まっているぶんの持ち駒を必ず載せ、
+      // 妥協した点を `labelNotes` で返す。
       editLoaded = !!st?.loaded;
-      editSfen = st ? st.sfen || st.boardSfen : "";
+      editSfen = st?.labelSfen ?? "";
+      editNotes = st?.labelNotes ?? [];
       syncTrain();
       if (!st?.loaded) {
         boardHandRow.hidden = true;
