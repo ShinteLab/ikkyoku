@@ -458,6 +458,11 @@ suteme の学習用サーバと同じパス・同じ方式。フロントは実�
 - 位置合わせを呼ぶのは「ウィンドウのリサイズ」「箱のリサイズ（ResizeObserver）」
   「盤の描き直し」「訂正モードの切り替え」。**大きさが変わりうる場面を 1 つでも
   落とすと、駒の見た目とクリック領域がずれる**
+- ⚠️ **CSS コメントの閉じ忘れで `.board-stage` のルールが丸ごと消え、`position: relative`
+  が効かずにグリッドがページ基準になっていたことがある**（横に大きくずれる）。
+  CSS は壊れても黙って動くので、`npm run build` の前に `check-css.mjs` が
+  コメントの対応を検査する。JS 側も `getComputedStyle(stage).position` を見て
+  `static` なら自分で `relative` にし、基準は `grid.offsetParent` から取る
 - ⚠️ **`.board-stage` の幅を `--board-max`（560px）で頭打ちにすること。**
   SVG はそれ以上大きくならないので、箱だけが広がると**グリッドが盤からずれ、
   1 マス違うマスを編集する**。`--board-max` は core/web の `CELL*9 + MARGIN*2` と

@@ -102,6 +102,12 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     }
   }
   stage.appendChild(grid);
+  // グリッドの位置の基準は「箱」であることを、CSS 任せにせずここでも保証する。
+  // **CSS が効いていないと基準がページ全体になり、グリッドが丸ごとずれる**
+  // （コメントの閉じ忘れで .board-stage のルールが丸ごと捨てられていて、実際に踏んだ）。
+  if (getComputedStyle(stage).position === "static") {
+    stage.style.position = "relative";
+  }
 
   // 盤の SVG 座標（core/web の shogi-board.js）。マス目は (MARGIN, MARGIN) から
   // CELL*9 の正方形。**向こうが変わったらここも直す。**
@@ -132,7 +138,9 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     };
     const topLeft = at(SVG_MARGIN, SVG_MARGIN);
     const bottomRight = at(SVG_MARGIN + SVG_CELL * 9, SVG_MARGIN + SVG_CELL * 9);
-    const base = stage.getBoundingClientRect();
+    // 基準は**実際に効いている位置の基準**（offsetParent）。stage を決め打ちにすると、
+    // 何かの拍子に stage が基準でなくなったときに丸ごとずれる。
+    const base = (grid.offsetParent ?? stage).getBoundingClientRect();
     const w = bottomRight.x - topLeft.x;
     const h = bottomRight.y - topLeft.y;
     if (w <= 0 || h <= 0) {

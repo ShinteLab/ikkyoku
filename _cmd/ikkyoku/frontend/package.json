@@ -5,8 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build:dev": "tsc && vite build --minify false --mode development",
-    "build": "tsc && vite build --mode production",
+    "check:css": "node check-css.mjs",
+    "build:dev": "node check-css.mjs && tsc && vite build --minify false --mode development",
+    "build": "node check-css.mjs && tsc && vite build --mode production",
     "preview": "vite preview"
   },
   "dependencies": {
