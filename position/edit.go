@@ -178,6 +178,45 @@ func (p *Position) TogglePromoted(rank, file int) error {
 	return p.Board.Set(rank, file, n)
 }
 
+// CycleCell は 1 マスの状態を順に回す:
+//
+//	先手の不成 → 先手の成 → 後手の不成 → 後手の成 → 先手の不成 …
+//
+// **訂正でマスに対してやりたいこと（先後と成/不成）はこの 4 通りしかない。**
+// 操作をクリックの左右で分けると「どちらがどちらだったか」を覚える必要が出るので、
+// UI からは 1 つの操作として回す（editor.ts の右クリック）。
+//
+// 金と玉は成れないので、その 2 つは先後の 2 状態だけを回る。
+func (p *Position) CycleCell(rank, file int) error {
+	c, err := p.Board.At(rank, file)
+	if err != nil {
+		return err
+	}
+	if c.IsEmpty() {
+		return fmt.Errorf("ikkyoku/position: 空マスです")
+	}
+	promotable := c.piece != sfen.Gold && c.piece != sfen.King
+
+	var black, promoted bool
+	switch {
+	case c.black && !c.promoted:
+		black, promoted = true, promotable // 先手の成（成れなければ後手へ）
+		if !promotable {
+			black = false
+		}
+	case c.black && c.promoted:
+		black, promoted = false, false // 後手の不成
+	case !c.black && !c.promoted:
+		black, promoted = false, promotable // 後手の成（成れなければ先手へ）
+		if !promotable {
+			black = true
+		}
+	default:
+		black, promoted = true, false // 先手の不成に戻る
+	}
+	return p.Place(rank, file, c.piece, black, promoted)
+}
+
 // FlipSide は駒の先後を入れ替える。**認識は駒の向きを外す**（後手の駒は 180 度回転で、
 // 回転を戻して分類するため、向きの判定を誤ると先後が入れ替わる）。
 func (p *Position) FlipSide(rank, file int) error {

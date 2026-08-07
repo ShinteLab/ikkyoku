@@ -26,6 +26,14 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 import * as $models from "./models.js";
 
 /**
+ * CycleCell は 1 マスを「先手不成 → 先手成 → 後手不成 → 後手成 → …」と回す。
+ * **訂正 UI の右クリックはこれ 1 つ**（先後と成/不成を左右のクリックで分けない）。
+ */
+export function CycleCell(rank: number, file: number): $CancellablePromise<$models.EditState> {
+    return $Call.ByID(38583860, rank, file);
+}
+
+/**
  * FlipSide は駒の先後を入れ替える。
  */
 export function FlipSide(rank: number, file: number): $CancellablePromise<$models.EditState> {
