@@ -350,7 +350,10 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
       const chips = zone.querySelector<HTMLDivElement>(".hand-chips")!;
       chips.replaceChildren();
       let total = 0;
-      for (const s of inv) {
+      // 並びは駒台に置く順（歩香桂銀金角飛王。Go 側の Inventory がその順で返す）。
+      // **後手は逆順に並べる。** 駒が 180 度回っているので、そちら側から読んだときに
+      // 同じ並びに見えるのはこの向き。
+      for (const s of black ? inv : [...inv].reverse()) {
         const n = black ? s.handBlack : s.handWhite;
         for (let i = 0; i < n; i++) {
           total++;

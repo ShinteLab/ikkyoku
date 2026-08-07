@@ -23,7 +23,15 @@ func TestInventoryInitial(t *testing.T) {
 	}
 	inv := p.Inventory()
 	if len(inv) != 8 {
-		t.Fatalf("在庫の駒種が %d 個です（飛角金銀桂香歩＋玉で 8）", len(inv))
+		t.Fatalf("在庫の駒種が %d 個です（歩香桂銀金角飛王で 8）", len(inv))
+	}
+	// **駒台に置く順。** 訂正 UI がこの順でそのまま並べるので固定しておく。
+	want := []int{sfen.Pawn, sfen.Lance, sfen.Knight, sfen.Silver,
+		sfen.Gold, sfen.Bishop, sfen.Rook, sfen.King}
+	for i, w := range want {
+		if inv[i].Piece != w {
+			t.Errorf("在庫の %d 番目 = %s, want %s", i, inv[i].Name, sfen.Name(w))
+		}
 	}
 	for _, s := range inv {
 		if s.Rest != 0 {

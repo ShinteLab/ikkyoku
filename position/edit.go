@@ -45,13 +45,22 @@ type Stock struct {
 // Over は過剰かを返す（盤上が上限を超えている）。
 func (s Stock) Over() bool { return s.Rest < 0 }
 
-// Inventory は全駒種の在庫を返す。並びは持ち駒の慣例（飛角金銀桂香歩）＋玉。
+// inventoryOrder は在庫と駒台を並べる順（歩・香・桂・銀・金・角・飛・王）。
 //
-// **訂正 UI の駒箱はこれをそのまま並べる。** 盤上の枚数ではなく残りを見せるのが要点で、
-// 「まだ置いていない駒」と「余計に置いた駒」が 1 つの数で表せる。
+// **駒台に置く順そのもの**なので、`sfen.HandOrder`（持ち駒表記の順＝飛角金銀桂香歩）とは
+// 逆向きに近い。SFEN の文字列を組むときは向こうの順を使うこと（`FormatHands` の担当）。
+var inventoryOrder = []int{
+	sfen.Pawn, sfen.Lance, sfen.Knight, sfen.Silver,
+	sfen.Gold, sfen.Bishop, sfen.Rook, sfen.King,
+}
+
+// Inventory は全駒種の在庫を返す。並びは駒台に置く順（歩香桂銀金角飛王）。
+//
+// **訂正 UI の駒箱と駒台はこれをそのまま並べる。** 盤上の枚数ではなく残りを見せるのが
+// 要点で、「まだ置いていない駒」と「余計に置いた駒」が 1 つの数で表せる。
 func (p *Position) Inventory() []Stock {
 	info := p.Board.Inspect(sfen.CheckSyntax)
-	order := append(append([]int{}, sfen.HandOrder...), sfen.King)
+	order := inventoryOrder
 
 	out := make([]Stock, 0, len(order))
 	for _, base := range order {
