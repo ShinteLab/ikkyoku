@@ -7,19 +7,21 @@
 //
 // 操作はドラッグ＆ドロップが主:
 //
-//   駒箱 → 盤   置く（在庫が尽きていても置ける。**余計な駒を外す前に正しい駒を
-//               置けないと詰む**ため。上限超過は警告と駒箱の赤い数字に出る）
-//   盤   → 盤   動かす（移動先の駒は置き換わる。取るのではない）
-//   盤   → 駒台 外して、その側の持ち駒にする（**外すのと先後を決めるのが 1 操作**）
-//   駒台 → 盤   打つ（その側の駒台にある駒だけ）
-//   盤   → 駒箱 先後を決めずに外す（**認識が作った余計な駒を消す操作**）
-//   駒台 ⇄ 駒台 持ち主を変える
-//   クリック     成/不成
-//   右クリック   先後の反転（認識は駒の向きを外す）
+//   足りない駒 → 盤   置く（先手の駒として置く。右クリックで後手に）
+//   盤 → 盤           動かす（移動先の駒は置き換わる。取るのではない）
+//   盤 → 駒台         外して、その側の持ち駒にする（**外すのと先後を決めるのが 1 操作**）
+//   駒台 → 盤         打つ（その側の駒台にある駒だけ）
+//   盤 → 足りない駒   先後を決めずに外す（**認識が作った余計な駒を消す操作**）
+//   駒台 ⇄ 駒台       持ち主を変える
+//   クリック          成/不成
+//   右クリック        先後の反転（認識は駒の向きを外す）
 //
-// **駒台は 2 つ（先手・後手）、駒箱は「まだ先後を決めていない駒」。** 盤に無い駒は
-// 駒数保存則からどちらかの駒台にあるはずだが、**どちらかは盤面からは決まらない**
-// （設計原則5）。決めるまで駒箱に居座り、決まるまで SFEN は組み上がらない。
+// **置き場は 3 つ: 先手の駒台・後手の駒台・「足りない駒」。** 盤に無い駒は駒数保存則から
+// どちらかの駒台にあるはずだが、**どちらかは盤面からは決まらない**（設計原則5）ので、
+// 決まるまで「足りない駒」に居る。決まるまで SFEN は組み上がらない。
+//
+// **駒種ごとの見本（駒箱）は置かない。** 置きたい駒は必ず「足りない駒」として現れる
+// （認識が駒種を間違えていれば、正しいほうの駒が足りなくなる）ので、見本は重複になる。
 //
 // **盤の描画は `<shogi-board>`（core/web）のまま。** 訂正用に盤を描き直さない
 // （描画が 2 実装になると、訂正中と確定後で見た目が変わる）。当たり判定は
@@ -164,8 +166,8 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     <div class="edit-bar">
       <button id="edit-toggle" class="ghost-btn" type="button" aria-pressed="false">訂正する</button>
       <span class="edit-hint">
-        盤 ⇄ 駒台をドラッグ（外すと同時に持ち主が決まる） / 駒箱は先後未決の置き場 /
-        クリックで成・不成 / 右クリックで先後
+        盤 ⇄ 駒台をドラッグ（外すと同時に持ち主が決まる） /
+        「足りない駒」は先後未決の置き場 / クリックで成・不成 / 右クリックで先後
       </span>
       <span class="spacer"></span>
       <button id="edit-reset" class="ghost-btn" type="button" hidden
@@ -184,7 +186,6 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
                title="0 なら不明。撮った 1 枚からは分からないのが普通です" />
         <span class="note">盤面からは決まりません</span>
       </div>
-      <div id="stock-rail" class="stock-rail"></div>
     </div>
   `;
 
@@ -201,10 +202,19 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     return zone;
   };
 
+  // 足りない駒（盤にも駒台にも無い＝**まだ先後を決めていない**駒）。
+  // **先手の駒台の上**に置く。駒種ごとの見本を並べる駒箱は廃した
+  // （置きたい駒は「足りない駒」として必ずここに出るので、見本は要らない）。
+  const missing = document.createElement("div");
+  missing.className = "missing-zone";
+  missing.innerHTML =
+    `<span class="hand-zone-label">足りない駒</span><div class="missing-chips"></div>`;
+  handSlots.black.insertBefore(missing, handSlots.black.firstChild);
+  const missingChips = missing.querySelector<HTMLDivElement>(".missing-chips")!;
+
   const toggle = panel.querySelector<HTMLButtonElement>("#edit-toggle")!;
   const resetBtn = panel.querySelector<HTMLButtonElement>("#edit-reset")!;
   const body = panel.querySelector<HTMLDivElement>("#edit-body")!;
-  const rail = panel.querySelector<HTMLDivElement>("#stock-rail")!;
   const handZones = [handZone(true), handZone(false)];
   const moveNum = panel.querySelector<HTMLInputElement>("#edit-movenum")!;
   const turnBtns = Array.from(panel.querySelectorAll<HTMLButtonElement>(".turn-btn"));
@@ -275,7 +285,7 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
       moveNum.value = String(next.moveNumber ?? 0);
     }
     const inv = next.inventory ?? [];
-    renderRail(inv);
+    renderMissing(inv);
     renderHands(inv);
     // onState が盤の sfen 属性を書き換える（= <shogi-board> が SVG を描き直す）ので、
     // グリッドの位置合わせはそのあと。
@@ -283,66 +293,33 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     layoutGrid();
   }
 
-  // ---- 駒箱と駒台 ---------------------------------------------------------
+  // ---- 足りない駒と駒台 ---------------------------------------------------
   //
-  // 駒箱は 1 行 1 駒種。**出すのは盤上の枚数ではなく「残り」**（存在するはずの
-  // 総数 − 盤上）で、正なら盤の外にあるはずの枚数、負なら認識が作った余計な駒。
-  // 駒台に割り振ったぶんは駒箱から減り、**残っているのが「先後未決」の駒**。
-  function renderRail(inv: Stock[]) {
-    rail.replaceChildren();
+  // 「足りない駒」＝ **存在するはずなのに盤にも駒台にも無い駒**（先後未決）。
+  // 駒数保存則からどちらかの駒台にあるはずだが、**どちらかは盤面からは決まらない**
+  // ので、決まるまでここに置く（設計原則5）。決めるのは駒台へのドラッグ。
+  //
+  // **駒種ごとの見本は出さない。** 置きたい駒は必ずここに「足りない駒」として
+  // 現れる（認識が駒種を間違えていれば、正しい駒が足りなくなる）ので、見本は要らない。
+  // 逆に多すぎる駒は盤から外す側で、それは警告に出る。
+  function renderMissing(inv: Stock[]) {
+    missingChips.replaceChildren();
+    let total = 0;
     for (const s of inv) {
-      const row = document.createElement("div");
-      row.className = "stock-row";
-      if (s.rest < 0) {
-        row.classList.add("is-over");
-      } else if (s.unassigned > 0) {
-        row.classList.add("is-unassigned");
-      }
-
-      // 見本。**在庫を見ずに置ける**ので、残りが 0 でも 過剰でもドラッグできる
-      // （間違った駒を外す前に正しい駒を置きたい場面があるため）。
-      for (const black of [true, false]) {
-        const chip = document.createElement("div");
-        chip.className = black ? "stock-chip" : "stock-chip is-white";
-        chip.draggable = true;
-        chip.dataset.piece = String(s.piece);
-        chip.dataset.black = String(black);
-        chip.textContent = black ? s.letter : s.letter.toLowerCase();
-        chip.title = `${black ? "先手" : "後手"}の${s.name}を盤に置く（在庫を見ません）`;
-        row.appendChild(chip);
-      }
-
-      const count = document.createElement("span");
-      count.className = "stock-count";
-      if (s.rest < 0) {
-        count.textContent = `${-s.rest}枚多い`;
-        count.title =
-          `${s.name}が上限（${s.limit}枚）より多く盤にあります。` +
-          `余分を駒箱か駒台へドラッグして外してください`;
-      } else {
-        count.textContent = s.unassigned > 0 ? `未決 ${s.unassigned}` : `${s.rest}`;
-        count.title =
-          `${s.name}: 上限 ${s.limit} / 盤上 ${s.black + s.white} / ` +
-          `駒台 先${s.handBlack} 後${s.handWhite} / 先後未決 ${s.unassigned}`;
-      }
-      row.appendChild(count);
-
-      // 未割り当ての駒。**どちらの駒台かは盤面からは決まらない**ので、
-      // ここから駒台へドラッグして人が決める。
-      const pool = document.createElement("div");
-      pool.className = "stock-pool";
       for (let i = 0; i < s.unassigned; i++) {
+        total++;
         const chip = document.createElement("div");
-        chip.className = "pool-chip";
+        chip.className = "stock-chip is-missing";
         chip.draggable = true;
         chip.dataset.piece = String(s.piece);
         chip.textContent = s.letter;
-        chip.title = `${s.name}（どちらの駒台か未決）。先手か後手の駒台へドラッグしてください`;
-        pool.appendChild(chip);
+        chip.title =
+          `${s.name}（どちらの駒台か未決）。駒台へドラッグすると持ち主が決まり、` +
+          `盤へドラッグすると先手の駒として置きます（右クリックで後手に）`;
+        missingChips.appendChild(chip);
       }
-      row.appendChild(pool);
-      rail.appendChild(row);
     }
+    missing.classList.toggle("is-empty", total === 0);
   }
 
   // 駒台。**盤に無い駒のうち、持ち主が決まったもの**を並べる。
@@ -464,7 +441,7 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
       // 駒台から打つ。**その側の駒台に無ければ Go 側で弾かれる。**
       void apply(() => PositionService.FromHand(rank, file, data.piece, data.black));
     } else {
-      // 駒箱の見本からは常に不成で置く（成っているかはクリックで切り替える）。
+      // 足りない駒からは常に不成で置く（成/不成はクリックで切り替える）。
       void apply(() => PositionService.Place(rank, file, data.piece, data.black, false));
     }
   });
@@ -492,30 +469,22 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     );
   });
 
-  // 駒箱。見本と「先後未決の駒」のドラッグ元であり、
+  // 足りない駒。**先後未決の駒のドラッグ元**であり、
   // **盤から先後を決めずに外すドロップ先**でもある。
-  rail.addEventListener("dragstart", (e) => {
-    const target = e.target as HTMLElement | null;
-    const sample = target?.closest<HTMLElement>(".stock-chip");
-    const pooled = target?.closest<HTMLElement>(".pool-chip");
-    if (!editing || (!sample && !pooled)) {
+  missing.addEventListener("dragstart", (e) => {
+    const chip = (e.target as HTMLElement)?.closest<HTMLElement>(".stock-chip");
+    if (!editing || !chip) {
       e.preventDefault();
       return;
     }
-    if (sample) {
-      const black = sample.dataset.black === "true";
-      setDrag(e, { from: "stock", piece: Number(sample.dataset.piece), black });
-      e.dataTransfer?.setDragImage(makeGhost(sample.textContent ?? "", black), 20, 20);
-      return;
-    }
-    // 未決の駒。持ち主が決まっていないので、置き先の駒台が先後を決める。
-    // 盤に落とされたときは先手の駒として置く（見本と同じ扱い。右クリックで直せる）。
-    setDrag(e, { from: "stock", piece: Number(pooled!.dataset.piece), black: true });
-    e.dataTransfer?.setDragImage(makeGhost(pooled!.textContent ?? "", true), 20, 20);
+    // 持ち主が決まっていないので、置き先の駒台が先後を決める。
+    // 盤に落とされたときは先手の駒として置く（右クリックで後手に直せる）。
+    setDrag(e, { from: "stock", piece: Number(chip.dataset.piece), black: true });
+    e.dataTransfer?.setDragImage(makeGhost(chip.textContent ?? "", true), 20, 20);
   });
 
-  rail.addEventListener("dragend", dropGhost);
-  makeDropZone(rail, (data) => {
+  missing.addEventListener("dragend", dropGhost);
+  makeDropZone(missing, (data) => {
     // 盤から: 先後を決めずに外す。駒台から: 持ち主を未決に戻す。
     if (data.from === "cell") {
       return PositionService.Remove(data.rank, data.file);
@@ -552,7 +521,7 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
         }
         return moveBetweenHands(data.piece, data.black, black);
       }
-      // 駒箱の見本・未決の駒から: この側の駒台に 1 枚足す。
+      // 足りない駒から: この側の駒台に 1 枚足す（＝持ち主が決まる）。
       return setHandDelta(data.piece, black, +1);
     });
   }

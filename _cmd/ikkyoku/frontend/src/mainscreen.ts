@@ -119,6 +119,10 @@ export function mountMainScreen(root: HTMLElement): void {
       </div>
 
       <div id="panel-board" class="panel is-active" role="tabpanel" aria-labelledby="tab-board">
+        <!-- 局面として成立していない点。**盤より上に出す。** 訂正しながら見るものなので、
+             盤の下だと見落とすし、件数で下の行が動く。中身は**今の局面**(EditState)の値で、
+             デバッグタブ側の同じ見出しとは別物(あちらは認識した時点の記録)。 -->
+        <ul id="board-warnings" class="warnings is-compact" hidden></ul>
         <div class="board-area">
           <!-- 盤と駒台の配置。**後手の駒台は盤の左上、先手の駒台は右下**
                (実際の将棋盤と同じ並び)。訂正モードのときだけ出る。 -->
@@ -139,17 +143,13 @@ export function mountMainScreen(root: HTMLElement): void {
           <span class="field-label">SFEN</span>
           <code id="sfen" class="sfen">-</code>
         </div>
-        <!-- 駒台と警告は**デバッグにも盤面にも出す**。デバッグ側は「認識がどれくらい
-             外したか」の指標として、こちら側は**局面を直すときに要る情報**として置く
-             (駒台の枚数は駒数保存則の逆算そのもので、警告は「どこが怪しいか」の提示)。
-             訂正 UI が乗るのはこの面なので、盤の近くに置く。 -->
         <!-- 駒台。**訂正中の局面の値**なので先後の割り振りが出る
-             (デバッグタブ側は認識した時点の推定枚数で「先後不明」のまま)。 -->
+             (デバッグタブ側は認識した時点の推定枚数で「先後不明」のまま)。
+             訂正中は盤の脇に駒そのものが並ぶので、こちらは文字の要約。 -->
         <div id="board-hand-row" class="hand-row" hidden>
           <span class="field-label">駒台</span>
           <span id="board-hand" class="hand"></span>
         </div>
-        <ul id="board-warnings" class="warnings is-compact" hidden></ul>
       </div>
 
       <div id="panel-debug" class="panel" role="tabpanel" aria-labelledby="tab-debug" hidden>
