@@ -2,6 +2,18 @@
   box-sizing: border-box;
 }
 
+:root {
+  /* 盤の固有サイズ。**core/web の `CELL*9 + MARGIN*2`(56*9+28*2)と同じ値。**
+     <shogi-board> の SVG は width 属性がこの値で `max-width: 100%` しか付いていないため、
+     置き場所をいくら広げてもこれ以上には伸びない。訂正 UI のグリッドは盤にぴったり
+     重ねる必要があるので、**箱のほうもここで頭打ちにする**(ずれると 1 マス違う
+     マスを編集してしまう)。core/web 側の定数が変わったらここも直すこと。 */
+  --board-max: 560px;
+  /* 盤の外周(SVG の MARGIN)が全体に占める割合。28/560 = 5%。
+     グリッドはこのぶんだけ内側に置く。 */
+  --board-inset: 5%;
+}
+
 html,
 body {
   margin: 0;
@@ -580,8 +592,22 @@ html.is-main body {
    `CELL*9 + MARGIN*2` = 560)で、指定されているのは `max-width` だけなので、
    host を広げても縮まないだけで伸びはしない。これ以上大きくするには core/web 側の
    svg に `width: 100%` が要る(= 他の利用側にも効く変更)なので、ここではやらない。 */
+/* .board-stage は盤とぴったり同じ大きさの箱。訂正 UI の 9x9 グリッドをここに重ねる。
+   **盤の固有サイズ(--board-max)で頭打ちにすること。** SVG はそれ以上大きくならないので、
+   箱だけが広がるとグリッドが盤からずれ、1 マス違うところを編集してしまう。 */
+.board-stage {
+  position: relative;
+  width: min(100%, calc(100vh - 260px), var(--board-max));
+  aspect-ratio: 1;
+  line-height: 0;
+}
+
+.board-stage[hidden] {
+  display: none;
+}
+
 .board-area shogi-board {
-  width: min(100%, calc(100vh - 120px));
+  width: 100%;
 }
 
 /* `hidden` 属性を効かせるために必要。<shogi-board> は Shadow DOM 内で
@@ -653,6 +679,228 @@ html.is-main body {
   font-size: 12px;
   line-height: 1.6;
   color: #ffc46b;
+}
+
+/* ---- 訂正 UI(editor.ts) --------------------------------------------------
+   盤の描画は <shogi-board> のまま。当たり判定だけを透明なグリッドで上に重ねる。
+   **座標は px で持たずパーセントで置く**ので、盤の表示サイズが変わっても付いてくる
+   (外周 --board-inset を除いた内側を 9 等分するだけ)。 */
+.edit-grid {
+  position: absolute;
+  inset: var(--board-inset);
+  display: grid;
+  grid-template-columns: repeat(9, 1fr);
+  grid-template-rows: repeat(9, 1fr);
+  /* 訂正モードでないときは盤を素通しにする(選択やホバーの邪魔をしない)。 */
+  pointer-events: none;
+}
+
+.edit-grid.is-active {
+  pointer-events: auto;
+}
+
+.edit-cell {
+  border: 1px solid transparent;
+  border-radius: 2px;
+}
+
+.edit-grid.is-active .edit-cell:not(.is-empty) {
+  cursor: grab;
+}
+
+.edit-grid.is-active .edit-cell:hover {
+  border-color: rgba(94, 160, 255, 0.9);
+  background: rgba(94, 160, 255, 0.12);
+}
+
+.edit-cell.is-over {
+  border-color: #5ea0ff;
+  background: rgba(94, 160, 255, 0.28);
+}
+
+.edit-cell.is-dragging {
+  opacity: 0.4;
+}
+
+/* ドラッグ中のゴースト。透明なマスをそのまま掴むと何も見えないので、
+   駒文字を描いた要素を一時的に作って setDragImage に渡している。 */
+.drag-ghost {
+  position: fixed;
+  top: -1000px;
+  left: -1000px;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "ShogiSFEN", serif;
+  font-size: 34px;
+  color: #1a1a1a;
+  background: #f3c877;
+  border: 1px solid #5a3b1a;
+  border-radius: 3px;
+}
+
+.drag-ghost.is-white {
+  transform: rotate(180deg);
+}
+
+.editor {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.edit-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.edit-hint {
+  font-size: 11.5px;
+  color: #6f7787;
+}
+
+.ghost-btn.is-active {
+  color: #d7e3ff;
+  border-color: #5ea0ff;
+  background: #2b3446;
+}
+
+.edit-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.edit-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.turn-group {
+  display: flex;
+  gap: 2px;
+}
+
+/* 手番は盤面からは決まらない(設計原則5)。**既定は「不明」**で、
+   人が押すまでどれも選ばれていない状態にしておく。 */
+.turn-btn {
+  padding: 3px 10px;
+  font-size: 12px;
+  color: #9aa6c0;
+  background: #23262e;
+  border: 1px solid #3a3d47;
+  cursor: pointer;
+}
+
+.turn-btn:first-child {
+  border-radius: 5px 0 0 5px;
+}
+
+.turn-btn:last-child {
+  border-radius: 0 5px 5px 0;
+}
+
+.turn-btn.is-active {
+  color: #d7e3ff;
+  border-color: #5ea0ff;
+  background: #2b3446;
+}
+
+.movenum {
+  width: 72px;
+  padding: 3px 6px;
+  font-size: 12px;
+  color: #c7cbd4;
+  background: #23262e;
+  border: 1px solid #3a3d47;
+  border-radius: 5px;
+}
+
+/* 駒箱。**「存在するはずの駒」の残り**を並べる。盤から外した駒はここに戻り、
+   盤に置きすぎた駒は赤い「n枚多い」になる。盤からのドロップ先でもある。 */
+.stock-rail {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(196px, 1fr));
+  gap: 4px 12px;
+  padding: 6px;
+  border: 1px dashed #3a3d47;
+  border-radius: 6px;
+}
+
+.stock-rail.is-over {
+  border-color: #5ea0ff;
+  border-style: solid;
+  background: rgba(94, 160, 255, 0.1);
+}
+
+.stock-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.stock-chip {
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "ShogiSFEN", serif;
+  font-size: 22px;
+  color: #1a1a1a;
+  background: #f3c877;
+  border: 1px solid #5a3b1a;
+  border-radius: 3px;
+  cursor: grab;
+}
+
+.stock-chip.is-white {
+  transform: rotate(180deg);
+}
+
+.stock-count {
+  min-width: 4.5em;
+  font-size: 12px;
+  color: #9aa6c0;
+}
+
+/* 過剰。**認識が余計な駒を作った状態**で、訂正の最初の手がかりになる。 */
+.stock-row.is-over .stock-count {
+  color: #ff7a7a;
+}
+
+.stock-split {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.split-btn {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  font-size: 11px;
+  color: #9aa6c0;
+  background: #23262e;
+  border: 1px solid #3a3d47;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.split-btn:disabled {
+  color: #4a4f5c;
+  cursor: default;
+}
+
+.split-label {
+  font-size: 11.5px;
+  color: #9aa6c0;
 }
 
 /* 盤面タブ側の警告。件数が増えても盤を押し潰さないよう高さを頭打ちにして送る

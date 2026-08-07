@@ -3,6 +3,9 @@
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
+import * as position$0 from "../github.com/ShinteLab/ikkyoku/position/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
 import * as recognize$0 from "../github.com/ShinteLab/ikkyoku/recognize/models.js";
 
 /**
@@ -79,6 +82,80 @@ export interface CaptureResult {
      * 渡してフロントで重ねれば軽く、マスごとの確信度をホバーで出すこともできる。
      */
     "debug"?: recognize$0.Debug | null;
+}
+
+/**
+ * EditCell は 1 マスの見え方。フロントが盤に重ねる当たり判定と、
+ * ドラッグ中のゴースト表示に使う。
+ */
+export interface EditCell {
+    /**
+     * Mark は SFEN のマス表記（"P" / "+p" / 空マスは ""）。
+     */
+    "mark": string;
+
+    /**
+     * Name は日本語（"先手の歩" / "空"）。ホバーと読み上げ用。
+     */
+    "name": string;
+
+    /**
+     * Empty は空マスか。Mark == "" と同じだが、フロントで判定を間違えないよう明示する。
+     */
+    "empty": boolean;
+}
+
+/**
+ * EditState は訂正の状態一式。**操作のたびにこれを丸ごと返す。**
+ */
+export interface EditState {
+    /**
+     * Loaded は局面を読み込んでいるか（まだ何も撮っていなければ false）。
+     */
+    "loaded": boolean;
+
+    /**
+     * BoardSFEN は盤面部分の SFEN。手番が未決でも取れる。
+     */
+    "boardSfen": string;
+
+    /**
+     * SFEN は局面全体の SFEN。**手番が未決なら空**（決めていない手番を勝手に
+     * 先手へ倒さないため。position.Position.SFEN と同じ理由）。
+     */
+    "sfen": string;
+
+    /**
+     * Turn は 0=不明 / 1=先手番 / 2=後手番。
+     */
+    "turn": number;
+    "turnLabel": string;
+
+    /**
+     * MoveNumber は手数。0 は不明。
+     */
+    "moveNumber": number;
+
+    /**
+     * Cells は 81 マス（SFEN 記述順。rank*9+file）。
+     */
+    "cells": EditCell[] | null;
+
+    /**
+     * Inventory は「存在するはずの駒」の在庫。**訂正 UI の駒箱はこれを並べる。**
+     */
+    "inventory": position$0.Stock[] | null;
+
+    /**
+     * Warnings は局面として成立していない点。**エラーではない**（直している最中は
+     * 壊れていて当たり前）。
+     */
+    "warnings": string[] | null;
+
+    /**
+     * Dirty は認識結果から変更したか。「訂正を捨てて戻す」を出すかの判断に使う。
+     */
+    "dirty": boolean;
 }
 
 /**

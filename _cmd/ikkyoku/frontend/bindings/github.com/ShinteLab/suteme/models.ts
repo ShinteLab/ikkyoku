@@ -50,9 +50,15 @@ export interface CellDebug {
     "rect": image$0.Rectangle;
 
     /**
-     * Category は ClassifyCellWith の判定（0=空 / 1=先手 / 2=後手）。
+     * Category は最終的に採用した 空/先手/後手（0=空 / 1=先手 / 2=後手）。
      */
     "category": CellCategory;
+
+    /**
+     * OrientBy は向きの決め方。既定（分類器の幅プロファイル）では ""、
+     * 分類器の確信度が足りず回転照合で決め直したときだけ "match"。
+     */
+    "orient_by"?: string;
 
     /**
      * Class は Predictor が返した駒種クラス（推論しなかったら -1、

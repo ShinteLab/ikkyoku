@@ -1,0 +1,143 @@
+package position
+
+// 訂正の操作と、その拠り所になる「在庫」。
+//
+// **訂正 UI は「存在するはずの駒」を中心に回す。** 将棋の駒は先後合わせて枚数が
+// 決まっている（歩 18・香 4・桂 4・銀 4・金 4・飛 2・角 2・玉 2）ので、
+// 「盤上に何枚あるか」ではなく「**あと何枚あるはずか**」を出すほうが、認識結果の
+// 直し方がそのまま見える。認識は**余計な駒を作る**（実測で `L: 11枚（上限4）`）ので、
+// 過剰は「負の残り」として出して、ユーザーが盤から外す先を用意する。
+//
+// **合法性は問わない。** 直している最中の盤は壊れていて当たり前で、置けるかどうかを
+// ここで止めると「間違った駒を外す前に正しい駒を置けない」という詰みが起きる
+// （設計原則3・原則4）。おかしさは Warnings で出す。
+
+import (
+	"fmt"
+
+	"github.com/ShinteLab/core/sfen"
+)
+
+// Stock は駒種 1 つぶんの在庫。
+type Stock struct {
+	// Piece はベース駒コード（sfen.Pawn など）。
+	Piece int `json:"piece"`
+	// Letter は SFEN の大文字（"P"）。フロントが駒を描くのに使う。
+	Letter string `json:"letter"`
+	// Name は日本語名（"歩"）。
+	Name string `json:"name"`
+	// Limit は先後合計の上限枚数。**これが「存在するはず」の総数。**
+	Limit int `json:"limit"`
+	// Black / White は盤上の枚数（成駒はベース駒に合算）。
+	Black int `json:"black"`
+	White int `json:"white"`
+	// Rest は残り = Limit - 盤上。**負なら過剰**（認識が余計な駒を作った状態）。
+	// 正の値はそのまま「駒台にあるはずの枚数」（先後の区別は付かない）。
+	Rest int `json:"rest"`
+	// HandBlack は Rest のうち先手に割り振った枚数（残りは後手）。
+	HandBlack int `json:"handBlack"`
+}
+
+// Over は過剰かを返す（盤上が上限を超えている）。
+func (s Stock) Over() bool { return s.Rest < 0 }
+
+// Inventory は全駒種の在庫を返す。並びは持ち駒の慣例（飛角金銀桂香歩）＋玉。
+//
+// **訂正 UI の駒箱はこれをそのまま並べる。** 盤上の枚数ではなく残りを見せるのが要点で、
+// 「まだ置いていない駒」と「余計に置いた駒」が 1 つの数で表せる。
+func (p *Position) Inventory() []Stock {
+	info := p.Board.Inspect(sfen.CheckSyntax)
+	order := append(append([]int{}, sfen.HandOrder...), sfen.King)
+
+	out := make([]Stock, 0, len(order))
+	for _, base := range order {
+		black, white := info.Black[base], info.White[base]
+		limit := sfen.PieceLimit(base)
+		rest := limit - black - white
+		hb := p.handBlack[base]
+		if hb < 0 {
+			hb = 0
+		}
+		if rest > 0 && hb > rest {
+			hb = rest
+		}
+		if rest <= 0 {
+			hb = 0
+		}
+		out = append(out, Stock{
+			Piece: base, Letter: sfen.Letter(base), Name: sfen.Name(base),
+			Limit: limit, Black: black, White: white, Rest: rest, HandBlack: hb,
+		})
+	}
+	return out
+}
+
+// Place はマスに駒を置く（元あった駒は消える）。**駒箱から盤へのドロップ。**
+//
+// 在庫が尽きていても置ける。**「余計な駒を外す前に正しい駒を置けない」を避けるため**で、
+// 上限超過は Warnings に出る（設計原則3）。
+func (p *Position) Place(rank, file, piece int, black, promoted bool) error {
+	c, err := NewCell(piece, black, promoted)
+	if err != nil {
+		return err
+	}
+	return p.Board.Set(rank, file, c)
+}
+
+// Remove はマスを空にする。**盤から駒箱へのドロップ**（＝認識が作った余計な駒を外す）。
+func (p *Position) Remove(rank, file int) error {
+	return p.Board.Set(rank, file, Cell{})
+}
+
+// Move は駒をマスからマスへ移す。**盤の中でのドラッグ＆ドロップ。**
+// 移動先に駒があれば上書きする（取るのではなく、置き換え。訂正なので）。
+// 空マスからの移動は何もしない（error）。
+func (p *Position) Move(fromRank, fromFile, toRank, toFile int) error {
+	c, err := p.Board.At(fromRank, fromFile)
+	if err != nil {
+		return err
+	}
+	if c.IsEmpty() {
+		return fmt.Errorf("ikkyoku/position: 移動元が空マスです")
+	}
+	if fromRank == toRank && fromFile == toFile {
+		return nil
+	}
+	if err := p.Board.Set(toRank, toFile, c); err != nil {
+		return err
+	}
+	return p.Board.Set(fromRank, fromFile, Cell{})
+}
+
+// TogglePromoted は成/不成を切り替える。**認識は成駒の "+" を落としやすい。**
+func (p *Position) TogglePromoted(rank, file int) error {
+	c, err := p.Board.At(rank, file)
+	if err != nil {
+		return err
+	}
+	if c.IsEmpty() {
+		return fmt.Errorf("ikkyoku/position: 空マスです")
+	}
+	n, err := NewCell(c.piece, c.black, !c.promoted)
+	if err != nil {
+		return err // 金と玉は成れない
+	}
+	return p.Board.Set(rank, file, n)
+}
+
+// FlipSide は駒の先後を入れ替える。**認識は駒の向きを外す**（後手の駒は 180 度回転で、
+// 回転を戻して分類するため、向きの判定を誤ると先後が入れ替わる）。
+func (p *Position) FlipSide(rank, file int) error {
+	c, err := p.Board.At(rank, file)
+	if err != nil {
+		return err
+	}
+	if c.IsEmpty() {
+		return fmt.Errorf("ikkyoku/position: 空マスです")
+	}
+	n, err := NewCell(c.piece, !c.black, c.promoted)
+	if err != nil {
+		return err
+	}
+	return p.Board.Set(rank, file, n)
+}

@@ -28,6 +28,8 @@ import { Clipboard, Events } from "@wailsio/runtime";
 import { FiCopy, FiImage } from "react-icons/fi";
 import { CaptureService, SettingsService } from "../bindings/ikkyoku-app";
 import { iconMarkup } from "./icon";
+import { mountEditor } from "./editor";
+import type { Stock } from "../bindings/github.com/ShinteLab/ikkyoku/position/models";
 // 認識の観測情報。**型を手で書き写さない**(Go 側は suteme の型をそのまま通しており、
 // ここで別に定義すると矩形の意味がずれても気づけない)。
 import type { Debug } from "../bindings/github.com/ShinteLab/suteme";
@@ -118,9 +120,15 @@ export function mountMainScreen(root: HTMLElement): void {
 
       <div id="panel-board" class="panel is-active" role="tabpanel" aria-labelledby="tab-board">
         <div class="board-area">
-          <shogi-board id="board" hidden></shogi-board>
+          <!-- .board-stage は盤と同じ大きさの箱。訂正 UI の 9x9 グリッドを
+               ここに重ねる(editor.ts)。**幅の上限は盤の固有サイズと揃えること**
+               (--board-max。ずれるとマスの当たり判定が 1 マスずれる)。 -->
+          <div id="board-stage" class="board-stage">
+            <shogi-board id="board" hidden></shogi-board>
+          </div>
           <p id="board-placeholder" class="board-placeholder">まだ撮っていません。</p>
         </div>
+        <div id="editor" class="editor"></div>
         <div class="sfen-row">
           <span class="field-label">SFEN</span>
           <code id="sfen" class="sfen">-</code>
@@ -212,16 +220,19 @@ export function mountMainScreen(root: HTMLElement): void {
   const sfenOut = root.querySelector<HTMLElement>("#sfen")!;
   const confidenceRow = root.querySelector<HTMLDivElement>("#confidence-row")!;
   const confidenceOut = root.querySelector<HTMLElement>("#confidence")!;
-  // 駒台と警告は盤面タブとデバッグタブの両方に出す。**同じ値を 2 か所に描くだけ**で、
-  // 片方だけ更新する経路を作らないこと(食い違うと、どちらが本当か分からなくなる)。
-  const handRows = [
-    { row: root.querySelector<HTMLDivElement>("#hand-row")!, out: root.querySelector<HTMLElement>("#hand")! },
-    { row: root.querySelector<HTMLDivElement>("#board-hand-row")!, out: root.querySelector<HTMLElement>("#board-hand")! },
-  ];
-  const warningLists = [
-    root.querySelector<HTMLUListElement>("#warnings")!,
-    root.querySelector<HTMLUListElement>("#board-warnings")!,
-  ];
+  // 駒台と警告は両方のタブに出るが、**出所が違う**。
+  //
+  //   デバッグタブ … 撮って認識した時点の値。**訂正しても変わらない**
+  //                  (どれくらい外したかの記録なので、直した後の値では意味が無い)
+  //   盤面タブ     … **今の局面**の値(EditState)。訂正するたびに変わる
+  //
+  // 同じ見た目で別の値なので、**片方の更新をもう片方に流用しないこと。**
+  const handRow = root.querySelector<HTMLDivElement>("#hand-row")!;
+  const handOut = root.querySelector<HTMLElement>("#hand")!;
+  const warnings = root.querySelector<HTMLUListElement>("#warnings")!;
+  const boardHandRow = root.querySelector<HTMLDivElement>("#board-hand-row")!;
+  const boardHandOut = root.querySelector<HTMLElement>("#board-hand")!;
+  const boardWarnings = root.querySelector<HTMLUListElement>("#board-warnings")!;
   const status = root.querySelector<HTMLParagraphElement>("#status")!;
   const shot = root.querySelector<HTMLDivElement>("#shot")!;
   const shotPath = root.querySelector<HTMLButtonElement>("#shot-path")!;
@@ -294,9 +305,53 @@ export function mountMainScreen(root: HTMLElement): void {
     }
   })();
 
+  // 訂正 UI。**盤に描くのは常にここが持つ局面**(EditState)で、認識結果を直接は描かない。
+  // 撮った直後は認識結果そのものが入っているので見た目は同じだが、訂正すると
+  // 盤・SFEN・駒台・警告がその場で追従する。**2 つの出所を混ぜないこと。**
+  const boardStage = root.querySelector<HTMLElement>("#board-stage")!;
+  const editor = mountEditor({
+    stage: boardStage,
+    panel: root.querySelector<HTMLElement>("#editor")!,
+    onState: (st) => {
+      if (!st?.loaded) {
+        boardHandRow.hidden = true;
+        fillWarnings(boardWarnings, []);
+        return;
+      }
+      showBoard(st.boardSfen, true);
+      sfenOut.textContent = st.sfen || st.boardSfen || "-";
+      showEditHand(st.inventory ?? []);
+      fillWarnings(boardWarnings, st.warnings ?? []);
+    },
+    onError: (message) => {
+      status.textContent = `訂正できませんでした: ${message}`;
+      status.classList.add("is-warn");
+    },
+  });
+
+  // 盤面タブの駒台。**訂正中の局面の値**で、先後の割り振りまで出す
+  // (デバッグタブ側は認識した時点の推定枚数のまま)。
+  const showEditHand = (inv: Stock[]) => {
+    const parts = inv
+      .filter((s) => s.rest > 0)
+      .map((s) => {
+        const black = s.handBlack;
+        const white = s.rest - black;
+        if (black > 0 && white > 0) {
+          return `${s.name}先${black}後${white}`;
+        }
+        return `${black > 0 ? "先" : "後"}${s.name}${black > 0 ? black : white}`;
+      });
+    boardHandOut.textContent = parts.join(" ");
+    boardHandRow.hidden = parts.length === 0;
+  };
+
   // sfen が空なら盤を隠して理由を出す。撮る前と「撮ったが認識できなかった」は別物なので
   // 文言を分ける(認識失敗はキャプチャの失敗ではない。設計原則3)。
   const showBoard = (sfen: string, captured: boolean) => {
+    // 盤ごと箱(.board-stage)を隠す。箱は正方形の場所取りをしているので、
+    // 中身が無いまま残すと空白が居座る。
+    boardStage.hidden = !sfen;
     if (!sfen) {
       board.hidden = true;
       placeholder.hidden = false;
@@ -322,29 +377,28 @@ export function mountMainScreen(root: HTMLElement): void {
     confidenceRow.hidden = false;
   };
 
+  // デバッグタブ側。**認識した時点の駒台の推定枚数**(先後不明)。
   const showHand = (hand: Record<string, number>) => {
     const parts = HAND_ORDER.filter((k) => (hand?.[k] ?? 0) > 0).map(
       (k) => `${HAND_LABEL[k]}${hand[k]}`,
     );
-    const text = parts.join(" ");
-    for (const { row, out } of handRows) {
-      out.textContent = text;
-      row.hidden = parts.length === 0;
-    }
+    handOut.textContent = parts.join(" ");
+    handRow.hidden = parts.length === 0;
   };
 
-  const showWarnings = (list: string[]) => {
+  const fillWarnings = (ul: HTMLUListElement, list: string[]) => {
     const items = list ?? [];
-    for (const ul of warningLists) {
-      ul.innerHTML = "";
-      for (const w of items) {
-        const li = document.createElement("li");
-        li.textContent = w;
-        ul.appendChild(li);
-      }
-      ul.hidden = items.length === 0;
+    ul.replaceChildren();
+    for (const w of items) {
+      const li = document.createElement("li");
+      li.textContent = w;
+      ul.appendChild(li);
     }
+    ul.hidden = items.length === 0;
   };
+
+  // デバッグタブ側の警告。**認識した時点のもの**で、訂正しても書き換えない。
+  const showWarnings = (list: string[]) => fillWarnings(warnings, list);
 
   // 設定で指定した学習データの置き場所(ikkyoku.Config の SutemeDataDir)。
   // 実際に読まれたファイル(debug.predictor.source)と突き合わせるために覚えておく。
@@ -545,8 +599,16 @@ export function mountMainScreen(root: HTMLElement): void {
     }
 
     showPath(result.path);
-    sfenOut.textContent = result.sfen || "-";
-    showBoard(result.sfen, true);
+    // 盤・SFEN・駒台・警告は訂正 UI 側(EditState)が描く。**認識結果をここで直接
+    // 描かない**(訂正した内容が撮り直すまで残る、という食い違いを作らないため)。
+    // 認識できていれば読み込んで訂正を始められる状態にし、駄目なら空に戻す。
+    if (result.sfen) {
+      void editor.load(result.sfen);
+    } else {
+      editor.clear();
+      showBoard("", true);
+      sfenOut.textContent = "-";
+    }
     showConfidence(result.confidence, result.sfen);
     showRegion(result.debug);
     showPredictor(result.debug);
