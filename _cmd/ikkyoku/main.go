@@ -126,7 +126,7 @@ func newFrameWindow(app *application.App, st windowState, hidden bool) *applicat
 	opts := application.WebviewWindowOptions{
 		// 隠していても HWND は生きているので、クライアント矩形も座標の逆算も普通に効く
 		// (枠を✕で隠したあとにそのまま撮れるのと同じ理屈。captureservice.go)。
-		Hidden: hidden,
+		Hidden:    hidden,
 		Title:     "ikkyoku",
 		Width:     w,
 		Height:    h,

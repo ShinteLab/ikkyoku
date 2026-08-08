@@ -28,17 +28,30 @@ func runFakeEngine() {
 		}
 		out.Flush()
 	}
-	var options []string
+	// ⚠️ **isready のあとに来た setoption は受け取らない。**
+	// 実際のエンジンでも間に合っていない（置換表の確保も評価関数の読み込みも
+	// isready で走る）ので、遅れて届いたものは無かったことにする。
+	//
+	// 送られる行そのものの検証は core 側（client の TestOpenSendsDeclaredDefaults）。
+	// ここで見るのは「別プロセス相手でも同じ手順が通るか」。
+	ready := false
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		switch {
 		case line == "usi":
-			say("id name Fake External Engine", "id author test", "usiok")
+			say("id name Fake External Engine", "id author test",
+				"option name USI_Hash type spin default 256 min 1 max 1024",
+				"option name Threads type spin default 1 min 1 max 8",
+				// button と空の既定値は送られてこないはず。
+				"option name Clear Hash type button",
+				"option name BookDir type string default <empty>",
+				"usiok")
 		case strings.HasPrefix(line, "setoption "):
-			options = append(options, line)
+			if ready {
+				continue // 間に合っていない。実際のエンジンと同じく無視する。
+			}
 		case line == "isready":
-			// 受け取った setoption を報告する（**isready の前に来たものだけ**）。
-			say("info string options=" + fmt.Sprint(len(options)))
+			ready = true
 			say("readyok")
 		case strings.HasPrefix(line, "go"):
 			say("info depth 1 score cp 42 nodes 10 pv 7g7f",
@@ -64,12 +77,20 @@ func TestExecSessionRunsExternalEngine(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	name, err := s.Connect(ctx)
+	info, err := s.Connect(ctx)
 	if err != nil {
 		t.Fatalf("外部エンジンに繋げませんでした: %v", err)
 	}
-	if name != "Fake External Engine" {
-		t.Errorf("id name = %q", name)
+	if info.Name != "Fake External Engine" {
+		t.Errorf("id name = %q", info.Name)
+	}
+	// ⚠️ **宣言された option には既定値を送る**（button と空の既定値は除く）。
+	// USI_Hash は設定で上書きしているので、送るのは 2 件。
+	if info.Options != 4 {
+		t.Errorf("宣言された option = %d, want 4", info.Options)
+	}
+	if info.Applied != 2 {
+		t.Errorf("送った setoption = %d, want 2（USI_Hash と Threads）", info.Applied)
 	}
 
 	r, err := s.Analyze(ctx, startpos, Options{Movetime: 3 * time.Second}, nil)

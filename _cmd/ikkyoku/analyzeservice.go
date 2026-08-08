@@ -122,6 +122,13 @@ type EngineCheck struct {
 	OK bool `json:"ok"`
 	// Name は繋がったエンジンの名前（`id name`）。
 	Name string `json:"name"`
+	// Options はエンジンが宣言した option の数。
+	Options int `json:"options"`
+	// Applied は `isready` の前に送った `setoption` の数（**既定値を含む**）。
+	//
+	// **送ったことが見えないと、効いているか確かめようがない**（option には
+	// 応答が返らない）。宣言より少ないのが普通（button と空の既定値は送らない）。
+	Applied int `json:"applied"`
 	// Error は繋がらなかった理由（日本語）。
 	Error string `json:"error"`
 }
@@ -140,14 +147,19 @@ func (s *AnalyzeService) CheckEngine() EngineCheck {
 
 	ctx, cancel := context.WithTimeout(context.Background(), engineConnectTimeout)
 	defer cancel()
-	name, err := session.Connect(ctx)
+	info, err := session.Connect(ctx)
 	if err != nil {
 		out.Error = err.Error()
 		s.logger.Warn("エンジンに繋げませんでした", "path", cfg.Path, "error", err)
 		return out
 	}
 	out.OK = true
-	out.Name = name
+	out.Name = info.Name
+	out.Options = info.Options
+	out.Applied = info.Applied
+	s.logger.Info("エンジンに繋がりました",
+		"name", info.Name, "path", cfg.Path,
+		"options", info.Options, "applied", info.Applied)
 	return out
 }
 

@@ -232,6 +232,19 @@ export interface EngineCheck {
     "name": string;
 
     /**
+     * Options はエンジンが宣言した option の数。
+     */
+    "options": number;
+
+    /**
+     * Applied は `isready` の前に送った `setoption` の数（**既定値を含む**）。
+     * 
+     * **送ったことが見えないと、効いているか確かめようがない**（option には
+     * 応答が返らない）。宣言より少ないのが普通（button と空の既定値は送らない）。
+     */
+    "applied": number;
+
+    /**
      * Error は繋がらなかった理由（日本語）。
      */
     "error": string;

@@ -1290,9 +1290,15 @@ export function mountMainScreen(root: HTMLElement): void {
           engineStatus.classList.add("is-error");
           return;
         }
+        // **何を送ったかまで出す。** setoption には応答が返らないので、
+        // 効いているかどうかを確かめる手掛かりがこれしかない。
+        const applied =
+          r.options > 0
+            ? `option ${r.options} 件を宣言、${r.applied} 件を送信（既定値を含む）`
+            : "option の宣言はありません";
         engineStatus.textContent = r.builtin
-          ? `同梱のエンジンに繋がりました（${r.name}）。`
-          : `繋がりました: ${r.name}`;
+          ? `同梱のエンジンに繋がりました（${r.name}）。${applied}。`
+          : `繋がりました: ${r.name} / ${applied}`;
       } catch (err) {
         engineStatus.textContent = `確認できませんでした: ${String(err instanceof Error ? err.message : err)}`;
         engineStatus.classList.add("is-error");

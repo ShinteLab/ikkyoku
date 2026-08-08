@@ -201,14 +201,33 @@ func (s *Session) Close() error {
 	return eng.Close()
 }
 
+// EngineInfo は繋がったエンジンの素性。
+type EngineInfo struct {
+	// Name は `id name`。
+	Name string `json:"name"`
+	// Author は `id author`。
+	Author string `json:"author"`
+	// Options はエンジンが `usi` で宣言した option の数。
+	Options int `json:"options"`
+	// Applied は `isready` の前に送った `setoption` の数（**既定値を含む**）。
+	//
+	// 宣言より少ないのが普通（button と、既定値が空のものは送らない）。
+	Applied int `json:"applied"`
+}
+
 // Connect は接続だけを確かめる（設定タブの「接続を確認」）。
-// 繋がったエンジンの名前を返す。**接続は張ったまま**にするので、続けて解析できる。
-func (s *Session) Connect(ctx context.Context) (string, error) {
+// **接続は張ったまま**にするので、続けて解析できる。
+func (s *Session) Connect(ctx context.Context) (EngineInfo, error) {
 	eng, err := s.engine(ctx)
 	if err != nil {
-		return "", err
+		return EngineInfo{}, err
 	}
-	return eng.ID, nil
+	return EngineInfo{
+		Name:    eng.ID,
+		Author:  eng.Author,
+		Options: len(eng.Options),
+		Applied: len(eng.Applied),
+	}, nil
 }
 
 // Analyze は局面を解析する。
