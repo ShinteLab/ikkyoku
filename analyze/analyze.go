@@ -260,6 +260,16 @@ func (s *Session) Analyze(ctx context.Context, positionSFEN string, opt Options,
 	}
 	defer eng.close()
 
+	// ⚠️ **`position` の前に `usinewgame` を送る**（`readyok` の直後）。
+	// これが無いと、**前の局面の探索結果を引きずったまま次を読む**エンジンがある。
+	//
+	// ここでは局面ごとに 1 回になる（プロセスが 1 回の解析で終わるため）。
+	// **それが正しい** —— ikkyoku が渡すのは履歴を持たない独立した局面で、
+	// 前の解析と繋がっていない（設計原則1）。
+	if err := eng.NewGame(); err != nil {
+		return Result{}, fmt.Errorf("エンジンに usinewgame を送れませんでした: %w", err)
+	}
+
 	started := time.Now()
 	acc := &accumulator{black: black, started: started}
 	res, err := eng.Analyze(ctx, strings.Join(fields, " "),

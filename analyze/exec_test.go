@@ -19,11 +19,14 @@ import (
 // 自分自身を起こせば「本当に別プロセスと標準入出力で話せるか」だけを確かめられる。
 const fakeEngineEnv = "IKKYOKU_TEST_USI_ENGINE"
 
-// quitMarkEnv に指すファイルがあれば、エンジンは `quit` を受け取って**自分から
-// 終わったこと**をそこに書き残す。
+// quitMarkEnv に指すファイルがあれば、エンジンは `quit` を受け取ったときに
+// **受け取ったコマンドの並び**をそこに書き残す。
 //
-// ⚠️ **「exe が残らない」がこの設計の目的そのもの**なので、外から観測できる形で
-// 確かめる（プロセスの生死は呼び出し側からは見えない）。
+// ⚠️ 2 つのことを外から観測するために要る。どちらも呼び出し側からは見えない:
+//
+//   - **「exe が残らない」**（プロセスの生死）。この設計の目的そのもの
+//   - **送っている手順が USI として正しいか**（usi → setoption → isready →
+//     usinewgame → position → go の並び）
 const quitMarkEnv = "IKKYOKU_TEST_USI_QUITMARK"
 
 // runFakeEngine は最低限の USI エンジンとして振る舞う。
@@ -43,8 +46,11 @@ func runFakeEngine() {
 	// 送られる行そのものの検証は core 側（client の TestOpenSendsDeclaredDefaults）。
 	// ここで見るのは「別プロセス相手でも同じ手順が通るか」。
 	ready := false
+	var log []string
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
+		// 手順の検証用に、届いた順で覚えておく（値は落として語だけ）。
+		log = append(log, strings.Fields(line + " ")[0])
 		switch {
 		case line == "usi":
 			say("id name Fake External Engine", "id author test",
@@ -67,7 +73,7 @@ func runFakeEngine() {
 				"bestmove 2g2f")
 		case line == "quit":
 			if mark := os.Getenv(quitMarkEnv); mark != "" {
-				_ = os.WriteFile(mark, []byte("quit"), 0o644)
+				_ = os.WriteFile(mark, []byte(strings.Join(log, " ")), 0o644)
 			}
 			return
 		}
@@ -130,8 +136,16 @@ func TestExecSessionRunsExternalEngine(t *testing.T) {
 		t.Errorf("読み筋が違います: %+v", r.Lines[0].Moves)
 	}
 	// ⚠️ **解析が終わったらプロセスも終わる**（exe を常駐させない）。
-	if _, err := os.Stat(mark); err != nil {
-		t.Errorf("解析のあとにエンジンが終わっていません: %v", err)
+	got, err := os.ReadFile(mark)
+	if err != nil {
+		t.Fatalf("解析のあとにエンジンが終わっていません: %v", err)
+	}
+	// ⚠️ **USI の手順どおりに送れていること。**
+	// `usinewgame` を落としていると、前の局面の探索結果を引きずるエンジンがある
+	// （実機の ShogiHome もこの並び）。
+	const want = "usi setoption setoption isready usinewgame position go quit"
+	if string(got) != want {
+		t.Errorf("送った手順が違います:\n got = %s\nwant = %s", got, want)
 	}
 	// 起動にかかった時間が出ること（解析のたびに払うコスト）。
 	if r.StartupMS < 0 {

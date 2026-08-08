@@ -795,6 +795,12 @@ Step 3  ikkyoku ──os/exec──> prokishi.exe                 ※同じ欄�
   `MateScore - ply` の生値を `score cp` として出す（`engine/TODO.md` の 2）。
   そのため `analyze` が `engineMateScore`（`1<<20`）を**写して**推定している。
   **`score mate` を返すエンジンではそちらを優先する**ので、向こうが直れば定数ごと消える
+- ⚠️ **`usinewgame` を落とさない。** 実際に送る並びは
+  `usi` → `setoption` → `isready` → **`usinewgame`** → `position` → `go infinite`
+  （ShogiHome の実機と同じ）。送らないと**前の局面の探索結果を引きずったまま次を読む**
+  エンジンがある。ikkyoku では**局面ごとに 1 回**になる（プロセスが 1 回の解析で
+  終わるため）が、**それが正しい** —— 渡すのは履歴を持たない独立した局面で、
+  前の解析と繋がっていない（設計原則1）
 - ⚠️ **`go movetime` に頼らない。** 自作 `engine` は解釈しない（`engine/TODO.md` の 3）。
   **常に `go infinite` で投げ、打ち切りは ikkyoku 側の `stop` で行う。**
   外部エンジンでも「こちらが時間を握る」ほうが揃う

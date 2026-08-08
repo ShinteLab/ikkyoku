@@ -206,6 +206,10 @@ Step 3  ikkyoku(USIクライアント) ──os/exec──> prokishi.exe        
 - ⚠️ **プロセスの ctx は解析の ctx から切り離す。** `exec.CommandContext` に
   解析の ctx をそのまま渡すと、**「停止」を押した瞬間にプロセスが死に、`stop` に対する
   bestmove を受け取れない**（打ち切っても評価値は出る、が成立しなくなる）
+- ⚠️ **`usinewgame` を落としていた**（2026-08-08 に実機の ShogiHome の並びを
+  教わって気づいた）。正しい並びは
+  `usi` → `setoption` → `isready` → **`usinewgame`** → `position` → `go`。
+  送らないと前の局面の探索結果を引きずるエンジンがある
 - ⚠️ **前の探索の残りを捨てないと固まる。** エンジンは bestmove のあとにも info を
   吐く。溜めたままにすると、**溜まりきった時点でエンジン側の書き込みがブロックし、
   `stop` にも応答できなくなる**（同じ Session で 4 局面続けて解析して踏んだ）。
