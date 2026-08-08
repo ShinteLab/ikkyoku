@@ -216,6 +216,17 @@ func (s *CaptureService) bind(app *application.App, wins *appWindows) {
 //
 // ホットキー経由のキャプチャは別 goroutine から来るのでロックで保護する
 // (Show/Focus 自体は Wails が内部で InvokeSync するのでスレッドは問わない)。
+//
+// ⚠️ **最小化されているときは先に戻す。畳まれたままの窓に Show() を当てない。**
+// Wails は `WM_SIZE / SIZE_MINIMIZED` で WebView2 のコントローラを不可視にし
+// (`chromium.Hide()` = `PutIsVisible(false)`)、**復帰の分岐でしか戻さない**。
+// 畳まれたままの窓に Show() を当てると、その最小化⇄復帰の並びに
+// `PutIsVisible` が横から差し込まれる。**戻し損ねるとメイン画面は真っ黒のまま
+// 入力も受け付けなくなり、以後 Focus() は「状態が正しくない」で失敗し続ける**
+// (2026-08-08 に実機で 1 回起きた。diagservice.go / RepairMain 参照)。
+//
+// **UnMinimise() は内部で Focus() まで済ませる**(Wails の restore())ので、
+// そちらを通ったときに重ねて Focus() を呼ばない。
 func (s *CaptureService) revealMain() {
 	if s.wins == nil || s.wins.main == nil {
 		return
@@ -228,12 +239,13 @@ func (s *CaptureService) revealMain() {
 	if first {
 		s.placeMainBesideFrame()
 	}
-	s.wins.main.Show()
-	// 最小化されていると Show() だけでは畳まれたまま。Focus() の前に戻す。
 	if s.wins.main.IsMinimised() {
 		s.wins.main.UnMinimise()
+		s.wins.main.Show()
+	} else {
+		s.wins.main.Show()
+		s.wins.main.Focus()
 	}
-	s.wins.main.Focus()
 	if first {
 		// 表示されて初めて位置が確定するので、ここで記録しておく
 		// (非表示のあいだの座標は当てにならない。geometry.go 参照)。
@@ -315,6 +327,27 @@ func (s *CaptureService) Quit() {
 	}
 	s.logger.Info("枠のメニューから終了します")
 	s.app.Quit()
+}
+
+// RepairMain はメイン画面を隠して出し直す。枠のメニューの「メイン画面を描き直す」から呼ばれる。
+//
+// **メイン画面が真っ黒になって何も触れなくなったときの復帰手段。**
+// Wails は Hide()/Show() でそれぞれ WebView2 の `PutIsVisible(false)`/`(true)` を呼ぶので、
+// 最小化の復帰で不可視のまま取り残されたコントローラを表示状態に戻せる
+// (現象と経緯は diagservice.go)。
+//
+// **入口を枠のメニューに置いたのが要点。** 黒くなるのはメイン画面なので、
+// メイン画面の中にボタンを置いても押せない。枠は別ウィンドウなので生きている。
+//
+// これで絵が戻るなら「見えなくされていた」、戻らないならレンダラ側が死んでいる、
+// という切り分けにもなる(心拍のログと合わせて読むこと)。
+func (s *CaptureService) RepairMain() {
+	if s.wins == nil || s.wins.main == nil {
+		return
+	}
+	s.logger.Info("メイン画面を描き直します")
+	s.wins.main.Hide()
+	s.revealMain()
 }
 
 // ShowFrame は隠した枠を出し直す。メイン画面のボタンから呼ばれる。

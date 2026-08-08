@@ -57,6 +57,9 @@ func main() {
 	// 解析は**確定した局面**にだけかかる。局面を持っているのは PositionService なので、
 	// フロントから SFEN を渡してもらうのではなく、あちらから読む。
 	analyzeSvc := NewAnalyzeService(logger, positionSvc, settingsSvc)
+	// フロントが生きているかの計測だけを持つ Service(diagservice.go)。
+	// 局面にもキャプチャにも関与しない。
+	diagSvc := NewDiagService(logger)
 
 	app := application.New(application.Options{
 		Name:        "ikkyoku",
@@ -68,6 +71,7 @@ func main() {
 			application.NewService(positionSvc),
 			application.NewService(trainingSvc),
 			application.NewService(analyzeSvc),
+			application.NewService(diagSvc),
 		},
 		Assets: assetOptions(),
 		Mac: application.MacOptions{
@@ -105,6 +109,8 @@ func main() {
 	registerFrameHooks(app, wins, state.Frame, captureSvc, cfg.FitOnStartup, logger)
 	registerMainHooks(app, wins, state.Main, quit)
 	registerHotkey(app, captureSvc, logger)
+	registerVisibilityLog(wins, logger)
+	diagSvc.watch()
 
 	// 駒種推論器(suteme)を先に用意しておく。3.5MB の学習データを読むので、
 	// 最初のキャプチャのときに読み始めると撮った瞬間に待たされる。
@@ -294,6 +300,34 @@ func registerMainHooks(app *application.App, wins *appWindows, st windowState, q
 		quit()
 		app.Quit()
 	})
+}
+
+// registerVisibilityLog は表示状態の変化(表示・非表示・最小化・復帰)をログに出す。
+//
+// **これだけは推測ではなく記録が要る。** メイン画面が真っ黒になって触れなくなる現象は、
+// Wails が最小化のときに WebView2 を不可視にし、復帰の分岐でしか戻さない作りに
+// 由来すると見ている(diagservice.go / CaptureService.revealMain)。だとすると
+// **「最小化 → 復帰の並びのどこで戻し損ねたか」がログに出ていないと追えない。**
+// 起きたときの手掛かりが `[WebView2] Focus failed` の 4 行しか無かったのが前回の反省。
+//
+// 位置・サイズの追跡(geometry.go)とは別物なので混ぜないこと。あちらは保存のため、
+// こちらは現象の再現待ち。**listener で十分**(記録するだけで、破棄とレースしない)。
+func registerVisibilityLog(wins *appWindows, logger *slog.Logger) {
+	watch := func(name string, w *application.WebviewWindow) {
+		for label, id := range map[string]events.WindowEventType{
+			"表示":  events.Common.WindowShow,
+			"非表示": events.Common.WindowHide,
+			"最小化": events.Common.WindowMinimise,
+			"復帰":  events.Common.WindowUnMinimise,
+			"戻す":  events.Common.WindowRestore,
+		} {
+			w.OnWindowEvent(id, func(*application.WindowEvent) {
+				logger.Info("ウィンドウの表示状態", "window", name, "event", label)
+			})
+		}
+	}
+	watch("frame", wins.frame)
+	watch("main", wins.main)
 }
 
 // saveWindowState は枠とメイン画面の位置・サイズを保存する。

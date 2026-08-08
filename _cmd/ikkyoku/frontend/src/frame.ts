@@ -68,6 +68,8 @@ export function mountFrame(root: HTMLElement): void {
     <div id="frame-menu-items" class="frame-menu" role="menu" hidden>
       <button id="frame-settings" class="frame-btn is-menu" type="button" role="menuitem"
               title="メイン画面の設定タブを開きます">設定</button>
+      <button id="frame-repair" class="frame-btn is-menu" type="button" role="menuitem"
+              title="メイン画面が真っ黒になって触れなくなったときに、隠して出し直します">メイン画面を描き直す</button>
       <div class="frame-menu-sep" role="separator"></div>
       <button id="frame-quit" class="frame-btn is-menu is-danger" type="button" role="menuitem"
               title="ikkyoku を終了します(枠とメイン画面の位置は保存されます)">終了</button>
@@ -81,6 +83,7 @@ export function mountFrame(root: HTMLElement): void {
   const menuBtn = root.querySelector<HTMLButtonElement>("#frame-menu")!;
   const menu = root.querySelector<HTMLDivElement>("#frame-menu-items")!;
   const settingsBtn = root.querySelector<HTMLButtonElement>("#frame-settings")!;
+  const repairBtn = root.querySelector<HTMLButtonElement>("#frame-repair")!;
   const quitBtn = root.querySelector<HTMLButtonElement>("#frame-quit")!;
   const fitBtn = root.querySelector<HTMLButtonElement>("#frame-fit")!;
   const captureBtn = root.querySelector<HTMLButtonElement>("#frame-capture")!;
@@ -169,6 +172,18 @@ export function mountFrame(root: HTMLElement): void {
   settingsBtn.addEventListener("click", () => {
     setMenuOpen(false);
     void CaptureService.ShowMain("settings");
+  });
+
+  // メイン画面を描き直す。**メイン画面が真っ黒になって何も触れなくなったときの復帰手段。**
+  // Go 側で Hide → Show するだけ(CaptureService.RepairMain)。Wails はこの 2 つで
+  // WebView2 の PutIsVisible(false)/(true) を呼ぶので、最小化の復帰で不可視のまま
+  // 取り残されたコントローラが表示状態に戻る。
+  //
+  // ⚠️ **この入口が枠の側にあることに意味がある。** 黒くなるのはメイン画面なので、
+  // メイン画面の中にボタンを置いても押せない。枠は別ウィンドウなので生きている。
+  repairBtn.addEventListener("click", () => {
+    setMenuOpen(false);
+    void CaptureService.RepairMain();
   });
 
   // 終了。**メイン画面を閉じたときと同じ扱い**(Go 側で位置・サイズを保存してから

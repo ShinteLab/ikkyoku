@@ -130,6 +130,24 @@ export function ReloadRecognizer(): $CancellablePromise<$models.RecognizerStatus
 }
 
 /**
+ * RepairMain はメイン画面を隠して出し直す。枠のメニューの「メイン画面を描き直す」から呼ばれる。
+ * 
+ * **メイン画面が真っ黒になって何も触れなくなったときの復帰手段。**
+ * Wails は Hide()/Show() でそれぞれ WebView2 の `PutIsVisible(false)`/`(true)` を呼ぶので、
+ * 最小化の復帰で不可視のまま取り残されたコントローラを表示状態に戻せる
+ * (現象と経緯は diagservice.go)。
+ * 
+ * **入口を枠のメニューに置いたのが要点。** 黒くなるのはメイン画面なので、
+ * メイン画面の中にボタンを置いても押せない。枠は別ウィンドウなので生きている。
+ * 
+ * これで絵が戻るなら「見えなくされていた」、戻らないならレンダラ側が死んでいる、
+ * という切り分けにもなる(心拍のログと合わせて読むこと)。
+ */
+export function RepairMain(): $CancellablePromise<void> {
+    return $Call.ByID(705668711);
+}
+
+/**
  * ShowFrame は隠した枠を出し直す。メイン画面のボタンから呼ばれる。
  */
 export function ShowFrame(): $CancellablePromise<void> {
