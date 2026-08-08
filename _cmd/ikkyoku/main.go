@@ -56,7 +56,7 @@ func main() {
 	trainingSvc := NewTrainingService(logger, settingsSvc)
 	// 解析は**確定した局面**にだけかかる。局面を持っているのは PositionService なので、
 	// フロントから SFEN を渡してもらうのではなく、あちらから読む。
-	analyzeSvc := NewAnalyzeService(logger, positionSvc)
+	analyzeSvc := NewAnalyzeService(logger, positionSvc, settingsSvc)
 
 	app := application.New(application.Options{
 		Name:        "ikkyoku",

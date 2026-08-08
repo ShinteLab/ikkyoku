@@ -531,6 +531,16 @@ html.is-main body {
   width: 76px;
 }
 
+/* エンジンの実行ファイル。パスは長いので行の残りを全部使う。 */
+.setting-fields .field.is-wide {
+  flex: 1 1 320px;
+}
+
+.setting-fields .field.is-wide input {
+  flex: 1;
+  min-width: 0;
+}
+
 /* エンジン解析の行（Phase 4）。盤のすぐ下に 1 行だけ。
    **評価値はこの画面の主役の 1 つ**なので、他の行より大きく出す。
    盤をできるだけ大きく見せたいので、行そのものは増やさないこと。 */

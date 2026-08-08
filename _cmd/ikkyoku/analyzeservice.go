@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -33,11 +34,17 @@ import (
 //	analyze:done    解析が終わった（Result）
 //	analyze:failed  始められなかった・エラーになった（理由の文字列）
 type AnalyzeService struct {
-	logger *slog.Logger
-	pos    *PositionService
-	app    *application.App
+	logger   *slog.Logger
+	pos      *PositionService
+	settings *SettingsService
+	app      *application.App
+
 	// session はエンジンとの接続。**使い回す**（接続は最初の解析まで開かない）。
-	session *analyze.Session
+	//
+	// ⚠️ **設定でエンジンを変えたら作り直す**（sessionKey）。使い回したままだと、
+	// パスを変えても前のエンジンが答え続ける。
+	session    *analyze.Session
+	sessionKey string
 
 	mu sync.Mutex
 	// cancel は走っている解析の打ち切り。走っていなければ nil。
@@ -47,19 +54,108 @@ type AnalyzeService struct {
 	seq int
 }
 
-func NewAnalyzeService(logger *slog.Logger, pos *PositionService) *AnalyzeService {
-	return &AnalyzeService{logger: logger, pos: pos, session: analyze.NewLocalSession()}
+func NewAnalyzeService(logger *slog.Logger, pos *PositionService, settings *SettingsService) *AnalyzeService {
+	return &AnalyzeService{logger: logger, pos: pos, settings: settings}
 }
 
 // close はエンジンとの接続を閉じる（終了時に呼ぶ）。
 //
-// 今は同一プロセスなので閉じなくても道連れで終わるが、**Step 2 で外部プロセスに
-// なったら閉じないと残る。** 経路は今のうちに通しておく。
+// ⚠️ **外部エンジンはプロセスなので、閉じないと残る。**
 func (s *AnalyzeService) close() {
-	if err := s.session.Close(); err != nil {
+	s.mu.Lock()
+	session := s.session
+	s.session = nil
+	s.sessionKey = ""
+	s.mu.Unlock()
+	if session == nil {
+		return
+	}
+	if err := session.Close(); err != nil {
 		s.logger.Warn("エンジンとの接続を閉じられませんでした", "error", err)
 	}
 }
+
+// engineSession は今の設定に合ったセッションを返す。
+//
+// **設定が変わっていたら作り直す。** 使い回したままだと、設定でエンジンを
+// 差し替えても前のエンジンが答え続ける（一番気づきにくい壊れ方）。
+// **ロックを取った状態で呼ぶこと。**
+func (s *AnalyzeService) engineSession() *analyze.Session {
+	cfg := s.settings.engineConfig()
+	// パスと option をまとめた鍵。どちらが変わっても繋ぎ直す
+	// （option は isready の前にしか送れないので、後から反映できない）。
+	key := fmt.Sprintf("%s\x00%v", cfg.Path, cfg.Options)
+	if s.session != nil && s.sessionKey == key {
+		return s.session
+	}
+	if s.session != nil {
+		old := s.session
+		go func() {
+			// 閉じるのに時間がかかることがある（プロセスの終了待ち）ので、
+			// ロックを持ったまま待たない。
+			if err := old.Close(); err != nil {
+				s.logger.Warn("前のエンジンを閉じられませんでした", "error", err)
+			}
+		}()
+	}
+	if cfg.Path == "" {
+		s.session = analyze.NewLocalSession()
+		s.logger.Info("同梱のエンジンを使います")
+	} else {
+		s.session = analyze.NewExecSession(cfg.Path, cfg.Options)
+		s.logger.Info("外部のエンジンを使います", "path", cfg.Path, "options", len(cfg.Options))
+	}
+	s.sessionKey = key
+	return s.session
+}
+
+// EngineCheck は「接続を確認」の結果。
+//
+// **エラーも値として返す**（error にしない）。設定タブに出す情報であって、
+// 呼び出しが失敗したわけではない。エンジンを置く前に確かめるのは普通の使い方。
+type EngineCheck struct {
+	// Path は確かめた実行ファイル（同梱なら空）。
+	Path string `json:"path"`
+	// Builtin は同梱のエンジンか。
+	Builtin bool `json:"builtin"`
+	// OK は繋がったか。
+	OK bool `json:"ok"`
+	// Name は繋がったエンジンの名前（`id name`）。
+	Name string `json:"name"`
+	// Error は繋がらなかった理由（日本語）。
+	Error string `json:"error"`
+}
+
+// CheckEngine は設定したエンジンに実際に繋いでみる（設定タブの「接続を確認」）。
+//
+// **繋いだ接続はそのまま使う。** 確かめるためだけに起こして捨てると、
+// 直後の解析でまた起動を待つことになる。
+func (s *AnalyzeService) CheckEngine() EngineCheck {
+	cfg := s.settings.engineConfig()
+	out := EngineCheck{Path: cfg.Path, Builtin: cfg.Path == ""}
+
+	s.mu.Lock()
+	session := s.engineSession()
+	s.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), engineConnectTimeout)
+	defer cancel()
+	name, err := session.Connect(ctx)
+	if err != nil {
+		out.Error = err.Error()
+		s.logger.Warn("エンジンに繋げませんでした", "path", cfg.Path, "error", err)
+		return out
+	}
+	out.OK = true
+	out.Name = name
+	return out
+}
+
+// engineConnectTimeout は接続の確認に使う上限。
+//
+// 評価関数の読み込みに時間のかかるエンジンがあるので、ハンドシェイクの上限
+// （`client.HandshakeTimeout`）より長めに取る。
+const engineConnectTimeout = 30 * time.Second
 
 func (s *AnalyzeService) bind(app *application.App) { s.app = app }
 
@@ -120,6 +216,8 @@ func (s *AnalyzeService) Start(seconds int) (AnalyzeState, error) {
 	seq := s.seq
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
+	// **設定が変わっていればここで繋ぎ直す。**
+	session := s.engineSession()
 	s.mu.Unlock()
 
 	opt := analyze.Options{}
@@ -131,7 +229,7 @@ func (s *AnalyzeService) Start(seconds int) (AnalyzeState, error) {
 		defer cancel()
 		defer s.finish(seq)
 
-		res, err := s.session.Analyze(ctx, sfen, opt, func(p analyze.Progress) {
+		res, err := session.Analyze(ctx, sfen, opt, func(p analyze.Progress) {
 			s.emit("analyze:info", AnalyzeProgress{Seq: seq, Progress: p})
 		})
 		if err != nil {
@@ -146,7 +244,7 @@ func (s *AnalyzeService) Start(seconds int) (AnalyzeState, error) {
 		s.emit("analyze:done", AnalyzeProgress{Seq: seq, Progress: res.Progress, Done: true})
 	}()
 
-	return AnalyzeState{Running: true, Seq: seq, SFEN: sfen, Engine: s.session.EngineName()}, nil
+	return AnalyzeState{Running: true, Seq: seq, SFEN: sfen, Engine: session.EngineName()}, nil
 }
 
 // Stop は走っている解析を打ち切る。**打ち切っても評価値は出る**ので、
@@ -157,14 +255,14 @@ func (s *AnalyzeService) Stop() AnalyzeState {
 	if s.cancel != nil {
 		s.cancel()
 	}
-	return AnalyzeState{Running: s.cancel != nil, Seq: s.seq, Engine: s.session.EngineName()}
+	return AnalyzeState{Running: s.cancel != nil, Seq: s.seq, Engine: s.engineName()}
 }
 
 // State は今の状態を返す（何も始めない）。フロントの初期表示用。
 func (s *AnalyzeService) State() AnalyzeState {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return AnalyzeState{Running: s.cancel != nil, Seq: s.seq, Engine: s.session.EngineName()}
+	return AnalyzeState{Running: s.cancel != nil, Seq: s.seq, Engine: s.engineName()}
 }
 
 // finish は解析が終わったことを記録する。**自分より新しい解析が始まっていたら
@@ -182,4 +280,13 @@ func (s *AnalyzeService) emit(name string, data any) {
 		return
 	}
 	s.app.Event.Emit(name, data)
+}
+
+// engineName は繋がっているエンジンの名前を返す。**ロックを取った状態で呼ぶこと。**
+// まだ繋いでいなければ空（表示のためだけなので、ここで繋ぎにいかない）。
+func (s *AnalyzeService) engineName() string {
+	if s.session == nil {
+		return ""
+	}
+	return s.session.EngineName()
 }

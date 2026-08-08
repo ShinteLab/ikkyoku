@@ -20,6 +20,8 @@ export type {
     CaptureResult,
     EditCell,
     EditState,
+    EngineCheck,
+    EngineSettings,
     FitResult,
     GuideLayout,
     RecognizerStatus,

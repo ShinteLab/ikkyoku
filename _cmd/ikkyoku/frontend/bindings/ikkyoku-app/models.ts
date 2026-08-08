@@ -48,6 +48,11 @@ export interface AppSettings {
     "training": TrainingSettings;
 
     /**
+     * Engine は解析に使う USI エンジン。
+     */
+    "engine": EngineSettings;
+
+    /**
      * Path は設定ファイルの場所。**表示のためだけ。** 手で編集したくなったときに
      * 探さずに済むよう出しておく(学習データの置き場所もこのファイルにある)。
      */
@@ -197,6 +202,67 @@ export interface EditState {
      * Dirty は認識結果から変更したか。「訂正を捨てて戻す」を出すかの判断に使う。
      */
     "dirty": boolean;
+}
+
+/**
+ * EngineCheck は「接続を確認」の結果。
+ * 
+ * **エラーも値として返す**（error にしない）。設定タブに出す情報であって、
+ * 呼び出しが失敗したわけではない。エンジンを置く前に確かめるのは普通の使い方。
+ */
+export interface EngineCheck {
+    /**
+     * Path は確かめた実行ファイル（同梱なら空）。
+     */
+    "path": string;
+
+    /**
+     * Builtin は同梱のエンジンか。
+     */
+    "builtin": boolean;
+
+    /**
+     * OK は繋がったか。
+     */
+    "ok": boolean;
+
+    /**
+     * Name は繋がったエンジンの名前（`id name`）。
+     */
+    "name": string;
+
+    /**
+     * Error は繋がらなかった理由（日本語）。
+     */
+    "error": string;
+}
+
+/**
+ * EngineSettings は解析に使う USI エンジンの設定。
+ * 
+ * **「外部エンジンを使うか」の真偽値は持たない。** パスが空なら同梱のエンジン、
+ * 入っていれば外部エンジン。2 つ持つと「パスが入っているのに無効」という
+ * 食い違いが起きる（ikkyoku.EngineConfig の注記と同じ）。
+ */
+export interface EngineSettings {
+    /**
+     * Path は USI エンジンの実行ファイル。空なら同梱。
+     */
+    "path": string;
+
+    /**
+     * Builtin は同梱のエンジンを使う状態か（Path が空）。**表示用。**
+     * フロントで `path === ""` を判定させないため（判断の基準を Go 側に置く）。
+     */
+    "builtin": boolean;
+
+    /**
+     * OptionCount は config.json に書いた setoption の数。**表示用。**
+     * 
+     * option は画面に出していない（エンジンごとに違いすぎる）ので、
+     * **書いたものが効いていることだけ**は見えるようにしておく。
+     */
+    "optionCount": number;
 }
 
 /**

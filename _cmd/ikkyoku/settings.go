@@ -3,6 +3,9 @@ package main
 import (
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -22,6 +25,8 @@ type AppSettings struct {
 	FitOnStartup bool `json:"fitOnStartup"`
 	// Training は訂正した局面を suteme へ登録する設定。
 	Training TrainingSettings `json:"training"`
+	// Engine は解析に使う USI エンジン。
+	Engine EngineSettings `json:"engine"`
 	// Path は設定ファイルの場所。**表示のためだけ。** 手で編集したくなったときに
 	// 探さずに済むよう出しておく(学習データの置き場所もこのファイルにある)。
 	Path string `json:"path"`
@@ -39,6 +44,24 @@ type TrainingSettings struct {
 	Token   string `json:"token"`
 	// Target は上の設定から組み立てた接続先("http://host:port")。**表示用。**
 	Target string `json:"target"`
+}
+
+// EngineSettings は解析に使う USI エンジンの設定。
+//
+// **「外部エンジンを使うか」の真偽値は持たない。** パスが空なら同梱のエンジン、
+// 入っていれば外部エンジン。2 つ持つと「パスが入っているのに無効」という
+// 食い違いが起きる（ikkyoku.EngineConfig の注記と同じ）。
+type EngineSettings struct {
+	// Path は USI エンジンの実行ファイル。空なら同梱。
+	Path string `json:"path"`
+	// Builtin は同梱のエンジンを使う状態か（Path が空）。**表示用。**
+	// フロントで `path === ""` を判定させないため（判断の基準を Go 側に置く）。
+	Builtin bool `json:"builtin"`
+	// OptionCount は config.json に書いた setoption の数。**表示用。**
+	//
+	// option は画面に出していない（エンジンごとに違いすぎる）ので、
+	// **書いたものが効いていることだけ**は見えるようにしておく。
+	OptionCount int `json:"optionCount"`
 }
 
 // SettingsService は設定ファイル(config.json)の読み書きを Wails にバインドする Service。
@@ -94,8 +117,74 @@ func (s *SettingsService) settings() AppSettings {
 	return AppSettings{
 		FitOnStartup: s.cfg.FitOnStartup,
 		Training:     trainingSettings(s.cfg.Training),
-		Path:         s.path,
+		Engine: EngineSettings{
+			Path:        s.cfg.Engine.Path,
+			Builtin:     s.cfg.Engine.Path == "",
+			OptionCount: len(s.cfg.Engine.Options),
+		},
+		Path: s.path,
 	}
+}
+
+// engineConfig は今のエンジン設定を返す(AnalyzeService が使う)。
+func (s *SettingsService) engineConfig() ikkyoku.EngineConfig {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cfg.Engine
+}
+
+// SetEnginePath は解析に使う USI エンジンの実行ファイルを保存する。
+//
+// **空にすると同梱のエンジンに戻る。**
+//
+// ⚠️ **起動して繋がるかは確かめない。** 設定を保存する操作と、実際に繋がるかを見る
+// 操作(AnalyzeService.CheckEngine)は別にしてある。まだ置いていないパスを先に
+// 書いておく、という順序が普通にあるため(接続設定と同じ考え方)。
+//
+// 存在の確認だけはする。**打ち間違いは「解析を押したら繋がらない」より、
+// ここで分かるほうが早い。**
+func (s *SettingsService) SetEnginePath(path string) (AppSettings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	p := strings.TrimSpace(strings.Trim(strings.TrimSpace(path), `"`))
+	if p != "" {
+		if info, err := os.Stat(p); err != nil {
+			return s.settings(), fmt.Errorf("その実行ファイルが見つかりません: %s", p)
+		} else if info.IsDir() {
+			return s.settings(), fmt.Errorf("ディレクトリではなく実行ファイルを指定してください: %s", p)
+		}
+	}
+	return s.save(func(cfg *ikkyoku.Config) { cfg.Engine.Path = p })
+}
+
+// BrowseEngine は実行ファイルを選ぶダイアログを出し、選ばれたパスを保存する。
+//
+// **パスを手で打たせない。** 将棋エンジンは深いディレクトリに置かれることが多く、
+// 打ち間違いが一番起きやすい入口。取り消したら何もしない(空文字が返る)。
+func (s *SettingsService) BrowseEngine() (AppSettings, error) {
+	if s.app == nil {
+		return s.Settings(), fmt.Errorf("ダイアログを開けません")
+	}
+	dlg := s.app.Dialog.OpenFile()
+	dlg.SetTitle("USI エンジンの実行ファイルを選ぶ")
+	dlg.CanChooseFiles(true)
+	dlg.CanChooseDirectories(false)
+	// 既に指定してあれば、その場所から開く(入れ替えるときに辿り直さずに済む)。
+	if cur := s.engineConfig().Path; cur != "" {
+		dlg.SetDirectory(filepath.Dir(cur))
+	}
+	if runtime.GOOS == "windows" {
+		dlg.AddFilter("実行ファイル", "*.exe")
+	}
+	picked, err := dlg.PromptForSingleSelection()
+	if err != nil {
+		return s.Settings(), fmt.Errorf("ファイルを選べませんでした: %w", err)
+	}
+	if picked == "" {
+		return s.Settings(), nil // 取り消し。**何も変えない。**
+	}
+	return s.SetEnginePath(picked)
 }
 
 // trainingSettings は設定ファイルの値を、画面に出す形(既定値を解決した接続先つき)にする。

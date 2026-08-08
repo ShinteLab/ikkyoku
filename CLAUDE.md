@@ -745,9 +745,9 @@ SFEN の `40` は「次が 40 手目」だが、**ユーザが「40」と入れ�
 転ぶかを辿る」という構想そのものが成立しない。案 B なら**棋力の問題が設定の問題になる。**
 
 ```
-Step 1  ikkyoku ──io.Pipe──> engine.NewUSI(...).Start()   ※同一プロセス（**今ここ**）
-Step 2  ikkyoku ──os/exec──> 外部エンジン .exe（やねうら王・水匠…）
-Step 3  ikkyoku ──os/exec──> prokishi.exe                 ※設定でパスを変えるだけ
+Step 1  ikkyoku ──io.Pipe──> engine.NewUSI(...).Start()   ※同一プロセス（パス未指定のとき）
+Step 2  ikkyoku ──os/exec──> 外部エンジン .exe（やねうら王・水匠…）※**設定タブで指定**
+Step 3  ikkyoku ──os/exec──> prokishi.exe                 ※同じ欄にパスを入れるだけ
 ```
 
 - **Step 1 はプロセス管理を一切払わない。** 起動・終了・タイムアウト・異常終了の処理が
@@ -815,6 +815,41 @@ Step 3  ikkyoku ──os/exec──> prokishi.exe                 ※設定で�
   差し替えられる以上、評価値だけ出して出所を伏せると比べようがない
 - **評価値の絶対値は当てにしない。** 自作 `engine` の PST は手作り・未調整
 
+### エンジンの指定（設定タブ）
+
+**繋ぎ先は設定の問題**にしてある（`ikkyoku.Config` の `engine`）。
+
+```json
+{ "engine": { "path": "D:/shogi/YaneuraOu.exe",
+              "options": { "USI_Hash": "1024", "Threads": "4", "EvalDir": "eval" } } }
+```
+
+- ⚠️ **「外部エンジンを使う」の真偽値は持たない。** **パスが空なら同梱、入っていれば外部。**
+  2 つ持つと「パスが入っているのに無効」という食い違いが起きる。
+  UI の「同梱に戻す」はパスを空にする操作
+- **パスは手で打たせない**（`SettingsService.BrowseEngine` がファイルダイアログを出す）。
+  将棋エンジンは深いディレクトリに置かれるので、打ち間違いが一番起きやすい入口。
+  テキスト欄も残してあるのは、貼り付けと確認のため
+- **保存と接続の確認は別の操作。** まだ置いていないパスを先に書く順序が普通にあるので、
+  保存時に起動はしない（**存在の確認だけ**する。打ち間違いは「解析を押したら繋がらない」
+  より早く分かるほうがよい）。実際に起こすのは「接続を確認」（`AnalyzeService.CheckEngine`）
+- **確認で繋いだ接続はそのまま解析に使う。** 確かめるためだけに起こして捨てると、
+  直後の解析でまた起動を待つことになる
+- ⚠️ **`options` は画面に出していない**（設定ファイルを手で編集する前提）。USI の option は
+  エンジンごとに名前も型も既定値も違うので、汎用の設定 UI を作り込むと重い。
+  素通しなら必要な人が必要なものだけ書ける。**書いた件数だけは設定タブに出す**
+  （効いているかどうかが見えないと、書いた意味が分からない）
+- ⚠️ **`options` は `isready` の前に送る**（`core/usi/client.Open`）。置換表の確保も
+  評価関数の読み込みも `isready` で走るので、**後から送っても間に合わない**。
+  しかもエンジンは黙って既定値で動くので、間違えても画面では気づけない
+- ⚠️ **設定が変わったらセッションを作り直す**（`AnalyzeService.engineSession` の `sessionKey`）。
+  使い回したままだと、**パスを変えても前のエンジンが答え続ける**（一番気づきにくい壊れ方）。
+  `options` も鍵に含める（後から反映できないため）
+- ⚠️ **プロセスの寿命は解析の ctx と別**（`analyze.Session.life`）。`client.Exec` は
+  `exec.CommandContext` で起こすので、**解析ごとの ctx を渡すとその解析が終わった瞬間に
+  エンジンが殺される**（接続を使い回す意味が無くなる）
+- **終了時に必ず閉じる**（`main.go` の `quit`）。外部エンジンはプロセスなので残る
+
 ### Step 1 の足場（**Step 2 で消える**）
 
 `ikkyoku/usi/local.go` が同一プロセスの `engine` を `io.Pipe` で繋いでいる。
@@ -858,9 +893,8 @@ Step 2 で `client.Exec` に差し替えれば依存ごと消える
   まとめて入れ替える）を足して、`analyze` に渡す直前で 1 回だけ使う。
   **表示は絶対に反転しない。** ⚠️ ここで詰まるのは「UI の手番トグルが指すのは
   対局の先後か、画面の上下か」で、**同じ `Turn` フィールドに 2 つの意味を持たせないこと**
-- **Step 2（外部エンジンの exe）。** `client.Exec` は core に**実装済み**なので、
-  ikkyoku 側は「エンジンのパスを設定に足して `analyze.Session.open` を差し替える」だけ。
-  実機のエンジンで通すのはこれから
+- **実機のエンジン（やねうら王・水匠）で通す。** 経路はテストで通っているが、
+  **実物では確かめていない**（評価関数の読み込み待ち・独自の option・終了の作法）
 - **選んだ手で局面を進める**（→ Phase 5 の検討ツリー）
 - **手の表記が USI のまま**（"7g7f"）。日本語表記（▲7六歩）にするには動かす駒種が要るので、
   盤面（`position`）と突き合わせる必要がある。**変換は `core` に足すのが筋**
@@ -967,10 +1001,10 @@ New-Item -ItemType Junction -Path (Join-Path $w 'engine') -Target 'D:\Go\Project
 | `capture.go` | `Region` / `DisplayInfo` / `ListDisplays` / `Capture` など、キャプチャの中核 |
 | `region.go` | `ParseRegion`（`"x,y,width,height"` 文字列 → `Region`） |
 | `save.go` | `SavePNG` / `DefaultOutDir` / タイムスタンプ式ファイル名生成 |
-| `config.go` | `Config` の JSON 読み書き（`encoding/json` のみ、標準ライブラリで完結）。`SutemeDataDir` / `FitOnStartup` / `Training`（suteme への登録先）もここ |
+| `config.go` | `Config` の JSON 読み書き（`encoding/json` のみ、標準ライブラリで完結）。`SutemeDataDir` / `FitOnStartup` / `Training`（suteme への登録先）/ `Engine`（解析に使う USI エンジン）もここ |
 | `training/` | **訂正した局面を `suteme` の学習用サーバへ登録するクライアント**（`POST /api/register` / `GET /api/status`）。標準ライブラリのみ。**サンプルの作り方は書かない**（81 マスの切り出しは suteme の責務） |
 | `hotkey.go` | `ParseHotkey`（`"alt+s"` 文字列 → `golang.design/x/hotkey` の修飾子・キー） |
-| `analyze/` | **確定した局面 → 評価値**（Phase 4）。エンジンとの接続を持ち回り、評価値を先手視点に直す。**画像を知らない**（`position` と同じ側）。**正式な SFEN を要求するのはここだけ**で、視点の反転もこの境界で行う |
+| `analyze/` | **確定した局面 → 評価値**（Phase 4）。同梱／外部エンジンの選択（`NewLocalSession` / `NewExecSession`）。エンジンとの接続を持ち回り、評価値を先手視点に直す。**画像を知らない**（`position` と同じ側）。**正式な SFEN を要求するのはここだけ**で、視点の反転もこの境界で行う |
 | `usi/` | **Step 1 の足場**（Phase 4）。同一プロセスの `engine` を `io.Pipe` で USI として繋ぐ。**クライアント本体は `core/usi/client`**（ここに書かない）。**Step 2 で消える** |
 | `position/` | **「とある局面」を扱う層**（Phase 3/5）。1 マスずつ直せる `Board`・手番・駒台の先後の割り振り・SFEN の組み立て・警告。**画像を知らない**。検証は `core/sfen` に投げる |
 | `recognize/` | 画像 → 盤面。`suteme` を呼ぶだけ（`recognize.go`）＋どの学習データを使うかの指定（`predictor.go`）＋盤の矩形だけを探す `DetectRegion`（`detect.go`。ガイド枠の自動フィット用）。**認識器はここに書かない**。**Phase 3 の局面矯正層もここには入れない**（画像を知らない層として別に切る。上記参照） |
@@ -1020,7 +1054,7 @@ CLI は無い。**
 | `frontend/src/main.ts` | エントリ。**素の `import "@wailsio/runtime"`** と `?window=` による画面分岐 |
 | `frontend/src/frame.ts` | 枠（ツールバー + ガイド枠） |
 | `positionservice.go` | 訂正中の局面を持つ Service。操作のたびに `EditState` を丸ごと返す |
-| `analyzeservice.go` | 確定した局面を解析する Service（`Start` / `Stop` / `State`）。**局面は持たない**（`PositionService` から読む）。途中経過はイベント |
+| `analyzeservice.go` | 確定した局面を解析する Service（`Start` / `Stop` / `State` / `CheckEngine`）。**局面は持たない**（`PositionService` から読む）。途中経過はイベント。**設定でエンジンが変わったら繋ぎ直す** |
 | `trainingservice.go` | 訂正した局面を suteme へ登録する Service（`Status` / `Send`）。**状態を持たない**（送るものはフロントが渡す） |
 | `frontend/src/mainscreen.ts` | メイン画面 |
 | `frontend/src/editor.ts` | 訂正 UI（盤に重ねる 9x9 のグリッド・駒箱・手番・手数） |
@@ -1456,6 +1490,12 @@ Start-Process .\_cmd\ikkyoku\bin\ikkyoku.exe
   bestmove まで**テストで実際に通している**が、**画面は実機で押していない**。要確認は
   「確定するまでボタンが押せないこと」「途中経過が深さごとに更新されること」
   「停止してもそこまでの評価値が残ること」「**局面を直すと結果が消えること**」の 4 つ
+- **外部エンジン（やねうら王・水匠）での実動。** 経路はテストで通しているが
+  （テストバイナリ自身を USI エンジンとして起こす）、**実物では確かめていない**。
+  要確認は「評価関数の読み込みで `isready` が長引いても待てるか」
+  「`engine.options` が効くか」「アプリ終了でプロセスが残らないか」
+  「パスを変えたら本当に繋ぎ直るか（`id name` が変わるか）」
+- **設定タブのエンジン欄**（参照ダイアログ・同梱に戻す・接続を確認）。実機で押していない
 - ⚠️ **同梱エンジンのログがうるさい可能性。** `engine` の USI 層は送受信した行を
   すべて `slog.Info` に出す（`engine/TODO.md` の 4）。アプリのログレベルが Info なので、
   解析のたびに info 行が全部流れる。**実機で確認して邪魔なら、engine 側を直すこと**
@@ -1546,6 +1586,13 @@ go test ./...
   向こうが変わったらこちらを直す）。座標が画像からはみ出す場合は**送る前に**弾くこと、
   再送が重複として通ること、`/api/status` が項目を絞って返しても壊れないこと、
   エラーが**何をすればよいか分かる日本語**になること
+- `analyze/exec_test.go` — **外部プロセスを本当に起こせること**（Step 2 の要）。
+  io.Pipe の同一プロセス版が通っていても `os/exec` の経路は別物（起動・作業ディレクトリ・
+  標準入出力の繋ぎ・終了）。⚠️ **実際の将棋エンジンの実行ファイルを要求しない** ——
+  テストバイナリ自身を `IKKYOKU_TEST_USI_ENGINE=1` で起こして USI エンジンとして
+  振る舞わせる（手元にやねうら王があるかでテストが変わると切り分けられない）。
+  実行ファイルが無いときに**繋ぐ時点で**理由が分かること（セッションを作る時点では
+  失敗しない）も見ている
 - `analyze/analyze_test.go` — **USI のハンドシェイクから bestmove まで実際に通す**
   （`io.Pipe` 越しの同梱エンジン相手。ここが通れば Step 2 で口が変わるだけ）。
   **評価値が先手視点であること**（`newScore` の単体と、「駒得している側が有利に出る」を

@@ -2,6 +2,7 @@ package ikkyoku
 
 import (
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -43,8 +44,31 @@ func TestLoadConfigMissingFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadConfig() error = %v, want nil (ファイル無しはエラーにしない)", err)
 	}
-	if got != (Config{}) {
+	// Config は map（Engine.Options）を含むので == で比べられない。
+	if !reflect.DeepEqual(got, Config{}) {
 		t.Errorf("LoadConfig() = %+v, want zero value", got)
+	}
+}
+
+// エンジンの設定が往復すること。**設定ファイルは手で編集する前提**でもあるので、
+// 書いたものがそのまま読めることを固定しておく。
+func TestConfigEngineRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+
+	want := Config{Engine: EngineConfig{
+		Path:    filepath.Join(dir, "engine.exe"),
+		Options: map[string]string{"USI_Hash": "1024", "Threads": "4"},
+	}}
+	if err := SaveConfig(path, want); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+	got, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	if !reflect.DeepEqual(got.Engine, want.Engine) {
+		t.Errorf("Engine = %+v, want %+v", got.Engine, want.Engine)
 	}
 }
 

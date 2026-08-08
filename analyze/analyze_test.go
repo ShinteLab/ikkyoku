@@ -17,6 +17,12 @@ const startpos = "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 
 // engine の USI 層は受け取った行・送った行を全部 slog.Info に出す。
 // テストの出力が埋まるので黙らせる（engine/TODO.md の「ログの出力先」）。
 func TestMain(m *testing.M) {
+	// **テストではなく USI エンジンとして起動する経路**（exec_test.go）。
+	// 外部エンジンを起こす経路を、実際の将棋エンジン無しで確かめるため。
+	if os.Getenv(fakeEngineEnv) == "1" {
+		runFakeEngine()
+		return
+	}
 	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
 	os.Exit(m.Run())
 }

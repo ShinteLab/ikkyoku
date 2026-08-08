@@ -18,6 +18,32 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 import * as $models from "./models.js";
 
 /**
+ * BrowseEngine は実行ファイルを選ぶダイアログを出し、選ばれたパスを保存する。
+ * 
+ * **パスを手で打たせない。** 将棋エンジンは深いディレクトリに置かれることが多く、
+ * 打ち間違いが一番起きやすい入口。取り消したら何もしない(空文字が返る)。
+ */
+export function BrowseEngine(): $CancellablePromise<$models.AppSettings> {
+    return $Call.ByID(1533817116);
+}
+
+/**
+ * SetEnginePath は解析に使う USI エンジンの実行ファイルを保存する。
+ * 
+ * **空にすると同梱のエンジンに戻る。**
+ * 
+ * ⚠️ **起動して繋がるかは確かめない。** 設定を保存する操作と、実際に繋がるかを見る
+ * 操作(AnalyzeService.CheckEngine)は別にしてある。まだ置いていないパスを先に
+ * 書いておく、という順序が普通にあるため(接続設定と同じ考え方)。
+ * 
+ * 存在の確認だけはする。**打ち間違いは「解析を押したら繋がらない」より、
+ * ここで分かるほうが早い。**
+ */
+export function SetEnginePath(path: string): $CancellablePromise<$models.AppSettings> {
+    return $Call.ByID(1535611797, path);
+}
+
+/**
  * SetFitOnStartup は「起動時に盤面を探す」を切り替えて保存する。
  */
 export function SetFitOnStartup(v: boolean): $CancellablePromise<$models.AppSettings> {

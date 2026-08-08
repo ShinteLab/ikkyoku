@@ -36,6 +36,16 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 import * as $models from "./models.js";
 
 /**
+ * CheckEngine は設定したエンジンに実際に繋いでみる（設定タブの「接続を確認」）。
+ * 
+ * **繋いだ接続はそのまま使う。** 確かめるためだけに起こして捨てると、
+ * 直後の解析でまた起動を待つことになる。
+ */
+export function CheckEngine(): $CancellablePromise<$models.EngineCheck> {
+    return $Call.ByID(232459897);
+}
+
+/**
  * Start は今の局面の解析を始める。
  * 
  * seconds は考える秒数（0 以下なら analyze の既定）。**時間で打ち切っても、

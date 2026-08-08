@@ -127,16 +127,54 @@ type Result struct {
 // **同時に 1 つの解析しか流せない**（USI がそういう作り）。検討ツリーで複数の枝を
 // 並べたくなったら Session を増やす。
 type Session struct {
-	// open はエンジンを開く関数。**Step 2 ではここを `client.Exec` に差し替えるだけ。**
+	// open はエンジンを開く関数。**繋ぎ先が変わるのはここだけ。**
 	open func(context.Context) (*client.Session, error)
+
+	// life はエンジンのプロセスの寿命。**1 回の解析の ctx とは別。**
+	//
+	// ⚠️ **`client.Exec` は `exec.CommandContext` でプロセスを起こす**ので、
+	// 解析ごとの ctx を渡すとその解析が終わった瞬間にエンジンが殺される
+	// （接続を使い回す意味が無くなる）。
+	life context.Context
+	stop context.CancelFunc
 
 	mu  sync.Mutex
 	eng *client.Session
 }
 
+func newSession(open func(context.Context) (*client.Session, error)) *Session {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &Session{open: open, life: ctx, stop: cancel}
+}
+
 // NewLocalSession は同梱の `engine` を USI で話す相手として使うセッションを作る
-// （Step 1）。**接続は最初の解析まで開かない。**
-func NewLocalSession() *Session { return &Session{open: localusi.Local} }
+// （Step 1 の足場）。**接続は最初の解析まで開かない。**
+func NewLocalSession() *Session { return newSession(localusi.Local) }
+
+// NewExecSession は外部の USI エンジン（.exe）を起こして使うセッションを作る
+// （Step 2）。**接続は最初の解析まで開かない**ので、パスが間違っていても
+// ここでは失敗しない（実際に繋ぐときに理由が出る）。
+//
+// options は接続時に `setoption` で送る値。**`isready` の前に送られる**
+// （置換表の確保や評価関数の読み込みに間に合わせるため）。
+func NewExecSession(path string, options map[string]string) *Session {
+	return newSession(func(ctx context.Context) (*client.Session, error) {
+		t, err := client.Exec(ctx, path)
+		if err != nil {
+			return nil, err
+		}
+		s, err := client.Open(ctx, t, options)
+		if err != nil {
+			// ハンドシェイクに失敗した時点でプロセスを片付ける
+			// （Open は自分が開いた Transport を閉じるが、起こしたのはこちら）。
+			if t.Close != nil {
+				_ = t.Close()
+			}
+			return nil, err
+		}
+		return s, nil
+	})
+}
 
 // EngineName は繋がっているエンジンの名前を返す（未接続なら空）。
 func (s *Session) EngineName() string {
@@ -148,16 +186,29 @@ func (s *Session) EngineName() string {
 	return s.eng.ID
 }
 
-// Close はエンジンとの接続を閉じる。
+// Close はエンジンとの接続を閉じる。**外部エンジンのプロセスもここで終わる。**
 func (s *Session) Close() error {
 	s.mu.Lock()
 	eng := s.eng
 	s.eng = nil
 	s.mu.Unlock()
+	// life を切ると、行儀の悪いエンジンでもプロセスごと片付く
+	// （exec.CommandContext のキャンセル）。
+	defer s.stop()
 	if eng == nil {
 		return nil
 	}
 	return eng.Close()
+}
+
+// Connect は接続だけを確かめる（設定タブの「接続を確認」）。
+// 繋がったエンジンの名前を返す。**接続は張ったまま**にするので、続けて解析できる。
+func (s *Session) Connect(ctx context.Context) (string, error) {
+	eng, err := s.engine(ctx)
+	if err != nil {
+		return "", err
+	}
+	return eng.ID, nil
 }
 
 // Analyze は局面を解析する。
@@ -213,13 +264,17 @@ func (s *Session) Analyze(ctx context.Context, positionSFEN string, opt Options,
 }
 
 // engine は接続を返す（無ければ開く）。
-func (s *Session) engine(ctx context.Context) (*client.Session, error) {
+//
+// ⚠️ **開くのに使うのは `s.life`（セッションの寿命）で、引数の ctx ではない。**
+// 引数の ctx は 1 回の解析の期限なので、それでプロセスを起こすと解析が終わった
+// 瞬間に外部エンジンが殺される。
+func (s *Session) engine(_ context.Context) (*client.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.eng != nil {
 		return s.eng, nil
 	}
-	eng, err := s.open(ctx)
+	eng, err := s.open(s.life)
 	if err != nil {
 		return nil, fmt.Errorf("エンジンに繋げませんでした: %w", err)
 	}

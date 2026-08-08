@@ -37,6 +37,35 @@ type Config struct {
 
 	// Training は訂正した局面を suteme の学習用サーバへ送る設定。
 	Training TrainingConfig `json:"training"`
+
+	// Engine は解析に使う USI エンジン。
+	Engine EngineConfig `json:"engine"`
+}
+
+// EngineConfig は解析に使う USI エンジンの指定。
+//
+// **繋ぎ先は「USI を話すプロセス」なら何でもよい**（やねうら王・水匠・prokishi.exe）。
+// 検討ツールとして実用になるかは繋ぐエンジンの棋力で決まるので、そこを差し替え
+// られるようにしてある（`_docs/phase4-engine-usi.md`）。
+type EngineConfig struct {
+	// Path は USI エンジンの実行ファイル。
+	//
+	// **空なら同梱のエンジンを使う。** 「外部エンジンを使うかどうか」の真偽値は
+	// 別に持たない —— 2 つ持つと、パスが入っているのに無効、という食い違いが起きる。
+	// 使うのをやめたければ空にする。
+	Path string `json:"path,omitempty"`
+
+	// Options は接続時に `setoption` で送る値（option 名 → 値）。
+	//
+	// ⚠️ **設定ファイルを手で編集する前提。画面には出していない。** USI の option は
+	// エンジンごとに名前も型も既定値も違うので、汎用の設定 UI を作り込むと重い。
+	// 素通しにしておけば、必要な人が必要なものだけ書ける。
+	//
+	// 例: `{"USI_Hash": "1024", "Threads": "4", "EvalDir": "eval"}`
+	//
+	// ⚠️ **`isready` の前に送られる**（置換表の確保や評価関数の読み込みに間に合わせるため。
+	// `core/usi/client.Open` の注記）。探索ごとに変えるもの（MultiPV）はここではない。
+	Options map[string]string `json:"options,omitempty"`
 }
 
 // TrainingConfig は訂正済みの局面を suteme に登録するための接続設定。

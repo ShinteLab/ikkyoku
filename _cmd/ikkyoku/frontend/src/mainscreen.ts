@@ -304,6 +304,36 @@ export function mountMainScreen(root: HTMLElement): void {
         </label>
         <p id="settings-status" class="status" role="status" aria-live="polite"></p>
 
+        <!-- 解析エンジン。**繋ぎ先は「USI を話すプロセス」なら何でもよい**
+             （やねうら王・水匠・prokishi.exe・同梱のエンジン）。検討ツールとして
+             実用になるかは繋ぐエンジンの棋力で決まるので、ここで差し替えられる。
+
+             ⚠️ **「外部を使う」のチェックボックスは置かない。** パスが空なら同梱、
+             入っていれば外部。2 つ持つと「パスが入っているのに無効」という
+             食い違いが起きる。 -->
+        <div class="setting-group">
+          <span class="setting-title">解析エンジン</span>
+          <span class="setting-note">
+            USI を話すエンジンの実行ファイルを指定します（やねうら王・水匠など）。
+            <strong>空にすると同梱のエンジン</strong>に戻ります。
+            <code>setoption</code> で送る値は設定ファイルの <code>engine.options</code> に書けます。
+          </span>
+          <div class="setting-fields">
+            <label class="field is-wide">
+              <span class="field-label">実行ファイル</span>
+              <input id="engine-path" type="text" spellcheck="false"
+                     placeholder="空なら同梱のエンジンを使います" />
+            </label>
+            <button id="engine-browse" class="ghost-btn" type="button"
+                    title="実行ファイルを選びます">参照…</button>
+            <button id="engine-clear" class="ghost-btn" type="button"
+                    title="同梱のエンジンに戻します">同梱に戻す</button>
+            <button id="engine-check" class="ghost-btn" type="button"
+                    title="実際に起動して、USI で応答するか確かめます">接続を確認</button>
+          </div>
+          <p id="engine-status" class="status" role="status" aria-live="polite"></p>
+        </div>
+
         <!-- 訂正結果を suteme の学習データに戻す設定。**自動送信のスイッチではない**
              (2026-08-07 の決定: 自動で送ると、人が直した 1 マス以外は推論結果のまま
              なので自分の出力を正解として食う)。ここで有効にすると、確定した局面ごとに
@@ -1132,13 +1162,32 @@ export function mountMainScreen(root: HTMLElement): void {
   const trainCheck = root.querySelector<HTMLButtonElement>("#train-check")!;
   const trainCheckStatus = root.querySelector<HTMLParagraphElement>("#train-check-status")!;
 
+  // 解析エンジン。**パスが空なら同梱**（「外部を使う」のトグルは持たない）。
+  const enginePath = root.querySelector<HTMLInputElement>("#engine-path")!;
+  const engineBrowse = root.querySelector<HTMLButtonElement>("#engine-browse")!;
+  const engineClear = root.querySelector<HTMLButtonElement>("#engine-clear")!;
+  const engineCheck = root.querySelector<HTMLButtonElement>("#engine-check")!;
+  const engineStatus = root.querySelector<HTMLParagraphElement>("#engine-status")!;
+
   const showSettings = (s: {
     fitOnStartup: boolean;
     path: string;
     training: { enabled: boolean; host: string; port: number; token: string; target: string };
+    engine: { path: string; builtin: boolean; optionCount: number };
   }) => {
     fitOnStartup.checked = s.fitOnStartup;
     settingsPath.textContent = s.path || "(保存先を決められませんでした)";
+    // 入力中は上書きしない（保存のたびに読み直すので、打っている途中で飛ぶ）。
+    if (document.activeElement !== enginePath) {
+      enginePath.value = s.engine.path;
+    }
+    engineClear.disabled = s.engine.builtin;
+    // **同梱かどうかの判定は Go 側の値を使う**（フロントで path === "" を書かない）。
+    const opts = s.engine.optionCount > 0 ? `（setoption ${s.engine.optionCount} 件）` : "";
+    engineStatus.classList.remove("is-error");
+    engineStatus.textContent = s.engine.builtin
+      ? "同梱のエンジンを使います。"
+      : `外部のエンジンを使います${opts}。`;
     // 既定値の解決は Go 側(training パッケージ)が済ませて返す。**フロントに
     // 既定値を書かないこと**(2 か所に持つと、既定を変えたときに食い違う)。
     const t = s.training;
@@ -1188,6 +1237,70 @@ export function mountMainScreen(root: HTMLElement): void {
       void saveTraining();
     });
   }
+
+  // ---- 解析エンジンの指定 --------------------------------------------------
+  //
+  // **保存と接続の確認は別の操作。** まだ置いていないパスを先に書いておく、という
+  // 順序が普通にあるので、保存時に起動はしない（存在の確認だけ Go 側でする）。
+  const saveEnginePath = async (path: string) => {
+    engineStatus.classList.remove("is-error");
+    try {
+      showSettings(await SettingsService.SetEnginePath(path));
+    } catch (err) {
+      engineStatus.textContent = String(err instanceof Error ? err.message : err);
+      engineStatus.classList.add("is-error");
+    }
+  };
+
+  enginePath.addEventListener("change", () => {
+    void saveEnginePath(enginePath.value);
+  });
+
+  engineBrowse.addEventListener("click", () => {
+    void (async () => {
+      engineBrowse.disabled = true;
+      engineStatus.classList.remove("is-error");
+      try {
+        // 取り消したときは Go 側が何も変えずに今の設定を返す。
+        showSettings(await SettingsService.BrowseEngine());
+      } catch (err) {
+        engineStatus.textContent = String(err instanceof Error ? err.message : err);
+        engineStatus.classList.add("is-error");
+      } finally {
+        engineBrowse.disabled = false;
+      }
+    })();
+  });
+
+  engineClear.addEventListener("click", () => {
+    void saveEnginePath("");
+  });
+
+  // 実際に起動して USI で応答するか確かめる。**繋いだ接続はそのまま解析に使う**
+  // ので、確認したあとの 1 回目が速い。
+  engineCheck.addEventListener("click", () => {
+    void (async () => {
+      engineCheck.disabled = true;
+      engineStatus.classList.remove("is-error");
+      engineStatus.textContent = "起動して確かめています…";
+      try {
+        const r = await AnalyzeService.CheckEngine();
+        if (!r.ok) {
+          engineStatus.textContent = `繋がりません: ${r.error}`;
+          engineStatus.classList.add("is-error");
+          return;
+        }
+        engineStatus.textContent = r.builtin
+          ? `同梱のエンジンに繋がりました（${r.name}）。`
+          : `繋がりました: ${r.name}`;
+      } catch (err) {
+        engineStatus.textContent = `確認できませんでした: ${String(err instanceof Error ? err.message : err)}`;
+        engineStatus.classList.add("is-error");
+      } finally {
+        engineCheck.disabled = false;
+      }
+    })();
+  });
 
   // 「今このサーバに送ってよいか」の問い合わせ(`GET /api/status`)。
   //

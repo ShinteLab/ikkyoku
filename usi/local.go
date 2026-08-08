@@ -52,6 +52,7 @@ func Local(ctx context.Context) (*client.Session, error) {
 		_ = cmdR.Close()
 	}()
 
+	// 同梱エンジンに setoption は無い（探索の設定は localEngine が直接持つ）。
 	s, err := client.Open(ctx, client.Transport{
 		In:  outR,
 		Out: cmdW,
@@ -60,7 +61,7 @@ func Local(ctx context.Context) (*client.Session, error) {
 			_ = cmdW.Close()
 			return outR.Close()
 		},
-	})
+	}, nil)
 	if err != nil {
 		_ = cmdW.Close()
 		_ = outR.Close()
