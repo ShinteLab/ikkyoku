@@ -219,6 +219,8 @@ export function mountMainScreen(root: HTMLElement): void {
             </select>
           </label>
           <span id="analyze-meta" class="note"></span>
+          <!-- 押せない理由。**ツールチップだけにしない**（ホバーしないと読めない）。 -->
+          <span id="analyze-hint" class="note is-caution" hidden></span>
         </div>
         <!-- 候補手（MultiPV）。**1 本しか来なくても一覧の形で出す** ——
              次善手を辿るのが構想の中心なので、ここが複数本になるのが前提の作り。 -->
@@ -581,6 +583,7 @@ export function mountMainScreen(root: HTMLElement): void {
   const analyzeSeconds = root.querySelector<HTMLSelectElement>("#analyze-seconds")!;
   const analyzeLines = root.querySelector<HTMLOListElement>("#analyze-lines")!;
   const analyzeMeta = root.querySelector<HTMLElement>("#analyze-meta")!;
+  const analyzeHint = root.querySelector<HTMLElement>("#analyze-hint")!;
   const analyzeStatus = root.querySelector<HTMLParagraphElement>("#analyze-status")!;
 
   // 今の解析の世代。**打ち切った解析の途中経過は後から届く**ので、これで捨てる。
@@ -590,13 +593,38 @@ export function mountMainScreen(root: HTMLElement): void {
   let analyzedSfen = "";
   // 解析できる局面か（EditState.sfen が埋まっているか）。
   let analyzeReady = false;
+  // 今の局面（EditState 由来）。**訂正中かどうかと合わせて解析の可否を決める**ので、
+  // 通知が来るたびに覚えておく（onState と onEditing の両方から使う）。
+  let analyzePositionSfen = "";
+  let analyzePositionLoaded = false;
   // 答えたエンジンの名前。**何が出した評価値なのかは見せる**（繋ぎ先を差し替えられる以上、
   // 出所を伏せると比べようがない）。
   let analyzeEngine = "";
   // 起動〜readyok にかかった時間（done で届く）。
   let analyzeStartupMs = 0;
 
+  // 解析できない理由。**空なら解析できる。**
+  //
+  // ⚠️ **理由をツールチップだけにしないこと。** 押せないボタンの `title` は
+  // ホバーしないと読めず、「なぜ押せないのか」が分からない（実際に詰まった）。
+  const analyzeBlockedReason = (): string => {
+    if (!analyzePositionLoaded) {
+      return "";
+    }
+    // **訂正中は解析しない。** 駒を自由に動かせる状態の盤は「まだ決めていない局面」で、
+    // その評価値には意味が無い。確定してから解析する。
+    if (editingNow) {
+      return "「盤面を確定する」を押すと解析できます";
+    }
+    if (!analyzePositionSfen) {
+      return "手番と駒台の先後を決めると解析できます";
+    }
+    return "";
+  };
+
   const syncAnalyzeButton = () => {
+    const blocked = analyzeBlockedReason();
+    analyzeReady = analyzePositionLoaded && blocked === "";
     analyzeRun.textContent = analyzeRunning ? "停止" : "解析";
     analyzeRun.classList.toggle("is-active", analyzeRunning);
     analyzeRun.disabled = !analyzeRunning && !analyzeReady;
@@ -604,7 +632,10 @@ export function mountMainScreen(root: HTMLElement): void {
       ? "ここまでの結果で打ち切ります"
       : analyzeReady
         ? "この局面をエンジンに解析させます"
-        : "手番と駒台の先後を決めると解析できます";
+        : blocked;
+    // 押せない理由は**文字でも出す**（上の ⚠️）。解析中と、押せるときは何も出さない。
+    analyzeHint.textContent = analyzeRunning ? "" : blocked;
+    analyzeHint.hidden = analyzeHint.textContent === "";
   };
 
   const clearAnalyzeResult = () => {
@@ -689,15 +720,19 @@ export function mountMainScreen(root: HTMLElement): void {
     void startAnalyze();
   });
 
-  // 局面が変わったら解析の可否と表示を追随させる。**結果は局面と紐づける。**
-  const syncAnalyze = (sfen: string, loaded: boolean) => {
-    analyzeRow.hidden = !loaded;
-    analyzeReady = !!sfen;
-    if (analyzedSfen && sfen !== analyzedSfen) {
+  // 局面や訂正モードが変わったら、解析の可否と表示を追随させる。
+  // **結果は局面と紐づける。**
+  const syncAnalyze = () => {
+    analyzeRow.hidden = !analyzePositionLoaded;
+    if (analyzedSfen && analyzePositionSfen !== analyzedSfen) {
       // 直したので、前の評価値は今の盤の値ではなくなった。
       clearAnalyzeResult();
       analyzeSeq = -1;
       analyzeRunning = false;
+    }
+    // 訂正に戻ったら走っている解析は打ち切る（訂正前の局面を読み続けても仕方がない）。
+    if (analyzeRunning && editingNow) {
+      void AnalyzeService.Stop();
     }
     syncAnalyzeButton();
   };
@@ -748,7 +783,9 @@ export function mountMainScreen(root: HTMLElement): void {
       editSfen = st?.labelSfen ?? "";
       editNotes = st?.labelNotes ?? [];
       syncTrain();
-      syncAnalyze(st?.sfen ?? "", !!st?.loaded);
+      analyzePositionSfen = st?.sfen ?? "";
+      analyzePositionLoaded = !!st?.loaded;
+      syncAnalyze();
       if (!st?.loaded) {
         boardHandRow.hidden = true;
         fillWarnings(boardWarnings, []);
@@ -763,6 +800,8 @@ export function mountMainScreen(root: HTMLElement): void {
       editingNow = on;
       syncCaptureRef();
       syncTrain();
+      // **訂正中は解析できない**ので、モードの出入りでも可否を計算し直す。
+      syncAnalyze();
     },
     onError: (message) => {
       status.textContent = `訂正できませんでした: ${message}`;
