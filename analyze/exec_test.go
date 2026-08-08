@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,13 @@ import (
 // あるかどうかでテストの結果が変わると、壊れたときに切り分けられない。
 // 自分自身を起こせば「本当に別プロセスと標準入出力で話せるか」だけを確かめられる。
 const fakeEngineEnv = "IKKYOKU_TEST_USI_ENGINE"
+
+// quitMarkEnv に指すファイルがあれば、エンジンは `quit` を受け取って**自分から
+// 終わったこと**をそこに書き残す。
+//
+// ⚠️ **「exe が残らない」がこの設計の目的そのもの**なので、外から観測できる形で
+// 確かめる（プロセスの生死は呼び出し側からは見えない）。
+const quitMarkEnv = "IKKYOKU_TEST_USI_QUITMARK"
 
 // runFakeEngine は最低限の USI エンジンとして振る舞う。
 func runFakeEngine() {
@@ -58,6 +66,9 @@ func runFakeEngine() {
 				"info depth 2 score cp 55 nodes 99 pv 2g2f",
 				"bestmove 2g2f")
 		case line == "quit":
+			if mark := os.Getenv(quitMarkEnv); mark != "" {
+				_ = os.WriteFile(mark, []byte("quit"), 0o644)
+			}
 			return
 		}
 	}
@@ -70,9 +81,10 @@ func runFakeEngine() {
 func TestExecSessionRunsExternalEngine(t *testing.T) {
 	// 子プロセス（= このテストバイナリ）がエンジンとして起動するようにする。
 	t.Setenv(fakeEngineEnv, "1")
+	mark := filepath.Join(t.TempDir(), "quit.mark")
+	t.Setenv(quitMarkEnv, mark)
 
 	s := NewExecSession(os.Args[0], map[string]string{"USI_Hash": "16"})
-	t.Cleanup(func() { _ = s.Close() })
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -92,6 +104,13 @@ func TestExecSessionRunsExternalEngine(t *testing.T) {
 	if info.Applied != 2 {
 		t.Errorf("送った setoption = %d, want 2（USI_Hash と Threads）", info.Applied)
 	}
+	// ⚠️ **確認しただけならプロセスを残さない。**
+	if _, err := os.Stat(mark); err != nil {
+		t.Errorf("接続を確認したあとにエンジンが終わっていません: %v", err)
+	}
+	if err := os.Remove(mark); err != nil {
+		t.Fatalf("印を消せませんでした: %v", err)
+	}
 
 	r, err := s.Analyze(ctx, startpos, Options{Movetime: 3 * time.Second}, nil)
 	if err != nil {
@@ -110,13 +129,20 @@ func TestExecSessionRunsExternalEngine(t *testing.T) {
 	if len(r.Lines) > 0 && len(r.Lines[0].Moves) != 1 {
 		t.Errorf("読み筋が違います: %+v", r.Lines[0].Moves)
 	}
+	// ⚠️ **解析が終わったらプロセスも終わる**（exe を常駐させない）。
+	if _, err := os.Stat(mark); err != nil {
+		t.Errorf("解析のあとにエンジンが終わっていません: %v", err)
+	}
+	// 起動にかかった時間が出ること（解析のたびに払うコスト）。
+	if r.StartupMS < 0 {
+		t.Errorf("StartupMS = %d", r.StartupMS)
+	}
 }
 
 // 実行ファイルが無いときは、繋ぐ時点で理由が分かること。
 // **セッションを作る時点では失敗しない**（パスを先に書いておく使い方があるため）。
 func TestExecSessionReportsMissingBinary(t *testing.T) {
 	s := NewExecSession("no-such-engine-binary.exe", nil)
-	t.Cleanup(func() { _ = s.Close() })
 
 	_, err := s.Connect(context.Background())
 	if err == nil {

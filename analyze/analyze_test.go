@@ -6,10 +6,13 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	coreusi "github.com/ShinteLab/core/usi"
+	"github.com/ShinteLab/core/usi/client"
+	localusi "github.com/ShinteLab/ikkyoku/usi"
 )
 
 const startpos = "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1"
@@ -32,9 +35,8 @@ const testMovetime = 400 * time.Millisecond
 
 func newTestSession(t *testing.T) *Session {
 	t.Helper()
-	s := NewLocalSession()
-	t.Cleanup(func() { _ = s.Close() })
-	return s
+	// エンジンのプロセスは 1 回の解析のあいだしか生きないので、後始末は要らない。
+	return NewLocalSession()
 }
 
 // 平手の初期局面を解析できること。**USI のハンドシェイクから bestmove まで通るのが最低条件。**
@@ -64,22 +66,38 @@ func TestAnalyzeStartPos(t *testing.T) {
 	}
 }
 
-// **接続を使い回すこと。** 局面ごとに繋ぎ直すと、外部エンジン（Step 2）では
-// 毎回プロセス起動と isready を待つことになる。
-func TestSessionReusesEngine(t *testing.T) {
+// ⚠️ **エンジンは解析ごとに起こして、終わったら閉じる**（2026-08-08 決定）。
+// 使い回すと exe が常駐し、置換表ぶんのメモリを掴んだままになる。
+func TestSessionOpensPerAnalyze(t *testing.T) {
+	var opens int32
+	s := newSession(func(ctx context.Context) (*client.Session, error) {
+		atomic.AddInt32(&opens, 1)
+		return localusi.Local(ctx)
+	})
+
+	for i := range 2 {
+		if _, err := s.Analyze(context.Background(), startpos, Options{Movetime: testMovetime}, nil); err != nil {
+			t.Fatalf("%d 回目: %v", i+1, err)
+		}
+	}
+	if got := atomic.LoadInt32(&opens); got != 2 {
+		t.Errorf("接続を開いた回数 = %d, want 2（解析ごとに開き直す）", got)
+	}
+	// 繋いでいなくても、最後に繋がった名前は表示のために残す。
+	if s.EngineName() == "" {
+		t.Error("エンジン名が残っていません")
+	}
+}
+
+// 起動にかかった時間が出ること。**解析のたびに払うコスト**なので見せる。
+func TestAnalyzeReportsStartupTime(t *testing.T) {
 	s := newTestSession(t)
-	if _, err := s.Analyze(context.Background(), startpos, Options{Movetime: testMovetime}, nil); err != nil {
-		t.Fatalf("1 回目: %v", err)
+	r, err := s.Analyze(context.Background(), startpos, Options{Movetime: testMovetime}, nil)
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
 	}
-	name := s.EngineName()
-	if name == "" {
-		t.Fatal("1 回目のあとにエンジン名が取れません")
-	}
-	if _, err := s.Analyze(context.Background(), startpos, Options{Movetime: testMovetime}, nil); err != nil {
-		t.Fatalf("2 回目: %v", err)
-	}
-	if s.EngineName() != name {
-		t.Error("2 回目で別のエンジンに繋ぎ直しています")
+	if r.StartupMS < 0 {
+		t.Errorf("StartupMS = %d", r.StartupMS)
 	}
 }
 

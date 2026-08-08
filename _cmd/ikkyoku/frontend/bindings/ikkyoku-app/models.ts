@@ -245,6 +245,14 @@ export interface EngineCheck {
     "applied": number;
 
     /**
+     * StartupMS は起動から `readyok` までの所要ミリ秒。
+     * 
+     * **解析のたびにこれだけ待つ**（プロセスは 1 回の解析のあいだしか生きない）ので、
+     * 繋ぎ先を選ぶ材料として出す。
+     */
+    "startupMs": number;
+
+    /**
      * Error は繋がらなかった理由（日本語）。
      */
     "error": string;

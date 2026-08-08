@@ -29,11 +29,6 @@ import (
 	localusi "github.com/ShinteLab/ikkyoku/usi"
 )
 
-// DefaultMovetime は既定の打ち切り時間。
-//
-// 反復深化なので途中で切っても「最後に完走した深さ」の結果が届いている（設計原則3）。
-const DefaultMovetime = 5 * time.Second
-
 // mateMargin は「詰みスコア」と判定する余裕（`score cp` しか返さないエンジン向け）。
 //
 // ⚠️ **自作 `engine` は詰みを `score mate` で返さない**（`MateScore - ply` の生値を
@@ -49,7 +44,11 @@ const engineMateScore = 1 << 20
 
 // Options は解析の指定。ゼロ値でも動く。
 type Options struct {
-	// Movetime は考える時間。0 以下なら DefaultMovetime。
+	// Movetime は考える時間。
+	//
+	// ⚠️ **0 なら「止めるまで考え続ける」**（`client.GoOptions` と同じ意味）。
+	// 「ずっと解析していたい」はこれで表す —— プロセスの寿命は解析の寿命なので、
+	// そのあいだエンジンも生きている。
 	Movetime time.Duration
 	// MultiPV は候補手をいくつ出させるか。0/1 なら最善手だけ。
 	//
@@ -117,46 +116,59 @@ type Result struct {
 	// **何が出した評価値なのかは残すこと。** 繋ぎ先を差し替えられる以上、
 	// 評価値だけ見せて出所を伏せると比べようがない。
 	Engine string `json:"engine"`
+	// StartupMS は起動から `readyok` までにかかったミリ秒。
+	//
+	// **解析のたびに払うコスト**（プロセスは 1 回の解析のあいだしか生きない）。
+	// NNUE の評価関数を読むエンジンでは数秒になりうるので、見えるようにしてある。
+	StartupMS int64 `json:"startupMs"`
 }
 
-// Session はエンジン 1 つとの対話を持ち回す。
+// Session は「どのエンジンに繋ぐか」を持つ。**接続そのものは持たない。**
 //
-// **接続は使い回す。** 局面ごとに繋ぎ直すと、外部エンジン（Step 2）では毎回
-// プロセスの起動と `isready` を待つことになる。
+// ⚠️ **エンジンのプロセスは 1 回の解析のあいだだけ生きる**（2026-08-08 決定）。
+// 解析を始めるときに起こし、終わったら `quit` して閉じる。
 //
-// **同時に 1 つの解析しか流せない**（USI がそういう作り）。検討ツリーで複数の枝を
-// 並べたくなったら Session を増やす。
+//	起動 → setoption → isready → position → go → bestmove → quit
+//
+// **「ずっと解析していたい」は時間無制限の解析 1 回**（`Options.Movetime = 0`）として
+// 表す。止めるまで `go` が続くので、そのあいだプロセスも生きている。
+// **アイドルタイマーも検討モードも要らない**のは、寿命が解析そのものと一致するから。
+//
+// この形にした理由は 2 つ:
+//
+//   - **exe を常駐させない。** 置換表は `isready` で確保されるので、待機中のプロセスが
+//     `USI_Hash` ぶん（GB 級になりうる）のメモリを掴んだままになる
+//   - **`setoption` は `isready` の前にしか効かない。** 毎回繋ぎ直すなら、
+//     設定を変えた結果が次の解析にそのまま反映される（作り直しの判断が要らない）
+//
+// 引き換えに、**解析のたびに `isready` のコストを払う**（NNUE の評価関数を読む
+// エンジンでは数秒かかりうる）。それがどれくらいかは `Result.StartupMS` に出る。
 type Session struct {
 	// open はエンジンを開く関数。**繋ぎ先が変わるのはここだけ。**
 	open func(context.Context) (*client.Session, error)
 
-	// life はエンジンのプロセスの寿命。**1 回の解析の ctx とは別。**
-	//
-	// ⚠️ **`client.Exec` は `exec.CommandContext` でプロセスを起こす**ので、
-	// 解析ごとの ctx を渡すとその解析が終わった瞬間にエンジンが殺される
-	// （接続を使い回す意味が無くなる）。
-	life context.Context
-	stop context.CancelFunc
-
-	mu  sync.Mutex
-	eng *client.Session
+	mu sync.Mutex
+	// lastEngine は最後に繋がったエンジンの名前。**表示用**
+	// （接続を持たないので、繋いでいないあいだも名前だけは出せるようにしておく）。
+	lastEngine string
 }
 
 func newSession(open func(context.Context) (*client.Session, error)) *Session {
-	ctx, cancel := context.WithCancel(context.Background())
-	return &Session{open: open, life: ctx, stop: cancel}
+	return &Session{open: open}
 }
 
 // NewLocalSession は同梱の `engine` を USI で話す相手として使うセッションを作る
-// （Step 1 の足場）。**接続は最初の解析まで開かない。**
+// （Step 1 の足場）。
 func NewLocalSession() *Session { return newSession(localusi.Local) }
 
-// NewExecSession は外部の USI エンジン（.exe）を起こして使うセッションを作る
-// （Step 2）。**接続は最初の解析まで開かない**ので、パスが間違っていても
-// ここでは失敗しない（実際に繋ぐときに理由が出る）。
+// NewExecSession は外部の USI エンジン（.exe）を起こして使うセッションを作る（Step 2）。
+//
+// **ここでは起動しない**ので、パスが間違っていても失敗しない
+// （実際に繋ぐときに理由が出る）。
 //
 // options は接続時に `setoption` で送る値。**`isready` の前に送られる**
-// （置換表の確保や評価関数の読み込みに間に合わせるため）。
+// （置換表の確保や評価関数の読み込みに間に合わせるため）。エンジンが `usi` で
+// 宣言した option には、ここに書かれていなくても既定値が送られる。
 func NewExecSession(path string, options map[string]string) *Session {
 	return newSession(func(ctx context.Context) (*client.Session, error) {
 		t, err := client.Exec(ctx, path)
@@ -176,29 +188,17 @@ func NewExecSession(path string, options map[string]string) *Session {
 	})
 }
 
-// EngineName は繋がっているエンジンの名前を返す（未接続なら空）。
+// EngineName は最後に繋がったエンジンの名前を返す（まだ繋いでいなければ空）。
 func (s *Session) EngineName() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.eng == nil {
-		return ""
-	}
-	return s.eng.ID
+	return s.lastEngine
 }
 
-// Close はエンジンとの接続を閉じる。**外部エンジンのプロセスもここで終わる。**
-func (s *Session) Close() error {
+func (s *Session) rememberEngine(name string) {
 	s.mu.Lock()
-	eng := s.eng
-	s.eng = nil
+	s.lastEngine = name
 	s.mu.Unlock()
-	// life を切ると、行儀の悪いエンジンでもプロセスごと片付く
-	// （exec.CommandContext のキャンセル）。
-	defer s.stop()
-	if eng == nil {
-		return nil
-	}
-	return eng.Close()
 }
 
 // EngineInfo は繋がったエンジンの素性。
@@ -213,24 +213,31 @@ type EngineInfo struct {
 	//
 	// 宣言より少ないのが普通（button と、既定値が空のものは送らない）。
 	Applied int `json:"applied"`
+	// StartupMS は起動から `readyok` までの所要ミリ秒。
+	//
+	// **解析のたびにこれだけ待つ**ことになるので、繋ぎ先を選ぶ材料として見せる。
+	StartupMS int64 `json:"startupMs"`
 }
 
-// Connect は接続だけを確かめる（設定タブの「接続を確認」）。
-// **接続は張ったまま**にするので、続けて解析できる。
+// Connect は繋がるかどうかだけを確かめる（設定タブの「接続を確認」）。
+//
+// **確かめたら閉じる。** 解析していないのにプロセスを残さない。
 func (s *Session) Connect(ctx context.Context) (EngineInfo, error) {
-	eng, err := s.engine(ctx)
+	eng, startup, err := s.dial(ctx)
 	if err != nil {
 		return EngineInfo{}, err
 	}
+	defer eng.close()
 	return EngineInfo{
-		Name:    eng.ID,
-		Author:  eng.Author,
-		Options: len(eng.Options),
-		Applied: len(eng.Applied),
+		Name:      eng.ID,
+		Author:    eng.Author,
+		Options:   len(eng.Options),
+		Applied:   len(eng.Applied),
+		StartupMS: startup.Milliseconds(),
 	}, nil
 }
 
-// Analyze は局面を解析する。
+// Analyze は局面を解析する。**このあいだだけエンジンのプロセスが生きている。**
 //
 // positionSFEN は**局面全体の SFEN**（盤面・手番・持ち駒・手数）。
 // `position.Position.SFEN()` が返すものをそのまま渡す。
@@ -239,6 +246,7 @@ func (s *Session) Connect(ctx context.Context) (EngineInfo, error) {
 // goroutine から呼ばれる**ので、UI へ流すならイベント経由にすること。
 //
 // ctx をキャンセルすると `stop` を送り、**それまでに届いた結果**を返す（設計原則3）。
+// そのあとエンジンは `quit` して終わる。
 func (s *Session) Analyze(ctx context.Context, positionSFEN string, opt Options, info func(Progress)) (Result, error) {
 	fields, err := checkSFEN(positionSFEN)
 	if err != nil {
@@ -246,69 +254,67 @@ func (s *Session) Analyze(ctx context.Context, positionSFEN string, opt Options,
 	}
 	black := fields[1] == "b"
 
-	eng, err := s.engine(ctx)
+	eng, startup, err := s.dial(ctx)
 	if err != nil {
 		return Result{}, err
 	}
-
-	movetime := opt.Movetime
-	if movetime <= 0 {
-		movetime = DefaultMovetime
-	}
+	defer eng.close()
 
 	started := time.Now()
 	acc := &accumulator{black: black, started: started}
 	res, err := eng.Analyze(ctx, strings.Join(fields, " "),
-		client.GoOptions{Movetime: movetime, MultiPV: opt.MultiPV},
+		client.GoOptions{Movetime: opt.Movetime, MultiPV: opt.MultiPV},
 		func(in coreusi.Info) {
 			if p, ok := acc.add(in); ok && info != nil {
 				info(p)
 			}
 		})
 	if err != nil {
-		// 通信が切れたら接続を捨てる（次の解析で開き直す）。
-		s.drop(eng)
 		return Result{}, err
 	}
 
 	final := acc.snapshot()
 	final.ElapsedMS = time.Since(started).Milliseconds()
 	return Result{
-		Progress: final,
-		Bestmove: res.Bestmove,
-		Turn:     fields[1],
-		Stopped:  res.Stopped,
-		Engine:   eng.ID,
+		Progress:  final,
+		Bestmove:  res.Bestmove,
+		Turn:      fields[1],
+		Stopped:   res.Stopped,
+		Engine:    eng.ID,
+		StartupMS: startup.Milliseconds(),
 	}, nil
 }
 
-// engine は接続を返す（無ければ開く）。
-//
-// ⚠️ **開くのに使うのは `s.life`（セッションの寿命）で、引数の ctx ではない。**
-// 引数の ctx は 1 回の解析の期限なので、それでプロセスを起こすと解析が終わった
-// 瞬間に外部エンジンが殺される。
-func (s *Session) engine(_ context.Context) (*client.Session, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.eng != nil {
-		return s.eng, nil
-	}
-	eng, err := s.open(s.life)
-	if err != nil {
-		return nil, fmt.Errorf("エンジンに繋げませんでした: %w", err)
-	}
-	s.eng = eng
-	return eng, nil
+// liveEngine は起動中のエンジン 1 つ。**close で必ず片付ける。**
+type liveEngine struct {
+	*client.Session
+	// kill はプロセスを強制的に終わらせる（行儀の悪いエンジンへの保険）。
+	kill context.CancelFunc
 }
 
-// drop は壊れた接続を捨てる。**別の接続に差し替わっていたら何もしない。**
-func (s *Session) drop(eng *client.Session) {
-	s.mu.Lock()
-	if s.eng == eng {
-		s.eng = nil
+// close は `quit` を送って閉じ、そのあとプロセスを落とす。
+func (e *liveEngine) close() {
+	_ = e.Session.Close()
+	e.kill()
+}
+
+// dial はエンジンを起こしてハンドシェイクまで済ませる。
+//
+// ⚠️ **プロセスの ctx は引数の ctx から切り離す**（`context.WithoutCancel`）。
+// `client.Exec` は `exec.CommandContext` で起こすので、解析の ctx をそのまま渡すと
+// **「停止」を押した瞬間にプロセスが死に、`stop` に対する bestmove を受け取れない**。
+// 片付けは close 側（`quit` → kill）で行う。
+func (s *Session) dial(ctx context.Context) (*liveEngine, time.Duration, error) {
+	procCtx, kill := context.WithCancel(context.WithoutCancel(ctx))
+
+	started := time.Now()
+	eng, err := s.open(procCtx)
+	if err != nil {
+		kill()
+		return nil, 0, fmt.Errorf("エンジンに繋げませんでした: %w", err)
 	}
-	s.mu.Unlock()
-	_ = eng.Close()
+	s.rememberEngine(eng.ID)
+	return &liveEngine{Session: eng, kill: kill}, time.Since(started), nil
 }
 
 // accumulator は info 行を候補手ごとに畳んで Progress にする。

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -13,9 +12,13 @@ import (
 
 // AnalyzeService は確定した局面をエンジンに解析させる Service（Phase 4）。
 //
-// **エンジンは USI を話す相手**（`analyze` → `ikkyoku/usi`）。今は同梱の `engine` を
-// 同一プロセスで動かしているが（Step 1）、外部エンジンの exe や `prokishi.exe` に
-// 差し替わってもここは変わらない（`_docs/phase4-engine-usi.md`）。
+// **エンジンは USI を話す相手**（`analyze` → `core/usi/client`）。同梱の `engine` でも
+// 外部エンジンの exe でも `prokishi.exe` でも、ここは変わらない
+// （`_docs/phase4-engine-usi.md`）。
+//
+// ⚠️ **エンジンのプロセスは 1 回の解析のあいだだけ生きる。** 解析を始めるときに
+// 起こし、終わったら `quit` する。「ずっと解析していたい」は**時間無制限の解析**
+// （考える秒数を「無制限」にする）として表すので、そのあいだは生きている。
 //
 // **局面はここが持たない。** 解析するのは常に「今 PositionService が持っている局面」で、
 // フロントから SFEN を受け取らない（フロントに局面の写しを持たせない、という
@@ -39,74 +42,59 @@ type AnalyzeService struct {
 	settings *SettingsService
 	app      *application.App
 
-	// session はエンジンとの接続。**使い回す**（接続は最初の解析まで開かない）。
-	//
-	// ⚠️ **設定でエンジンを変えたら作り直す**（sessionKey）。使い回したままだと、
-	// パスを変えても前のエンジンが答え続ける。
-	session    *analyze.Session
-	sessionKey string
-
 	mu sync.Mutex
 	// cancel は走っている解析の打ち切り。走っていなければ nil。
 	cancel context.CancelFunc
+	// done は走っている解析が終わったことの通知（終了時に待つため）。
+	done chan struct{}
 	// seq は解析の世代。**打ち切った解析の途中経過が後から届く**ので、
 	// フロントはこれで古いものを捨てる。
 	seq int
+	// lastEngine は最後に答えたエンジンの名前。**表示用**
+	// （接続を持ち続けないので、繋いでいないあいだも名前だけは出せるようにする）。
+	lastEngine string
 }
 
 func NewAnalyzeService(logger *slog.Logger, pos *PositionService, settings *SettingsService) *AnalyzeService {
 	return &AnalyzeService{logger: logger, pos: pos, settings: settings}
 }
 
-// close はエンジンとの接続を閉じる（終了時に呼ぶ）。
+// close は走っている解析を打ち切り、エンジンが終わるまで待つ（アプリの終了時）。
 //
-// ⚠️ **外部エンジンはプロセスなので、閉じないと残る。**
+// ⚠️ **待たないと外部エンジンのプロセスが残る。** 親が先に消えても、Windows では
+// 子プロセスは道連れにならない。
 func (s *AnalyzeService) close() {
 	s.mu.Lock()
-	session := s.session
-	s.session = nil
-	s.sessionKey = ""
+	cancel, done := s.cancel, s.done
 	s.mu.Unlock()
-	if session == nil {
+	if cancel == nil {
 		return
 	}
-	if err := session.Close(); err != nil {
-		s.logger.Warn("エンジンとの接続を閉じられませんでした", "error", err)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(engineShutdownWait):
+		s.logger.Warn("エンジンの終了を待ちきれませんでした")
 	}
 }
 
-// engineSession は今の設定に合ったセッションを返す。
+// engineShutdownWait は終了時にエンジンの後始末を待つ上限。
 //
-// **設定が変わっていたら作り直す。** 使い回したままだと、設定でエンジンを
-// 差し替えても前のエンジンが答え続ける（一番気づきにくい壊れ方）。
-// **ロックを取った状態で呼ぶこと。**
-func (s *AnalyzeService) engineSession() *analyze.Session {
+// `stop` → `bestmove` → `quit` → プロセス終了、まで待つ。長すぎるとアプリが
+// 閉じなくなるので、諦める線を引いておく。
+const engineShutdownWait = 5 * time.Second
+
+// session は今の設定に合ったセッションを作る。
+//
+// **毎回作ってよい。** Session は接続を持たない（繋ぐのは解析のあいだだけ）ので、
+// 作るコストはほぼ無い。**設定を変えたときの繋ぎ直しを気にしなくてよくなった**のが、
+// この寿命にした利点の 1 つ（以前は鍵を持って作り直しを判断していた）。
+func (s *AnalyzeService) session() *analyze.Session {
 	cfg := s.settings.engineConfig()
-	// パスと option をまとめた鍵。どちらが変わっても繋ぎ直す
-	// （option は isready の前にしか送れないので、後から反映できない）。
-	key := fmt.Sprintf("%s\x00%v", cfg.Path, cfg.Options)
-	if s.session != nil && s.sessionKey == key {
-		return s.session
-	}
-	if s.session != nil {
-		old := s.session
-		go func() {
-			// 閉じるのに時間がかかることがある（プロセスの終了待ち）ので、
-			// ロックを持ったまま待たない。
-			if err := old.Close(); err != nil {
-				s.logger.Warn("前のエンジンを閉じられませんでした", "error", err)
-			}
-		}()
-	}
 	if cfg.Path == "" {
-		s.session = analyze.NewLocalSession()
-		s.logger.Info("同梱のエンジンを使います")
-	} else {
-		s.session = analyze.NewExecSession(cfg.Path, cfg.Options)
-		s.logger.Info("外部のエンジンを使います", "path", cfg.Path, "options", len(cfg.Options))
+		return analyze.NewLocalSession()
 	}
-	s.sessionKey = key
-	return s.session
+	return analyze.NewExecSession(cfg.Path, cfg.Options)
 }
 
 // EngineCheck は「接続を確認」の結果。
@@ -129,25 +117,26 @@ type EngineCheck struct {
 	// **送ったことが見えないと、効いているか確かめようがない**（option には
 	// 応答が返らない）。宣言より少ないのが普通（button と空の既定値は送らない）。
 	Applied int `json:"applied"`
+	// StartupMS は起動から `readyok` までの所要ミリ秒。
+	//
+	// **解析のたびにこれだけ待つ**（プロセスは 1 回の解析のあいだしか生きない）ので、
+	// 繋ぎ先を選ぶ材料として出す。
+	StartupMS int64 `json:"startupMs"`
 	// Error は繋がらなかった理由（日本語）。
 	Error string `json:"error"`
 }
 
 // CheckEngine は設定したエンジンに実際に繋いでみる（設定タブの「接続を確認」）。
 //
-// **繋いだ接続はそのまま使う。** 確かめるためだけに起こして捨てると、
-// 直後の解析でまた起動を待つことになる。
+// **確かめたら閉じる。** 解析していないのにプロセスを残さない。
+// 起動にかかった時間も返すので、**解析のたびに払うコストがここで分かる。**
 func (s *AnalyzeService) CheckEngine() EngineCheck {
 	cfg := s.settings.engineConfig()
 	out := EngineCheck{Path: cfg.Path, Builtin: cfg.Path == ""}
 
-	s.mu.Lock()
-	session := s.engineSession()
-	s.mu.Unlock()
-
 	ctx, cancel := context.WithTimeout(context.Background(), engineConnectTimeout)
 	defer cancel()
-	info, err := session.Connect(ctx)
+	info, err := s.session().Connect(ctx)
 	if err != nil {
 		out.Error = err.Error()
 		s.logger.Warn("エンジンに繋げませんでした", "path", cfg.Path, "error", err)
@@ -157,9 +146,11 @@ func (s *AnalyzeService) CheckEngine() EngineCheck {
 	out.Name = info.Name
 	out.Options = info.Options
 	out.Applied = info.Applied
+	out.StartupMS = info.StartupMS
+	s.rememberEngine(info.Name)
 	s.logger.Info("エンジンに繋がりました",
 		"name", info.Name, "path", cfg.Path,
-		"options", info.Options, "applied", info.Applied)
+		"options", info.Options, "applied", info.Applied, "startupMs", info.StartupMS)
 	return out
 }
 
@@ -183,6 +174,11 @@ type AnalyzeProgress struct {
 	Progress analyze.Progress `json:"progress"`
 	// Done は最後の 1 通か。
 	Done bool `json:"done"`
+	// StartupMS は起動から `readyok` までの所要ミリ秒（**done のときだけ入る**）。
+	//
+	// **解析のたびに払っているコスト**なので画面に出す。これが見えないと、
+	// 遅いのが探索のせいなのか起動のせいなのか分からない。
+	StartupMS int64 `json:"startupMs"`
 }
 
 // AnalyzeFailure は解析が失敗したことの通知。
@@ -204,10 +200,11 @@ type AnalyzeState struct {
 	Engine string `json:"engine"`
 }
 
-// Start は今の局面の解析を始める。
+// Start は今の局面の解析を始める。**ここでエンジンを起こす。**
 //
-// seconds は考える秒数（0 以下なら analyze の既定）。**時間で打ち切っても、
-// それまでに完走した深さの評価値は出る**（設計原則3）。
+// seconds は考える秒数。**0 以下なら「止めるまで考え続ける」**（＝そのあいだ
+// エンジンも生きている）。時間で打ち切っても、それまでに完走した深さの評価値は出る
+// （設計原則3）。
 //
 // ⚠️ **局面が確定していなければエラー。** 手番か駒台の先後が未決だと SFEN が
 // 組み上がらない（決めていないことを勝手に決めない。設計原則5）。訂正 UI で
@@ -227,17 +224,23 @@ func (s *AnalyzeService) Start(seconds int) (AnalyzeState, error) {
 	s.seq++
 	seq := s.seq
 	ctx, cancel := context.WithCancel(context.Background())
-	s.cancel = cancel
-	// **設定が変わっていればここで繋ぎ直す。**
-	session := s.engineSession()
+	done := make(chan struct{})
+	s.cancel, s.done = cancel, done
 	s.mu.Unlock()
 
+	// **エンジンは解析のあいだだけ生きる。** 設定はここで読まれるので、
+	// 変えた結果が次の解析にそのまま効く（繋ぎ直しの判断が要らない）。
+	session := s.session()
+
+	// ⚠️ **seconds が 0 以下なら「止めるまで考え続ける」。**
+	// これが「ずっと解析していたい」の表し方で、そのあいだプロセスも生きている。
 	opt := analyze.Options{}
 	if seconds > 0 {
 		opt.Movetime = time.Duration(seconds) * time.Second
 	}
 
 	go func() {
+		defer close(done)
 		defer cancel()
 		defer s.finish(seq)
 
@@ -249,14 +252,17 @@ func (s *AnalyzeService) Start(seconds int) (AnalyzeState, error) {
 			s.emit("analyze:failed", AnalyzeFailure{Seq: seq, Error: err.Error()})
 			return
 		}
+		s.rememberEngine(res.Engine)
 		s.logger.Info("解析しました",
 			"engine", res.Engine, "sfen", sfen, "depth", res.Depth,
 			"best", res.Bestmove, "nodes", res.Nodes,
-			"elapsedMs", res.ElapsedMS, "stopped", res.Stopped)
-		s.emit("analyze:done", AnalyzeProgress{Seq: seq, Progress: res.Progress, Done: true})
+			"elapsedMs", res.ElapsedMS, "startupMs", res.StartupMS, "stopped", res.Stopped)
+		s.emit("analyze:done", AnalyzeProgress{
+			Seq: seq, Progress: res.Progress, Done: true, StartupMS: res.StartupMS,
+		})
 	}()
 
-	return AnalyzeState{Running: true, Seq: seq, SFEN: sfen, Engine: session.EngineName()}, nil
+	return AnalyzeState{Running: true, Seq: seq, SFEN: sfen, Engine: s.engineNameForDisplay()}, nil
 }
 
 // Stop は走っている解析を打ち切る。**打ち切っても評価値は出る**ので、
@@ -267,14 +273,14 @@ func (s *AnalyzeService) Stop() AnalyzeState {
 	if s.cancel != nil {
 		s.cancel()
 	}
-	return AnalyzeState{Running: s.cancel != nil, Seq: s.seq, Engine: s.engineName()}
+	return AnalyzeState{Running: s.cancel != nil, Seq: s.seq, Engine: s.lastEngine}
 }
 
 // State は今の状態を返す（何も始めない）。フロントの初期表示用。
 func (s *AnalyzeService) State() AnalyzeState {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return AnalyzeState{Running: s.cancel != nil, Seq: s.seq, Engine: s.engineName()}
+	return AnalyzeState{Running: s.cancel != nil, Seq: s.seq, Engine: s.lastEngine}
 }
 
 // finish は解析が終わったことを記録する。**自分より新しい解析が始まっていたら
@@ -283,8 +289,26 @@ func (s *AnalyzeService) finish(seq int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.seq == seq {
-		s.cancel = nil
+		s.cancel, s.done = nil, nil
 	}
+}
+
+// rememberEngine は最後に答えたエンジンの名前を覚える（表示用）。
+func (s *AnalyzeService) rememberEngine(name string) {
+	if name == "" {
+		return
+	}
+	s.mu.Lock()
+	s.lastEngine = name
+	s.mu.Unlock()
+}
+
+// engineNameForDisplay は最後に答えたエンジンの名前を返す（まだ無ければ空）。
+// **公開しない**（Service の公開メソッドは bindings に出てフロントの API になる）。
+func (s *AnalyzeService) engineNameForDisplay() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastEngine
 }
 
 func (s *AnalyzeService) emit(name string, data any) {
@@ -292,13 +316,4 @@ func (s *AnalyzeService) emit(name string, data any) {
 		return
 	}
 	s.app.Event.Emit(name, data)
-}
-
-// engineName は繋がっているエンジンの名前を返す。**ロックを取った状態で呼ぶこと。**
-// まだ繋いでいなければ空（表示のためだけなので、ここで繋ぎにいかない）。
-func (s *AnalyzeService) engineName() string {
-	if s.session == nil {
-		return ""
-	}
-	return s.session.EngineName()
 }

@@ -76,6 +76,11 @@ interface AnalyzeProgress {
   };
 }
 
+// 解析の結末（analyze:done のみ）。**起動にかかった時間は done でしか分からない。**
+interface AnalyzeDone extends AnalyzeProgress {
+  startupMs: number;
+}
+
 interface AnalyzeFailure {
   seq: number;
   error: string;
@@ -204,11 +209,13 @@ export function mountMainScreen(root: HTMLElement): void {
         <div id="analyze-row" class="analyze-row" hidden>
           <button id="analyze-run" class="ghost-btn" type="button">解析</button>
           <label class="analyze-time">
-            <select id="analyze-seconds" title="考える時間。途中で切っても、そこまでの評価値は出ます">
+            <select id="analyze-seconds"
+                    title="考える時間。途中で切っても、そこまでの評価値は出ます。「無制限」は停止するまで考え続けます（そのあいだエンジンは起動したままです）">
               <option value="1">1秒</option>
               <option value="3" selected>3秒</option>
               <option value="10">10秒</option>
               <option value="30">30秒</option>
+              <option value="0">無制限</option>
             </select>
           </label>
           <span id="analyze-meta" class="note"></span>
@@ -586,6 +593,8 @@ export function mountMainScreen(root: HTMLElement): void {
   // 答えたエンジンの名前。**何が出した評価値なのかは見せる**（繋ぎ先を差し替えられる以上、
   // 出所を伏せると比べようがない）。
   let analyzeEngine = "";
+  // 起動〜readyok にかかった時間（done で届く）。
+  let analyzeStartupMs = 0;
 
   const syncAnalyzeButton = () => {
     analyzeRun.textContent = analyzeRunning ? "停止" : "解析";
@@ -637,6 +646,11 @@ export function mountMainScreen(root: HTMLElement): void {
       parts.push(`${p.nodes.toLocaleString()} ノード`);
     }
     parts.push(`${(p.elapsedMs / 1000).toFixed(1)} 秒`);
+    // ⚠️ **起動の時間は解析のたびに払っている。** エンジンは 1 回の解析のあいだしか
+    // 生きないので、これが見えないと「遅い理由」が分からない。
+    if (analyzeStartupMs > 0) {
+      parts.push(`起動 ${(analyzeStartupMs / 1000).toFixed(1)} 秒`);
+    }
     if (analyzeEngine) {
       parts.push(analyzeEngine);
     }
@@ -648,12 +662,14 @@ export function mountMainScreen(root: HTMLElement): void {
     analyzeStatus.textContent = "";
     analyzeLines.replaceChildren();
     analyzeLines.hidden = true;
-    analyzeMeta.textContent = "考えています…";
+    analyzeMeta.textContent = "エンジンを起動しています…";
     try {
       const st = await AnalyzeService.Start(Number(analyzeSeconds.value) || 0);
       analyzeSeq = st.seq;
       analyzedSfen = st.sfen;
       analyzeEngine = st.engine;
+      // 起動の時間は今回の解析のもの。前回の値を持ち越さない。
+      analyzeStartupMs = 0;
       analyzeRunning = true;
     } catch (err) {
       clearAnalyzeResult();
@@ -692,11 +708,12 @@ export function mountMainScreen(root: HTMLElement): void {
     }
     showAnalyzeProgress(event.data.progress);
   });
-  Events.On("analyze:done", (event: { data: AnalyzeProgress }) => {
+  Events.On("analyze:done", (event: { data: AnalyzeDone }) => {
     if (event.data.seq !== analyzeSeq) {
       return;
     }
     analyzeRunning = false;
+    analyzeStartupMs = event.data.startupMs ?? 0;
     showAnalyzeProgress(event.data.progress);
     syncAnalyzeButton();
   });
@@ -1296,9 +1313,12 @@ export function mountMainScreen(root: HTMLElement): void {
           r.options > 0
             ? `option ${r.options} 件を宣言、${r.applied} 件を送信（既定値を含む）`
             : "option の宣言はありません";
+        // ⚠️ **起動の時間は解析のたびに払う**（エンジンは解析のあいだしか生きない）。
+        // 繋ぎ先を選ぶ材料になるので出しておく。
+        const startup = `起動 ${(r.startupMs / 1000).toFixed(1)} 秒（解析のたびにかかります）`;
         engineStatus.textContent = r.builtin
-          ? `同梱のエンジンに繋がりました（${r.name}）。${applied}。`
-          : `繋がりました: ${r.name} / ${applied}`;
+          ? `同梱のエンジンに繋がりました（${r.name}）。${applied}。${startup}。`
+          : `繋がりました: ${r.name} / ${applied} / ${startup}`;
       } catch (err) {
         engineStatus.textContent = `確認できませんでした: ${String(err instanceof Error ? err.message : err)}`;
         engineStatus.classList.add("is-error");
