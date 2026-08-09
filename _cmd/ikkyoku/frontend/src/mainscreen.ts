@@ -84,7 +84,15 @@ interface CaptureResult {
 interface AnalyzeLine {
   rank: number;
   score: { cp: number; mate: number; label: string };
+  // moves は USI 表記（"8h2b+"）。**手を辿るのに使うのはこちら。**
   moves: string[];
+  // text は日本語表記（"▲２二角成"）。**画面に出すのはこちら。**
+  //
+  // ⚠️ **フロントで組み立て直さないこと。** USI の手には駒種が書いていない
+  // （"8h2b+" のどこにも「角」が無い）ので、盤と突き合わせないと作れない。
+  // 変換は Go 側（core/kifu）が解析した局面から 1 手ずつ盤を進めて行っている。
+  // **moves と同じ長さ**で、変換できなかった手はその USI がそのまま入る。
+  text: string[];
 }
 
 interface AnalyzeProgress {
@@ -768,7 +776,14 @@ export function mountMainScreen(root: HTMLElement): void {
       moves.className = "analyze-moves";
       // ⚠️ **読み筋の長さはエンジン次第。** 自作 engine は 1 手しか返さないので、
       // 深い読み筋があるかのように見せないこと（無ければ何も出さない）。
-      moves.textContent = l.moves?.join(" ") ?? "";
+      //
+      // 出すのは日本語表記（text）。⚠️ **text が無いときに moves へ落とさないこと** ——
+      // Go 側は変換に失敗した手も USI のまま text に入れて返すので、text が空なのは
+      // 「読み筋そのものが無い」ときだけ。落とすと、古い Go と繋いだときに
+      // 静かに USI 表記へ戻る（気づけない）。
+      moves.textContent = l.text?.join(" ") ?? "";
+      // USI 表記はツールチップに残す（エンジンの出力をそのまま確かめたいとき用）。
+      moves.title = l.moves?.join(" ") ?? "";
 
       li.append(score, moves);
       analyzeLines.appendChild(li);

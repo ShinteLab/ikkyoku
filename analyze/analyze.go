@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ShinteLab/core/kifu"
 	"github.com/ShinteLab/core/sfen"
 	coreusi "github.com/ShinteLab/core/usi"
 	"github.com/ShinteLab/core/usi/client"
@@ -87,6 +88,15 @@ type Line struct {
 	// ⚠️ **自作 `engine` は 1 手しか返さない**（engine/TODO.md の 2）。
 	// **深い読み筋があるかのように出さないこと。**
 	Moves []string `json:"moves"`
+	// Text は読み筋の日本語表記（"▲２二角成" "△同　銀" …）。**画面に出すのはこちら。**
+	//
+	// 駒種は USI の手文字列に書いていない（"8h2b+" のどこにも「角」が無い）ので、
+	// **解析した局面から 1 手ずつ盤を進めて割り出している**（`core/kifu.FormatMoves`）。
+	// ⚠️ **フロントで組み立て直さないこと** —— 盤が要る変換なので、フロントには材料が無い。
+	//
+	// **Moves と必ず同じ長さ。** 変換できなかった手はその USI がそのまま入る
+	// （読み筋を丸ごと捨てないため。設計原則3）。
+	Text []string `json:"text"`
 }
 
 // Progress は反復深化の 1 段ぶんの途中経過。**深さが 1 つ終わるたびに届く。**
@@ -271,7 +281,7 @@ func (s *Session) Analyze(ctx context.Context, positionSFEN string, opt Options,
 	}
 
 	started := time.Now()
-	acc := &accumulator{black: black, started: started}
+	acc := &accumulator{black: black, started: started, sfen: strings.Join(fields, " ")}
 	res, err := eng.Analyze(ctx, strings.Join(fields, " "),
 		client.GoOptions{Movetime: opt.Movetime, MultiPV: opt.MultiPV},
 		func(in coreusi.Info) {
@@ -334,6 +344,9 @@ func (s *Session) dial(ctx context.Context) (*liveEngine, time.Duration, error) 
 type accumulator struct {
 	black   bool
 	started time.Time
+	// sfen は解析している局面（全体の SFEN）。**読み筋を日本語にするのに要る。**
+	// USI の手には駒種が書いていないので、ここから 1 手ずつ盤を進めて割り出す。
+	sfen string
 
 	mu    sync.Mutex
 	depth int
@@ -364,8 +377,31 @@ func (a *accumulator) add(in coreusi.Info) (Progress, bool) {
 	if rank <= 0 {
 		rank = 1
 	}
-	a.lines[rank] = Line{Rank: rank, Score: newScore(in, a.black), Moves: in.PV}
+	a.lines[rank] = Line{
+		Rank:  rank,
+		Score: newScore(in, a.black),
+		Moves: in.PV,
+		Text:  a.moveText(in.PV),
+	}
 	return a.progressLocked(), true
+}
+
+// moveText は読み筋を日本語表記にする。
+//
+// ⚠️ **エラーは握り潰す。** `kifu.FormatMoves` は読めなかった手をその USI のまま
+// 返してくれるので、**表記が作れなくても読み筋は必ず出る**（設計原則3）。
+// ここで解析そのものを失敗させるのは割に合わない ——
+// 評価値は正しく出ているのに、表記の都合で捨てることになる。
+func (a *accumulator) moveText(pv []string) []string {
+	if len(pv) == 0 {
+		return nil
+	}
+	texts, _ := kifu.FormatMoves(a.sfen, pv)
+	out := make([]string, 0, len(texts))
+	for _, t := range texts {
+		out = append(out, t.Text)
+	}
+	return out
 }
 
 func (a *accumulator) snapshot() Progress {

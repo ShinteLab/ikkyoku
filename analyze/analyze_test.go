@@ -266,6 +266,74 @@ func TestAccumulatorGroupsMultiPV(t *testing.T) {
 	}
 }
 
+// 読み筋は**日本語表記でも**返すこと。
+//
+// USI の手には駒種が書いていない（"8h2b+" のどこにも「角」が無い）ので、解析した
+// 局面から 1 手ずつ盤を進めて割り出す。⚠️ **開始局面を渡し忘れると全部おかしくなる**
+// のに、USI 表記のほうは正しいままなので画面を見ても気づきにくい。
+func TestAccumulatorNamesPV(t *testing.T) {
+	a := &accumulator{black: true, started: time.Now(), sfen: startpos}
+	a.add(coreusi.Info{
+		Depth: 3, MultiPV: 1, ScoreCP: 100, HasScore: true,
+		PV: []string{"7g7f", "3c3d", "8h2b+", "3a2b"},
+	})
+	p := a.snapshot()
+	if len(p.Lines) != 1 {
+		t.Fatalf("候補が %d 本", len(p.Lines))
+	}
+	want := []string{"▲７六歩", "△３四歩", "▲２二角成", "△同　銀"}
+	got := p.Lines[0].Text
+	if len(got) != len(want) {
+		t.Fatalf("Text = %q, want %q", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("Text[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+	// **USI 表記も残すこと**（手を辿るのに使うのはこちら）。
+	if len(p.Lines[0].Moves) != len(want) {
+		t.Errorf("Moves = %q（日本語にしたあとも USI を残すこと）", p.Lines[0].Moves)
+	}
+}
+
+// 後手番の局面から始まる読み筋でも記号が正しく付くこと。
+//
+// ⚠️ **先手番だけを前提にすると、半分の局面で ▲△ が入れ替わる。**
+func TestAccumulatorNamesPVFromWhite(t *testing.T) {
+	a := &accumulator{black: false, started: time.Now(),
+		sfen: "lnsgkgsnl/1r5b1/ppppppppp/9/9/2P6/PP1PPPPPP/1B5R1/LNSGKGSNL w - 2"}
+	a.add(coreusi.Info{Depth: 3, MultiPV: 1, ScoreCP: 10, HasScore: true, PV: []string{"3c3d"}})
+	p := a.snapshot()
+	if got := p.Lines[0].Text; len(got) != 1 || got[0] != "△３四歩" {
+		t.Errorf("Text = %q, want [△３四歩]", got)
+	}
+}
+
+// 表記にできない手があっても読み筋を捨てないこと（設計原則3）。
+//
+// **評価値は正しく出ているのに、表記の都合で候補ごと消えるのが一番困る。**
+func TestAccumulatorKeepsPVWhenNamingFails(t *testing.T) {
+	a := &accumulator{black: true, started: time.Now(), sfen: startpos}
+	// 5e は空マスなので名付けられない。
+	a.add(coreusi.Info{Depth: 3, MultiPV: 1, ScoreCP: 100, HasScore: true,
+		PV: []string{"7g7f", "5e5d"}})
+	p := a.snapshot()
+	if len(p.Lines) != 1 {
+		t.Fatalf("候補が消えています: %+v", p.Lines)
+	}
+	got := p.Lines[0].Text
+	if len(got) != 2 {
+		t.Fatalf("Text = %q, want 2 件", got)
+	}
+	if got[0] != "▲７六歩" {
+		t.Errorf("Text[0] = %q, want %q", got[0], "▲７六歩")
+	}
+	if got[1] != "5e5d" {
+		t.Errorf("Text[1] = %q（読めない手は USI のまま出すこと）", got[1])
+	}
+}
+
 // 評価値も詰みも無い行（info string など）で表示を動かさないこと。
 func TestAccumulatorIgnoresScorelessInfo(t *testing.T) {
 	a := &accumulator{black: true, started: time.Now()}
