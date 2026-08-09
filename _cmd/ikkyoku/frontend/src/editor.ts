@@ -1,4 +1,10 @@
-// 訂正 UI（Phase 5 の必須コンポーネント）。
+// 訂正 UI（Phase 5 の必須コンポーネント）。**訂正タブの中身。**
+//
+// ⚠️ **訂正モードのトグルは無い（2026-08-10）。訂正タブに居ること自体が訂正モード。**
+// 以前は盤面タブ 1 枚の中で「訂正する ⇄ 盤面を確定する」を切り替えており、
+// **同じ盤に「自由編集」と「確定した局面」の 2 つの意味**が乗っていた。タブを
+// 分けたので、出口は「この局面を解析する」（＝解析タブへ写しを渡す）だけになった。
+// **ここにモードを戻さないこと。**
 //
 // **「存在するはずの駒」を中心に回す。** 将棋の駒は先後合わせて枚数が決まっているので、
 // 「盤上に何枚あるか」ではなく「**あと何枚あるはずか**」を駒箱に出す。認識は
@@ -61,6 +67,13 @@ export interface EditorHandle {
   load(boardSFEN: string): Promise<void>;
   // clear は局面が無い状態に戻す（撮る前の表示）。
   clear(): void;
+  // relayout は盤に重ねるグリッドを置き直す。
+  //
+  // ⚠️ **訂正タブを開いた瞬間に呼ぶこと。** グリッドの位置は `getScreenCTM()` で
+  // 測っているが、**`display: none` の中では CTM が取れない**（隠れているパネルの
+  // 中では null が返る）。タブで隠している以上、開いたときに測り直さないと
+  // グリッドが出ないか、前回の大きさのまま残って**1 マスずれたところを編集する**。
+  relayout(): void;
 }
 
 export interface EditorOptions {
@@ -77,18 +90,19 @@ export interface EditorOptions {
   resetButton: HTMLButtonElement;
   // onState は操作のたびに呼ばれる。盤・SFEN・警告の表示は呼び出し側（mainscreen）が持つ。
   onState(state: EditState | null): void;
-  // onEditing は訂正モードの出入りで呼ばれる。**訂正中だけ出すもの**（撮った画像の
-  // 参照表示など）を呼び出し側が出し入れするための通知で、ここが状態を持つわけではない。
+  // onConfirm は「この局面を解析する」が押されたときに呼ばれる。
   //
-  // ⚠️ **この中で盤の横幅を変える要素を出し入れすると盤の位置が動く。** 呼ぶのは
-  // layoutGrid() の前で、位置合わせがそのあとに走ることを前提にしている。
-  onEditing?(editing: boolean): void;
+  // **訂正タブの唯一の出口。** ここから先（確定した局面を解析タブへ渡す・タブを
+  // 移る）は呼び出し側（mainscreen）の仕事で、**この UI は確定の可否を判定しない**
+  // （手番や駒台の先後が未決かどうかは Go 側の StudyService.Adopt が言う。
+  // フロントで同じ判定を書くと 2 か所に散る）。
+  onConfirm(): void;
   // onError は操作が通らなかったときの理由（「移動元が空マスです」など）。
   onError(message: string): void;
 }
 
 export function mountEditor(opts: EditorOptions): EditorHandle {
-  const { stage, panel, handSlots, resetButton: resetBtn, onState, onEditing, onError } = opts;
+  const { stage, panel, handSlots, resetButton: resetBtn, onState, onConfirm, onError } = opts;
 
   // ---- 盤に重ねるグリッド -------------------------------------------------
   //
@@ -173,16 +187,18 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   observer.observe(stage);
   window.addEventListener("resize", layoutGrid);
 
+  // ⚠️ **「訂正する」のトグルは置かない。** 訂正タブに居ること自体が訂正モード。
+  // ここに要るのは出口（＝確定して解析タブへ渡す）だけ。
   panel.innerHTML = `
     <div class="edit-bar">
-      <button id="edit-toggle" class="ghost-btn" type="button" aria-pressed="false">訂正する</button>
+      <button id="edit-confirm" class="ghost-btn is-primary" type="button">この局面を解析する</button>
       <span class="edit-hint">
         盤 ⇄ 駒台をドラッグ（外すと同時に持ち主が決まる） /
         「足りない駒」から盤へドラッグして置く /
         右クリックで先後と成・不成を切り替え
       </span>
     </div>
-    <div id="edit-body" class="edit-body" hidden>
+    <div id="edit-body" class="edit-body">
       <div class="edit-meta">
         <span class="field-label">手番</span>
         <div class="turn-group" role="group" aria-label="手番">
@@ -221,43 +237,36 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   handSlots.missing.appendChild(missing);
   const missingChips = missing.querySelector<HTMLDivElement>(".missing-chips")!;
 
-  const toggle = panel.querySelector<HTMLButtonElement>("#edit-toggle")!;
+  const confirmBtn = panel.querySelector<HTMLButtonElement>("#edit-confirm")!;
   const body = panel.querySelector<HTMLDivElement>("#edit-body")!;
   const handZones = [handZone(true), handZone(false)];
   const moveNum = panel.querySelector<HTMLInputElement>("#edit-movenum")!;
   const turnBtns = Array.from(panel.querySelectorAll<HTMLButtonElement>(".turn-btn"));
 
   let state: EditState | null = null;
-  let editing = false;
+  // editable は「局面を読み込んでいるか」。**訂正モードのフラグではない**
+  // （訂正タブに居ること自体が訂正モードなので、モードは無い）。
+  // 撮る前は盤も駒台も無いので、ドラッグ類を全部止めるために要る。
+  let editable = false;
 
-  const setEditing = (on: boolean) => {
-    editing = on && !!state?.loaded;
-    toggle.classList.toggle("is-active", editing);
-    toggle.setAttribute("aria-pressed", String(editing));
-    // **「やめる」ではなく「確定する」。** 訂正は撮ったあとの既定の状態で、
-    // 出口は「この局面でよい」と決めること（そこから先が解析・検討）。
-    toggle.textContent = editing ? "盤面を確定する" : "訂正する";
-    toggle.title = editing
-      ? "この局面でよければ確定します（あとから訂正し直せます）"
-      : "盤面を直します";
-    body.hidden = !editing;
-    stage.classList.toggle("is-editing", editing);
-    grid.classList.toggle("is-active", editing);
-    // **駒台は訂正をやめても出したままにする。** 駒台は局面の一部（どちらが何を
-    // 持っているか）であって訂正の道具ではないので、見えなくなると局面が読めない。
-    // 出し入れするのはドラッグの受け付けだけ（.is-static）。
-    const loaded = !!state?.loaded;
-    handSlots.black.hidden = !loaded;
-    handSlots.white.hidden = !loaded;
-    handSlots.black.classList.toggle("is-static", !editing);
-    handSlots.white.classList.toggle("is-static", !editing);
-    // 「足りない駒」は**訂正のための置き場**なので、訂正中だけ出す
-    // （駒台と違い、局面の一部ではない）。
-    handSlots.missing.hidden = !loaded || !editing;
-    // 撮った画像の参照表示など、訂正中だけ出るものを呼び出し側に出し入れさせる。
-    // **layoutGrid より先に呼ぶ**（盤の左に列が増えると盤の位置が動くため）。
-    onEditing?.(editing);
-    // 駒台や参照画像の出し入れで盤の位置が動く（グリッドの並びが変わる）。
+  // syncLoaded は局面の有無だけで見た目を決める。
+  //
+  // **駒台も「足りない駒」も、読み込んでいれば常に出す。** 以前は訂正モードの
+  // 出入りで畳んでいたが、モードが無くなったので出しっぱなしでよい
+  // （駒台は局面の一部、足りない駒は訂正タブ専用の置き場）。
+  const syncLoaded = () => {
+    editable = !!state?.loaded;
+    confirmBtn.disabled = !editable;
+    confirmBtn.title = editable
+      ? "この局面を解析タブへ渡します（あとから訂正タブに戻って直せます）"
+      : "まだ局面がありません";
+    body.hidden = !editable;
+    stage.classList.toggle("is-editing", editable);
+    grid.classList.toggle("is-active", editable);
+    handSlots.black.hidden = !editable;
+    handSlots.white.hidden = !editable;
+    handSlots.missing.hidden = !editable;
+    // 駒台や足りない駒の出し入れで盤の位置が動く（グリッドの並びが変わる）。
     layoutGrid();
   };
 
@@ -280,13 +289,12 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   function render(next: EditState) {
     state = next;
     if (!next.loaded) {
-      setEditing(false);
-      toggle.disabled = true;
+      syncLoaded();
       resetBtn.hidden = true;
       onState(null);
       return;
     }
-    toggle.disabled = false;
+    syncLoaded();
     resetBtn.hidden = !next.dirty;
 
     for (let i = 0; i < cells.length; i++) {
@@ -425,7 +433,7 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
 
   grid.addEventListener("dragstart", (e) => {
     const el = (e.target as HTMLElement)?.closest<HTMLElement>(".edit-cell");
-    if (!editing || !el || el.classList.contains("is-empty")) {
+    if (!editable || !el || el.classList.contains("is-empty")) {
       e.preventDefault();
       return;
     }
@@ -443,7 +451,7 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   });
 
   grid.addEventListener("dragover", (e) => {
-    if (!editing || !e.dataTransfer?.types.includes(DRAG_TYPE)) {
+    if (!editable || !e.dataTransfer?.types.includes(DRAG_TYPE)) {
       return;
     }
     e.preventDefault();
@@ -459,7 +467,7 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   });
 
   grid.addEventListener("drop", (e) => {
-    if (!editing) {
+    if (!editable) {
       return;
     }
     e.preventDefault();
@@ -491,7 +499,7 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   // 覚えずに済む。認識は**駒の向きも "+" も外す**ので、どちらも同じ頻度で要る。
   grid.addEventListener("contextmenu", (e) => {
     const el = (e.target as HTMLElement)?.closest<HTMLElement>(".edit-cell");
-    if (!editing || !el || el.classList.contains("is-empty")) {
+    if (!editable || !el || el.classList.contains("is-empty")) {
       return;
     }
     e.preventDefault();
@@ -504,7 +512,7 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   // **盤から先後を決めずに外すドロップ先**でもある。
   missing.addEventListener("dragstart", (e) => {
     const chip = (e.target as HTMLElement)?.closest<HTMLElement>(".stock-chip");
-    if (!editing || !chip) {
+    if (!editable || !chip) {
       e.preventDefault();
       return;
     }
@@ -532,7 +540,7 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
 
     zone.addEventListener("dragstart", (e) => {
       const chip = (e.target as HTMLElement)?.closest<HTMLElement>(".stock-chip");
-      if (!editing || !chip) {
+      if (!editable || !chip) {
         e.preventDefault();
         return;
       }
@@ -561,7 +569,7 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   // handler が null を返したら何もしない。
   function makeDropZone(el: HTMLElement, handler: (data: Drag) => Promise<EditState> | null) {
     el.addEventListener("dragover", (e) => {
-      if (!editing || !e.dataTransfer?.types.includes(DRAG_TYPE)) {
+      if (!editable || !e.dataTransfer?.types.includes(DRAG_TYPE)) {
         return;
       }
       e.preventDefault();
@@ -575,7 +583,7 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
       }
     });
     el.addEventListener("drop", (e) => {
-      if (!editing) {
+      if (!editable) {
         return;
       }
       e.preventDefault();
@@ -617,19 +625,9 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
 
   // ---- 手番・手数・トグル -------------------------------------------------
 
-  // 確定するとき、局面としてまだ足りないものがあれば知らせる。
-  // **止めはしない**（設計原則3。決められないまま盤だけ見たい場面はある）。
-  toggle.addEventListener("click", () => {
-    const confirming = editing;
-    setEditing(!editing);
-    if (confirming && state?.loaded && !state.sfen) {
-      onError(
-        state.turn === TURN_UNKNOWN
-          ? "手番が決まっていないので、まだ局面として確定していません。"
-          : "駒台の先後が決まっていないので、まだ局面として確定していません。",
-      );
-    }
-  });
+  // 訂正タブの唯一の出口。**可否の判定はここでしない**（Go 側の
+  // StudyService.Adopt が言う。フロントで同じ判定を書くと 2 か所に散る）。
+  confirmBtn.addEventListener("click", () => onConfirm());
 
   resetBtn.addEventListener("click", () => {
     void apply(() => PositionService.Reset());
@@ -655,18 +653,16 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   });
 
   return {
-    // 撮ったら**訂正モードで始まる**。認識結果はまず直すものなので、そこが既定の
-    // 状態（「訂正する」を押させない）。読むだけにしたければ止められる。
     async load(boardSFEN: string) {
       await apply(() => PositionService.Load(boardSFEN));
-      setEditing(true);
+      syncLoaded();
     },
     clear() {
       state = null;
-      setEditing(false);
-      toggle.disabled = true;
+      syncLoaded();
       resetBtn.hidden = true;
       onState(null);
     },
+    relayout: layoutGrid,
   };
 }

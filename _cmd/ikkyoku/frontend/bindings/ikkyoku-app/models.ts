@@ -320,6 +320,55 @@ export interface RecognizerStatus {
 }
 
 /**
+ * StudyState は解析タブが描くのに要るもの一式。
+ * 
+ * **EditState とは別の型にしてある。** 見た目が似ていても中身の意味が違う
+ * （あちらは「直している最中の局面」、こちらは「確定した局面」）ので、
+ * 片方の型をもう片方に流用しない。訂正の道具（在庫の負の値・足りない駒）は
+ * ここには要らない。
+ */
+export interface StudyState {
+    /**
+     * Loaded はまだ何も採っていなければ false。
+     */
+    "loaded": boolean;
+
+    /**
+     * BoardSFEN は盤面部分の SFEN。盤を描くのに使う。
+     */
+    "boardSfen": string;
+
+    /**
+     * SFEN は局面全体の SFEN。**確定しているので必ず埋まる**
+     * （Adopt が確定していない局面を断るため）。
+     */
+    "sfen": string;
+
+    /**
+     * Turn は 1=先手番 / 2=後手番（0 は Loaded == false のときだけ）。
+     */
+    "turn": number;
+    "turnLabel": string;
+
+    /**
+     * MoveNumber は SFEN の数え方の手数（0 は不明）。
+     */
+    "moveNumber": number;
+
+    /**
+     * Hands は駒台。**訂正タブと違い未決は残っていない**（確定した局面なので）。
+     */
+    "hands": position$0.Stock[] | null;
+
+    /**
+     * Warnings は局面として成立していない点。**確定を止めはしない**
+     * （詰将棋のような「論理的におかしくても正しい」局面があるため。設計原則3）。
+     * 解析タブでも出しておくのは、変な評価値が出たときの手掛かりになるから。
+     */
+    "warnings": string[] | null;
+}
+
+/**
  * TrainingSendResult は登録の結果。
  */
 export interface TrainingSendResult {

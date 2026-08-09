@@ -3,32 +3,49 @@
 // 撮った画像から割り出した盤面・SFEN・警告を出す画面。起動時は非表示で、最初の
 // キャプチャで現れる。**この画面を閉じるとアプリが終了する**(枠を閉じても終了しない)。
 //
-// 画面は 3 タブ(盤面 / デバッグ / 設定)。
+// 画面は 5 タブ(入力 / 訂正 / 解析 / デバッグ / 設定)。**2026-08-10 に 3 タブから
+// 割った**(以前は「盤面」1 枚の中で訂正モードをトグルしていた)。
 //
-// **盤面タブはこのアプリの作業場所。** 今は撮った局面を見るだけだが、ここが
-// **訂正 → 決定 → 局面をいじる → その評価値を見る**を行う面になる
-// (Phase 3 の局面矯正、Phase 5 の検討 UI)。
+// ⚠️ **訂正タブと解析タブは別の局面を持っている。** Go 側も 2 つに分かれており
+// (PositionService / StudyService)、繋がるのは「この局面を解析する」を押した
+// ときの 1 回だけ(写しを渡す)。**片方の値をもう片方に流用しないこと。**
 //
-// デバッグタブに寄せてあるのは**認識精度を追うための情報**(認識器の状態・検出の
-// 信頼度・盤面領域・推論器・保存先・撮った画像)。**盤面タブから外したのはこれらで
-// あって、「項目を足すな」ではない。** 置き場所は「局面を読む・直す・動かすのに要るか
-// (盤面)」「認識がどれくらい外したかを見るものか(デバッグ)」で決める。
+//   入力   … 局面を**取り込む**面。今はキャプチャだけ。今後 SFEN / KIF / 画像ファイル
+//            (画像は認識を通るので訂正タブへ、SFEN/KIF は確定済みなので解析タブへ)
+//   訂正   … 認識の誤りを**直す**面。**ここに居ること自体が訂正モード**
+//            (自由編集・合法性を問わない・手番も駒台の先後も未決でよい)
+//   解析   … **確定した局面**の面。評価値を出し、今後ここに手順と分岐ツリーが乗る
+//            (合法手だけを辿る)
+//   デバッグ … **認識精度を追う**面(認識器の状態・検出の信頼度・盤面領域・推論器・
+//            保存先・撮った画像)。局面そのものの話ではないものはここ
+//   設定   … 設定
 //
-// **駒台と警告は両方に出す。** デバッグ側では「認識がどれくらい外したか」だが、
-// 盤面側では**局面を直すために要る情報**(駒台の枚数は駒数保存則の逆算そのもの、
-// 警告は「どこが怪しいか」の提示)。同じ値でも読む目的が違う。
+// 足す項目がどこに載るかはこの区分で決める。**「項目を足すな」ではない。**
 //
-// **撮る操作はここには置かない。** 撮るのは盤に枠を合わせている最中の操作なので、
-// 枠のツールバーとホットキーで完結する。ここは撮れたものを見る側。
+// **駒台と警告は訂正タブとデバッグタブの両方に出す。** デバッグ側では「認識が
+// どれくらい外したか」の記録(訂正しても変わらない)だが、訂正側では**局面を直すために
+// 要る情報**(駒台の枚数は駒数保存則の逆算そのもの、警告は「どこが怪しいか」の提示)。
+// 同じ見た目でも**出所が違う**ので、片方の更新をもう片方に流用しないこと。
+//
+// **撮る操作そのものはここには置かない。** 撮るのは盤に枠を合わせている最中の操作
+// なので、枠のツールバーとホットキーで完結する。入力タブに置いてあるのは
+// その入口(枠を出す・盤に合わせる)と、撮れた結果の表示。
 //
 // 枠(frame.ts)とは別ウィンドウなので、ここに置いた要素はキャプチャに写り込まない
 // ——ただし**枠に重なる位置に動かすと写り込む**(画面の合成結果を撮るため)。初回だけ
 // Go 側が枠の外へ逃がす(captureservice.go の placeMainBesideFrame)。
 import { Clipboard, Events } from "@wailsio/runtime";
 import { FiCopy, FiImage } from "react-icons/fi";
-import { AnalyzeService, CaptureService, SettingsService, TrainingService } from "../bindings/ikkyoku-app";
+import {
+  AnalyzeService,
+  CaptureService,
+  SettingsService,
+  StudyService,
+  TrainingService,
+} from "../bindings/ikkyoku-app";
 import { iconMarkup } from "./icon";
 import { mountEditor } from "./editor";
+import type { StudyState } from "../bindings/ikkyoku-app/models";
 import type { Stock } from "../bindings/github.com/ShinteLab/ikkyoku/position/models";
 // 認識の観測情報。**型を手で書き写さない**(Go 側は suteme の型をそのまま通しており、
 // ここで別に定義すると矩形の意味がずれても気づけない)。
@@ -145,8 +162,12 @@ export function mountMainScreen(root: HTMLElement): void {
     <div class="main-screen">
       <div class="main-toolbar">
         <div class="tabs" role="tablist">
-          <button id="tab-board" class="tab is-active" type="button"
-                  role="tab" aria-selected="true" aria-controls="panel-board">盤面</button>
+          <button id="tab-input" class="tab is-active" type="button"
+                  role="tab" aria-selected="true" aria-controls="panel-input">入力</button>
+          <button id="tab-edit" class="tab" type="button"
+                  role="tab" aria-selected="false" aria-controls="panel-edit">訂正</button>
+          <button id="tab-study" class="tab" type="button"
+                  role="tab" aria-selected="false" aria-controls="panel-study">解析</button>
           <button id="tab-debug" class="tab" type="button"
                   role="tab" aria-selected="false" aria-controls="panel-debug">デバッグ</button>
           <button id="tab-settings" class="tab" type="button"
@@ -157,7 +178,32 @@ export function mountMainScreen(root: HTMLElement): void {
         <button id="show-frame-btn" class="ghost-btn" type="button">枠を表示</button>
       </div>
 
-      <div id="panel-board" class="panel is-active" role="tabpanel" aria-labelledby="tab-board">
+      <!-- 入力タブ。**局面を取り込む面。** 今はキャプチャだけだが、ここに
+           SFEN・KIF・画像ファイルの入口が並ぶ（そのとき行き先が分かれる:
+           画像は認識を通るので訂正タブへ、SFEN/KIF は確定済みなので解析タブへ）。 -->
+      <div id="panel-input" class="panel is-active" role="tabpanel" aria-labelledby="tab-input">
+        <div class="setting-group">
+          <span class="setting-title">画面から撮る</span>
+          <span class="setting-note">
+            ガイド枠を中継の盤面に合わせて、枠のツールバーのカメラ、または
+            <span class="hotkey-hint">Alt+S</span> を押します。
+            撮ると<strong>訂正タブ</strong>が開きます。
+          </span>
+          <div class="setting-fields">
+            <button id="input-show-frame" class="ghost-btn" type="button">枠を表示</button>
+            <button id="input-fit" class="ghost-btn" type="button"
+                    title="画面から盤を探して、ガイド枠を合わせます">盤に合わせる</button>
+          </div>
+        </div>
+        <p id="status" class="status" role="status" aria-live="polite">
+          ガイド枠を盤面に合わせて撮影してください。
+        </p>
+      </div>
+
+      <!-- 訂正タブ。**認識の誤りを直す面。ここに居ること自体が訂正モード**
+           （2026-08-10。以前は盤面タブ 1 枚の中でトグルしていた）。
+           出口は「この局面を解析する」だけで、押すと解析タブへ写しが渡る。 -->
+      <div id="panel-edit" class="panel" role="tabpanel" aria-labelledby="tab-edit">
         <!-- 上段。左に警告、右に「認識結果に戻す」。
              局面として成立していない点は**盤より上に出す**(訂正しながら見るものなので、
              盤の下だと見落とすし、件数で下の行が動く)。中身は**今の局面**(EditState)の
@@ -200,11 +246,63 @@ export function mountMainScreen(root: HTMLElement): void {
           <p id="board-placeholder" class="board-placeholder">まだ撮っていません。</p>
         </div>
         <div id="editor" class="editor"></div>
-        <!-- エンジン解析（Phase 4）。**確定した局面にだけかかる。**
-             手番と駒台の先後が決まらないと SFEN が組み上がらないので、それまでは
-             ボタンを押せなくして理由を出す（決めていないことを勝手に決めない。設計原則5）。
+        <p id="edit-status" class="status" role="status" aria-live="polite"></p>
+        <!-- 訂正した局面を suteme の学習データとして送る。設定で有効にしていない
+             ときは行ごと出さない。**押したときだけ送る**(自動送信はしない)。
 
-             ⚠️ **局面を直したら結果を消す。** 評価値は「その局面の」値なので、
+             ⚠️ **確定を待たない。** 送るのは labelSfen（未確定でも持ち駒を
+             落とさない画像ラベル用の SFEN）なので、手番や駒台の先後が決まって
+             いなくても学習の役には立つ（設計原則3）。何が落ちるかは note に出る。 -->
+        <div id="train-row" class="train-row" hidden>
+          <button id="train-send" class="ghost-btn" type="button"
+                  title="この画像と訂正した盤面を、suteme の学習データとして登録します">訂正データを送信</button>
+          <!-- 送る SFEN のために妥協した点(手番が未決・先後未決の持ち駒)。
+               **送る前に出す**(何が落ちるか分からないまま送らせない)。 -->
+          <span id="train-note" class="note is-caution"></span>
+          <span id="train-send-status" class="note"></span>
+        </div>
+        <div class="sfen-row">
+          <span class="field-label">SFEN</span>
+          <code id="sfen" class="sfen">-</code>
+        </div>
+        <!-- 駒台。**訂正中の局面の値**なので先後の割り振りが出る
+             (デバッグタブ側は認識した時点の推定枚数で「先後不明」のまま)。
+             訂正中は盤の脇に駒そのものが並ぶので、こちらは文字の要約。 -->
+        <div id="board-hand-row" class="hand-row" hidden>
+          <span class="field-label">駒台</span>
+          <span id="board-hand" class="hand"></span>
+        </div>
+      </div>
+
+      <!-- 解析タブ。**確定した局面の面。** 訂正タブとは別の局面を持つ
+           （Go 側も PositionService / StudyService の 2 つに分かれている）。
+
+           ⚠️ **ここに訂正の道具を置かないこと。** 駒を自由に置ける盤は
+           「まだ決めていない局面」で、その評価値には意味が無い。直したくなったら
+           訂正タブへ戻る（戻ると解析結果は捨てる。別の局面の話になるため）。
+
+           **これから**: 手を進める UI（合法手だけ・1 手ごとに手番が入れ替わる）と
+           分岐ツリーがここに乗る。 -->
+      <div id="panel-study" class="panel" role="tabpanel" aria-labelledby="tab-study" hidden>
+        <div class="board-head">
+          <ul id="study-warnings" class="warnings is-compact" hidden></ul>
+          <button id="study-back" class="ghost-btn" type="button" hidden
+                  title="訂正タブへ戻ります。解析の結果は捨てられます">訂正に戻る</button>
+        </div>
+        <div class="board-area">
+          <div id="study-stage" class="board-stage">
+            <shogi-board id="study-board" hidden></shogi-board>
+          </div>
+          <p id="study-placeholder" class="board-placeholder">
+            訂正タブで「この局面を解析する」を押すと、ここに局面が出ます。
+          </p>
+        </div>
+        <!-- エンジン解析（Phase 4）。**確定した局面にだけかかる。**
+             確定していない局面はそもそもこのタブに来ない（Go 側の
+             StudyService.Adopt が断る）ので、ここでの「押せない理由」は
+             「まだ何も採っていない」だけになった。
+
+             ⚠️ **局面を採り直したら結果を消す。** 評価値は「その局面の」値なので、
              盤が変わったあとも残っていると、別の局面の値を今の盤の評価だと読ませる。 -->
         <div id="analyze-row" class="analyze-row" hidden>
           <button id="analyze-run" class="ghost-btn" type="button">解析</button>
@@ -226,27 +324,13 @@ export function mountMainScreen(root: HTMLElement): void {
              次善手を辿るのが構想の中心なので、ここが複数本になるのが前提の作り。 -->
         <ol id="analyze-lines" class="analyze-lines" hidden></ol>
         <p id="analyze-status" class="note is-caution" hidden></p>
-        <!-- 訂正した局面を suteme の学習データとして送る。**確定してから出す**
-             (訂正の途中の盤面を送る意味が無い)。設定で有効にしていないときは
-             行ごと出さない。**押したときだけ送る**(自動送信はしない)。 -->
-        <div id="train-row" class="train-row" hidden>
-          <button id="train-send" class="ghost-btn" type="button"
-                  title="この画像と訂正した盤面を、suteme の学習データとして登録します">訂正データを送信</button>
-          <!-- 送る SFEN のために妥協した点(手番が未決・先後未決の持ち駒)。
-               **送る前に出す**(何が落ちるか分からないまま送らせない)。 -->
-          <span id="train-note" class="note is-caution"></span>
-          <span id="train-send-status" class="note"></span>
-        </div>
         <div class="sfen-row">
           <span class="field-label">SFEN</span>
-          <code id="sfen" class="sfen">-</code>
+          <code id="study-sfen" class="sfen">-</code>
         </div>
-        <!-- 駒台。**訂正中の局面の値**なので先後の割り振りが出る
-             (デバッグタブ側は認識した時点の推定枚数で「先後不明」のまま)。
-             訂正中は盤の脇に駒そのものが並ぶので、こちらは文字の要約。 -->
-        <div id="board-hand-row" class="hand-row" hidden>
+        <div id="study-hand-row" class="hand-row" hidden>
           <span class="field-label">駒台</span>
-          <span id="board-hand" class="hand"></span>
+          <span id="study-hand" class="hand"></span>
         </div>
       </div>
 
@@ -275,9 +359,6 @@ export function mountMainScreen(root: HTMLElement): void {
           <span class="note">先後不明</span>
         </div>
         <ul id="warnings" class="warnings" hidden></ul>
-        <p id="status" class="status" role="status" aria-live="polite">
-          ガイド枠を盤面に合わせて撮影してください。
-        </p>
 
         <div class="debug-shot">
           <div class="debug-shot-head">
@@ -423,19 +504,29 @@ export function mountMainScreen(root: HTMLElement): void {
   const predictorRow = root.querySelector<HTMLDivElement>("#predictor-row")!;
   const predictorOut = root.querySelector<HTMLElement>("#predictor")!;
 
-  // タブ。盤面タブは局面を扱う面(盤・SFEN・駒台・警告。今後ここに訂正と検討が乗る)、
-  // デバッグタブは認識精度を追うための面(認識器の状態・信頼度・撮った画像)。
-  // 足す項目がどちらに載るかはこの基準で決める。盤はできるだけ大きく見せたいので、
+  // タブは 5 枚。**局面を扱う面が「訂正」と「解析」の 2 つに分かれている**のが要点で、
+  // 持っている局面も別物（Go 側の PositionService / StudyService）。
+  //
+  //   入力     … 局面を取り込む（キャプチャ。今後 SFEN / KIF / 画像ファイル）
+  //   訂正     … 認識の誤りを直す。**自由編集**（合法性を問わない・未決でよい）
+  //   解析     … 確定した局面。**手を選んで進める**面（合法手だけ。手順 UI はこれから）
+  //   デバッグ … 認識精度を追う（認識器の状態・信頼度・撮った画像）
+  //   設定     … 設定
+  //
+  // 足す項目がどこに載るかはこの区分で決める。盤はできるだけ大きく見せたいので、
   // 盤の周りに積む行は短く保つこと。
   //
-  // 隠すのは表示だけで、両方のパネルの中身は常に更新する(タブを切り替えた瞬間に
+  // 隠すのは表示だけで、パネルの中身は常に更新する(タブを切り替えた瞬間に
   // 古い内容が出ることが無いように)。
-  const tabs: { tab: HTMLButtonElement; panel: HTMLElement }[] = [
-    { tab: root.querySelector<HTMLButtonElement>("#tab-board")!, panel: root.querySelector<HTMLElement>("#panel-board")! },
-    { tab: root.querySelector<HTMLButtonElement>("#tab-debug")!, panel: root.querySelector<HTMLElement>("#panel-debug")! },
-    { tab: root.querySelector<HTMLButtonElement>("#tab-settings")!, panel: root.querySelector<HTMLElement>("#panel-settings")! },
-  ];
-  const debugTab = tabs[1].tab;
+  const tabOf = (name: string) => ({
+    tab: root.querySelector<HTMLButtonElement>(`#tab-${name}`)!,
+    panel: root.querySelector<HTMLElement>(`#panel-${name}`)!,
+  });
+  const tabs = ["input", "edit", "study", "debug", "settings"].map(tabOf);
+  const inputTab = tabs[0].tab;
+  const editTab = tabs[1].tab;
+  const studyTab = tabs[2].tab;
+  const debugTab = tabs[3].tab;
 
   const selectTab = (target: HTMLButtonElement) => {
     for (const { tab, panel } of tabs) {
@@ -447,6 +538,12 @@ export function mountMainScreen(root: HTMLElement): void {
     }
     if (target === debugTab) {
       debugTab.classList.remove("has-warn", "has-error");
+    }
+    // ⚠️ **隠れているパネルの中では盤に重ねるグリッドの位置が測れない**
+    // （`getScreenCTM()` が null を返す）。開いた瞬間に測り直さないと、
+    // グリッドが出ないか前回の大きさのまま残り、1 マスずれたところを編集する。
+    if (target === editTab) {
+      editor.relayout();
     }
   };
 
@@ -493,12 +590,14 @@ export function mountMainScreen(root: HTMLElement): void {
   // 出す条件は「訂正中」かつ「画像がある」の両方。撮る前と、確定したあとは畳む。
   const captureRef = root.querySelector<HTMLDivElement>("#capture-ref")!;
   const captureRefImg = root.querySelector<HTMLImageElement>("#capture-ref-img")!;
-  let editingNow = false;
   // 画像の有無は自前で覚える。**`img.src` は空文字を入れてもページの URL に解決される**
   // ので、要素から「画像が入っているか」は読めない。
+  //
+  // **訂正タブに居るあいだは常に出す**（タブそのものが訂正モードなので、
+  // 以前の「訂正中だけ」という条件は画像の有無だけになった）。
   let hasShot = false;
   const syncCaptureRef = () => {
-    captureRef.hidden = !editingNow || !hasShot;
+    captureRef.hidden = !hasShot;
   };
 
   // ---- 訂正データの送信（suteme への還元） --------------------------------
@@ -524,7 +623,7 @@ export function mountMainScreen(root: HTMLElement): void {
   let lastRegion: { x1: number; y1: number; x2: number; y2: number } | null = null;
 
   const syncTrain = () => {
-    const ready = !editingNow && editLoaded && !!shotFullPath && !!lastRegion;
+    const ready = editLoaded && !!shotFullPath && !!lastRegion;
     trainRow.hidden = !trainEnabled || !ready;
     if (trainRow.hidden) {
       return;
@@ -568,16 +667,17 @@ export function mountMainScreen(root: HTMLElement): void {
     void sendTraining();
   });
 
-  // ---- エンジン解析（Phase 4） --------------------------------------------
+  // ---- エンジン解析（Phase 4）。**解析タブの中身。** --------------------------
   //
-  // **確定した局面にだけかかる。** 手番か駒台の先後が未決だと SFEN が組み上がらず、
-  // Go 側が始める前に断る（決めていないことを勝手に決めない。設計原則5）。
+  // **確定した局面にだけかかる。** 確定していない局面はそもそも解析タブに来ない
+  // （Go 側の StudyService.Adopt が断る）ので、以前あった「訂正中は押せない」という
+  // 判定はフロントから消えた —— **タブを分けたことで構造上そこに手が届かない。**
   //
   // 反復深化なので**深さが 1 つ終わるたびに答えが更新される**。終わるまで黙って
   // いると数秒固まって見えるので、途中経過をそのまま出して育つ様子を見せる。
   //
-  // ⚠️ **局面を直したら結果を消す。** 評価値は「その局面の」値で、盤が変わったあとも
-  // 残っていると別の局面の値を今の盤の評価として読ませることになる。
+  // ⚠️ **局面を採り直したら結果を消す。** 評価値は「その局面の」値で、盤が変わった
+  // あとも残っていると別の局面の値を今の盤の評価として読ませることになる。
   const analyzeRow = root.querySelector<HTMLDivElement>("#analyze-row")!;
   const analyzeRun = root.querySelector<HTMLButtonElement>("#analyze-run")!;
   const analyzeSeconds = root.querySelector<HTMLSelectElement>("#analyze-seconds")!;
@@ -591,12 +691,12 @@ export function mountMainScreen(root: HTMLElement): void {
   let analyzeRunning = false;
   // 何を解析した値なのか。今の局面と食い違ったら表示を消す。
   let analyzedSfen = "";
-  // 解析できる局面か（EditState.sfen が埋まっているか）。
+  // 解析できる局面か。
   let analyzeReady = false;
-  // 今の局面（EditState 由来）。**訂正中かどうかと合わせて解析の可否を決める**ので、
-  // 通知が来るたびに覚えておく（onState と onEditing の両方から使う）。
-  let analyzePositionSfen = "";
-  let analyzePositionLoaded = false;
+  // 今**解析タブが持っている**局面（StudyState 由来）。⚠️ **訂正タブの局面
+  // （EditState）ではない。** 混ぜると、直している最中の盤の評価値を出すことになる。
+  let studySfen = "";
+  let studyLoaded = false;
   // 答えたエンジンの名前。**何が出した評価値なのかは見せる**（繋ぎ先を差し替えられる以上、
   // 出所を伏せると比べようがない）。
   let analyzeEngine = "";
@@ -608,15 +708,12 @@ export function mountMainScreen(root: HTMLElement): void {
   // ⚠️ **理由をツールチップだけにしないこと。** 押せないボタンの `title` は
   // ホバーしないと読めず、「なぜ押せないのか」が分からない（実際に詰まった）。
   const analyzeBlockedReason = (): string => {
-    if (!analyzePositionLoaded) {
+    // 局面が無いときは解析の行ごと出ないので、理由を書く相手が居ない。
+    if (!studyLoaded) {
       return "";
     }
-    // **訂正中は解析しない。** 駒を自由に動かせる状態の盤は「まだ決めていない局面」で、
-    // その評価値には意味が無い。確定してから解析する。
-    if (editingNow) {
-      return "「盤面を確定する」を押すと解析できます";
-    }
-    if (!analyzePositionSfen) {
+    // Adopt を通っている以上 SFEN は必ず埋まっているが、念のため。
+    if (!studySfen) {
       return "手番と駒台の先後を決めると解析できます";
     }
     return "";
@@ -624,7 +721,7 @@ export function mountMainScreen(root: HTMLElement): void {
 
   const syncAnalyzeButton = () => {
     const blocked = analyzeBlockedReason();
-    analyzeReady = analyzePositionLoaded && blocked === "";
+    analyzeReady = studyLoaded && blocked === "";
     analyzeRun.textContent = analyzeRunning ? "停止" : "解析";
     analyzeRun.classList.toggle("is-active", analyzeRunning);
     analyzeRun.disabled = !analyzeRunning && !analyzeReady;
@@ -720,19 +817,15 @@ export function mountMainScreen(root: HTMLElement): void {
     void startAnalyze();
   });
 
-  // 局面や訂正モードが変わったら、解析の可否と表示を追随させる。
+  // 解析タブの局面が変わったら、解析の可否と表示を追随させる。
   // **結果は局面と紐づける。**
   const syncAnalyze = () => {
-    analyzeRow.hidden = !analyzePositionLoaded;
-    if (analyzedSfen && analyzePositionSfen !== analyzedSfen) {
-      // 直したので、前の評価値は今の盤の値ではなくなった。
+    analyzeRow.hidden = !studyLoaded;
+    if (analyzedSfen && studySfen !== analyzedSfen) {
+      // 採り直したので、前の評価値は今の盤の値ではなくなった。
       clearAnalyzeResult();
       analyzeSeq = -1;
       analyzeRunning = false;
-    }
-    // 訂正に戻ったら走っている解析は打ち切る（訂正前の局面を読み続けても仕方がない）。
-    if (analyzeRunning && editingNow) {
-      void AnalyzeService.Stop();
     }
     syncAnalyzeButton();
   };
@@ -763,6 +856,96 @@ export function mountMainScreen(root: HTMLElement): void {
     syncAnalyzeButton();
   });
 
+  // ---- 解析タブの盤 --------------------------------------------------------
+  //
+  // **訂正タブとは別の <shogi-board>。** 同じ盤を出し入れして使い回さないこと
+  // （タブごとに別の局面が出ているのが正しい状態で、片方を動かしたらもう片方も
+  // 動く、という作りにすると「今どちらの局面を見ているか」が分からなくなる）。
+  //
+  // ⚠️ **ここにグリッドを重ねない。** 駒を掴んで動かせるのは訂正タブだけ。
+  // 手を進める UI（合法手だけ）はこれからで、そのときも訂正のグリッドは流用しない。
+  const studyStage = root.querySelector<HTMLElement>("#study-stage")!;
+  const studyBoard = root.querySelector<HTMLElement>("#study-board")!;
+  const studyPlaceholder = root.querySelector<HTMLParagraphElement>("#study-placeholder")!;
+  const studySfenOut = root.querySelector<HTMLElement>("#study-sfen")!;
+  const studyHandRow = root.querySelector<HTMLDivElement>("#study-hand-row")!;
+  const studyHandOut = root.querySelector<HTMLElement>("#study-hand")!;
+  const studyWarnings = root.querySelector<HTMLUListElement>("#study-warnings")!;
+  const studyBack = root.querySelector<HTMLButtonElement>("#study-back")!;
+  // 訂正タブ側の一行。訂正の操作が通らなかった理由と、確定できない理由を出す。
+  const editStatus = root.querySelector<HTMLParagraphElement>("#edit-status")!;
+
+  const showStudy = (st: StudyState) => {
+    studyLoaded = !!st.loaded;
+    studySfen = st.sfen ?? "";
+    studyStage.hidden = !studyLoaded;
+    studyBoard.hidden = !studyLoaded;
+    studyPlaceholder.hidden = studyLoaded;
+    studyBack.hidden = !studyLoaded;
+    if (studyLoaded) {
+      studyBoard.setAttribute("sfen", st.boardSfen);
+      // 手番と手数は SFEN に入っているが、読むのに要るのは文字のほう。
+      const n = st.moveNumber > 0 ? ` / ${st.moveNumber}手目` : "";
+      studySfenOut.textContent = `${st.sfen}`;
+      studySfenOut.title = `${st.turnLabel}${n}`;
+      showStudyHand(st.hands ?? []);
+    } else {
+      studySfenOut.textContent = "-";
+      studyHandRow.hidden = true;
+    }
+    // 確定した局面でも警告は出うる（詰将棋のように「論理的におかしくても正しい」
+    // 局面があるため。設計原則3）。変な評価値が出たときの手掛かりになる。
+    fillWarnings(studyWarnings, st.warnings ?? []);
+    syncAnalyze();
+  };
+
+  // 解析タブの駒台。**未決は残っていない**（確定した局面なので）。
+  const showStudyHand = (inv: Stock[]) => {
+    const fmt = (pick: (s: Stock) => number) =>
+      inv
+        .filter((s) => pick(s) > 0)
+        .map((s) => `${s.name}${pick(s)}`)
+        .join(" ");
+    const black = fmt((s) => s.handBlack);
+    const white = fmt((s) => s.handWhite);
+    const parts: string[] = [];
+    if (black) {
+      parts.push(`先手 ${black}`);
+    }
+    if (white) {
+      parts.push(`後手 ${white}`);
+    }
+    studyHandOut.textContent = parts.join(" / ");
+    studyHandRow.hidden = parts.length === 0;
+  };
+
+  // 訂正タブ → 解析タブ。**受け渡しはこの 1 か所だけ。**
+  //
+  // ⚠️ **確定しているかの判定は Go 側（StudyService.Adopt）に任せる。** 手番か
+  // 駒台の先後が未決ならエラーが返るので、そのまま訂正タブに出して留まる
+  // （フロントで同じ判定を書くと 2 か所に散る）。
+  const adoptToStudy = async () => {
+    editStatus.textContent = "";
+    editStatus.classList.remove("is-error");
+    try {
+      showStudy(await StudyService.Adopt());
+    } catch (err) {
+      editStatus.textContent = String(err instanceof Error ? err.message : err);
+      editStatus.classList.add("is-error");
+      return;
+    }
+    selectTab(studyTab);
+  };
+
+  // 解析タブ → 訂正タブ。**解析の結果は捨てる。**
+  // 直した結果を採り直せば別の局面になるので、前の評価値を残す意味が無い。
+  studyBack.addEventListener("click", () => {
+    if (analyzeRunning) {
+      void AnalyzeService.Stop();
+    }
+    selectTab(editTab);
+  });
+
   const editor = mountEditor({
     stage: boardStage,
     handSlots: {
@@ -783,9 +966,8 @@ export function mountMainScreen(root: HTMLElement): void {
       editSfen = st?.labelSfen ?? "";
       editNotes = st?.labelNotes ?? [];
       syncTrain();
-      analyzePositionSfen = st?.sfen ?? "";
-      analyzePositionLoaded = !!st?.loaded;
-      syncAnalyze();
+      // ⚠️ **ここから解析の状態を触らないこと。** 訂正タブの局面と解析タブの局面は
+      // 別物で、繋ぐのは「この局面を解析する」を押したときの 1 回だけ。
       if (!st?.loaded) {
         boardHandRow.hidden = true;
         fillWarnings(boardWarnings, []);
@@ -796,16 +978,14 @@ export function mountMainScreen(root: HTMLElement): void {
       showEditHand(st.inventory ?? []);
       fillWarnings(boardWarnings, st.warnings ?? []);
     },
-    onEditing: (on) => {
-      editingNow = on;
-      syncCaptureRef();
-      syncTrain();
-      // **訂正中は解析できない**ので、モードの出入りでも可否を計算し直す。
-      syncAnalyze();
+    onConfirm: () => {
+      void adoptToStudy();
     },
     onError: (message) => {
-      status.textContent = `訂正できませんでした: ${message}`;
-      status.classList.add("is-warn");
+      // **訂正タブの中に出す。** 撮影の結果（入力タブの #status）とは別の話で、
+      // タブを跨いだ先に理由が出ても読めない。
+      editStatus.textContent = `訂正できませんでした: ${message}`;
+      editStatus.classList.add("is-error");
     },
   });
 
@@ -1092,15 +1272,31 @@ export function mountMainScreen(root: HTMLElement): void {
     }
 
     showPath(result.path);
+    // 撮り直したら解析タブは空に戻す。**前の局面の盤と評価値を残さない**
+    // （新しい認識結果の裏で生き残っていると、どちらが今の話か分からなくなる）。
+    if (analyzeRunning) {
+      void AnalyzeService.Stop();
+    }
+    void (async () => {
+      try {
+        showStudy(await StudyService.Clear());
+      } catch {
+        /* 消せなくても撮影は成功している（設計原則3）。次の Adopt で入れ替わる。 */
+      }
+    })();
     // 盤・SFEN・駒台・警告は訂正 UI 側(EditState)が描く。**認識結果をここで直接
     // 描かない**(訂正した内容が撮り直すまで残る、という食い違いを作らないため)。
     // 認識できていれば読み込んで訂正を始められる状態にし、駄目なら空に戻す。
+    //
+    // **撮ったら訂正タブへ移る。** 認識結果はまず直すものなので、そこが行き先。
+    // 盤が取れなかったときは直すものが無いので、理由の出ている入力タブに留まる。
     if (result.sfen) {
-      void editor.load(result.sfen);
+      void editor.load(result.sfen).then(() => selectTab(editTab));
     } else {
       editor.clear();
       showBoard("", true);
       sfenOut.textContent = "-";
+      selectTab(inputTab);
     }
     showConfidence(result.confidence, result.sfen);
     showRegion(result.debug);
@@ -1158,8 +1354,35 @@ export function mountMainScreen(root: HTMLElement): void {
   };
 
   // 枠は閉じても隠れるだけなので、ここから出し直せる。
-  showFrame.addEventListener("click", () => {
-    void CaptureService.ShowFrame();
+  // ツールバーと入力タブの 2 か所にあるのは、**入力タブが「取り込む面」だから**
+  // （枠を出すのは取り込みの操作）。ツールバー側はどのタブからでも押せる保険。
+  for (const btn of [showFrame, root.querySelector<HTMLButtonElement>("#input-show-frame")!]) {
+    btn.addEventListener("click", () => {
+      void CaptureService.ShowFrame();
+    });
+  }
+
+  // 枠のツールバーの □ と同じ操作。**枠を出してからでないと合わせる先が無い**ので、
+  // 先に出しておく（HideFrame と違い ShowFrame は出ていれば何もしない）。
+  const inputFit = root.querySelector<HTMLButtonElement>("#input-fit")!;
+  inputFit.addEventListener("click", () => {
+    void (async () => {
+      inputFit.disabled = true;
+      status.textContent = "盤を探しています…";
+      status.classList.remove("is-error", "is-warn");
+      try {
+        await CaptureService.ShowFrame();
+        const r = await CaptureService.FitFrame();
+        status.textContent = r.message;
+        // 見つからないのはエラーではない（設計原則3）。枠は 1px も動いていない。
+        status.classList.toggle("is-warn", !r.fitted);
+      } catch (err) {
+        status.textContent = `盤を探せませんでした: ${String(err instanceof Error ? err.message : err)}`;
+        status.classList.add("is-error");
+      } finally {
+        inputFit.disabled = false;
+      }
+    })();
   });
 
   // 学習データを育てながら使うための入口。suteme は一度読んだ推論器をキャッシュするので、

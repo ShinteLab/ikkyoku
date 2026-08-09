@@ -6,6 +6,7 @@ import * as CaptureService from "./captureservice.js";
 import * as DiagService from "./diagservice.js";
 import * as PositionService from "./positionservice.js";
 import * as SettingsService from "./settingsservice.js";
+import * as StudyService from "./studyservice.js";
 import * as TrainingService from "./trainingservice.js";
 export {
     AnalyzeService,
@@ -13,6 +14,7 @@ export {
     DiagService,
     PositionService,
     SettingsService,
+    StudyService,
     TrainingService
 };
 
@@ -27,6 +29,7 @@ export type {
     FitResult,
     GuideLayout,
     RecognizerStatus,
+    StudyState,
     TrainingSendResult,
     TrainingSettings,
     TrainingStatus

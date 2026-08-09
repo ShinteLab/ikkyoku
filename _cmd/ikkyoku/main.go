@@ -54,9 +54,16 @@ func main() {
 	captureSvc := NewCaptureService(logger, cfg.SutemeDataDir)
 	positionSvc := NewPositionService(logger)
 	trainingSvc := NewTrainingService(logger, settingsSvc)
-	// 解析は**確定した局面**にだけかかる。局面を持っているのは PositionService なので、
+	// 局面を持つ Service は 2 つあり、**別のものを持っている**（混同しないこと）。
+	//
+	//   positionSvc … 訂正タブ。認識の誤りを直す面。未決・不正でよい
+	//   studySvc    … 解析タブ。確定した局面。**訂正タブから写しを採る**
+	//
+	// 受け渡しは studySvc.Adopt の 1 か所だけ（訂正タブの「この局面を解析する」）。
+	studySvc := NewStudyService(logger, positionSvc)
+	// 解析は**確定した局面**にだけかかる。局面を持っているのは studySvc なので、
 	// フロントから SFEN を渡してもらうのではなく、あちらから読む。
-	analyzeSvc := NewAnalyzeService(logger, positionSvc, settingsSvc)
+	analyzeSvc := NewAnalyzeService(logger, studySvc, settingsSvc)
 	// フロントが生きているかの計測だけを持つ Service(diagservice.go)。
 	// 局面にもキャプチャにも関与しない。
 	diagSvc := NewDiagService(logger)
@@ -69,6 +76,7 @@ func main() {
 			application.NewService(captureSvc),
 			application.NewService(settingsSvc),
 			application.NewService(positionSvc),
+			application.NewService(studySvc),
 			application.NewService(trainingSvc),
 			application.NewService(analyzeSvc),
 			application.NewService(diagSvc),

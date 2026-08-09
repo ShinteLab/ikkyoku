@@ -381,8 +381,9 @@ html.is-main body {
 }
 
 /* ---- タブ ----------------------------------------------------------------
-   盤面(盤と SFEN だけ)とデバッグ(認識器の状態・警告・撮った画像)の 2 枚。
-   盤を大きく見せるのが目的なので、盤面タブに項目を足さないこと。 */
+   入力(取り込む) / 訂正(直す) / 解析(進める) / デバッグ(認識精度) / 設定 の 5 枚。
+   **訂正と解析は別の局面を持っている**(Go 側も PositionService / StudyService)。
+   盤を大きく見せるのが目的なので、盤の周りに積む行は短く保つこと。 */
 .tabs {
   flex: 0 0 auto;
   display: flex;
@@ -762,7 +763,11 @@ html.is-main body {
   border-radius: 6px;
 }
 
-.board-area > .board-with-hands {
+.board-area > .board-with-hands,
+/* 解析タブの盤は駒台を脇に置かない(駒台は下に文字で出る)ので、.board-stage が
+   そのまま .board-area の子になる。**縮ませないこと** —— .board-stage の幅は
+   盤の SVG とぴったり同じ前提で、縮むと盤の絵が箱の中で中央寄せになり余白ができる。 */
+.board-area > .board-stage {
   flex: 0 0 auto;
 }
 
@@ -830,14 +835,6 @@ html.is-main body {
 
 .hand-slot[hidden] {
   display: none;
-}
-
-/* 訂正をやめているあいだ。**駒台は出したまま**(局面の一部なので)だが、
-   ドロップ先ではなくなるので枠を実線の控えめな見た目にする。
-   「足りない駒」は訂正のための置き場なので、こちらは畳む。 */
-.hand-slot.is-static .hand-zone {
-  border-style: solid;
-  border-color: #2f333c;
 }
 
 
@@ -1028,6 +1025,20 @@ html.is-main body {
   background: #2b3446;
 }
 
+/* 訂正タブの唯一の出口(「この局面を解析する」)。訂正中は他にもボタンが並ぶので、
+   次に進む先だけは見分けが付くようにしておく。赤は「捨てる/危険」に使っているので
+   青系。 */
+.ghost-btn.is-primary {
+  color: #d7e3ff;
+  border-color: #4a7fd0;
+  background: #27354b;
+}
+
+.ghost-btn.is-primary:hover:not(:disabled) {
+  border-color: #5ea0ff;
+  background: #2f4260;
+}
+
 .edit-body {
   display: flex;
   flex-direction: column;
@@ -1145,11 +1156,6 @@ html.is-main body {
 /* 足りている駒。**掴めなくはしない**(在庫が尽きていても置ける)。見た目だけ落とす。 */
 .stock-chip.is-missing.is-spare {
   opacity: 0.3;
-}
-
-/* 訂正していないときは掴めない（見せるだけ）。 */
-.hand-slot.is-static .stock-chip {
-  cursor: default;
 }
 
 .stock-chip {

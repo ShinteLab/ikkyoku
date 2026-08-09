@@ -20,10 +20,15 @@ import (
 // 起こし、終わったら `quit` する。「ずっと解析していたい」は**時間無制限の解析**
 // （考える秒数を「無制限」にする）として表すので、そのあいだは生きている。
 //
-// **局面はここが持たない。** 解析するのは常に「今 PositionService が持っている局面」で、
+// **局面はここが持たない。** 解析するのは常に「今 StudyService が持っている確定局面」で、
 // フロントから SFEN を受け取らない（フロントに局面の写しを持たせない、という
-// PositionService の方針と揃える。渡してもらう形にすると、訂正した直後に古い局面を
+// PositionService の方針と揃える。渡してもらう形にすると、採り直した直後に古い局面を
 // 解析する経路ができる）。
+//
+// ⚠️ **訂正タブの局面（PositionService）を解析しない。** 駒を自由に動かせる状態の
+// 盤は「まだ決めていない局面」で、その評価値には意味が無い。以前は訂正モードかどうかを
+// フロントが見てボタンを止めていたが、**タブを分けたことで構造上そこに手が届かなくなった**
+// （2026-08-10）。
 //
 // **同時に走るのは 1 本だけ。** 新しく始めると前の解析は打ち切る。検討ツリー
 // （Phase 5）で複数の枝を並べて解析したくなったらここを増やすが、**そのときも
@@ -37,8 +42,11 @@ import (
 //	analyze:done    解析が終わった（Result）
 //	analyze:failed  始められなかった・エラーになった（理由の文字列）
 type AnalyzeService struct {
-	logger   *slog.Logger
-	pos      *PositionService
+	logger *slog.Logger
+	// study は**解析タブが持っている確定局面**。⚠️ **PositionService（訂正タブ）
+	// を直に見ないこと** —— あちらは訂正の途中の、まだ決めていない局面で、
+	// その評価値には意味が無い。
+	study    *StudyService
 	settings *SettingsService
 	app      *application.App
 
@@ -55,8 +63,8 @@ type AnalyzeService struct {
 	lastEngine string
 }
 
-func NewAnalyzeService(logger *slog.Logger, pos *PositionService, settings *SettingsService) *AnalyzeService {
-	return &AnalyzeService{logger: logger, pos: pos, settings: settings}
+func NewAnalyzeService(logger *slog.Logger, study *StudyService, settings *SettingsService) *AnalyzeService {
+	return &AnalyzeService{logger: logger, study: study, settings: settings}
 }
 
 // close は走っている解析を打ち切り、エンジンが終わるまで待つ（アプリの終了時）。
@@ -210,7 +218,7 @@ type AnalyzeState struct {
 // 組み上がらない（決めていないことを勝手に決めない。設計原則5）。訂正 UI で
 // 決めてもらう以外に手は無いので、ここは警告ではなくエラーにする。
 func (s *AnalyzeService) Start(seconds int) (AnalyzeState, error) {
-	sfen, err := s.pos.positionSFEN()
+	sfen, err := s.study.positionSFEN()
 	if err != nil {
 		return AnalyzeState{}, err
 	}
