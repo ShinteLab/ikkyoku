@@ -142,8 +142,10 @@ func main() {
 //   - `CaptureService.ShowFrame`（入力タブのボタン・枠のメニュー経由）
 //   - `startupFit`（設定「起動時に盤面を探す」。**合わせ終えてから**出す）
 //
-// **隠していても HWND は生きている**ので、枠を一度も出さないまま `Alt+S` で
-// 前回の領域を撮ることもできる(枠を✕で隠したあとにそのまま撮れるのと同じ理屈)。
+// **隠していても HWND は生きている**ので、出し直せば前と同じ領域に戻る。ただし
+// ⚠️ **隠しているあいだは撮れない**(`CaptureService.Capture` の `requireFrame`)。
+// 「今どこを撮るのか」が画面に出ていないまま撮れるのは事故のもとなので、
+// **枠が見えていることを撮れる条件にしてある。**
 func newFrameWindow(app *application.App, st windowState) *application.WebviewWindow {
 	w, h := safeFallback(st, defaultFrameWidth, defaultFrameHeight)
 

@@ -28,8 +28,13 @@
 // 同じ見た目でも**出所が違う**ので、片方の更新をもう片方に流用しないこと。
 //
 // **撮る操作そのものはここには置かない。** 撮るのは盤に枠を合わせている最中の操作
-// なので、枠のツールバーとホットキーで完結する。入力タブに置いてあるのは
+// なので、枠のツールバーで完結する。入力タブに置いてあるのは
 // その入口(枠を出す・盤に合わせる)と、撮れた結果の表示。
+//
+// ⚠️ **ホットキー(Alt+S)は画面のどこにも書かない**(2026-08-10)。登録はしてあるが、
+// 枠が出ていないと撮れないようにしたので「フォーカスがどこにあっても撮れる」という
+// 売りが枠の出ているあいだに限られる。入力の口もこれから増えるので、撮ることを
+// 前提にした案内をツールバーに常設しない。
 //
 // 枠(frame.ts)とは別ウィンドウなので、ここに置いた要素はキャプチャに写り込まない
 // ——ただし**枠に重なる位置に動かすと写り込む**(画面の合成結果を撮るため)。初回だけ
@@ -173,11 +178,9 @@ export function mountMainScreen(root: HTMLElement): void {
           <button id="tab-settings" class="tab" type="button"
                   role="tab" aria-selected="false" aria-controls="panel-settings">設定</button>
         </div>
-        <span class="spacer"></span>
-        <!-- ⚠️ **ここに「枠を表示」を戻さないこと**（2026-08-10 に外した）。
+        <!-- ⚠️ **ここに「枠を表示」も撮り方の案内も戻さないこと**（2026-08-10 に外した）。
              枠は「撮るときだけ使う道具」で、入力の口はこれから増える
-             （SFEN / KIF / 画像ファイル）。取り込みの操作は入力タブに寄せる。 -->
-        <span class="hint">撮るのは枠のツールバー、または <span class="hotkey-hint">Alt+S</span></span>
+             （SFEN / KIF / 画像ファイル）。取り込みの話は入力タブに寄せる。 -->
       </div>
 
       <!-- 入力タブ。**局面を取り込む面。** 今はキャプチャだけだが、ここに
@@ -188,10 +191,10 @@ export function mountMainScreen(root: HTMLElement): void {
           <span class="setting-title">画面から撮る</span>
           <span class="setting-note">
             「枠を表示」でガイド枠を出し、中継の盤面に合わせてから、
-            枠のツールバーのカメラか <span class="hotkey-hint">Alt+S</span> を押します。
+            枠のツールバーのカメラを押します。
             撮ると<strong>訂正タブ</strong>が開きます。
-            枠を閉じても位置は覚えているので、出さないまま
-            <span class="hotkey-hint">Alt+S</span> でも撮れます。
+            <strong>枠が出ていないあいだは撮れません</strong>
+            （どこを撮るのかが画面に見えていない状態で撮らないため）。
           </span>
           <div class="setting-fields">
             <button id="input-show-frame" class="ghost-btn" type="button">枠を表示</button>
@@ -1686,9 +1689,8 @@ export function mountMainScreen(root: HTMLElement): void {
       selectTab(target);
     }
   });
-  Events.On("hotkey:register-failed", (event: { data: { hotkey: string; error: string } }) => {
-    status.textContent = `グローバルホットキー(${event.data.hotkey})の登録に失敗しました。枠のツールバーの「撮る」は使えます。`;
-    status.classList.add("is-error");
-    markDebug("error");
-  });
+  // ⚠️ **ホットキーの登録失敗は画面に出さない**（2026-08-10）。案内していない操作なので、
+  // 失敗を伝えても何をすればよいか分からない。撮る手段は枠のツールバーのカメラで、
+  // そちらは無関係に効く。理由が要るときは Go 側の warn ログを読むこと
+  // （`hotkey:register-failed` イベント自体は残してある。出す先が要るときのために）。
 }

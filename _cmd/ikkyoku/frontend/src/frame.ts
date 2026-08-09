@@ -56,13 +56,13 @@ export function mountFrame(root: HTMLElement): void {
                 aria-label="盤に合わせる"
                 title="盤に合わせる(画面に出ている盤を探して枠を合わせる)">${iconMarkup(FiCrop)}</button>
         <button id="frame-capture" class="frame-btn is-primary is-icon" type="button"
-                aria-label="撮る" title="撮る(Alt+S)">${iconMarkup(FiCamera)}</button>
+                aria-label="撮る" title="撮る">${iconMarkup(FiCamera)}</button>
       </div>
       <span class="frame-title"></span>
       <div class="frame-actions">
         <button id="frame-hide" class="frame-btn is-icon" type="button"
                 aria-label="枠を隠す"
-                title="枠を隠す(領域は保持され、Alt+S でそのまま撮れます)">${iconMarkup(FiX)}</button>
+                title="枠を隠す(位置は覚えているので、出し直せば同じ領域に戻ります)">${iconMarkup(FiX)}</button>
       </div>
     </div>
     <div id="frame-menu-items" class="frame-menu" role="menu" hidden>
@@ -96,9 +96,10 @@ export function mountFrame(root: HTMLElement): void {
 
   // 自前の✕は WindowClosing を通らない(wails3 skill tray-hotkey.md 3)ので、
   // ランタイムの Window.Hide() ではなく Go 側の HideFrame() を呼ぶ。閉じるのではなく
-  // 隠すだけで、ウィンドウが生きている限りキャプチャ領域の定義も生きる(隠したままでも
-  // Alt+S で同じ領域が撮れる)。「隠した結果ウィンドウが 1 枚も見えなくなるならメイン画面を
-  // 出す」という判断を Go 側に一本化したいので、Alt+F4 の経路と同じ入口を通す。
+  // 隠すだけで、ウィンドウが生きている限りキャプチャ領域の定義も生きる(出し直せば
+  // 同じ領域に戻る)。⚠️ **隠しているあいだは撮れない**(Go 側の requireFrame)。
+  // 「隠した結果ウィンドウが 1 枚も見えなくなるならメイン画面を出す」という判断を
+  // Go 側に一本化したいので、Alt+F4 の経路と同じ入口を通す。
   hideBtn.addEventListener("click", () => {
     void CaptureService.HideFrame();
   });

@@ -123,7 +123,8 @@ type CaptureService struct {
 	app *application.App
 	// wins は枠とメイン画面。**キャプチャ領域は枠のクライアント矩形そのもの**なので、
 	// メイン画面がどちらであっても撮る基準は枠のまま。枠は隠されていても HWND が
-	// 生きているため、非表示でも領域の定義は有効(そのまま撮れる)。
+	// 生きているため領域の定義自体は有効だが、**撮るのは枠が出ているときだけ**
+	// (Capture の requireFrame)。
 	wins   *appWindows
 	logger *slog.Logger
 
@@ -282,8 +283,11 @@ func (s *CaptureService) placeMainBesideFrame() {
 // HideFrame は枠を隠す。フロント(ツールバーの✕)と Alt+F4 の両方から呼ばれる。
 //
 // 閉じずに隠すだけなのは、枠が「見せるための UI」ではなく「撮る領域の定義」だから。
-// 隠しても HWND は生きているので、そのまま Alt+S で同じ領域を撮り続けられる。
-// むしろ隠したほうが、ツールバーやガイド枠が写り込む余地が原理的に無くなる。
+// 隠しても HWND は生きているので、**出し直せば前と同じ領域に戻る**（位置を覚えている）。
+//
+// ⚠️ **隠しているあいだは撮れない**（`Capture` の `requireFrame`）。技術的には
+// 撮れてしまうが、**「今どこを撮るのか」が画面に出ていないまま撮れるのは事故のもと**
+// なので、見えていることを条件にしてある。
 //
 // 枠を隠した結果として可視ウィンドウが 1 枚も無くなると、アプリが動いているのに
 // 操作できない状態になる。それを避けるため、メイン画面がまだ出ていなければ出す
@@ -354,6 +358,21 @@ func (s *CaptureService) RepairMain() {
 	s.revealMain()
 }
 
+// requireFrame は枠が出ていなければ理由を返す。**撮る前の唯一の門番。**
+//
+// ⚠️ **`FitFrame` には掛けないこと。** あちらは枠を隠して撮り直す手順を内側に
+// 持っており(`captureWithoutSelf`)、起動時の自動フィットに至っては枠を出す前に
+// 走る。掛けると自分で自分を止める。
+func (s *CaptureService) requireFrame() error {
+	if s.wins == nil || s.wins.frame == nil {
+		return fmt.Errorf("ikkyoku-app: ウィンドウが初期化されていません")
+	}
+	if !s.wins.frame.IsVisible() {
+		return fmt.Errorf("ガイド枠が出ていません。入力タブの「枠を表示」から出して、撮りたい盤面に合わせてください")
+	}
+	return nil
+}
+
 // ShowFrame は隠した枠を出し直す。メイン画面のボタンから呼ばれる。
 func (s *CaptureService) ShowFrame() {
 	if s.wins == nil || s.wins.frame == nil {
@@ -403,7 +422,16 @@ type CaptureResult struct {
 // Capture はガイド枠の内側を撮って PNG 保存し、保存先パスとサムネイルを返す。
 // フロントの「撮る」ボタンとグローバルホットキーの両方から呼ばれる。
 // 1 回のキャプチャは他のキャプチャと完全に独立している(状態を持たない)。
+//
+// ⚠️ **枠が出ていなければ撮らない**(2026-08-10 決定)。技術的には隠れていても
+// HWND は生きているので撮れてしまうが、**「今どこを撮るのか」が画面に出ていない
+// まま撮れるのは事故のもと**。枠は「どこを撮るか」の定義そのものなので、
+// **見えていることを撮れる条件にする。**
 func (s *CaptureService) Capture() (CaptureResult, error) {
+	if err := s.requireFrame(); err != nil {
+		return CaptureResult{}, err
+	}
+
 	region, _, err := s.captureRegion()
 	if err != nil {
 		return CaptureResult{}, err
