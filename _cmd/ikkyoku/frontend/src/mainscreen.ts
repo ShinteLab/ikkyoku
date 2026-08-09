@@ -174,8 +174,10 @@ export function mountMainScreen(root: HTMLElement): void {
                   role="tab" aria-selected="false" aria-controls="panel-settings">設定</button>
         </div>
         <span class="spacer"></span>
+        <!-- ⚠️ **ここに「枠を表示」を戻さないこと**（2026-08-10 に外した）。
+             枠は「撮るときだけ使う道具」で、入力の口はこれから増える
+             （SFEN / KIF / 画像ファイル）。取り込みの操作は入力タブに寄せる。 -->
         <span class="hint">撮るのは枠のツールバー、または <span class="hotkey-hint">Alt+S</span></span>
-        <button id="show-frame-btn" class="ghost-btn" type="button">枠を表示</button>
       </div>
 
       <!-- 入力タブ。**局面を取り込む面。** 今はキャプチャだけだが、ここに
@@ -185,9 +187,11 @@ export function mountMainScreen(root: HTMLElement): void {
         <div class="setting-group">
           <span class="setting-title">画面から撮る</span>
           <span class="setting-note">
-            ガイド枠を中継の盤面に合わせて、枠のツールバーのカメラ、または
-            <span class="hotkey-hint">Alt+S</span> を押します。
+            「枠を表示」でガイド枠を出し、中継の盤面に合わせてから、
+            枠のツールバーのカメラか <span class="hotkey-hint">Alt+S</span> を押します。
             撮ると<strong>訂正タブ</strong>が開きます。
+            枠を閉じても位置は覚えているので、出さないまま
+            <span class="hotkey-hint">Alt+S</span> でも撮れます。
           </span>
           <div class="setting-fields">
             <button id="input-show-frame" class="ghost-btn" type="button">枠を表示</button>
@@ -470,7 +474,6 @@ export function mountMainScreen(root: HTMLElement): void {
     </div>
   `;
 
-  const showFrame = root.querySelector<HTMLButtonElement>("#show-frame-btn")!;
   const reloadBtn = root.querySelector<HTMLButtonElement>("#reload-btn")!;
   const recognizer = root.querySelector<HTMLParagraphElement>("#recognizer")!;
   const board = root.querySelector<HTMLElement>("#board")!;
@@ -1353,14 +1356,12 @@ export function mountMainScreen(root: HTMLElement): void {
     markDebug("error");
   };
 
-  // 枠は閉じても隠れるだけなので、ここから出し直せる。
-  // ツールバーと入力タブの 2 か所にあるのは、**入力タブが「取り込む面」だから**
-  // （枠を出すのは取り込みの操作）。ツールバー側はどのタブからでも押せる保険。
-  for (const btn of [showFrame, root.querySelector<HTMLButtonElement>("#input-show-frame")!]) {
-    btn.addEventListener("click", () => {
-      void CaptureService.ShowFrame();
-    });
-  }
+  // 枠を出す唯一の入口（**起動時は出ていない**。閉じても隠れるだけなので出し直せる）。
+  // ⚠️ **入力タブに置いてあるのが要点。** 枠を出すのは「画面から撮る」ための操作で、
+  // 入力の口の 1 つでしかない。ツールバーに置くと常設の機能に見える。
+  root.querySelector<HTMLButtonElement>("#input-show-frame")!.addEventListener("click", () => {
+    void CaptureService.ShowFrame();
+  });
 
   // 枠のツールバーの □ と同じ操作。**枠を出してからでないと合わせる先が無い**ので、
   // 先に出しておく（HideFrame と違い ShowFrame は出ていれば何もしない）。

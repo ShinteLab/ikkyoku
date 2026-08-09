@@ -2,10 +2,16 @@
 //
 // ウィンドウは 2 枚。
 //
+//   - メイン画面   … アプリ本体。**起動するとこれが出る**(入力タブ)。
+//     **閉じるとアプリが終了する。**
 //   - 枠ウィンドウ … 画面に重ねる Frameless の透過ウィンドウ。「どこを撮るか」の定義そのもの。
-//     上部のツールバーから撮れる。閉じても破棄せず隠すだけ(領域の定義は生かしたまま)。
-//   - メイン画面   … アプリ本体。撮った画像・認識結果・設定を置く。起動時は非表示で、
-//     最初のキャプチャで現れる。**閉じるとアプリが終了する。**
+//     上部のツールバーから撮れる。**起動時は出さない**——入力タブの「枠を表示」を
+//     押すまで隠れている。閉じても破棄せず隠すだけ(領域の定義は生かしたまま)。
+//
+// ⚠️ **起動時に出るのは枠ではなくメイン画面**(2026-08-10 に入れ替えた)。以前は
+// 「枠だけが出て、最初のキャプチャでメイン画面が現れる」だったが、**入力の口が
+// 画面キャプチャだけではなくなる**(SFEN / KIF / 画像ファイル)ので、
+// 撮ることを前提にした導線をやめた。枠は「撮るときだけ使う道具」の位置づけになる。
 //
 // 「メイン」は枠ではなくメイン画面。枠は位置合わせが済めば用済みになりうる道具で、
 // アプリの寿命を握る画面ではない。ただし**キャプチャ領域の基準は枠のまま**で、これは
@@ -88,9 +94,7 @@ func main() {
 	})
 
 	state := loadAppState()
-	// 起動時に盤を探す設定なら、**枠は隠したまま作る**。探し終えてから出すことで、
-	// ユーザーには「最初から盤に合った枠」が現れる(startupFit)。
-	frame := newFrameWindow(app, state.Frame, cfg.FitOnStartup)
+	frame := newFrameWindow(app, state.Frame)
 	main, mainHasSavedPos := newMainWindow(app, state.Main)
 
 	wins := &appWindows{
@@ -132,15 +136,19 @@ func main() {
 
 // newFrameWindow は盤に重ねる Frameless の透過ウィンドウを作る。
 //
-// hidden は「起動時に盤を探す」設定のときだけ true。**探し終えるまで見せない**ため
-// (見えている枠が判定のあとで飛ぶのを避ける。出すのは startupFit の最後)。
-func newFrameWindow(app *application.App, st windowState, hidden bool) *application.WebviewWindow {
+// ⚠️ **常に隠した状態で作る**(2026-08-10)。枠は「撮るときだけ使う道具」なので、
+// 入力タブの「枠を表示」を押すまで出さない。出すのは 2 経路だけ:
+//
+//   - `CaptureService.ShowFrame`（入力タブのボタン・枠のメニュー経由）
+//   - `startupFit`（設定「起動時に盤面を探す」。**合わせ終えてから**出す）
+//
+// **隠していても HWND は生きている**ので、枠を一度も出さないまま `Alt+S` で
+// 前回の領域を撮ることもできる(枠を✕で隠したあとにそのまま撮れるのと同じ理屈)。
+func newFrameWindow(app *application.App, st windowState) *application.WebviewWindow {
 	w, h := safeFallback(st, defaultFrameWidth, defaultFrameHeight)
 
 	opts := application.WebviewWindowOptions{
-		// 隠していても HWND は生きているので、クライアント矩形も座標の逆算も普通に効く
-		// (枠を✕で隠したあとにそのまま撮れるのと同じ理屈。captureservice.go)。
-		Hidden:    hidden,
+		Hidden:    true,
 		Title:     "ikkyoku",
 		Width:     w,
 		Height:    h,
@@ -174,7 +182,13 @@ func newFrameWindow(app *application.App, st windowState, hidden bool) *applicat
 	return app.Window.NewWithOptions(opts)
 }
 
-// newMainWindow はアプリ本体の画面を作る。起動時は非表示。
+// newMainWindow はアプリ本体の画面を作る。
+//
+// ⚠️ **`Hidden: true` で作るが、起動時にすぐ出す**(`registerFrameHooks` の
+// `WindowRuntimeReady` → `revealMain`)。**最初から `Hidden: false` にしないこと** ——
+// 位置決め(`placeMainBesideFrame`)も座標の記録も `revealMain` が面倒を見ており、
+// そこを通らないと初回のキャプチャで**ウィンドウが突然動く**。
+//
 // 2 つ目の戻り値は「保存された位置を持っているか」で、初回だけ枠の外へ逃がす判断に使う。
 func newMainWindow(app *application.App, st windowState) (*application.WebviewWindow, bool) {
 	w, h := safeFallback(st, defaultMainWidth, defaultMainHeight)
@@ -186,7 +200,7 @@ func newMainWindow(app *application.App, st windowState) (*application.WebviewWi
 		MinWidth:  minMainWidth,
 		MinHeight: minMainHeight,
 		URL:       "/?window=main",
-		// 起動直後は枠だけを見せる。最初のキャプチャで現れる(revealMain)。
+		// 出すのは revealMain。上の ⚠️ を読むこと。
 		Hidden: true,
 		// AlwaysOnTop は付けない。中継を観ながら使う画面なので、最前面に居座ると
 		// 中継そのものを覆ってしまう。最前面が要るのは位置合わせをする枠だけ。
@@ -231,9 +245,20 @@ func registerFrameHooks(app *application.App, wins *appWindows, st windowState, 
 		// 次回同じ場所に出るようにするため。
 		wins.frameGeom.record(frame)
 
+		// ⚠️ **起動時にメイン画面を出すのはここ。**「枠の座標が確定したあと」でないと
+		// `placeMainBesideFrame` が保存前のセンチネル値(-32000)を基準に置いてしまう
+		// (初回起動でメイン画面が画面外へ飛ぶ)。**枠のフックに置いてあるのはこの順序を
+		// 保証するためで、メイン画面側のフックへ移さないこと**(2 つのウィンドウの
+		// WindowRuntimeReady はどちらが先か決まっていない)。
 		if fitOnStartup {
+			// 探しているあいだは枠もメイン画面も画面に無い状態にしておく
+			// (自分のウィンドウが 1 枚も写らないので、塗り潰しも要らない)。
+			// 出すのは合わせ終えてから。
 			startupFit(app, wins, svc, logger)
+			return
 		}
+		// **枠は出さない。** 入力タブの「枠を表示」を押すまで隠れたまま。
+		svc.revealMain()
 	})
 
 	// 枠は閉じずに隠す。Alt+F4・タスクバーから閉じる・OS シャットダウンはこの経路を通る
@@ -255,8 +280,12 @@ func registerFrameHooks(app *application.App, wins *appWindows, st windowState, 
 // 枠は隠した状態で作ってある(newFrameWindow)。**見えている枠を後から動かすのではなく、
 // 最初から合った位置に出す**のが狙い。ボタンを押したときと違って、枠を隠して撮る
 // 手順(captureWithoutSelf)も走らない — 最初から出ていないので隠す必要が無い。
-// メイン画面も起動時は非表示なので、塗り潰し(maskWindows)も要らない。
+// メイン画面もまだ出していない(下記)ので、塗り潰し(maskWindows)も要らない。
 // **起動時は画面に自分のウィンドウが 1 枚も無い**状態で探せる。
+//
+// ⚠️ **この設定のときだけ枠が自動で出る。** 「枠を表示を押すまで出さない」の唯一の
+// 例外だが、**この設定の目的がまさに「最初から盤に合った枠が出ていること」**なので、
+// ここで隠したままにすると設定の意味が無くなる。既定はオフ。
 //
 // 枠そのものは先に作る必要がある。キャプチャ領域は枠のクライアント矩形そのもの
 // (captureservice.go)で、座標の逆算もその矩形との差分で出しているため。
@@ -264,11 +293,16 @@ func registerFrameHooks(app *application.App, wins *appWindows, st windowState, 
 // 別 goroutine で走らせるのは、探すのに数秒かかるため。ここで待つと
 // WindowRuntimeReady のフックが返らず、起動が止まる。
 //
-// **どの経路を通っても最後に必ず枠を出す。** 盤が見つからなくても、探索が失敗しても、
-// 枠が出ないままではアプリが操作できない。
+// **どの経路を通っても最後に必ず枠とメイン画面を出す。** 盤が見つからなくても、
+// 探索が失敗しても、どちらも出ないままではアプリが操作できない。
+// ⚠️ **メイン画面は枠のあと**(`revealMain` が枠の位置を基準に置くため。
+// 合わせたあとの枠に対して逃がさないと、キャプチャ領域に重なりうる)。
 func startupFit(app *application.App, wins *appWindows, svc *CaptureService, logger *slog.Logger) {
 	go func() {
-		defer wins.frame.Show()
+		defer func() {
+			wins.frame.Show()
+			svc.revealMain()
+		}()
 
 		time.Sleep(startupFitDelay)
 		started := time.Now()
