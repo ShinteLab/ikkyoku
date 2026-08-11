@@ -55,7 +55,7 @@ import {
 import { iconMarkup } from "./icon";
 import { mountEditor } from "./editor";
 import { mountStudyBoard } from "./study";
-import type { AppSettings, EngineSettings, StudyState } from "../bindings/ikkyoku-app/models";
+import type { AppSettings, EngineSettings, KifuLoad, StudyState } from "../bindings/ikkyoku-app/models";
 import type { Stock } from "../bindings/github.com/ShinteLab/ikkyoku/position/models";
 // 認識の観測情報。**型を手で書き写さない**(Go 側は suteme の型をそのまま通しており、
 // ここで別に定義すると矩形の意味がずれても気づけない)。
@@ -243,11 +243,22 @@ export function mountMainScreen(root: HTMLElement): void {
         <div class="setting-group">
           <span class="setting-title">棋譜を貼り付ける</span>
           <span class="setting-note">
-            KIF 形式の棋譜を貼って「読み込む」を押すと、
+            KIF 形式の棋譜を貼るか、<strong>.kif の URL</strong> を入れて読み込むと、
             <strong>指し手を全て反映した局面</strong>で<strong>解析タブ</strong>が開きます。
             手順は盤の右に並ぶので、押せばその局面まで戻れます。
             <strong>訂正タブは通りません</strong>（棋譜の局面は初期局面と手順で決まるため）。
           </span>
+          <!-- URL から取る（2026-08-12）。日本将棋連盟の棋譜中継のように
+               .kif を直に配っているところなら、貼り付けと同じ扱いで読める。
+               ⚠️ **取得も文字コードの判別も Go 側**（ikkyoku/kifuweb）。
+               webview の fetch では CORS で弾かれるうえ、
+               **中継の .kif は Shift_JIS** なので、いずれにせよこちらでは扱えない。 -->
+          <div class="setting-fields kifu-url-row">
+            <span class="field-label">URL</span>
+            <input id="kifu-url" type="url" spellcheck="false"
+                   placeholder="http://live.shogi.or.jp/.../oui202607290101.kif" />
+            <button id="kifu-load-url" class="ghost-btn" type="button">URL から読み込む</button>
+          </div>
           <textarea id="kifu-text" class="kifu-text" spellcheck="false"
                     placeholder="手数----指手---------消費時間--&#10;   1 ７六歩(77)   ( 0:16/00:00:16)&#10;   2 ３四歩(33)   ( 0:04/00:00:04)"></textarea>
           <div class="setting-fields">
@@ -1897,7 +1908,9 @@ export function mountMainScreen(root: HTMLElement): void {
   // ⚠️ **読み取りも指し手の変換も Go 側**（core/kifu → position.FromKIF）。
   // フロントで KIF を解釈しないこと（将棋の仕様は core に一本化する）。
   const kifuText = root.querySelector<HTMLTextAreaElement>("#kifu-text")!;
+  const kifuURL = root.querySelector<HTMLInputElement>("#kifu-url")!;
   const kifuLoad = root.querySelector<HTMLButtonElement>("#kifu-load")!;
+  const kifuLoadURL = root.querySelector<HTMLButtonElement>("#kifu-load-url")!;
   const kifuStatus = root.querySelector<HTMLParagraphElement>("#kifu-status")!;
   const showKifuStatus = (message: string, kind?: "warn" | "error") => {
     kifuStatus.textContent = message;
@@ -1910,38 +1923,62 @@ export function mountMainScreen(root: HTMLElement): void {
     showKifuStatus("");
     kifuText.focus();
   });
+  // 貼り付けでも URL でも、読み込んだあとにやることは同じ。
+  // **1 か所にまとめてある**（2 つに分けると、片方だけ直したときに挙動が食い違う）。
+  const runKifuLoad = async (button: HTMLButtonElement, load: () => Promise<KifuLoad>) => {
+    button.disabled = true;
+    kifuLoad.disabled = true;
+    kifuLoadURL.disabled = true;
+    showKifuStatus("読み込んでいます…");
+    try {
+      const got = await load();
+      // ⚠️ **タブを先に開いてから描くこと。** 手順のリストは「今見ている手」を
+      // scrollIntoView で見せるが、`display: none` の中では効かない。
+      // 逆順にすると、100 手の棋譜を読んでもリストが先頭のまま出る
+      // （最終手まで進んでいるのに、そこが見えない）。
+      selectTab(studyTab);
+      showStudy(got.state);
+      // ⚠️ **note が空でないことをエラー扱いしないこと。** 途中で止まっても
+      // そこまでの手順は正しく、その局面は解析できる（設計原則3）。
+      showKifuStatus(
+        got.note ? `${got.summary}（${got.note}）` : got.summary,
+        got.note ? "warn" : undefined,
+      );
+    } catch (err) {
+      showKifuStatus(
+        `棋譜を読み込めませんでした: ${String(err instanceof Error ? err.message : err)}`,
+        "error",
+      );
+    } finally {
+      kifuLoad.disabled = false;
+      kifuLoadURL.disabled = false;
+    }
+  };
   kifuLoad.addEventListener("click", () => {
-    void (async () => {
-      const text = kifuText.value.trim();
-      if (!text) {
-        showKifuStatus("棋譜が空です。KIF 形式のテキストを貼り付けてください。", "error");
-        return;
-      }
-      kifuLoad.disabled = true;
-      showKifuStatus("読み込んでいます…");
-      try {
-        const load = await StudyService.LoadKifu(text);
-        // ⚠️ **タブを先に開いてから描くこと。** 手順のリストは「今見ている手」を
-        // scrollIntoView で見せるが、`display: none` の中では効かない。
-        // 逆順にすると、100 手の棋譜を読んでもリストが先頭のまま出る
-        // （最終手まで進んでいるのに、そこが見えない）。
-        selectTab(studyTab);
-        showStudy(load.state);
-        // ⚠️ **note が空でないことをエラー扱いしないこと。** 途中で止まっても
-        // そこまでの手順は正しく、その局面は解析できる（設計原則3）。
-        showKifuStatus(
-          load.note ? `${load.summary}（${load.note}）` : load.summary,
-          load.note ? "warn" : undefined,
-        );
-      } catch (err) {
-        showKifuStatus(
-          `棋譜を読み込めませんでした: ${String(err instanceof Error ? err.message : err)}`,
-          "error",
-        );
-      } finally {
-        kifuLoad.disabled = false;
-      }
-    })();
+    const text = kifuText.value.trim();
+    if (!text) {
+      showKifuStatus("棋譜が空です。KIF 形式のテキストを貼り付けてください。", "error");
+      return;
+    }
+    void runKifuLoad(kifuLoad, () => StudyService.LoadKifu(text));
+  });
+  // URL から取る。**取得は Go 側**（webview の fetch は CORS で弾かれるうえ、
+  // 中継の .kif は Shift_JIS なのでどのみちこちらでは読めない）。
+  const loadFromURL = () => {
+    const url = kifuURL.value.trim();
+    if (!url) {
+      showKifuStatus("URL が空です。.kif ファイルの URL を入れてください。", "error");
+      return;
+    }
+    void runKifuLoad(kifuLoadURL, () => StudyService.LoadKifuURL(url));
+  };
+  kifuLoadURL.addEventListener("click", loadFromURL);
+  // URL 欄で Enter を押したら読み込む（打ってからボタンへ手を戻さずに済む）。
+  kifuURL.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      loadFromURL();
+    }
   });
 
   // 学習データを育てながら使うための入口。suteme は一度読んだ推論器をキャッシュするので、

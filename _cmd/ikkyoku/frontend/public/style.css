@@ -2022,3 +2022,16 @@ html.is-main body {
   outline: none;
   border-color: #6ad3ff;
 }
+
+/* 棋譜の URL 欄。ボタンまで 1 行に収め、**入力欄だけが伸び縮みする**
+   （ボタンが折り返して縦に伸びると、下の貼り付け欄が押し下げられる）。 */
+.kifu-url-row {
+  align-self: stretch;
+  flex-wrap: nowrap;
+  padding-left: 0;
+}
+
+.kifu-url-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+}

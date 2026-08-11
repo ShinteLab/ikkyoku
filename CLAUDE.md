@@ -282,6 +282,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 |---|---|---|
 | **画面から撮る** | 認識（`recognize`）を通る | **訂正タブ**（まず直すものなので） |
 | **棋譜を貼り付ける**（KIF） | 認識を通らない | **解析タブ**（既に確定しているので） |
+| **棋譜の URL を入れる**（.kif） | 取得（`kifuweb`）だけ通る | 同上（貼り付けと同じ扱い） |
 
 ⚠️ **「受け渡しは `Adopt` の 1 か所だけ」は訂正タブとの受け渡しの話。**
 入力の口が増えること自体は想定どおりで、棋譜は訂正タブを経由せず
@@ -304,6 +305,29 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   分岐ツリーが入るまではこのまま（木の形は core で決める）
 - ⚠️ **盤面図（BOD）つきの KIF は未対応。** 途中局面から始まる棋譜は
   手合割から初期局面を決められないので読めない（対応するなら `core/kifu.Parse` 側）
+
+##### URL から取る（`ikkyoku/kifuweb`）
+
+`StudyService.LoadKifuURL` が取ってきて、あとは貼り付けと同じ経路に合流する
+（**読み込んだあとの処理を 2 つに分けない**）。実測で
+`http://live.shogi.or.jp/oui/kifu/67/oui202607290101.kif`（王位戦）が
+151 手そのまま載ることを確認済み。
+
+- ⚠️ **取得はフロントではなく Go 側。** webview の `fetch` は CORS で弾かれるうえ、
+  **中継の .kif は Shift_JIS** なので、どのみちブラウザ側では読めない
+- ⚠️ **文字コードは中身から判別する**（UTF-8 として妥当ならそのまま、駄目なら Shift_JIS）。
+  **UTF-8 決め打ちにしないこと** —— 対局者名が化けるだけでなく、
+  **漢数字が壊れて指し手が 1 手も読めなくなる**。何として読んだかは画面に出す
+- ⚠️ **http / https 以外は受けない。** `file://` を通すと URL 欄から手元のファイルを
+  読めてしまう（ファイルの読み込みは口として別に作るもの）
+- **HTML が返ってきたら断る。** 中継ページの URL を渡したときに、曖昧に推測して
+  別のものを読むより、どこを直せばよいかが分かるほうがよい。
+  ⚠️ **中継ページから .kif を辿る処理は持たない**（kicho にはある）
+- **上限 4MiB・タイムアウト 20 秒。** 棋譜 1 局は数十 KB なので、
+  これで足りないのは相手が居ないときだけ
+- ⚠️ **kicho の `scrape` にほぼ同じものがある**（`DecodeKIF` / `ReadLimited`）。
+  **依存の向きに kicho は入っていない**ので共有できず、必要なぶんだけ持っている。
+  **3 つめの利用側が出たら core へ寄せること**
 
 - **訂正タブに居ること自体が訂正モード。** トグルは廃した（`editor.ts` の
   `setEditing` は無い）。**モードを戻さないこと** —— タブが意味の境界になっている
@@ -1393,6 +1417,7 @@ DRM を素通りする。そのため入口を Chrome 拡張からネイティ�
 
 現時点の依存:
 
+- `golang.org/x/text` — **棋譜の文字コード変換**（`kifuweb`。中継の .kif は Shift_JIS）。PureGo
 - `github.com/kbinani/screenshot` — 画面キャプチャ。Windows は GDI 直呼びで cgo 不要
 - `golang.design/x/hotkey` — グローバルホットキー。Windows は `RegisterHotKey` を
   `golang.org/x/sys/windows` 経由で直呼びしており cgo 不要（cgo が要るのは macOS 側の実装のみ。
@@ -1466,6 +1491,7 @@ New-Item -ItemType Junction -Path (Join-Path $w 'engine') -Target 'D:\Go\Project
 | `region.go` | `ParseRegion`（`"x,y,width,height"` 文字列 → `Region`） |
 | `save.go` | `SavePNG` / `DefaultOutDir` / タイムスタンプ式ファイル名生成 |
 | `config.go` | `Config` の JSON 読み書き（`encoding/json` のみ、標準ライブラリで完結）。`SutemeDataDir` / `FitOnStartup` / `Training`（suteme への登録先）/ `Engines`（**登録した USI エンジンの一覧**。旧形式 `engine` からの移行もここ）もここ |
+| `kifuweb/` | **棋譜（.kif）を URL から取ってくる**（Phase 5）。文字コードの判別（Shift_JIS / UTF-8）まで。**KIF の解釈は書かない**（`core/kifu`）。⚠️ kicho の `scrape` にほぼ同じものがあるが、**依存の向きに kicho は入っていない**ので共有できない |
 | `training/` | **訂正した局面を `suteme` の学習用サーバへ登録するクライアント**（`POST /api/register` / `GET /api/status`）。標準ライブラリのみ。**サンプルの作り方は書かない**（81 マスの切り出しは suteme の責務） |
 | `hotkey.go` | `ParseHotkey`（`"alt+s"` 文字列 → `golang.design/x/hotkey` の修飾子・キー） |
 | `analyze/` | **確定した局面 → 評価値**（Phase 4）。同梱／外部エンジンの選択（`NewLocalSession` / `NewExecSession`）。エンジンとの接続を持ち回り、評価値を先手視点に直す。**画像を知らない**（`position` と同じ側）。**正式な SFEN を要求するのはここだけ**で、視点の反転もこの境界で行う |
@@ -2126,6 +2152,9 @@ Start-Process .\_cmd\ikkyoku\bin\ikkyoku.exe
     **最終手が見えている位置までリストが送られている**こと
     （`scrollIntoView` は `display: none` では効かないので、
     **タブを開いてから描く順序**を崩さないこと）
+  - **URL から読み込めること。** ⚠️ **実測で確認済み**（王位戦の .kif が 151 手
+    そのまま載る）だが、**画面から押してはいない**。`.kif` 以外の URL・
+    中継ページ・繋がらない URL を入れたときの文言も見ること
   - **読み込むと解析タブが開き、最終手の局面が出ている**こと。
     ⚠️ **盤の右の手順リストで戻れる**こと（`relayout` を通るので、
     **光る位置が 1 マスずれないか**もここで確かめる）
@@ -2263,6 +2292,12 @@ go test ./...
   ⚠️ **旧形式 `engine` から `engines` への移行**。落とすと設定してあった外部エンジンが
   黙って同梱に戻り、画面には何も出ないので気づけない）
 - `hotkey_test.go` — `ParseHotkey` の文字列パース
+- `kifuweb/fetch_test.go` — ⚠️ **Shift_JIS の .kif を取ってきて読めること**
+  （UTF-8 決め打ちだと対局者名が化けるだけでなく、**漢数字が壊れて指し手が
+  1 手も読めなくなる**）。UTF-8 のものはそのまま読むこと、中継ページ（HTML）を
+  渡したら**何を指定すればよいかが分かる文言で断る**こと、
+  ⚠️ **http / https 以外を受けないこと**（`file://` を通すと URL 欄から手元の
+  ファイルを読める）、大きすぎるものを掴まないこと
 - `training/client_test.go` — `POST /api/register` に**画像・SFEN・盤面座標が正しく載るか**
   （httptest のスタブ。**フィールド名も応答の形も suteme 側の実装が正**なので、
   向こうが変わったらこちらを直す）。座標が画像からはみ出す場合は**送る前に**弾くこと、
@@ -2350,7 +2385,9 @@ GUI 側（`_cmd/ikkyoku/`。別モジュールなので上の `./...` には含�
   （組み立て直した 1 つの SFEN では千日手と連続王手が判定できず、根で
   「局面が変わった」を判定すると**前の手の評価値が今の盤の上に残る**）、
   **採り直すと手順ごと入れ替わること**、局面が無くても配列を返すこと。
-  **棋譜の貼り付け**（`LoadKifu`）も見ている: 最終手まで反映されること・
+  **棋譜の貼り付け**（`LoadKifu`）と **URL からの読み込み**（`LoadKifuURL`。
+  Shift_JIS のまま化けないこと・**何の文字コードとして読んだかが出ること**・
+  取れなかったときに前の局面を壊さないこと）も見ている: 最終手まで反映されること・
   **解析に渡す形（根 + 手順）になっていること**・読み込んだ手数と対局者が
   1 行に出ること・⚠️ **貼り間違い（棋譜でないテキスト）でそれまでの局面を
   壊さないこと**（壊すと、貼り間違えただけで検討が消える）

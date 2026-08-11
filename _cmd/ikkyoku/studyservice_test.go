@@ -3,8 +3,13 @@ package main
 import (
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"golang.org/x/text/encoding/japanese"
+	"golang.org/x/text/transform"
 )
 
 const hirateBoard = "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL"
@@ -235,5 +240,54 @@ func TestStudyServiceLoadKifuKeepsPositionOnError(t *testing.T) {
 	}
 	if !load.State.Loaded || load.State.Ply != 1 {
 		t.Errorf("失敗したのに前の局面が壊れています: %+v", load.State)
+	}
+}
+
+// URL から棋譜を取って読み込めること（文字コードは Shift_JIS が多い）。
+func TestStudyServiceLoadKifuURL(t *testing.T) {
+	body, _, err := transform.Bytes(japanese.ShiftJIS.NewEncoder(), []byte(
+		"先手：先手太郎\n後手：後手花子\n手数----指手---------消費時間--\n"+
+			"   1 ７六歩(77)\n   2 ３四歩(33)\n"))
+	if err != nil {
+		t.Fatalf("Shift_JIS へ変換できません: %v", err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(body)
+	}))
+	defer srv.Close()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	s := NewStudyService(logger, NewPositionService(logger))
+	load, err := s.LoadKifuURL(srv.URL + "/sample.kif")
+	if err != nil {
+		t.Fatalf("LoadKifuURL: %v", err)
+	}
+	if load.State.Ply != 2 {
+		t.Fatalf("最終手まで反映されていません: %+v", load.State)
+	}
+	// 対局者が化けていないこと（＝文字コードを取り違えていないこと）。
+	if !strings.Contains(load.Summary, "先手太郎") {
+		t.Errorf("文字が化けています: %q", load.Summary)
+	}
+	// **何として読んだか**を出す（打ち間違いの切り分けに要る）。
+	if !strings.Contains(load.Summary, "shift_jis") {
+		t.Errorf("文字コードが出ていません: %q", load.Summary)
+	}
+}
+
+// 取れなかったときは、それまでの局面を壊さずに理由を返すこと。
+func TestStudyServiceLoadKifuURLKeepsPositionOnError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	s := adopted(t)
+	load, err := s.LoadKifuURL(srv.URL + "/none.kif")
+	if err == nil {
+		t.Fatal("404 なのにエラーになりませんでした")
+	}
+	if !load.State.Loaded {
+		t.Errorf("失敗したのに前の局面が消えています: %+v", load.State)
 	}
 }

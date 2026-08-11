@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/ShinteLab/core/kifu"
+	"github.com/ShinteLab/ikkyoku/kifuweb"
 	"github.com/ShinteLab/ikkyoku/legal"
 	"github.com/ShinteLab/ikkyoku/position"
 )
@@ -168,6 +171,36 @@ func (s *StudyService) LoadKifu(text string) (KifuLoad, error) {
 	s.logger.Info("棋譜を読み込みました",
 		"moves", load.Loaded, "total", load.Total, "note", load.Note)
 	return KifuLoad{State: st, Summary: kifuSummary(load), Note: load.Note}, nil
+}
+
+// kifuFetchTimeout は棋譜を取りに行くときの上限。
+//
+// 棋譜 1 局は数十 KB なので、これで足りないのは相手が居ないときだけ。
+// **長くしないこと**（返らない URL を打ったときに画面が固まる）。
+const kifuFetchTimeout = 20 * time.Second
+
+// LoadKifuURL は URL から棋譜を取ってきて読み込む（`LoadKifu` の口違い）。
+//
+// **取ってくるのは `ikkyoku/kifuweb`**（文字コードの判別もあちら。日本将棋連盟の
+// 棋譜中継は Shift_JIS）。ここは繋ぐだけで、**取得も KIF の解釈もここに書かない。**
+func (s *StudyService) LoadKifuURL(rawURL string) (KifuLoad, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), kifuFetchTimeout)
+	defer cancel()
+
+	got, err := kifuweb.Fetch(ctx, rawURL)
+	if err != nil {
+		return KifuLoad{State: s.State()}, err
+	}
+	s.logger.Info("棋譜を取得しました", "url", got.URL, "encoding", got.Encoding, "bytes", len(got.Text))
+
+	load, err := s.LoadKifu(got.Text)
+	if err != nil {
+		return load, err
+	}
+	// **何を読んだかを出す。** URL は打ち間違えても「棋譜が読めません」としか
+	// 出ないことがあるので、**取れた側の事実**（どこから・何文字コードで）を見せる。
+	load.Summary += fmt.Sprintf("（%s）", got.Encoding)
+	return load, nil
 }
 
 // kifuSummary は「何手読み込んだか」の 1 行を組み立てる。

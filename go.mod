@@ -8,6 +8,7 @@ require (
 	github.com/ShinteLab/suteme v0.0.0-00010101000000-000000000000
 	github.com/kbinani/screenshot v0.0.0-20250624051815-089614a94018
 	golang.design/x/hotkey v0.6.1
+	golang.org/x/text v0.40.0
 )
 
 require (
