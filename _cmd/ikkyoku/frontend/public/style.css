@@ -885,13 +885,36 @@ html.is-main body {
   min-height: 22px;
 }
 
-.eval-graph-range {
+.eval-graph-range,
+.eval-graph-num {
   padding: 2px 6px;
   font-size: 12.5px;
   color: #f2f3f5;
   background: #23262e;
   border: 1px solid #3a3d47;
   border-radius: 5px;
+}
+
+/* 自由入力の範囲。**ドラッグで絞ったときの行き先でもある**（選んだ値がここに入る）
+   ので、「全て」のときだけ隠す。 */
+.eval-graph-fields {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.eval-graph-fields[hidden] {
+  display: none;
+}
+
+.eval-graph-num {
+  width: 56px;
+}
+
+.eval-graph-dash {
+  font-size: 12.5px;
+  color: #9aa6c0;
 }
 
 /* 触った位置の読み上げ。**行の高さを動かさないこと**（1 行に収めて溢れは省く）。 */
@@ -987,6 +1010,13 @@ html.is-main body {
   stroke: #7d859a;
   stroke-width: 1;
   stroke-dasharray: 3 3;
+}
+
+/* ドラッグで選んでいる範囲。**離す前に「どこからどこまでか」が見えること。** */
+.eval-select {
+  fill: rgba(106, 211, 255, 0.16);
+  stroke: #6ad3ff;
+  stroke-width: 1;
 }
 
 /* 訂正データの送信。**確定してから出る行**なので、訂正中は場所を取らない。 */

@@ -545,18 +545,25 @@ export function mountMainScreen(root: HTMLElement): void {
         <div id="eval-graph-row" class="eval-graph-row" hidden>
           <div class="eval-graph-head">
             <span class="field-label">評価値</span>
-            <!-- 横軸の範囲。**既定は自動（1〜今の手数）。**
-                 固定は「棋譜を最後まで並べたときの見え方」で読みたいとき用で、
-                 **手が増えても軸が動かない**ので中継と突き合わせやすい。 -->
+            <!-- 横軸の範囲。**既定は「全て」＝ 指した手が全部見えている状態。**
+                 ⚠️ **1 から始まるとは限らない** —— 根は初期局面とは限らないので、
+                 撮った 40 手目の局面から始めたなら 40 手目から始まる。
+
+                 **絞るのはグラフの上をドラッグする**のが本筋で、選んだ範囲は
+                 そのまま下の欄に入る（＝見えている数字が今の範囲）。
+                 「1-150 の中のどこに居るか」で読みたいときは欄に直接書く。 -->
             <select id="eval-graph-range" class="eval-graph-range"
-                    title="横軸の範囲。自動は「1〜今の手数」、固定は手数が増えても軸が動きません">
-              <option value="0" selected>自動</option>
-              <option value="50">1-50</option>
-              <option value="100">1-100</option>
-              <option value="150">1-150</option>
-              <option value="200">1-200</option>
-              <option value="300">1-300</option>
+                    title="横軸の範囲。「全て」は指した手が全部見える範囲、「自由入力」は書いたとおりの手数です">
+              <option value="all" selected>全て</option>
+              <option value="custom">自由入力</option>
             </select>
+            <span id="eval-graph-fields" class="eval-graph-fields" hidden>
+              <input id="eval-graph-from" class="eval-graph-num" type="number"
+                     min="0" max="999" step="1" value="1" title="左端の手数" />
+              <span class="eval-graph-dash">-</span>
+              <input id="eval-graph-to" class="eval-graph-num" type="number"
+                     min="1" max="999" step="1" value="150" title="右端の手数" />
+            </span>
             <!-- どの色がどのエンジンか。**グラフの中に重ねない**（目盛りと重なるうえ、
                  折れ線の描ける範囲がそのぶん狭くなる）。 -->
             <span id="eval-graph-legend" class="eval-graph-legend"></span>
@@ -565,7 +572,7 @@ export function mountMainScreen(root: HTMLElement): void {
             <span id="eval-graph-readout" class="note eval-graph-readout"></span>
           </div>
           <div id="eval-graph" class="eval-graph"
-               title="押すとその局面に戻ります（手順は消えません）"></div>
+               title="押すとその局面に戻ります（手順は消えません）。横にドラッグするとその範囲に絞ります"></div>
         </div>
         <!-- ⚠️ **盤の下に SFEN と駒台の行を戻さないこと**（2026-08-12 に外した）。
              駒台は盤の脇に駒そのものが出ているので文字の要約は要らず、SFEN は
@@ -1518,6 +1525,9 @@ export function mountMainScreen(root: HTMLElement): void {
   const evalGraphUI = mountEvalGraph({
     host: root.querySelector<HTMLElement>("#eval-graph")!,
     range: root.querySelector<HTMLSelectElement>("#eval-graph-range")!,
+    from: root.querySelector<HTMLInputElement>("#eval-graph-from")!,
+    to: root.querySelector<HTMLInputElement>("#eval-graph-to")!,
+    fields: root.querySelector<HTMLElement>("#eval-graph-fields")!,
     legend: root.querySelector<HTMLElement>("#eval-graph-legend")!,
     readout: root.querySelector<HTMLElement>("#eval-graph-readout")!,
     // **押したらその局面へ戻る**（手順のチップと同じ「戻って見る」操作。手順は消さない）。

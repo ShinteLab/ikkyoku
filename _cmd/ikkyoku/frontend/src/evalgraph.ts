@@ -45,8 +45,20 @@ export interface EvalGraphOptions {
   // host はグラフを描く箱。**高さは CSS で固定しておくこと**（中身で伸び縮みすると
   // 盤ごと画面が上下に跳ねる）。
   host: HTMLElement;
-  // range は横軸の範囲の指定（"auto" か手数）。
+  // range は横軸の決め方（"all" = 全て / "custom" = 自由入力）。
+  //
+  // ⚠️ **既定は「全て」**（＝**指した手が全部見えている状態**）。
+  // 「1 から」ではない —— 根は初期局面とは限らないので、撮った 40 手目の局面から
+  // 始めたなら 40 手目から始まるのが「全て」。
   range: HTMLSelectElement;
+  // from / to は自由入力の範囲（手数）。**既定は 1-150。**
+  //
+  // 少ししか指していなくても「1-150 の中のどこに居るか」で読みたいことがあるので、
+  // **全体表示とは別に、手で範囲を決められる口が要る。**
+  from: HTMLInputElement;
+  to: HTMLInputElement;
+  // fields は自由入力の欄を包む要素（"全て" のときは隠す）。
+  fields: HTMLElement;
   // legend はどの色がどのエンジンかを出す場所。
   //
   // ⚠️ **グラフの中に描かないこと。** 高さ 116px の絵に文字を重ねると
@@ -61,7 +73,7 @@ export interface EvalGraphOptions {
 }
 
 export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
-  const { host, range, legend, readout, onSeek } = opts;
+  const { host, range, from, to, fields, legend, readout, onSeek } = opts;
 
   const svg = document.createElementNS(NS, "svg");
   svg.setAttribute("class", "eval-graph-svg");
@@ -70,6 +82,14 @@ export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
   let graph: EvalGraph | null = null;
   // 今ホバーしている手数（null なら離れている）。**画面だけの状態。**
   let hover: number | null = null;
+  // ドラッグで範囲を選んでいる最中の両端（null なら掴んでいない）。
+  //
+  // ⚠️ **クリック（その局面へ戻る）と同じボタンで始まる**ので、
+  // **どちらだったかは離したときに決める**（下の finishDrag）。
+  let dragA: number | null = null;
+  let dragB: number | null = null;
+  // 掴んだ位置の画面座標。**動いていなければクリック**として扱う。
+  let dragX = 0;
 
   const el = (name: string, attrs: Record<string, string | number>): SVGElement => {
     const node = document.createElementNS(NS, name);
@@ -81,18 +101,42 @@ export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
 
   // 横軸の範囲。
   //
-  // **自動は「根の手数 〜 最終手」**（＝ 1〜手数）。固定はいつも 0 から数えた
-  // 絶対の手数で、**根が中盤の局面でも軸は動かない**（中継の棋譜と突き合わせる
-  // ときに、軸が毎回変わると読み比べられない）。
+  // **「全て」は根の手数 〜 最終手**（＝ 指した手が全部見えている状態）。
+  // ⚠️ **1 から始まるとは限らない** —— 根は初期局面とは限らないので、撮った
+  // 40 手目の局面から始めたなら 40 手目から始まる。
+  //
+  // **「自由入力」は書いたとおりの手数**。少ししか指していなくても
+  // 「1-150 の中のどこに居るか」で読めるようにするための口で、
+  // **ドラッグで絞ったときの行き先でもある**（絞った値がそのまま欄に入る）。
   const domain = (): { x0: number; x1: number } => {
-    const fixed = Number(range.value) || 0;
-    if (fixed > 0) {
-      return { x0: 0, x1: fixed };
+    if (range.value === "custom") {
+      const a = Math.max(0, Math.floor(Number(from.value) || 0));
+      const b = Math.floor(Number(to.value) || 0);
+      // ⚠️ **逆さや潰れた範囲でも描けること。** 打っている途中の欄は普通に
+      // 壊れた値になる（"15" と打ちたい途中の "1"）ので、**弾かずに丸める。**
+      return { x0: a, x1: Math.max(b, a + 1) };
     }
     const first = graph?.first ?? 0;
     const last = graph?.last ?? 0;
-    // 手が少ないうちに軸が詰まりすぎないよう、最低 20 手ぶんは取る。
-    return { x0: first, x1: Math.max(last, first + 20) };
+    // 手が少ないうちに軸が詰まりすぎないよう、最低 10 手ぶんは取る。
+    return { x0: first, x1: Math.max(last, first + 10) };
+  };
+
+  // 自由入力の欄は「自由入力」のときだけ出す（"全て" のときは意味が無い）。
+  const syncFields = () => {
+    fields.hidden = range.value !== "custom";
+  };
+
+  // useRange はドラッグで選んだ範囲を横軸にする。
+  //
+  // ⚠️ **選んだ値を欄に入れて「自由入力」に切り替える**こと。範囲を 2 か所
+  // （欄とドラッグ）に持つと、どちらが今の範囲か分からなくなる。
+  // **見えている数字がそのまま今の範囲**なら、続けて手で直せる。
+  const useRange = (a: number, b: number) => {
+    range.value = "custom";
+    from.value = String(Math.min(a, b));
+    to.value = String(Math.max(a, b));
+    syncFields();
   };
 
   // 評価値 → 縦位置。**詰みは端に置く**（数として大きすぎるので潰れる）。
@@ -192,8 +236,19 @@ export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
     if (graph && cur >= x0 && cur <= x1) {
       svg.appendChild(el("line", { x1: px(cur), x2: px(cur), y1: top, y2: bottom, class: "eval-cursor" }));
     }
-    if (hover !== null && hover >= x0 && hover <= x1) {
+    if (hover !== null && dragA === null && hover >= x0 && hover <= x1) {
       svg.appendChild(el("line", { x1: px(hover), x2: px(hover), y1: top, y2: bottom, class: "eval-hover" }));
+    }
+
+    // ---- ドラッグで選んでいる範囲 ------------------------------------------
+    //
+    // **どこからどこまでを掴んでいるか**が見えないと、離すまで結果が分からない。
+    if (dragA !== null && dragB !== null && dragA !== dragB) {
+      const a = px(Math.min(dragA, dragB));
+      const b = px(Math.max(dragA, dragB));
+      svg.appendChild(el("rect", {
+        x: a, y: top, width: Math.max(b - a, 1), height: bottom - top, class: "eval-select",
+      }));
     }
 
     // ---- 凡例 --------------------------------------------------------------
@@ -210,7 +265,11 @@ export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
     });
   };
 
-  // 押した/触った位置の手数。範囲の外なら null。
+  // 押した/触った位置の手数。
+  //
+  // ⚠️ **範囲の外は捨てずに丸めること。** ドラッグは箱の端まで引いてから離す
+  // 操作が普通にあるので、外へ出た瞬間に「掴んでいる位置が無い」状態にすると
+  // **端まで含めた範囲を選べない。**
   const numberAt = (ev: MouseEvent): number | null => {
     const w = host.clientWidth;
     if (w <= 0 || !graph) {
@@ -220,9 +279,6 @@ export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
     const left = PAD.left;
     const rightEdge = w - PAD.right;
     const x = ev.clientX - host.getBoundingClientRect().left;
-    if (x < left - 4 || x > rightEdge + 4) {
-      return null;
-    }
     const n = Math.round(x0 + ((x - left) / Math.max(rightEdge - left, 1)) * (x1 - x0));
     return Math.max(x0, Math.min(x1, n));
   };
@@ -248,8 +304,71 @@ export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
       : parts.join(" / ");
   };
 
+  // seek はその手数の局面へ戻す（**手順は消さない**。手順のチップと同じ操作）。
+  // **手順の外を押しても何もしない。**
+  const seek = (n: number) => {
+    if (!graph) {
+      return;
+    }
+    const ply = n - (graph.first ?? 0);
+    if (ply < 0 || ply > (graph.last ?? 0) - (graph.first ?? 0)) {
+      return;
+    }
+    onSeek(ply);
+  };
+
+  // ⚠️ **クリックとドラッグは同じボタンで始まる**ので、**どちらだったかは
+  // 離したときに決める**。動いていなければ「その局面へ戻る」、横に動いていれば
+  // 「その範囲に絞る」。
+  const finishDrag = (ev: MouseEvent) => {
+    if (dragA === null) {
+      return;
+    }
+    const a = dragA;
+    const b = dragB ?? a;
+    dragA = null;
+    dragB = null;
+    // 動いた量で分ける。**手数の差だけで見ないこと** —— 軸が広いと、
+    // 数十 px 動かしても手数が変わらないことがある（＝絞れない）。
+    const moved = Math.abs(ev.clientX - dragX) > 4;
+    if (moved && Math.abs(b - a) >= 2) {
+      useRange(a, b);
+    } else if (!moved) {
+      seek(a);
+    }
+    hover = null;
+    showReadout(null);
+    draw();
+  };
+
+  host.addEventListener("mousedown", (ev) => {
+    const n = numberAt(ev);
+    if (n === null) {
+      return;
+    }
+    // ⚠️ **既定の選択（テキストのドラッグ）を止める。** 止めないと、
+    // 横に引いたときに見出しごと青く反転して掴んでいる範囲が見えなくなる。
+    ev.preventDefault();
+    dragA = n;
+    dragB = n;
+    dragX = ev.clientX;
+    draw();
+  });
   host.addEventListener("mousemove", (ev) => {
     const n = numberAt(ev);
+    if (dragA !== null) {
+      if (n === dragB) {
+        return;
+      }
+      dragB = n;
+      showReadout(null);
+      // 掴んでいるあいだは「これから絞る範囲」を出す（離す前に確かめられる）。
+      if (dragA !== null && dragB !== null) {
+        readout.textContent = `${Math.min(dragA, dragB)}〜${Math.max(dragA, dragB)}手目に絞る`;
+      }
+      draw();
+      return;
+    }
     // ⚠️ **手数が変わったときだけ描き直すこと。** mousemove のたびに描くと、
     // 同じ絵を毎フレーム作り直すことになる（1 手ぶん動かないと絵は変わらない）。
     if (n === hover) {
@@ -260,25 +379,28 @@ export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
     draw();
   });
   host.addEventListener("mouseleave", () => {
+    // ⚠️ **掴んでいる最中は離脱で消さないこと**（箱の外まで引いてから離す操作が
+    // 普通にある）。終わらせるのは window の mouseup。
+    if (dragA !== null) {
+      return;
+    }
     hover = null;
     showReadout(null);
     draw();
   });
-  // ⚠️ **押すとその局面へ戻る**（手順のリストのチップと同じ「戻って見る」操作）。
-  // 手順は消さないので、進め直せる。**範囲の外や手順の外を押しても何もしない。**
-  host.addEventListener("click", (ev) => {
-    const n = numberAt(ev);
-    if (n === null || !graph) {
-      return;
-    }
-    const ply = n - (graph.first ?? 0);
-    if (ply < 0 || ply > (graph.last ?? 0) - (graph.first ?? 0)) {
-      return;
-    }
-    onSeek(ply);
-  });
+  // ⚠️ **離すのは箱の外のこともある**ので window で受ける（host だけだと、
+  // 端まで引いて離したときに掴んだままになる）。
+  window.addEventListener("mouseup", finishDrag);
 
-  range.addEventListener("change", draw);
+  range.addEventListener("change", () => {
+    syncFields();
+    draw();
+  });
+  // 打っている途中でも追随させる（確定を待たない。壊れた値は domain が丸める）。
+  for (const input of [from, to]) {
+    input.addEventListener("input", draw);
+  }
+  syncFields();
   // 箱の大きさが変わったら測り直す（ウィンドウのリサイズもここで拾える）。
   new ResizeObserver(() => draw()).observe(host);
 
@@ -286,6 +408,11 @@ export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
     render(next: EvalGraph | null) {
       graph = next;
       hover = null;
+      // ⚠️ **掴んでいる状態を持ち越さないこと**（局面が変わったのに、前の絵の
+      // 上で選び始めた範囲が残る）。**範囲そのもの（欄の値）は残す** ——
+      // 絞って見ているところに 1 手指したら全体に戻る、では使えない。
+      dragA = null;
+      dragB = null;
       showReadout(null);
       draw();
     },
