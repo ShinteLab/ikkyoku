@@ -1197,11 +1197,15 @@ html.is-main body {
   width: 140px;
   height: auto;
   min-height: 0;
-  aspect-ratio: 1;
-  padding: 4px;
+  /* 正方形より少し縦長。駒が縦に積まれる場所なので、横に広げるより縦に取るほうが
+     枚数が増えたときに見える駒が多い。 */
+  aspect-ratio: 4 / 5;
+  padding: 10px 4px;
+  /* 駒台は木製なので茶色。駒(#f3c877)より暗くして、載っている駒が浮くようにする。 */
+  background: #7a5530;
   /* 破線は「ここへ落とせる」の合図なので、掴めないこちらは実線にする。 */
   border-style: solid;
-  border-color: #33363f;
+  border-color: #5a3b1a;
 }
 
 /* 掴めるように見せないこと（駒を動かせるのは訂正タブだけ）。
