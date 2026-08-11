@@ -344,3 +344,65 @@ func TestAccumulatorIgnoresScorelessInfo(t *testing.T) {
 		t.Error("currmove だけの行で表示が更新されています")
 	}
 }
+
+// 手を進めた局面を `position sfen <根> moves ...` として渡せること。
+//
+// **エンジンに渡すのは根 + 手順。** 局面を組み立て直して渡すと、千日手と
+// 連続王手をエンジンが判定できなくなる。
+func TestAnalyzeWithMoves(t *testing.T) {
+	s := NewLocalSession()
+	r, err := s.Analyze(context.Background(), startpos,
+		Options{Movetime: testMovetime, Moves: []string{"7g7f", "3c3d"}}, nil)
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	// **手番は解析する局面のもの**（2 手進んだので先手番のまま）。
+	if r.Turn != "b" {
+		t.Errorf("Turn = %q, want %q", r.Turn, "b")
+	}
+	if r.Bestmove == "" {
+		t.Error("bestmove が返っていません")
+	}
+}
+
+// ⚠️ **奇数手進めたら手番が入れ替わること。** ここを根の手番のままにすると、
+// **奇数手進めたときだけ評価値の符号が逆に見える**（画面では気づけない）。
+func TestAnalyzeMovesFlipTurn(t *testing.T) {
+	s := NewLocalSession()
+	r, err := s.Analyze(context.Background(), startpos,
+		Options{Movetime: testMovetime, Moves: []string{"7g7f"}}, nil)
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	if r.Turn != "w" {
+		t.Errorf("Turn = %q, want %q（1 手進めたら後手番）", r.Turn, "w")
+	}
+}
+
+// 読み筋の日本語表記は**進めたあとの局面から**始まること。
+//
+// ⚠️ **根からいきなり読み筋を流すと、別の盤の上で名付けることになる**
+// （駒種も「同」も全部おかしくなるのに、USI のほうは正しいままなので
+// 画面を見ても気づけない）。
+func TestAccumulatorNamesPVAfterMoves(t *testing.T) {
+	a := &accumulator{
+		black: true, started: time.Now(), sfen: startpos,
+		played: []string{"7g7f", "3c3d"},
+	}
+	a.add(coreusi.Info{Depth: 3, MultiPV: 1, ScoreCP: 100, HasScore: true,
+		PV: []string{"8h2b+", "3a2b"}})
+	p := a.snapshot()
+	if len(p.Lines) != 1 {
+		t.Fatalf("候補が %d 本", len(p.Lines))
+	}
+	want := []string{"▲２二角成", "△同　銀"}
+	got := p.Lines[0].Text
+	if len(got) != len(want) {
+		t.Fatalf("Text = %q, want %q（指し終わったぶんを捨てること）", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("Text[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}

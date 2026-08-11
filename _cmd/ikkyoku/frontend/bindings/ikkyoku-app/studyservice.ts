@@ -22,9 +22,13 @@
  * **永続化しない**（PositionService と同じ。2026-08-07 決定）。検討セッションは
  * メモリ上に持つだけで、保存は明示的なエクスポート。
  * 
- * **これから**: 手順（`Moves`）と分岐ツリーがここに乗る。合法手生成が要るので
- * `ikkyoku → engine` の Go 依存が戻るが、**解析だけは USI 経由のまま**にすること
- * （棋力の問題を設定の問題にした意味が無くなる）。
+ * **手順はここに乗る**（2026-08-11）。`position.Study` が「根 + 指した手の並び」を
+ * 持ち、合法手は `ikkyoku/legal`（engine）が出す。⚠️ **`ikkyoku → engine` の Go 依存が
+ * ここで戻るが、解析だけは USI 経由のまま**にすること（棋力の問題を設定の問題にした
+ * 意味が無くなる）。**用途が違う** —— こちらは手の検証であって解析ではない。
+ * 
+ * **これから**: 分岐ツリー（今は一直線。戻って別の手を指すと先は捨てる）。
+ * 木の形は `core/kifu` が持てるようになってから決める。
  * @module
  */
 
@@ -57,8 +61,38 @@ export function Clear(): $CancellablePromise<$models.StudyState> {
 }
 
 /**
+ * GoTo は手順の n 手目まで進めた局面を見る（0 なら根）。**手順は消さない。**
+ */
+export function GoTo(n: number): $CancellablePromise<$models.StudyState> {
+    return $Call.ByID(2871148087, n);
+}
+
+/**
+ * Play は 1 手指して局面を進める（解析タブの盤のクリック）。
+ * 
+ * ⚠️ **合法手だけ。** 訂正タブ（どこへでも動かせる）とは別の面で、ここは実際の
+ * 対局と同じように進める。指せない手は Go 側で断る（**フロントで同じ判定を
+ * 書かないこと** —— 合法手の一覧は `StudyState.Legal` に出しているので、
+ * 画面はそれを光らせるだけでよい）。
+ * 
+ * **戻って見ている途中で指すと、そこから先の手順は捨てる。**
+ */
+export function Play(move: string): $CancellablePromise<$models.StudyState> {
+    return $Call.ByID(3489214574, move);
+}
+
+/**
  * State は今の状態を返す（何も変えない）。フロントの初期表示用。
  */
 export function State(): $CancellablePromise<$models.StudyState> {
     return $Call.ByID(15823641);
+}
+
+/**
+ * Undo は 1 手戻す（**手順からも消す**。「指し間違えた」の取り消し）。
+ * 
+ * 戻って見るだけなら GoTo。**混同しないこと。**
+ */
+export function Undo(): $CancellablePromise<$models.StudyState> {
+    return $Call.ByID(675958962);
 }

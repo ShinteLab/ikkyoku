@@ -277,7 +277,9 @@ type AnalyzeState struct {
 // ⚠️ **設定で「解析に使う」が 1 つも無ければエラー。** 何も起きないより、
 // 設定を直す先が分かるほうがよい。
 func (s *AnalyzeService) Start(seconds int) (AnalyzeState, error) {
-	sfen, err := s.study.positionSFEN()
+	// ⚠️ **根と手順を分けて受け取る。** 組み立て直した 1 つの SFEN を渡すと、
+	// 千日手と連続王手をエンジンが判定できない（`position sfen <根> moves ...`）。
+	target, err := s.study.analyzeTarget()
 	if err != nil {
 		return AnalyzeState{}, err
 	}
@@ -313,7 +315,7 @@ func (s *AnalyzeService) Start(seconds int) (AnalyzeState, error) {
 
 	// ⚠️ **seconds が 0 以下なら「止めるまで考え続ける」。**
 	// これが「ずっと解析していたい」の表し方で、そのあいだプロセスも生きている。
-	opt := analyze.Options{}
+	opt := analyze.Options{Moves: target.Moves}
 	if seconds > 0 {
 		opt.Movetime = time.Duration(seconds) * time.Second
 	}
@@ -325,7 +327,7 @@ func (s *AnalyzeService) Start(seconds int) (AnalyzeState, error) {
 		wg.Add(1)
 		go func(entry ikkyoku.EngineEntry) {
 			defer wg.Done()
-			s.runOne(ctx, seq, entry, sfen, opt)
+			s.runOne(ctx, seq, entry, target.Root, opt)
 		}(entry)
 	}
 	go func() {
@@ -337,7 +339,10 @@ func (s *AnalyzeService) Start(seconds int) (AnalyzeState, error) {
 		close(done)
 	}()
 
-	return AnalyzeState{Running: true, Seq: seq, SFEN: sfen, Engines: engines}, nil
+	// ⚠️ **SFEN には「解析する局面」を入れる**（根ではない）。手を進めても根は
+	// 変わらないので、根を入れるとフロントが「局面が変わった」に気づけず、
+	// **前の手の評価値が今の盤の上に残る。**
+	return AnalyzeState{Running: true, Seq: seq, SFEN: target.Current, Engines: engines}, nil
 }
 
 // runOne はエンジン 1 つぶんの解析。**他のエンジンの成否に影響しない。**

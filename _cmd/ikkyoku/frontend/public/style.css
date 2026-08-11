@@ -1182,6 +1182,112 @@ html.is-main body {
   transform: rotate(180deg);
 }
 
+/* ---- 手を進める UI(study.ts) ---------------------------------------------
+   解析タブの盤に重ねるグリッド。**訂正タブ(.edit-grid)とは別物**で、
+   ドラッグではなく**クリック 2 回**（駒 → 光った移動先）で指す。
+   位置の測り方だけは同じ（SVG の実寸を px で入れる。% や inset を書かないこと）。 */
+.study-grid {
+  position: absolute;
+  display: grid;
+  grid-template-columns: repeat(9, 1fr);
+  grid-template-rows: repeat(9, 1fr);
+  /* 局面が無いあいだは盤を素通しにする。 */
+  pointer-events: none;
+}
+
+.study-grid.is-active {
+  pointer-events: auto;
+}
+
+.study-cell {
+  position: relative;
+  border: 1px solid transparent;
+  border-radius: 2px;
+}
+
+/* 掴める駒（＝そのマスから指せる手がある）。**手番側の駒にしか付かない**
+   ——合法手から出しているので、「自分の駒か」をフロントで判定していない。 */
+.study-cell.is-pickable {
+  cursor: pointer;
+}
+
+.study-grid.is-active .study-cell.is-pickable:hover {
+  border-color: rgba(94, 160, 255, 0.9);
+  background: rgba(94, 160, 255, 0.1);
+}
+
+/* 掴んでいる駒。 */
+.study-cell.is-source {
+  border-color: #5ea0ff;
+  background: rgba(94, 160, 255, 0.22);
+}
+
+/* 動かせる位置。**駒を隠さないように中央の丸で出す**（マス全体を塗ると、
+   そこに居る駒（取れる駒）が読めなくなる）。 */
+.study-cell.is-target {
+  cursor: pointer;
+}
+
+.study-cell.is-target::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 34%;
+  height: 34%;
+  border-radius: 50%;
+  background: rgba(94, 160, 255, 0.75);
+  box-shadow: 0 0 6px rgba(94, 160, 255, 0.8);
+  pointer-events: none;
+}
+
+.study-cell.is-target:hover {
+  background: rgba(94, 160, 255, 0.28);
+}
+
+/* 手順（棋譜）。**盤をできるだけ大きく見せたい**ので 1 行に収めて横スクロール。 */
+.study-move-row {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.study-moves {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow-x: auto;
+  padding: 2px 0;
+}
+
+.move-chip {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  font-size: 12px;
+  color: #c8cdd8;
+  background: transparent;
+  border: 1px solid #3a3d47;
+  border-radius: 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.move-chip:hover {
+  border-color: #5ea0ff;
+}
+
+/* 今見ている局面。**戻って見ているときにどこに居るかが分からないと、
+   進め直す先が決められない。** */
+.move-chip.is-current {
+  color: #0f1115;
+  background: #5ea0ff;
+  border-color: #5ea0ff;
+}
+
 .editor {
   flex: 0 0 auto;
   display: flex;
@@ -1393,13 +1499,28 @@ html.is-main body {
   border-color: #5a3b1a;
 }
 
-/* 掴めるように見せないこと（駒を動かせるのは訂正タブだけ）。
-   大きさは盤の駒(CELL=56px)に寄せる。 */
+/* 掴めるように見せないこと（**ドラッグで動かせるのは訂正タブだけ**）。
+   大きさは盤の駒(CELL=56px)に寄せる。
+
+   ⚠️ **クリックは別**（2026-08-11）。解析タブでは駒台の駒を押すと打てる位置が
+   光る（study.ts）。ドラッグの入口が無いことと、押せないことは違う。 */
 .hand-zone.is-readonly .stock-chip {
   width: 40px;
   height: 40px;
   font-size: 34px;
   cursor: default;
+}
+
+/* 打てる駒（＝今の手番側の持ち駒で、打ち先がある）。押せることを見せる。 */
+.hand-zone.is-readonly .stock-chip.is-pickable {
+  cursor: pointer;
+}
+
+/* 掴んでいる駒。盤の選択（.study-cell.is-source）と同じ見え方に揃える。 */
+.hand-zone.is-readonly .stock-chip.is-source {
+  outline: 2px solid #5ea0ff;
+  outline-offset: 1px;
+  box-shadow: 0 0 8px rgba(94, 160, 255, 0.7);
 }
 
 .hand-zone.is-over {

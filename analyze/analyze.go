@@ -56,6 +56,15 @@ type Options struct {
 	// ⚠️ **対応していないエンジンでは無視される**（自作 `engine` が今それ。
 	// engine/TODO.md の 1）。**候補が 1 本しか返らないことを異常扱いしないこと。**
 	MultiPV int
+	// Moves は根の局面から指した手（USI）。**`position sfen <根> moves ...` の moves。**
+	//
+	// 解析タブで手を進めたぶんがここに入る。**局面を組み立て直して渡さないこと** ——
+	// 千日手と連続王手は手順が無いとエンジンに判定できないので、手順があるなら渡す。
+	//
+	// ⚠️ **これは設計原則1（履歴に依存しない）に反しない。** 根の 1 局面だけでも
+	// 解析は成立していて（Moves が空でよい）、ここに入るのは**ユーザーが自分で
+	// 伸ばした手順**であって、中継を最初から観ていないと得られない情報ではない。
+	Moves []string
 }
 
 // Score は評価値。**先手視点に直してある。**
@@ -249,8 +258,9 @@ func (s *Session) Connect(ctx context.Context) (EngineInfo, error) {
 
 // Analyze は局面を解析する。**このあいだだけエンジンのプロセスが生きている。**
 //
-// positionSFEN は**局面全体の SFEN**（盤面・手番・持ち駒・手数）。
-// `position.Position.SFEN()` が返すものをそのまま渡す。
+// positionSFEN は**根の局面全体の SFEN**（盤面・手番・持ち駒・手数）。
+// `position.Position.SFEN()` が返すものをそのまま渡す。手を進めているなら
+// `opt.Moves` に手順を入れる（**局面を組み立て直して渡さないこと**）。
 //
 // info は深さが 1 つ完走するたびに呼ばれる（nil 可）。**エンジンの読み取り
 // goroutine から呼ばれる**ので、UI へ流すならイベント経由にすること。
@@ -262,7 +272,24 @@ func (s *Session) Analyze(ctx context.Context, positionSFEN string, opt Options,
 	if err != nil {
 		return Result{}, err
 	}
+	root := strings.Join(fields, " ")
+	// ⚠️ **評価値の符号を決めるのは「解析する局面の」手番**であって、根の手番ではない。
+	// 手を進めていれば 1 手ごとに入れ替わる。**ここを根のままにすると、
+	// 奇数手進めたときだけ符号が逆に見える**（画面を見ても気づけない壊れ方）。
 	black := fields[1] == "b"
+	if len(opt.Moves)%2 == 1 {
+		black = !black
+	}
+	turn := "b"
+	if !black {
+		turn = "w"
+	}
+	// `position sfen <根> moves ...`。手順があるなら**組み立て直さずにそのまま渡す**
+	// （千日手と連続王手は手順が無いとエンジンに判定できない）。
+	cmd := root
+	if len(opt.Moves) > 0 {
+		cmd += " moves " + strings.Join(opt.Moves, " ")
+	}
 
 	eng, startup, err := s.dial(ctx)
 	if err != nil {
@@ -281,8 +308,8 @@ func (s *Session) Analyze(ctx context.Context, positionSFEN string, opt Options,
 	}
 
 	started := time.Now()
-	acc := &accumulator{black: black, started: started, sfen: strings.Join(fields, " ")}
-	res, err := eng.Analyze(ctx, strings.Join(fields, " "),
+	acc := &accumulator{black: black, started: started, sfen: root, played: opt.Moves}
+	res, err := eng.Analyze(ctx, cmd,
 		client.GoOptions{Movetime: opt.Movetime, MultiPV: opt.MultiPV},
 		func(in coreusi.Info) {
 			if p, ok := acc.add(in); ok && info != nil {
@@ -298,7 +325,7 @@ func (s *Session) Analyze(ctx context.Context, positionSFEN string, opt Options,
 	return Result{
 		Progress:  final,
 		Bestmove:  res.Bestmove,
-		Turn:      fields[1],
+		Turn:      turn,
 		Stopped:   res.Stopped,
 		Engine:    eng.ID,
 		StartupMS: startup.Milliseconds(),
@@ -344,9 +371,15 @@ func (s *Session) dial(ctx context.Context) (*liveEngine, time.Duration, error) 
 type accumulator struct {
 	black   bool
 	started time.Time
-	// sfen は解析している局面（全体の SFEN）。**読み筋を日本語にするのに要る。**
+	// sfen は**根の**局面（全体の SFEN）。**読み筋を日本語にするのに要る。**
 	// USI の手には駒種が書いていないので、ここから 1 手ずつ盤を進めて割り出す。
 	sfen string
+	// played は根から解析対象の局面までの手（USI）。
+	//
+	// ⚠️ **読み筋を名付けるには、まずここまで盤を進める必要がある。** 根から
+	// いきなり読み筋を流すと**別の盤の上で名付ける**ことになり、駒種も「同」も
+	// 全部おかしくなる（しかも USI のほうは正しいままなので画面では気づけない）。
+	played []string
 
 	mu    sync.Mutex
 	depth int
@@ -396,9 +429,17 @@ func (a *accumulator) moveText(pv []string) []string {
 	if len(pv) == 0 {
 		return nil
 	}
-	texts, _ := kifu.FormatMoves(a.sfen, pv)
-	out := make([]string, 0, len(texts))
-	for _, t := range texts {
+	// **根から通しで変換して、指し終わっているぶんを捨てる。** 途中の局面の SFEN を
+	// 別に持って渡す手もあるが、そうすると「同」の判定に要る直前の移動先が落ちる。
+	all := make([]string, 0, len(a.played)+len(pv))
+	all = append(all, a.played...)
+	all = append(all, pv...)
+	texts, _ := kifu.FormatMoves(a.sfen, all)
+	if len(texts) <= len(a.played) {
+		return nil
+	}
+	out := make([]string, 0, len(pv))
+	for _, t := range texts[len(a.played):] {
 		out = append(out, t.Text)
 	}
 	return out

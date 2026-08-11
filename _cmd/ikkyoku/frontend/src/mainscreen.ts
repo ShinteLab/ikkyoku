@@ -54,6 +54,7 @@ import {
 } from "../bindings/ikkyoku-app";
 import { iconMarkup } from "./icon";
 import { mountEditor } from "./editor";
+import { mountStudyBoard } from "./study";
 import type { AppSettings, EngineSettings, StudyState } from "../bindings/ikkyoku-app/models";
 import type { Stock } from "../bindings/github.com/ShinteLab/ikkyoku/position/models";
 // 認識の観測情報。**型を手で書き写さない**(Go 側は suteme の型をそのまま通しており、
@@ -403,6 +404,20 @@ export function mountMainScreen(root: HTMLElement): void {
             訂正タブで「この局面を解析する」を押すと、ここに局面が出ます。
           </p>
         </div>
+        <!-- 手順（Phase 5「手を進める UI」。2026-08-11）。
+             **駒をクリック → 動かせる位置が光る → そこをクリックで指す。**
+             合法手だけを辿るので、駒台の駒も打てる位置が光る。
+
+             ⚠️ **チップを押すと戻れるが、手順は消えない**（進め直せる）。消えるのは
+             戻った先で別の手を指したとき（Go 側の Study.Play が捨てる）。
+             「1手戻す」は指し間違えの取り消しなので、**そちらは手順からも消す**。 -->
+        <div id="study-move-row" class="study-move-row" hidden>
+          <span class="field-label">手順</span>
+          <div id="study-moves" class="study-moves"></div>
+          <button id="study-undo" class="ghost-btn" type="button"
+                  title="最後の 1 手を取り消します（手順からも消えます）">1手戻す</button>
+        </div>
+        <p id="study-move-status" class="note is-caution" hidden></p>
         <!-- エンジン解析（Phase 4）。**確定した局面にだけかかる。**
              確定していない局面はそもそもこのタブに来ない（Go 側の
              StudyService.Adopt が断る）ので、ここでの「押せない理由」は
@@ -606,6 +621,11 @@ export function mountMainScreen(root: HTMLElement): void {
     // グリッドが出ないか前回の大きさのまま残り、1 マスずれたところを編集する。
     if (target === editTab) {
       editor.relayout();
+    }
+    // ⚠️ **解析タブの盤にもグリッドが乗っている**（手を進める UI。2026-08-11）。
+    // **こちらを落とすと、光った位置と実際に指す位置が 1 マスずれる。**
+    if (target === studyTab) {
+      studyBoardUI.relayout();
     }
   };
 
@@ -1025,7 +1045,13 @@ export function mountMainScreen(root: HTMLElement): void {
   const syncAnalyze = () => {
     analyzeRow.hidden = !studyLoaded;
     if (analyzedSfen && studySfen !== analyzedSfen) {
-      // 採り直したので、前の評価値は今の盤の値ではなくなった。
+      // 採り直した・手を進めたので、前の評価値は今の盤の値ではなくなった。
+      // ⚠️ **走っているなら止めること**（2026-08-11）。表示を消すだけだと、
+      // **もう誰も読まない局面のためにエンジンのプロセスが生き続ける**
+      // （手を 1 手進めるたびに増えるので、放っておくと重くなる）。
+      if (analyzeRunning) {
+        void AnalyzeService.Stop();
+      }
       clearAnalyzeResult();
       analyzeSeq = -1;
       analyzeRunning = false;
@@ -1082,8 +1108,8 @@ export function mountMainScreen(root: HTMLElement): void {
   // （タブごとに別の局面が出ているのが正しい状態で、片方を動かしたらもう片方も
   // 動く、という作りにすると「今どちらの局面を見ているか」が分からなくなる）。
   //
-  // ⚠️ **ここにグリッドを重ねない。** 駒を掴んで動かせるのは訂正タブだけ。
-  // 手を進める UI（合法手だけ）はこれからで、そのときも訂正のグリッドは流用しない。
+  // ⚠️ **重ねるグリッドは訂正タブのものを流用しない**（別のタブの別の盤）。
+  // ここのグリッド（`study.ts`）は**合法手だけ**を扱い、クリック 2 回で指す。
   const studyStage = root.querySelector<HTMLElement>("#study-stage")!;
   const studyBoard = root.querySelector<HTMLElement>("#study-board")!;
   const studyPlaceholder = root.querySelector<HTMLParagraphElement>("#study-placeholder")!;
@@ -1098,6 +1124,10 @@ export function mountMainScreen(root: HTMLElement): void {
     black: root.querySelector<HTMLElement>("#study-hand-black-slot")!,
     white: root.querySelector<HTMLElement>("#study-hand-white-slot")!,
   };
+  const studyMoveRow = root.querySelector<HTMLDivElement>("#study-move-row")!;
+  const studyMoves = root.querySelector<HTMLDivElement>("#study-moves")!;
+  const studyUndo = root.querySelector<HTMLButtonElement>("#study-undo")!;
+  const studyMoveStatus = root.querySelector<HTMLParagraphElement>("#study-move-status")!;
   // 中身は訂正タブと同じ .hand-zone だが、**見出しは出さない**（`is-readonly`）。
   // 盤との位置関係そのものが「どちらの駒台か」の説明になっているので、
   // 掴む相手でもない箱に文字を足すと、そのぶん駒台が縦に伸びるだけになる。
@@ -1114,7 +1144,13 @@ export function mountMainScreen(root: HTMLElement): void {
   // 訂正タブ側の一行。訂正の操作が通らなかった理由と、確定できない理由を出す。
   const editStatus = root.querySelector<HTMLParagraphElement>("#edit-status")!;
 
-  const showStudy = (st: StudyState) => {
+  // showStudy は解析タブの表示一式（盤・駒台・SFEN・警告・手順）を描く。
+  //
+  // ⚠️ **手順とグリッドの描き直しを落とさないこと。** 盤だけ更新すると、
+  // **前の局面の合法手が光ったまま**になり、指せない手を指そうとする。
+  // 盤の操作から呼ばれたとき（`fromBoard`）だけは、あちらが既に描いているので
+  // 二度描かない（**同じ状態を 2 か所から描くと、どちらが今かが分からなくなる**）。
+  const showStudy = (st: StudyState, o?: { fromBoard?: boolean }) => {
     studyLoaded = !!st.loaded;
     studySfen = st.sfen ?? "";
     studyStage.hidden = !studyLoaded;
@@ -1125,6 +1161,8 @@ export function mountMainScreen(root: HTMLElement): void {
     // （持ち駒が 0 枚であることも局面の情報）。
     studyHandSlots.black.hidden = !studyLoaded;
     studyHandSlots.white.hidden = !studyLoaded;
+    studyMoveRow.hidden = !studyLoaded;
+    studyUndo.disabled = (st.ply ?? 0) === 0;
     if (studyLoaded) {
       studyBoard.setAttribute("sfen", st.boardSfen);
       // 手番と手数は SFEN に入っているが、読むのに要るのは文字のほう。
@@ -1136,9 +1174,17 @@ export function mountMainScreen(root: HTMLElement): void {
       studySfenOut.textContent = "-";
       showStudyHand([]);
     }
+    // ⚠️ **合法手が出せなくても局面は生きている**（設計原則3）。玉の欠けた局面などでは
+    // 手を進められないだけで、盤も解析もそのまま使える。**理由は出すこと** ——
+    // 何も出さないと「駒を押しても光らない」の理由が分からない。
+    studyMoveStatus.textContent = st.legalError ?? "";
+    studyMoveStatus.hidden = !st.legalError;
     // 確定した局面でも警告は出うる（詰将棋のように「論理的におかしくても正しい」
     // 局面があるため。設計原則3）。変な評価値が出たときの手掛かりになる。
     fillWarnings(studyWarnings, st.warnings ?? []);
+    if (!o?.fromBoard) {
+      studyBoardUI.render(st.loaded ? st : null);
+    }
     syncAnalyze();
   };
 
@@ -1162,6 +1208,9 @@ export function mountMainScreen(root: HTMLElement): void {
           total++;
           const chip = document.createElement("div");
           chip.className = black ? "stock-chip" : "stock-chip is-white";
+          // ⚠️ **piece を持たせること。** 駒台の駒はマスを持たないので、
+          // 「打てる位置」を合法手（`legal.Move.drop`）と突き合わせる鍵がこれしかない。
+          chip.dataset.piece = String(s.piece);
           chip.textContent = black ? s.letter : s.letter.toLowerCase();
           chip.title = `${black ? "先手" : "後手"}の${s.name}（${n}枚）`;
           chips.appendChild(chip);
@@ -1196,6 +1245,7 @@ export function mountMainScreen(root: HTMLElement): void {
   const adoptToStudy = async () => {
     editStatus.textContent = "";
     editStatus.classList.remove("is-error");
+    studyMoveStatus.hidden = true;
     try {
       showStudy(await StudyService.Adopt());
     } catch (err) {
@@ -1205,6 +1255,23 @@ export function mountMainScreen(root: HTMLElement): void {
     }
     selectTab(studyTab);
   };
+
+  // 解析タブの盤の操作（手を進める UI）。**合法手だけ。**
+  //
+  // ⚠️ **訂正タブの mountEditor とは別物。** あちらはドラッグで自由に置く面で、
+  // こちらはクリック 2 回で合法手だけを辿る面。**同じグリッドを流用しないこと。**
+  const studyBoardUI = mountStudyBoard({
+    stage: studyStage,
+    handSlots: studyHandSlots,
+    movesPanel: studyMoves,
+    // 指したあとの局面は showStudy がそのまま描く（盤・駒台・SFEN・警告）。
+    onState: (st) => showStudy(st, { fromBoard: true }),
+    onError: (message) => {
+      studyMoveStatus.textContent = message;
+      studyMoveStatus.hidden = false;
+    },
+  });
+  studyUndo.addEventListener("click", () => studyBoardUI.undo());
 
   // 解析タブ → 訂正タブ。**解析の結果は捨てる。**
   // 直した結果を採り直せば別の局面になるので、前の評価値を残す意味が無い。

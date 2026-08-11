@@ -3,6 +3,9 @@
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
+import * as legal$0 from "../github.com/ShinteLab/ikkyoku/legal/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
 import * as position$0 from "../github.com/ShinteLab/ikkyoku/position/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
@@ -433,6 +436,44 @@ export interface StudyState {
      * 解析タブでも出しておくのは、変な評価値が出たときの手掛かりになるから。
      */
     "warnings": string[] | null;
+
+    /**
+     * RootSFEN は根の局面（採ったときの局面）。**エンジンに渡すのはこれ + Played。**
+     */
+    "rootSfen": string;
+
+    /**
+     * Moves は根から指した手順（棋譜の順。日本語表記つき）。
+     */
+    "moves": position$0.Move[] | null;
+
+    /**
+     * Ply は今どこまで進めて見ているか（0 なら根）。
+     * 
+     * **len(Moves) より小さいことがある**（戻って見ている状態）。
+     */
+    "ply": number;
+
+    /**
+     * Played は今の局面までの手（USI）。**解析に渡す moves そのもの。**
+     */
+    "played": string[] | null;
+
+    /**
+     * Legal は今の局面で指せる手。**駒をクリックしたときに光らせる先。**
+     * 
+     * ⚠️ **同じ移動先に成りと不成の 2 つが並ぶことがある。** どちらを指すかは
+     * 人が決めることなので、**Go 側で片方に丸めないこと**（UI が聞く）。
+     */
+    "legal": legal$0.Move[] | null;
+
+    /**
+     * LegalError は合法手を出せなかった理由（出せたなら空）。
+     * 
+     * ⚠️ **これはエラーにしない**（設計原則3）。玉の欠けた局面などでは手を進められ
+     * ないが、盤は描けるし解析タブに居ることもできる。**手が指せなくなるだけ。**
+     */
+    "legalError": string;
 }
 
 /**
