@@ -507,6 +507,7 @@ export function mountMainScreen(root: HTMLElement): void {
               <option value="1">候補 1</option>
               <option value="3" selected>候補 3</option>
               <option value="5">候補 5</option>
+              <option value="10">候補 10</option>
             </select>
           </label>
           <span id="analyze-meta" class="note"></span>
