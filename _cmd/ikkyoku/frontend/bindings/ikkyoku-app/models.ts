@@ -378,6 +378,29 @@ export interface GuideLayout {
 }
 
 /**
+ * KifuLoad は棋譜を読み込んだ結果（入力タブの「棋譜を貼り付ける」）。
+ */
+export interface KifuLoad {
+    /**
+     * State は読み込んだあとの解析タブの状態。**そのまま showStudy に渡す。**
+     */
+    "state": StudyState;
+
+    /**
+     * Summary は「何手読み込んだか」の 1 行（対局者・棋戦が分かれば添える）。
+     */
+    "summary": string;
+
+    /**
+     * Note は全部は載らなかった理由（載ったなら空）。
+     * 
+     * ⚠️ **これはエラーではない。** 途中で止まっても、そこまでの手順は正しいので
+     * 解析できる（設計原則3）。**フロントで空でないことをエラー扱いしないこと。**
+     */
+    "note": string;
+}
+
+/**
  * RecognizerStatus は駒種推論器(suteme)の読み込み状況。
  */
 export interface RecognizerStatus {

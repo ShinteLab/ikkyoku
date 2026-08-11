@@ -11,7 +11,7 @@
 // (PositionService / StudyService)、繋がるのは「この局面を解析する」を押した
 // ときの 1 回だけ(写しを渡す)。**片方の値をもう片方に流用しないこと。**
 //
-//   入力   … 局面を**取り込む**面。今はキャプチャだけ。今後 SFEN / KIF / 画像ファイル
+//   入力   … 局面を**取り込む**面。キャプチャと**棋譜(KIF)の貼り付け**。今後 SFEN / 画像ファイル
 //            (画像は認識を通るので訂正タブへ、SFEN/KIF は確定済みなので解析タブへ)
 //   訂正   … 認識の誤りを**直す**面。**ここに居ること自体が訂正モード**
 //            (自由編集・合法性を問わない・手番も駒台の先後も未決でよい)
@@ -237,6 +237,25 @@ export function mountMainScreen(root: HTMLElement): void {
         <p id="status" class="status" role="status" aria-live="polite">
           ガイド枠を盤面に合わせて撮影してください。
         </p>
+
+        <!-- 棋譜を貼り付ける。**画像を通らない 2 つめの入口**なので、行き先も違う
+             （撮影は認識を通るので訂正タブ、棋譜は既に確定しているので解析タブ）。 -->
+        <div class="setting-group">
+          <span class="setting-title">棋譜を貼り付ける</span>
+          <span class="setting-note">
+            KIF 形式の棋譜を貼って「読み込む」を押すと、
+            <strong>指し手を全て反映した局面</strong>で<strong>解析タブ</strong>が開きます。
+            手順は盤の右に並ぶので、押せばその局面まで戻れます。
+            <strong>訂正タブは通りません</strong>（棋譜の局面は初期局面と手順で決まるため）。
+          </span>
+          <textarea id="kifu-text" class="kifu-text" spellcheck="false"
+                    placeholder="手数----指手---------消費時間--&#10;   1 ７六歩(77)   ( 0:16/00:00:16)&#10;   2 ３四歩(33)   ( 0:04/00:00:04)"></textarea>
+          <div class="setting-fields">
+            <button id="kifu-load" class="ghost-btn" type="button">読み込む</button>
+            <button id="kifu-clear" class="ghost-btn" type="button">消す</button>
+          </div>
+          <p id="kifu-status" class="status" role="status" aria-live="polite" hidden></p>
+        </div>
       </div>
 
       <!-- 訂正タブ。**認識の誤りを直す面。ここに居ること自体が訂正モード**
@@ -626,7 +645,7 @@ export function mountMainScreen(root: HTMLElement): void {
   // タブは 5 枚。**局面を扱う面が「訂正」と「解析」の 2 つに分かれている**のが要点で、
   // 持っている局面も別物（Go 側の PositionService / StudyService）。
   //
-  //   入力     … 局面を取り込む（キャプチャ。今後 SFEN / KIF / 画像ファイル）
+  //   入力     … 局面を取り込む（キャプチャ・棋譜の貼り付け。今後 SFEN / 画像ファイル）
   //   訂正     … 認識の誤りを直す。**自由編集**（合法性を問わない・未決でよい）
   //   解析     … 確定した局面。**手を選んで進める**面（合法手だけ。手順 UI はこれから）
   //   デバッグ … 認識精度を追う（認識器の状態・信頼度・撮った画像）
@@ -1866,6 +1885,54 @@ export function mountMainScreen(root: HTMLElement): void {
         status.classList.add("is-error");
       } finally {
         inputFit.disabled = false;
+      }
+    })();
+  });
+
+  // 棋譜（KIF）を貼り付ける。**キャプチャと並ぶ入力の口で、行き先は解析タブ。**
+  //
+  // ⚠️ **読み取りも指し手の変換も Go 側**（core/kifu → position.FromKIF）。
+  // フロントで KIF を解釈しないこと（将棋の仕様は core に一本化する）。
+  const kifuText = root.querySelector<HTMLTextAreaElement>("#kifu-text")!;
+  const kifuLoad = root.querySelector<HTMLButtonElement>("#kifu-load")!;
+  const kifuStatus = root.querySelector<HTMLParagraphElement>("#kifu-status")!;
+  const showKifuStatus = (message: string, kind?: "warn" | "error") => {
+    kifuStatus.textContent = message;
+    kifuStatus.classList.toggle("is-warn", kind === "warn");
+    kifuStatus.classList.toggle("is-error", kind === "error");
+    kifuStatus.hidden = message === "";
+  };
+  root.querySelector<HTMLButtonElement>("#kifu-clear")!.addEventListener("click", () => {
+    kifuText.value = "";
+    showKifuStatus("");
+    kifuText.focus();
+  });
+  kifuLoad.addEventListener("click", () => {
+    void (async () => {
+      const text = kifuText.value.trim();
+      if (!text) {
+        showKifuStatus("棋譜が空です。KIF 形式のテキストを貼り付けてください。", "error");
+        return;
+      }
+      kifuLoad.disabled = true;
+      showKifuStatus("読み込んでいます…");
+      try {
+        const load = await StudyService.LoadKifu(text);
+        showStudy(load.state);
+        // ⚠️ **note が空でないことをエラー扱いしないこと。** 途中で止まっても
+        // そこまでの手順は正しく、その局面は解析できる（設計原則3）。
+        showKifuStatus(
+          load.note ? `${load.summary}（${load.note}）` : load.summary,
+          load.note ? "warn" : undefined,
+        );
+        selectTab(studyTab);
+      } catch (err) {
+        showKifuStatus(
+          `棋譜を読み込めませんでした: ${String(err instanceof Error ? err.message : err)}`,
+          "error",
+        );
+      } finally {
+        kifuLoad.disabled = false;
       }
     })();
   });

@@ -29,6 +29,7 @@ export type {
     EngineSettings,
     FitResult,
     GuideLayout,
+    KifuLoad,
     RecognizerStatus,
     StudyState,
     TrainingSendResult,

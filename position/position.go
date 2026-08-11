@@ -59,6 +59,17 @@ type Position struct {
 	Board *Board
 	// Turn は手番。TurnUnknown のままでも盤は成立する。
 	Turn Turn
+	// HandsFixed は「駒台は書いてあるとおりで、盤上から逆算しない」ことを表す。
+	//
+	// **画像から作った局面では常に false。** 撮った盤に写っていない駒は駒台に
+	// あるはずなので、駒数保存則の逆算（HandTotal）が訂正 UI の拠り所になる。
+	//
+	// ⚠️ **持ち駒まで書いてある SFEN から作った局面（KIF の初期局面を含む）では
+	// true にする。** 駒落ちのように**そもそも盤にも駒台にも存在しない駒**があると、
+	// 逆算は「駒台にあるはず」と言い続け、未決が消えないので **SFEN() が永久に
+	// 組み上がらない**（＝二枚落ちの棋譜が 1 手も進められない。実際に踏んだ）。
+	// 持ち駒が明記されている以上、そこに推測を混ぜる理由が無い。
+	HandsFixed bool
 	// MoveNumber は手数。0 は「不明」。
 	//
 	// 中継の画面から読めることもあるが、**撮った 1 枚からは分からないのが普通**。
@@ -142,6 +153,10 @@ func (p *Position) assigned(base int) (black, white int) {
 // 訂正 UI は「どちらの駒台か」をここから減らしていく操作として作る。
 func (p *Position) Unassigned() map[int]int {
 	out := map[int]int{}
+	if p.HandsFixed {
+		// 駒台が書いてある局面では逆算しない（決めるものが残っていない）。
+		return out
+	}
 	for base, total := range p.HandTotal() {
 		b, w := p.assigned(base)
 		if rest := total - b - w; rest > 0 {
@@ -315,6 +330,9 @@ func (p *Position) Clone() *Position {
 	c := &Position{
 		Board:      p.Board.Clone(),
 		Turn:       p.Turn,
+		// ⚠️ **HandsFixed も写すこと。** 落とすと、手を 1 つ進めた（＝Clone した）
+		// 瞬間に駒台の逆算が復活し、駒落ちの棋譜がそこで進まなくなる。
+		HandsFixed: p.HandsFixed,
 		MoveNumber: p.MoveNumber,
 		handBlack:  make(map[int]int, len(p.handBlack)),
 		handWhite:  make(map[int]int, len(p.handWhite)),

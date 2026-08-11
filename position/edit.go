@@ -68,6 +68,11 @@ func (p *Position) Inventory() []Stock {
 		limit := sfen.PieceLimit(base)
 		rest := limit - black - white
 		hb, hw := p.assigned(base)
+		// 駒台が書いてある局面（KIF・SFEN から読んだもの）では未決が無い。
+		unassigned := max(max(rest, 0)-hb-hw, 0)
+		if p.HandsFixed {
+			unassigned = 0
+		}
 		out = append(out, Stock{
 			Piece: base, Letter: sfen.Letter(base), Name: sfen.Name(base),
 			Limit: limit, Black: black, White: white, Rest: rest,
@@ -75,7 +80,7 @@ func (p *Position) Inventory() []Stock {
 			// 割り振りが逆算した残りを超えていたら未割り当ては 0（負にはしない）。
 			// **駒台の枚数のほうを丸めない**（人が決めた枚数なので消さない。
 			// 多すぎることは Warnings に出る）。
-			Unassigned: max(max(rest, 0)-hb-hw, 0),
+			Unassigned: unassigned,
 		})
 	}
 	return out

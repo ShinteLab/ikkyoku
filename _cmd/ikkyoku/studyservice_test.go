@@ -187,3 +187,53 @@ func TestStudyServicePlayWithoutPosition(t *testing.T) {
 		t.Error("空でも配列を返すこと（フロントが null を踏む）")
 	}
 }
+
+// 棋譜を貼り付けると、指し手が全て反映された状態になること。
+func TestStudyServiceLoadKifu(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	s := NewStudyService(logger, NewPositionService(logger))
+
+	load, err := s.LoadKifu("棋戦：テスト戦\n先手：先手太郎\n後手：後手花子\n" +
+		"手数----指手---------消費時間--\n" +
+		"   1 ７六歩(77)\n   2 ３四歩(33)\n   3 ２二角成(88)\n   4 同　銀(31)\n   5 投了\n")
+	if err != nil {
+		t.Fatalf("LoadKifu: %v", err)
+	}
+	if load.Note != "" {
+		t.Errorf("止まった理由が出ている: %s", load.Note)
+	}
+	st := load.State
+	if !st.Loaded || st.Ply != 4 || len(st.Moves) != 4 {
+		t.Fatalf("最終手まで反映されていません: %+v", st)
+	}
+	// **解析に渡せる形になっていること**（根 + 手順）。
+	target, err := s.analyzeTarget()
+	if err != nil {
+		t.Fatalf("analyzeTarget: %v", err)
+	}
+	if len(target.Moves) != 4 || target.Root == target.Current {
+		t.Errorf("解析対象が手順を持っていません: %+v", target)
+	}
+	// **採り直しと同じで、根ごと入れ替わること。**
+	if !strings.Contains(load.Summary, "4手") {
+		t.Errorf("読み込んだ手数が出ない: %q", load.Summary)
+	}
+	if !strings.Contains(load.Summary, "先手太郎") {
+		t.Errorf("対局者が出ない: %q", load.Summary)
+	}
+}
+
+// 貼り間違い（棋譜でないテキスト）は、それまでの局面を壊さずにエラーを返すこと。
+func TestStudyServiceLoadKifuKeepsPositionOnError(t *testing.T) {
+	s := adopted(t)
+	if _, err := s.Play("7g7f"); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	load, err := s.LoadKifu("これは棋譜ではありません")
+	if err == nil {
+		t.Fatal("棋譜でないテキストでエラーにならなかった")
+	}
+	if !load.State.Loaded || load.State.Ply != 1 {
+		t.Errorf("失敗したのに前の局面が壊れています: %+v", load.State)
+	}
+}

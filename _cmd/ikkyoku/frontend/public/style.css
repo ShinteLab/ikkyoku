@@ -1919,3 +1919,29 @@ html.is-main body {
   fill: rgba(255, 196, 107, 0.28);
   stroke: #ffc46b;
 }
+
+/* 棋譜（KIF）を貼り付ける欄。**入力タブの 2 つめの入口。**
+   高さを固定してあるのは、貼った棋譜の長さで下の行（ボタンと結果）が
+   動かないようにするため（100 手の棋譜を貼るとページごと伸びる）。
+   溢れたぶんは中でスクロールさせる。 */
+.kifu-text {
+  align-self: stretch;
+  min-height: 120px;
+  max-height: 220px;
+  padding: 6px 8px;
+  font-family: "Consolas", "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #f2f3f5;
+  background: #23262e;
+  border: 1px solid #3a3d47;
+  border-radius: 5px;
+  resize: vertical;
+  overflow: auto;
+  white-space: pre;
+}
+
+.kifu-text:focus {
+  outline: none;
+  border-color: #6ad3ff;
+}

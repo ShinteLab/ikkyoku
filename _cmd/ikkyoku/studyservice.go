@@ -3,8 +3,10 @@ package main
 import (
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 
+	"github.com/ShinteLab/core/kifu"
 	"github.com/ShinteLab/ikkyoku/legal"
 	"github.com/ShinteLab/ikkyoku/position"
 )
@@ -126,6 +128,68 @@ func (s *StudyService) Adopt() (StudyState, error) {
 
 	s.logger.Info("局面を解析タブへ採りました", "sfen", st.SFEN)
 	return st, nil
+}
+
+// KifuLoad は棋譜を読み込んだ結果（入力タブの「棋譜を貼り付ける」）。
+type KifuLoad struct {
+	// State は読み込んだあとの解析タブの状態。**そのまま showStudy に渡す。**
+	State StudyState `json:"state"`
+	// Summary は「何手読み込んだか」の 1 行（対局者・棋戦が分かれば添える）。
+	Summary string `json:"summary"`
+	// Note は全部は載らなかった理由（載ったなら空）。
+	//
+	// ⚠️ **これはエラーではない。** 途中で止まっても、そこまでの手順は正しいので
+	// 解析できる（設計原則3）。**フロントで空でないことをエラー扱いしないこと。**
+	Note string `json:"note"`
+}
+
+// LoadKifu は KIF テキストを読んで解析タブの根と手順にする。
+//
+// ⚠️ **訂正タブを経由しない 2 つめの入口。** 「受け渡しは Adopt の 1 か所だけ」は
+// **訂正タブとの受け渡し**の話で、入力の口が増えること自体は想定どおり
+// （画像は認識を通るので訂正タブへ、KIF は既に確定しているので直接ここへ）。
+// **`PositionService` は触らない** —— 撮った局面を消してしまうと、
+// 貼り付けたのが誤りだったときに戻る先が無くなる。
+//
+// **指し手が全て反映された状態**（最終手まで進めた局面）で返す。戻って見たければ
+// 手順のリストから辿れる。
+func (s *StudyService) LoadKifu(text string) (KifuLoad, error) {
+	study, load, err := position.FromKIF(text)
+	if err != nil {
+		return KifuLoad{State: s.State()}, err
+	}
+
+	s.mu.Lock()
+	// **根ごと入れ替える**（Adopt と同じ）。前の手順と解析結果は別の局面の話になる。
+	s.study = study
+	st := s.state()
+	s.mu.Unlock()
+
+	s.logger.Info("棋譜を読み込みました",
+		"moves", load.Loaded, "total", load.Total, "note", load.Note)
+	return KifuLoad{State: st, Summary: kifuSummary(load), Note: load.Note}, nil
+}
+
+// kifuSummary は「何手読み込んだか」の 1 行を組み立てる。
+func kifuSummary(load position.KIFLoad) string {
+	head := fmt.Sprintf("%d手を読み込みました", load.Loaded)
+	if load.Loaded < load.Total {
+		head = fmt.Sprintf("%d手を読み込みました（棋譜には%d手）", load.Loaded, load.Total)
+	}
+	var who []string
+	if load.Game.Event != "" {
+		who = append(who, load.Game.Event)
+	}
+	if load.Game.Black != "" || load.Game.White != "" {
+		who = append(who, fmt.Sprintf("先手 %s / 後手 %s", load.Game.Black, load.Game.White))
+	}
+	if load.Game.Handicap != "" && load.Game.Handicap != kifu.HirateHandicap {
+		who = append(who, load.Game.Handicap)
+	}
+	if len(who) == 0 {
+		return head
+	}
+	return head + "（" + strings.Join(who, "・") + "）"
 }
 
 // Play は 1 手指して局面を進める（解析タブの盤のクリック）。

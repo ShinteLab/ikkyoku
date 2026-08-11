@@ -68,6 +68,22 @@ export function GoTo(n: number): $CancellablePromise<$models.StudyState> {
 }
 
 /**
+ * LoadKifu は KIF テキストを読んで解析タブの根と手順にする。
+ * 
+ * ⚠️ **訂正タブを経由しない 2 つめの入口。** 「受け渡しは Adopt の 1 か所だけ」は
+ * **訂正タブとの受け渡し**の話で、入力の口が増えること自体は想定どおり
+ * （画像は認識を通るので訂正タブへ、KIF は既に確定しているので直接ここへ）。
+ * **`PositionService` は触らない** —— 撮った局面を消してしまうと、
+ * 貼り付けたのが誤りだったときに戻る先が無くなる。
+ * 
+ * **指し手が全て反映された状態**（最終手まで進めた局面）で返す。戻って見たければ
+ * 手順のリストから辿れる。
+ */
+export function LoadKifu(text: string): $CancellablePromise<$models.KifuLoad> {
+    return $Call.ByID(2011736629, text);
+}
+
+/**
  * Play は 1 手指して局面を進める（解析タブの盤のクリック）。
  * 
  * ⚠️ **合法手だけ。** 訂正タブ（どこへでも動かせる）とは別の面で、ここは実際の
