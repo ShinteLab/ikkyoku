@@ -623,6 +623,16 @@ html.is-main body {
      行の高さはその文字サイズで決まる。ここを 1 か所に持っておくと、
      枠の最低高さ(下)と食い違わない。 */
   --analyze-line-h: 28px;
+  /* 1 番手の文字サイズと、2 番手以降(.is-sub)の文字サイズ。
+     ⚠️ **小さくするのは評価値と次の 1 手だけ** —— その先の読み筋はもともと
+     小さいので、そちらまで変えると 1 番手の行と揃わなくなる。 */
+  --analyze-main-size: 20px;
+  --analyze-sub-size: 16px;
+  /* ⚠️ **評価値と「次の 1 手」の幅は px で固定する**（em にしないこと）。
+     2 番手以降は文字が小さいので、em だと同じ指定でも幅が変わり、
+     **読み筋の始まり(2 手目)が行ごとにずれる**。 */
+  --analyze-score-w: 100px;
+  --analyze-first-w: 124px;
   /* 候補手の一覧の高さ。**max ではなく固定**（下の .analyze-lines）。
      ⚠️ **実際の値は JS が入れる**（mainscreen.ts の reserveLines。候補の本数の
      指定に合わせて、4 本ぶんで頭打ち）。ここにあるのは、まだ入っていないときの既定。
@@ -763,13 +773,28 @@ html.is-main body {
 }
 
 /* 次の 1 手。**評価値と同じ大きさで出す**（読むのはほぼ「この評価値が付いているのは
-   どの手か」なので、そこだけ拾えれば足りる）。 */
+   どの手か」なので、そこだけ拾えれば足りる）。
+
+   ⚠️ **幅を固定する。** そうしないと**読み筋の始まり(2 手目)が行ごとにずれ**、
+   候補を縦に読み比べられない（手の表記は「▲同　銀」から「▲２二角不成」まで
+   長さが違う）。 */
 .analyze-first {
   flex: 0 0 auto;
-  font-size: 20px;
+  width: var(--analyze-first-w);
+  font-size: var(--analyze-main-size);
   font-weight: 600;
   color: #f2f3f5;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 2 番手以降。**一段小さくして 1 番手と見分ける**（同じ大きさで並べると、
+   どれが最善手なのかが順番でしか分からない）。
+   ⚠️ **幅は変えない**（上の px 固定）。ここで em にすると列がずれる。 */
+.analyze-line.is-sub .analyze-score,
+.analyze-line.is-sub .analyze-first {
+  font-size: var(--analyze-sub-size);
 }
 
 /* その先の読み筋。**手順の裏付け**として小さいまま並べる。
@@ -790,10 +815,10 @@ html.is-main body {
    幅を取ってあるのは、桁が増えても次の 1 手がずれないようにするため）。 */
 .analyze-score {
   flex: 0 0 auto;
-  font-size: 20px;
+  font-size: var(--analyze-main-size);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-  min-width: 5em;
+  width: var(--analyze-score-w);
   text-align: right;
   color: #c9ccd3;
 }

@@ -1013,9 +1013,13 @@ export function mountMainScreen(root: HTMLElement): void {
   const showAnalyzeProgress = (card: EngineCard, p: AnalyzeProgress["progress"]) => {
     const lines = p.lines ?? [];
     card.lines.replaceChildren();
-    for (const l of lines) {
+    for (const [i, l] of lines.entries()) {
       const li = document.createElement("li");
-      li.className = "analyze-line";
+      // ⚠️ **2 番手以降は一段小さく出す**（`is-sub`）。最善手と同じ大きさで
+      // 並べると、どれが 1 番手なのかが順番でしか分からない。
+      // 小さくするのは**評価値と次の 1 手だけ** —— その先の読み筋はもともと
+      // 小さいので、そちらまで変えると 1 番手の行と揃わなくなる。
+      li.className = i === 0 ? "analyze-line" : "analyze-line is-sub";
 
       const score = document.createElement("span");
       score.textContent = l.score.label;
