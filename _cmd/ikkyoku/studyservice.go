@@ -93,6 +93,13 @@ type StudyState struct {
 
 	// RootSFEN は根の局面（採ったときの局面）。**エンジンに渡すのはこれ + Played。**
 	RootSFEN string `json:"rootSfen"`
+	// First は根までに指された手数（＝**棋譜の手数の起点**）。
+	//
+	// ⚠️ **`Move.Number` は根からの手数で、棋譜の手数ではない**（あちらは `GoTo` に
+	// 渡す値も兼ねているので、起点をずらせない）。撮った 41 手目の局面を根にすると
+	// `Move.Number` は 1 から始まるので、**画面に手数として出すときは First を足す**。
+	// 評価値グラフの横軸（`EvalGraph.First`）と**同じ値**にすること。
+	First int `json:"first"`
 	// Moves は根から指した手順（棋譜の順。日本語表記つき）。
 	Moves []position.Move `json:"moves"`
 	// Ply は今どこまで進めて見ているか（0 なら根）。
@@ -473,6 +480,7 @@ func (s *StudyService) state() StudyState {
 		Hands:      cur.Inventory(),
 		Warnings:   warnings,
 		RootSFEN:   root,
+		First:      s.moveBaseLocked(),
 		Moves:      s.study.Moves(),
 		Ply:        s.study.Ply(),
 		Played:     s.study.Played(),

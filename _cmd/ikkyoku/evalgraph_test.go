@@ -174,4 +174,32 @@ func TestEvalGraphAxisStartsAtRootMoveNumber(t *testing.T) {
 	if g.First != 40 || g.Series[0].Points[0].Number != 40 {
 		t.Errorf("横軸が根の手数から始まっていません: %+v", g)
 	}
+	// ⚠️ **手順リストの手数とグラフの横軸は同じ数え方であること。**
+	// 食い違うと、リストの「1手目」とグラフの「41手目」が同じ手になる。
+	if st := s.State(); st.First != g.First {
+		t.Errorf("StudyState.First(%d) と EvalGraph.First(%d) が違います", st.First, g.First)
+	}
+}
+
+// ⚠️ **`Move.Number` は根からの手数（`GoTo` の引数）で、棋譜の手数ではない。**
+// 画面に手数として出すときは `StudyState.First` を足す ——
+// **足し忘れると、撮った中盤の局面から始めたときにリストだけ 1 から数え直す。**
+func TestStudyStateMoveNumberIsRelativeToRoot(t *testing.T) {
+	s := adopted(t)
+	if _, err := s.src.SetMoveNumber(41); err != nil {
+		t.Fatalf("SetMoveNumber: %v", err)
+	}
+	if _, err := s.Adopt(); err != nil {
+		t.Fatalf("Adopt: %v", err)
+	}
+	st, err := s.Play("7g7f")
+	if err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	if st.First != 40 {
+		t.Fatalf("First = %d, want 40", st.First)
+	}
+	if st.Moves[0].Number != 1 {
+		t.Errorf("Move.Number = %d, want 1（根からの手数。GoTo に渡す値）", st.Moves[0].Number)
+	}
 }

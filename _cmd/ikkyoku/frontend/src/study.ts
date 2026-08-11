@@ -221,7 +221,11 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
     movesPanel.appendChild(chip("", "開始局面", 0, "採ったときの局面に戻ります"));
     for (const m of state.moves ?? []) {
       movesPanel.appendChild(
-        chip(String(m.number), m.text || m.usi, m.number, `${m.usi} までの局面に戻ります`),
+        // ⚠️ **出す数字と `GoTo` に渡す値は別物。** `m.number` は根からの手数
+        // （`GoTo` の引数）で、画面に出すのは棋譜の手数（＝根の手数を足したもの）。
+        // 撮った 41 手目の局面を根にすると、この 2 つは 40 ずれる。
+        chip(String((state.first ?? 0) + m.number), m.text || m.usi, m.number,
+          `${m.usi} までの局面に戻ります`),
       );
     }
     // 今見ている手が画面の外にあると、進めても手順が動いていないように見える。
