@@ -769,15 +769,15 @@ html.is-main body {
 }
 
 /* 評価値。**符号は Go 側が先手視点に揃えている**ので、色は値の符号を見るだけ。
-   **左寄せ**（幅を取ってあるのは桁が増えても次の 1 手がずれないようにするためで、
-   数字そのものは行の左端に揃っているほうが縦に読み比べやすい）。 */
+   **右寄せ**（数字なので、桁が変わっても一の位が揃っているほうが読み比べやすい。
+   幅を取ってあるのは、桁が増えても次の 1 手がずれないようにするため）。 */
 .analyze-score {
   flex: 0 0 auto;
   font-size: 20px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   min-width: 5em;
-  text-align: left;
+  text-align: right;
   color: #c9ccd3;
 }
 
