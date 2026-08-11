@@ -1366,11 +1366,14 @@ export function mountMainScreen(root: HTMLElement): void {
 
   // 解析タブの駒台。**未決は残っていない**（確定した局面なので）。
   //
-  // ⚠️ **盤の脇の駒台と、下の文字の行の両方をここで更新する。**
-  // 同じ値を 2 か所に描くだけにすること（片方だけ更新する経路を作ると、
-  // どちらが今の局面の持ち駒なのか分からなくなる）。
+  // ⚠️ **駒種 1 つにつき駒 1 枚を出し、枚数は数字で添える**（2026-08-12 に変えた）。
+  // 以前は訂正タブと同じく**枚数ぶん並べていた**が、歩が溜まると駒台から溢れ、
+  // **スクロールバーが出て幅を食い、1 行に入る駒が 3 枚から 2 枚に減って更に溢れる**
+  // という悪循環になっていた。駒種は最大 8 つなので、この形なら**溢れが原理的に
+  // 起きない**（多くの将棋ソフトと同じ見せ方でもある）。
+  // ⚠️ **訂正タブの駒台は今までどおり枚数ぶん並べる** —— あちらは 1 枚ずつ掴んで
+  // 動かす面なので、駒の数と操作の対象が一致しているほうがよい。
   const showStudyHand = (inv: Stock[]) => {
-    // 盤の脇。**枚数は数字ではなく駒そのものの数で見せる**（訂正タブと同じ）。
     for (const zone of studyHandZones) {
       const black = zone.dataset.black === "true";
       const chips = zone.querySelector<HTMLDivElement>(".hand-chips")!;
@@ -1380,17 +1383,25 @@ export function mountMainScreen(root: HTMLElement): void {
       // **後手は逆順**（駒が 180 度回っているので、そちら側から読んで同じ並びになる）。
       for (const s of black ? inv : [...inv].reverse()) {
         const n = black ? s.handBlack : s.handWhite;
-        for (let i = 0; i < n; i++) {
-          total++;
-          const chip = document.createElement("div");
-          chip.className = black ? "stock-chip" : "stock-chip is-white";
-          // ⚠️ **piece を持たせること。** 駒台の駒はマスを持たないので、
-          // 「打てる位置」を合法手（`legal.Move.drop`）と突き合わせる鍵がこれしかない。
-          chip.dataset.piece = String(s.piece);
-          chip.textContent = black ? s.letter : s.letter.toLowerCase();
-          chip.title = `${black ? "先手" : "後手"}の${s.name}（${n}枚）`;
-          chips.appendChild(chip);
+        if (n <= 0) {
+          continue;
         }
+        total += n;
+        const chip = document.createElement("div");
+        chip.className = black ? "stock-chip" : "stock-chip is-white";
+        // ⚠️ **piece を持たせること。** 駒台の駒はマスを持たないので、
+        // 「打てる位置」を合法手（`legal.Move.drop`）と突き合わせる鍵がこれしかない。
+        chip.dataset.piece = String(s.piece);
+        chip.append(black ? s.letter : s.letter.toLowerCase());
+        chip.title = `${black ? "先手" : "後手"}の${s.name}（${n}枚）`;
+        // 1 枚のときは数字を出さない（実際の駒台と同じで、見れば分かる）。
+        if (n > 1) {
+          const count = document.createElement("span");
+          count.className = "stock-count";
+          count.textContent = String(n);
+          chip.appendChild(count);
+        }
+        chips.appendChild(chip);
       }
       zone.classList.toggle("is-empty", total === 0);
     }

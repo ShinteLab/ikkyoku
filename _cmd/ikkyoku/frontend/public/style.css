@@ -1666,6 +1666,8 @@ html.is-main body {
 }
 
 .stock-chip {
+  /* 枚数バッジ（.stock-count）を角に置くための基準。 */
+  position: relative;
   width: 26px;
   height: 26px;
   display: flex;
@@ -1736,6 +1738,37 @@ html.is-main body {
   cursor: pointer;
 }
 
+/* 枚数（2 枚以上のときだけ出る。2026-08-12）。
+   解析タブの駒台は**駒種 1 つにつき駒 1 枚**で、枚数はこの数字で表す。
+   枚数ぶん並べると歩が溜まったときに溢れ、**スクロールバーが幅を食って
+   1 行に入る駒が減り、更に溢れる**という悪循環になっていた。
+
+   ⚠️ **駒の中に置くこと**（外に出すと、押したときに study.ts の
+   `closest(".stock-chip")` が外れて打てなくなる）。
+   ⚠️ **後手の駒は 180 度回っている**ので、数字は逆回転させて読める向きに戻す。 */
+.stock-count {
+  /* ⚠️ **駒の内側に収めること。** はみ出させると `.hand-chips` の
+     `overflow-y: auto` がそれを見てスクロールバーを出す（直そうとした当の症状）。 */
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  min-width: 15px;
+  padding: 0 2px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 11px;
+  line-height: 15px;
+  font-weight: 600;
+  text-align: center;
+  color: #f2f3f5;
+  background: #23262e;
+  border: 1px solid #5a3b1a;
+  border-radius: 8px;
+}
+
+.stock-chip.is-white .stock-count {
+  transform: rotate(180deg);
+}
+
 /* 掴んでいる駒。盤の選択（.study-cell.is-source）と同じ見え方に揃える。 */
 .hand-zone.is-readonly .stock-chip.is-source {
   outline: 2px solid #5ea0ff;
@@ -1755,8 +1788,12 @@ html.is-main body {
   color: #6f7787;
 }
 
-/* **駒は枚数ぶん並べる**(数字で「歩5」と書かない)。実際の駒台と同じ見え方に
-   なるので、何枚あるかが一目で分かる。溢れたらスクロールさせる。 */
+/* **訂正タブの駒台は駒を枚数ぶん並べる**(数字で「歩5」と書かない)。1 枚ずつ掴んで
+   動かす面なので、駒の数と操作の対象が一致しているほうがよい。溢れたらスクロールさせる。
+
+   ⚠️ **解析タブは別**(2026-08-12)。あちらは見るだけなので**駒種 1 つにつき 1 枚 +
+   枚数バッジ**(`.stock-count`)にしてある。枚数ぶん並べると歩が溜まったときに溢れ、
+   スクロールバーが幅を食って 1 行に入る駒が減り、更に溢れるという悪循環になった。 */
 .hand-chips {
   flex: 1 1 auto;
   align-content: flex-start;
