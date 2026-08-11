@@ -189,6 +189,9 @@ async function registerBoardFont(): Promise<void> {
 }
 
 export function mountMainScreen(root: HTMLElement): void {
+  // ⚠️ **この中の HTML コメントにバッククォートを書かないこと。** テンプレート
+  // リテラルなので、`.foo` のような引用がそこで文字列を終わらせる。**エラーは
+  // ずっと下の行に出る**（実際に踏んだ）ので、原因に辿り着きにくい。
   root.innerHTML = `
     <div class="main-screen">
       <div class="main-toolbar">
@@ -400,24 +403,32 @@ export function mountMainScreen(root: HTMLElement): void {
             </div>
             <div id="study-hand-black-slot" class="hand-slot" hidden></div>
           </div>
+          <!-- 手順（Phase 5「手を進める UI」。2026-08-11）。
+               **駒をクリック → 動かせる位置が光る → そこをクリックで指す。**
+               合法手だけを辿るので、駒台の駒も打てる位置が光る。
+
+               **盤の右に縦のリストで並べる**（棋譜ソフトと同じ並び）。指すたびに
+               下へ積まれるので、**どこまで進めたかが縦位置でそのまま見える**。
+               ⚠️ **盤の右の余白に置くだけにすること** —— 盤は 560px より大きく
+               ならないので、ここに置いても盤は狭くならない（訂正タブの盤の左に
+               撮った画像を置いてあるのと同じ理屈）。
+
+               ⚠️ **チップを押すと戻れるが、手順は消えない**（進め直せる）。消えるのは
+               戻った先で別の手を指したとき（Go 側の Study.Play が捨てる）。
+               「1手戻す」は指し間違えの取り消しなので、**そちらは手順からも消す**。 -->
+          <div id="study-move-row" class="study-move-row" hidden>
+            <div class="study-move-head">
+              <span class="field-label">手順</span>
+              <button id="study-undo" class="ghost-btn" type="button"
+                      title="最後の 1 手を取り消します（手順からも消えます）">1手戻す</button>
+            </div>
+            <div id="study-moves" class="study-moves"></div>
+            <p id="study-move-status" class="note is-caution" hidden></p>
+          </div>
           <p id="study-placeholder" class="board-placeholder">
             訂正タブで「この局面を解析する」を押すと、ここに局面が出ます。
           </p>
         </div>
-        <!-- 手順（Phase 5「手を進める UI」。2026-08-11）。
-             **駒をクリック → 動かせる位置が光る → そこをクリックで指す。**
-             合法手だけを辿るので、駒台の駒も打てる位置が光る。
-
-             ⚠️ **チップを押すと戻れるが、手順は消えない**（進め直せる）。消えるのは
-             戻った先で別の手を指したとき（Go 側の Study.Play が捨てる）。
-             「1手戻す」は指し間違えの取り消しなので、**そちらは手順からも消す**。 -->
-        <div id="study-move-row" class="study-move-row" hidden>
-          <span class="field-label">手順</span>
-          <div id="study-moves" class="study-moves"></div>
-          <button id="study-undo" class="ghost-btn" type="button"
-                  title="最後の 1 手を取り消します（手順からも消えます）">1手戻す</button>
-        </div>
-        <p id="study-move-status" class="note is-caution" hidden></p>
         <!-- エンジン解析（Phase 4）。**確定した局面にだけかかる。**
              確定していない局面はそもそもこのタブに来ない（Go 側の
              StudyService.Adopt が断る）ので、ここでの「押せない理由」は

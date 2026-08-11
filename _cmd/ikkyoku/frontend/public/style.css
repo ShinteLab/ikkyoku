@@ -1245,39 +1245,78 @@ html.is-main body {
   background: rgba(94, 160, 255, 0.28);
 }
 
-/* 手順（棋譜）。**盤をできるだけ大きく見せたい**ので 1 行に収めて横スクロール。 */
+/* 手順（棋譜）。**盤の右に縦のリスト**（棋譜ソフトと同じ並び）。指すたびに下へ
+   積まれるので、どこまで進めたかが縦位置でそのまま見える。
+
+   ⚠️ **幅を中身に依存させないこと**（`.capture-ref` と同じ理由）。手が増えて
+   表記の長さが変わるたびに幅が動くと、**盤が横へずれてグリッドだけ取り残される**
+   （そのとき layoutGrid は呼ばれない）。縮むのはこちらだけ（盤は flex: 0 0 auto）。 */
 .study-move-row {
+  flex: 0 1 auto;
+  width: min(34%, 260px);
+  min-width: 0;
+  align-self: stretch;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.study-move-head {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
-  min-width: 0;
 }
 
+/* **溢れたら中でスクロールさせる。** 盤の高さを超えて伸ばすと、盤ごと画面が動く。 */
 .study-moves {
   flex: 1 1 auto;
   display: flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-  overflow-x: auto;
-  padding: 2px 0;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
 }
 
 .move-chip {
   flex: 0 0 auto;
-  padding: 2px 8px;
-  font-size: 12px;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 8px;
+  font-size: 12.5px;
+  text-align: left;
   color: #c8cdd8;
   background: transparent;
-  border: 1px solid #3a3d47;
-  border-radius: 10px;
+  border: 1px solid transparent;
+  border-radius: 4px;
   cursor: pointer;
   white-space: nowrap;
 }
 
+/* 手数。**桁を揃える**（縦に並ぶので、揃っていないと何手目かが読み取りにくい）。 */
+.move-num {
+  flex: 0 0 auto;
+  width: 2.2em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: #6f7787;
+}
+
+.move-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .move-chip:hover {
   border-color: #5ea0ff;
+  background: rgba(94, 160, 255, 0.1);
 }
 
 /* 今見ている局面。**戻って見ているときにどこに居るかが分からないと、
@@ -1286,6 +1325,10 @@ html.is-main body {
   color: #0f1115;
   background: #5ea0ff;
   border-color: #5ea0ff;
+}
+
+.move-chip.is-current .move-num {
+  color: #0f1115;
 }
 
 .editor {

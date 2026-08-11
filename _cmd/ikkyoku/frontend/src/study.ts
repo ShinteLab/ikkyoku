@@ -185,7 +185,7 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
     }
   };
 
-  // 手順（棋譜）。**クリックでその局面へ戻れる。**
+  // 手順（棋譜）。**盤の右に縦のリストで積む。クリックでその局面へ戻れる。**
   //
   // ⚠️ **戻っても手順は消さない**（進め直せる）。消えるのは、戻った先で
   // 別の手を指したときだけ（Go 側の Study.Play が捨てる）。
@@ -195,20 +195,28 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
       return;
     }
     const ply = state.ply ?? 0;
-    const chip = (label: string, n: number, title: string) => {
+    // 手数と手を別の要素にして、**手数の桁を揃える**（縦に並ぶので、揃っていないと
+    // 何手目を見ているのかが読み取りにくい）。
+    const chip = (num: string, label: string, n: number, title: string) => {
       const b = document.createElement("button");
       b.type = "button";
       b.className = "move-chip";
-      b.textContent = label;
       b.title = title;
+      const i = document.createElement("span");
+      i.className = "move-num";
+      i.textContent = num;
+      const t = document.createElement("span");
+      t.className = "move-text";
+      t.textContent = label;
+      b.append(i, t);
       b.classList.toggle("is-current", n === ply);
       b.addEventListener("click", () => void run(() => StudyService.GoTo(n)));
       return b;
     };
-    movesPanel.appendChild(chip("開始", 0, "採ったときの局面に戻ります"));
+    movesPanel.appendChild(chip("", "開始局面", 0, "採ったときの局面に戻ります"));
     for (const m of state.moves ?? []) {
       movesPanel.appendChild(
-        chip(`${m.number}. ${m.text || m.usi}`, m.number, `${m.usi} までの局面に戻ります`),
+        chip(String(m.number), m.text || m.usi, m.number, `${m.usi} までの局面に戻ります`),
       );
     }
     // 今見ている手が画面の外にあると、進めても手順が動いていないように見える。
