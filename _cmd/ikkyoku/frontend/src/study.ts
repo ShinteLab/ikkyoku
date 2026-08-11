@@ -178,17 +178,37 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
       el.title = cellLabel(rank, file);
     }
     // 駒台のほうも、掴んでいる駒が分かるようにする（盤と同じ見え方に揃える）。
-    for (const slot of [handSlots.black, handSlots.white]) {
+    //
+    // ⚠️ **押せない駒は「押せない」と分かるようにすること**（2026-08-12）。
+    // 打ち先が無い駒（二歩になる歩・行き所のない香桂）は押しても何も光らないので、
+    // **見た目が同じだと壊れているのか駄目な手なのか区別が付かない**。
+    // ⚠️ **薄くするのは手番側の駒だけ。** 相手の駒が押せないのは手番から明らかで、
+    // そこまで薄くすると「今どちらの番か」の手掛かりまで薄れる。
+    for (const [black, slot] of [
+      [true, handSlots.black],
+      [false, handSlots.white],
+    ] as const) {
+      const mine = loaded && state?.turn === (black ? 1 : 2);
       for (const chip of slot.querySelectorAll<HTMLElement>(".stock-chip")) {
         const piece = Number(chip.dataset.piece);
+        const canDrop = loaded && legalMoves().some((m) => m.drop === piece);
         chip.classList.toggle("is-source", pick?.from === "hand" && pick.piece === piece);
-        chip.classList.toggle(
-          "is-pickable",
-          loaded && legalMoves().some((m) => m.drop === piece),
-        );
+        chip.classList.toggle("is-pickable", canDrop);
+        chip.classList.toggle("is-unpickable", !!mine && !canDrop);
+        // ⚠️ **元の見出し（駒種と枚数）は dataset に持っておくこと。**
+        // title に直接足すと、描き直すたびに理由が積み重なる。
+        const base = chip.dataset.label ?? "";
+        chip.title = canDrop || !loaded ? base : `${base}／${dropReason(!!mine)}`;
       }
     }
   };
+
+  // dropReason は駒台の駒を打てない理由。**押したときにも同じ文言を出す**
+  // （ツールチップだけだとホバーしないと読めない）。
+  const dropReason = (mine: boolean) =>
+    mine
+      ? "打てる場所がありません（二歩・打ち歩詰め・行き所のない駒）"
+      : `今は${state?.turnLabel ?? "相手の番"}です`;
 
   // 手順（棋譜）。**盤の右に縦のリストで積む。クリックでその局面へ戻れる。**
   //
@@ -360,6 +380,16 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
     const rank = Number(el.dataset.rank);
     const file = Number(el.dataset.file);
 
+    // ⚠️ **掴んでいる駒をもう一度押したら解除**（2026-08-12）。これが無いと、
+    // 掴み直しとして同じマスを選び直すので**光ったまま消せない**
+    // （駒台の駒は前から解除できていたので、盤だけ挙動が違っていた）。
+    if (pick?.from === "cell" && pick.rank === rank && pick.file === file) {
+      pick = null;
+      onError("");
+      paint();
+      return;
+    }
+
     // 掴んでいるなら、まず「そこへ指せるか」を見る。
     const dests = movesFromPick().filter((m) => m.toRank === rank && m.toFile === file);
     if (dests.length > 0) {
@@ -368,12 +398,16 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
     }
     // 指せないところを押したら、掴み直し（掴めない駒なら解除）。
     pick = canPickCell(rank, file) ? { from: "cell", rank, file } : null;
+    onError(""); // 前の操作の理由を残さない
     paint();
   });
 
   // 駒台の駒をクリックすると、**打てる位置が光る**。
   // ⚠️ **ここはイベント委譲**（駒台の中身は局面が変わるたびに作り直される）。
-  for (const slot of [handSlots.black, handSlots.white]) {
+  for (const [black, slot] of [
+    [true, handSlots.black],
+    [false, handSlots.white],
+  ] as const) {
     slot.addEventListener("click", (e) => {
       if (!state?.loaded || ask) {
         return;
@@ -383,10 +417,23 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
         return;
       }
       const piece = Number(chip.dataset.piece);
-      // 同じ駒をもう一度押したら解除。打てない駒は掴まない。
-      const same = pick?.from === "hand" && pick.piece === piece;
-      const canDrop = legalMoves().some((m) => m.drop === piece);
-      pick = same || !canDrop ? null : { from: "hand", piece };
+      // 同じ駒をもう一度押したら解除。
+      if (pick?.from === "hand" && pick.piece === piece) {
+        pick = null;
+        onError("");
+        paint();
+        return;
+      }
+      // ⚠️ **打てない駒は「なぜ押せないか」を出す**（2026-08-12）。黙って何も
+      // 起きないと、壊れているのか駄目な手なのかが分からない（実際に分からなかった）。
+      if (!legalMoves().some((m) => m.drop === piece)) {
+        pick = null;
+        paint();
+        onError(dropReason(state?.turn === (black ? 1 : 2)));
+        return;
+      }
+      pick = { from: "hand", piece };
+      onError(""); // 前の操作の理由を残さない
       paint();
     });
   }

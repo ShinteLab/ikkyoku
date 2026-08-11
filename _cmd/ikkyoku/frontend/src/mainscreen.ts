@@ -1404,7 +1404,11 @@ export function mountMainScreen(root: HTMLElement): void {
         // 「打てる位置」を合法手（`legal.Move.drop`）と突き合わせる鍵がこれしかない。
         chip.dataset.piece = String(s.piece);
         chip.append(black ? s.letter : s.letter.toLowerCase());
-        chip.title = `${black ? "先手" : "後手"}の${s.name}（${n}枚）`;
+        // ⚠️ **見出しは dataset にも持たせる。** `study.ts` が「押せない理由」を
+        // 足した title を組み立てるので、素の見出しが要る（title へ直に足すと、
+        // 描き直すたびに理由が積み重なる）。
+        chip.dataset.label = `${black ? "先手" : "後手"}の${s.name}（${n}枚）`;
+        chip.title = chip.dataset.label;
         // 1 枚のときは数字を出さない（実際の駒台と同じで、見れば分かる）。
         if (n > 1) {
           const count = document.createElement("span");
@@ -1450,9 +1454,11 @@ export function mountMainScreen(root: HTMLElement): void {
     movesPanel: studyMoves,
     // 指したあとの局面は showStudy がそのまま描く（盤・駒台・SFEN・警告）。
     onState: (st) => showStudy(st, { fromBoard: true }),
+    // 空文字は「理由を消す」（駒を掴み直したときなど）。**出しっぱなしにしないこと** ——
+    // 前の操作の理由が残っていると、今の操作が失敗したように見える。
     onError: (message) => {
       studyMoveStatus.textContent = message;
-      studyMoveStatus.hidden = false;
+      studyMoveStatus.hidden = message === "";
     },
   });
   studyUndo.addEventListener("click", () => studyBoardUI.undo());
