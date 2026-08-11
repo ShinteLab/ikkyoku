@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -35,8 +36,10 @@ const testMovetime = 400 * time.Millisecond
 
 func newTestSession(t *testing.T) *Session {
 	t.Helper()
-	// エンジンのプロセスは 1 回の解析のあいだしか生きないので、後始末は要らない。
-	return NewLocalSession()
+	// ⚠️ **接続は解析をまたいで生き続ける**（2026-08-12）ので、後始末が要る。
+	s := NewLocalSession()
+	t.Cleanup(s.Close)
+	return s
 }
 
 // 平手の初期局面を解析できること。**USI のハンドシェイクから bestmove まで通るのが最低条件。**
@@ -66,9 +69,12 @@ func TestAnalyzeStartPos(t *testing.T) {
 	}
 }
 
-// ⚠️ **エンジンは解析ごとに起こして、終わったら閉じる**（2026-08-08 決定）。
-// 使い回すと exe が常駐し、置換表ぶんのメモリを掴んだままになる。
-func TestSessionOpensPerAnalyze(t *testing.T) {
+// ⚠️ **接続は解析をまたいで使い回す**（2026-08-12。以前は解析ごとに開き直していた）。
+//
+// **連続モードと全て解析がこれを要求する** —— 1 手ごとに解析し直すので、
+// 開き直していると `isready`（NNUE の読み込み。数秒になりうる）を手数ぶん払う。
+// **ここが 2 に戻ったら、151 手の棋譜の解析が待ち時間だらけになる。**
+func TestSessionReusesConnection(t *testing.T) {
 	var opens int32
 	s := newSession(func(ctx context.Context) (*client.Session, error) {
 		atomic.AddInt32(&opens, 1)
@@ -76,20 +82,68 @@ func TestSessionOpensPerAnalyze(t *testing.T) {
 	})
 
 	for i := range 2 {
-		if _, err := s.Analyze(context.Background(), startpos, Options{Movetime: testMovetime}, nil); err != nil {
+		r, err := s.Analyze(context.Background(), startpos, Options{Movetime: testMovetime}, nil)
+		if err != nil {
 			t.Fatalf("%d 回目: %v", i+1, err)
 		}
+		// **2 回目は起動を払っていない。** `StartupMS` が 0 の理由がこれで、
+		// 「速かった」と区別できないと画面で読めなくなる。
+		if want := i > 0; r.Reused != want {
+			t.Errorf("%d 回目の Reused = %v, want %v", i+1, r.Reused, want)
+		}
+	}
+	if got := atomic.LoadInt32(&opens); got != 1 {
+		t.Errorf("接続を開いた回数 = %d, want 1（解析をまたいで使い回す）", got)
+	}
+
+	// ⚠️ **閉じたら次で開き直すこと**（解析タブを離れて戻ってきた場合）。
+	s.Close()
+	if _, err := s.Analyze(context.Background(), startpos, Options{Movetime: testMovetime}, nil); err != nil {
+		t.Fatalf("閉じたあとの解析: %v", err)
 	}
 	if got := atomic.LoadInt32(&opens); got != 2 {
-		t.Errorf("接続を開いた回数 = %d, want 2（解析ごとに開き直す）", got)
+		t.Errorf("閉じたあとに開き直していません: 開いた回数 = %d, want 2", got)
 	}
+	s.Close()
+
 	// 繋いでいなくても、最後に繋がった名前は表示のために残す。
 	if s.EngineName() == "" {
 		t.Error("エンジン名が残っていません")
 	}
 }
 
-// 起動にかかった時間が出ること。**解析のたびに払うコスト**なので見せる。
+// ⚠️ **1 接続 1 探索。** 使い回す以上、重ねて走らせられない
+// （**前の bestmove が返る前に次の position を送ると噛み合わなくなる**）。
+// 「止めて即次」を繰り返す連続モードと全て解析がまさにこれを踏む。
+func TestSessionSerializesAnalyze(t *testing.T) {
+	s := newTestSession(t)
+
+	var running, maxRunning int32
+	var wg sync.WaitGroup
+	for range 3 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = s.Analyze(context.Background(), startpos, Options{Movetime: testMovetime},
+				func(Progress) {
+					n := atomic.AddInt32(&running, 1)
+					for {
+						old := atomic.LoadInt32(&maxRunning)
+						if n <= old || atomic.CompareAndSwapInt32(&maxRunning, old, n) {
+							break
+						}
+					}
+					atomic.AddInt32(&running, -1)
+				})
+		}()
+	}
+	wg.Wait()
+	if got := atomic.LoadInt32(&maxRunning); got > 1 {
+		t.Errorf("同時に走った探索 = %d, want 1（1 接続 1 探索）", got)
+	}
+}
+
+// 起動にかかった時間が出ること（**最初の 1 回で払うコスト**なので見せる）。
 func TestAnalyzeReportsStartupTime(t *testing.T) {
 	s := newTestSession(t)
 	r, err := s.Analyze(context.Background(), startpos, Options{Movetime: testMovetime}, nil)

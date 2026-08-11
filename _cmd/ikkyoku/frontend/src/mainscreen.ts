@@ -125,6 +125,9 @@ interface AnalyzeProgress {
 // 解析の結末（analyze:done のみ）。**起動にかかった時間は done でしか分からない。**
 interface AnalyzeDone extends AnalyzeProgress {
   startupMs: number;
+  // ⚠️ **接続を使い回したか。** `startupMs` が 0 のとき、「起動が速かった」のか
+  // 「払っていない」のかはこれでしか区別できない。
+  reused: boolean;
 }
 
 // ⚠️ **1 つのエンジンが落ちても、他のエンジンの解析は続く**（設計原則3）。
@@ -743,6 +746,17 @@ export function mountMainScreen(root: HTMLElement): void {
   const debugSummary = root.querySelector<HTMLElement>("#debug-summary")!;
 
   const selectTab = (target: HTMLButtonElement) => {
+    // ⚠️ **解析タブを離れたらエンジンを手放す**（2026-08-12）。接続は解析を
+    // またいで使い回すようになったので、**放っておくとタブを移ったあとも
+    // `USI_Hash` ぶん（GB 級になりうる）のメモリを掴んだまま**になる。
+    // タブの境界を寿命にしてあるのは、アイドルタイマーを持たずに済ませるため。
+    //
+    // **走っている解析（全て解析を含む）も止まる。** タブを移ると止まるのは
+    // そういう約束で、**そこまでの評価値は残る**（設計原則3）。
+    if (target !== studyTab && studyTab.classList.contains("is-active")) {
+      stopBatch("");
+      void AnalyzeService.Release();
+    }
     for (const { tab, panel } of tabs) {
       const active = tab === target;
       tab.classList.toggle("is-active", active);
@@ -1002,7 +1016,10 @@ export function mountMainScreen(root: HTMLElement): void {
     // まだ結果が届いていないエンジンか（走っているエンジンの数を数えるのに使う）。
     pending: boolean;
     // 起動〜readyok にかかった時間（done で届く）。**エンジンごとに違う。**
+    // ⚠️ **接続を使い回したときは 0**（下の reused）。
     startupMs: number;
+    // 繋ぎっぱなしの接続を使い回したか。**startupMs が 0 の理由がこれ。**
+    reused: boolean;
     name: HTMLElement;
     meta: HTMLElement;
     lines: HTMLOListElement;
@@ -1095,6 +1112,7 @@ export function mountMainScreen(root: HTMLElement): void {
         label: e.label,
         pending: true,
         startupMs: 0,
+        reused: false,
         name: card.querySelector<HTMLElement>(".analyze-engine-name")!,
         meta: card.querySelector<HTMLElement>(".analyze-engine-meta")!,
         lines: card.querySelector<HTMLOListElement>(".analyze-lines")!,
@@ -1192,11 +1210,15 @@ export function mountMainScreen(root: HTMLElement): void {
       parts.push(`${p.nodes.toLocaleString()} ノード`);
     }
     parts.push(`${(p.elapsedMs / 1000).toFixed(1)} 秒`);
-    // ⚠️ **起動の時間は解析のたびに払っている。** エンジンは 1 回の解析のあいだしか
-    // 生きないので、これが見えないと「遅い理由」が分からない。
-    // **エンジンごとに違う**（NNUE を読むものは数秒かかる）ので、その行に出す。
+    // 起動にかかった時間。**エンジンごとに違う**（NNUE を読むものは数秒かかる）ので
+    // その行に出す。これが見えないと「遅い理由」が分からない。
+    //
+    // ⚠️ **接続を使い回したときは 0**（＝払っていない。「速かった」ではない）ので、
+    // **0 を「起動 0.0 秒」と書かないこと** —— 意味が 2 通りになって読めなくなる。
     if (card.startupMs > 0) {
       parts.push(`起動 ${(card.startupMs / 1000).toFixed(1)} 秒`);
+    } else if (card.reused) {
+      parts.push("接続を使い回し");
     }
     card.meta.textContent = parts.join(" / ");
   };
@@ -1499,6 +1521,7 @@ export function mountMainScreen(root: HTMLElement): void {
     }
     card.pending = false;
     card.startupMs = event.data.startupMs ?? 0;
+    card.reused = !!event.data.reused;
     showEngineName(card, event.data.engineName ?? "");
     showAnalyzeProgress(card, event.data.progress);
     // ⚠️ **1 つ終わっただけでは解析は終わらない**（他のエンジンはまだ読んでいる）。
@@ -2454,9 +2477,9 @@ export function mountMainScreen(root: HTMLElement): void {
         r.options > 0
           ? `option ${r.options} 件を宣言、${r.applied} 件を送信（既定値を含む）`
           : "option の宣言はありません";
-      // ⚠️ **起動の時間は解析のたびに払う**（エンジンは解析のあいだしか生きない）。
-      // 繋ぎ先を選ぶ材料になるので出しておく。
-      const startup = `起動 ${(r.startupMs / 1000).toFixed(1)} 秒（解析のたびにかかります）`;
+      // ⚠️ **起動の時間は「解析タブで最初に解析するとき」に 1 回払う**
+      // （そのあとは接続を使い回す）。繋ぎ先を選ぶ材料になるので出しておく。
+      const startup = `起動 ${(r.startupMs / 1000).toFixed(1)} 秒（解析タブで最初に解析するときにかかります）`;
       note.textContent = `繋がりました: ${r.name} / ${applied} / ${startup}`;
     } catch (err) {
       note.textContent = `確認できませんでした: ${String(err instanceof Error ? err.message : err)}`;
