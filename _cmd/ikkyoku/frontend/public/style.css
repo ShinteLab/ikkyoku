@@ -1258,6 +1258,50 @@ html.is-main body {
   background: rgba(94, 160, 255, 0.28);
 }
 
+/* 成る / 成らずを聞くダイアログ。**押した場所に出す**（study.ts が座標を入れる）。
+   ⚠️ **window.confirm を使わないこと** —— あれは画面の真ん中に出るうえ、
+   「OK / キャンセル」でしか聞けない（「キャンセル＝不成」は読み取れない）。
+
+   ⚠️ **position: fixed で body に置く**（盤の箱に入れると、はみ出したぶんが切られる）。 */
+.promote-ask {
+  position: fixed;
+  z-index: 50;
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: #23262e;
+  border: 1px solid #5ea0ff;
+  border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+}
+
+.promote-btn {
+  padding: 5px 12px;
+  font-size: 13px;
+  color: #f2f3f5;
+  background: #2c303a;
+  border: 1px solid #3a3d47;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.promote-btn:hover {
+  border-color: #5ea0ff;
+}
+
+/* 成るほうが圧倒的に多いので、そちらを既定の見た目にして初期フォーカスも当てる。 */
+.promote-btn.is-primary {
+  color: #0f1115;
+  background: #5ea0ff;
+  border-color: #5ea0ff;
+}
+
+.promote-btn:focus-visible {
+  outline: 2px solid #f2f3f5;
+  outline-offset: 1px;
+}
+
 /* 手順（棋譜）。**盤の右に縦のリスト**（棋譜ソフトと同じ並び）。指すたびに下へ
    積まれるので、どこまで進めたかが縦位置でそのまま見える。
 

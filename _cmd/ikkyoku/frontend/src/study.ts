@@ -243,26 +243,109 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
     }
   };
 
+  // ---- 成る / 成らず を聞くダイアログ -------------------------------------
+  //
+  // ⚠️ **`window.confirm` は使わない。** あれは画面の真ん中に出るうえ、
+  // 「OK / キャンセル」という**この選択とは無関係な語**でしか聞けない
+  // （「キャンセル＝不成」は読み取れない）。**指した場所で「成る / 成らず」を
+  // そのまま聞く**ほうが、盤から目を離さずに選べる。
+  //
+  // ⚠️ **どちらも指せる手なので、片方に丸めないこと**（「成らず」を選べないと
+  // 実戦の手順が辿れなくなる）。**閉じただけなら指さない**（誤操作の取り消し）。
+
+  // ask は開いているダイアログ。**開いているあいだは盤の操作を止める。**
+  let ask: { close: () => void } | null = null;
+
+  const closeAsk = () => {
+    ask?.close();
+    ask = null;
+  };
+
+  // askPromote は押した場所で「成る / 成らず」を聞く。
+  // 選ばずに閉じたら onPick は呼ばれない（＝指さない）。
+  const askPromote = (x: number, y: number, onPick: (promote: boolean) => void) => {
+    closeAsk();
+    const box = document.createElement("div");
+    box.className = "promote-ask";
+    box.setAttribute("role", "dialog");
+    box.setAttribute("aria-label", "成るかどうか");
+
+    const button = (label: string, promote: boolean, primary: boolean) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = primary ? "promote-btn is-primary" : "promote-btn";
+      b.textContent = label;
+      b.addEventListener("click", () => {
+        closeAsk();
+        onPick(promote);
+      });
+      return b;
+    };
+    // **「成る」を先に置いて初期フォーカスにする**（成るほうが圧倒的に多い）。
+    const yes = button("成る", true, true);
+    box.append(yes, button("成らず", false, false));
+
+    // ⚠️ **`position: fixed` で body に置く**（盤の箱に入れると、はみ出したぶんが
+    // 切られる）。押した場所の右下に出し、画面から出るなら内側へ寄せる。
+    document.body.appendChild(box);
+    const r = box.getBoundingClientRect();
+    const m = 8;
+    box.style.left = `${Math.min(Math.max(x + 12, m), window.innerWidth - r.width - m)}px`;
+    box.style.top = `${Math.min(Math.max(y + 12, m), window.innerHeight - r.height - m)}px`;
+    yes.focus();
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        closeAsk();
+      }
+    };
+    const onOutside = (e: Event) => {
+      if (!box.contains(e.target as Node | null)) {
+        closeAsk();
+      }
+    };
+    // ⚠️ **今の click が終わってから外側の監視を始める。** 同じフレームで付けると、
+    // ダイアログを開いたこのクリックがそのまま「外側」として届いて即座に閉じる。
+    const timer = window.setTimeout(() => {
+      document.addEventListener("pointerdown", onOutside, true);
+    }, 0);
+    document.addEventListener("keydown", onKey, true);
+
+    ask = {
+      close: () => {
+        window.clearTimeout(timer);
+        document.removeEventListener("pointerdown", onOutside, true);
+        document.removeEventListener("keydown", onKey, true);
+        box.remove();
+      },
+    };
+  };
+
   // play は移動先が決まったときに 1 手指す。
   //
-  // ⚠️ **成りと不成の両方が指せるなら聞く。** どちらを選ぶかは人が決めることなので、
-  // **片方に丸めないこと**（「成らず」を選べないと、実戦の手順が辿れなくなる）。
-  const play = (dests: LegalMove[]) => {
+  // at は押した場所（成る / 成らずを聞くダイアログをそこに出す）。
+  const play = (dests: LegalMove[], at: { x: number; y: number }) => {
     if (dests.length === 0) {
       return;
     }
-    let move = dests[0].usi;
     const promote = dests.find((m) => m.promote);
     const stay = dests.find((m) => !m.promote);
+    const go = (move: string) => {
+      pick = null;
+      void run(() => StudyService.Play(move));
+    };
     if (promote && stay) {
-      move = window.confirm("成りますか？（キャンセルで不成）") ? promote.usi : stay.usi;
+      // ⚠️ **選ぶまで掴んだままにしておく**（光ったまま待つ）。ここで pick を
+      // 落とすと、閉じただけのときに選択が消えて掴み直しになる。
+      askPromote(at.x, at.y, (yes) => go(yes ? promote.usi : stay.usi));
+      return;
     }
-    pick = null;
-    void run(() => StudyService.Play(move));
+    go(dests[0].usi);
   };
 
   grid.addEventListener("click", (e) => {
-    if (!state?.loaded) {
+    // ダイアログが開いているあいだは盤を触らせない（裏で別の手を指してしまう）。
+    if (!state?.loaded || ask) {
       return;
     }
     const el = (e.target as HTMLElement)?.closest<HTMLElement>(".study-cell");
@@ -275,7 +358,7 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
     // 掴んでいるなら、まず「そこへ指せるか」を見る。
     const dests = movesFromPick().filter((m) => m.toRank === rank && m.toFile === file);
     if (dests.length > 0) {
-      play(dests);
+      play(dests, { x: e.clientX, y: e.clientY });
       return;
     }
     // 指せないところを押したら、掴み直し（掴めない駒なら解除）。
@@ -287,7 +370,7 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
   // ⚠️ **ここはイベント委譲**（駒台の中身は局面が変わるたびに作り直される）。
   for (const slot of [handSlots.black, handSlots.white]) {
     slot.addEventListener("click", (e) => {
-      if (!state?.loaded) {
+      if (!state?.loaded || ask) {
         return;
       }
       const chip = (e.target as HTMLElement)?.closest<HTMLElement>(".stock-chip");
@@ -307,6 +390,8 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
 
   // show は Go から返った局面を呼び出し側にも渡して描く。
   const show = (next: StudyState) => {
+    // 局面が変わったのだから、開いたままのダイアログはもう別の手の話。
+    closeAsk();
     state = next;
     // **局面が変わったら選択は捨てる。** 掴んでいた駒はもう同じ駒ではない。
     pick = null;
@@ -320,6 +405,7 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
 
   return {
     render(next: StudyState | null) {
+      closeAsk();
       if (!next) {
         state = null;
         pick = null;
