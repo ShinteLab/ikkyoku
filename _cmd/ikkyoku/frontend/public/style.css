@@ -18,6 +18,12 @@
      **その箱の高さで行ごと伸び、`align-items: center` の盤が画面の外へ出る**
      （100 手の棋譜を読み込むと初期表示で盤が見えなくなった。2026-08-12）。 */
   --board-size: min(calc(100vh - 260px), var(--board-max));
+
+  /* 評価値グラフの高さ（解析タブ。2026-08-12）。
+     ⚠️ **:root に置いてあるのは、#panel-study の --board-size がこれを引くから。**
+     カスタムプロパティは下へしか継承しないので、グラフの箱の中で定義すると
+     盤の大きさの式から読めない（引き忘れると盤が縦にはみ出す）。 */
+  --eval-graph-h: 116px;
 }
 
 html,
@@ -458,6 +464,15 @@ html.is-main body {
   overflow: auto;
 }
 
+/* 解析タブは盤の下に「解析の行 + エンジンごとの結果 + 評価値グラフ」が積まれる。
+   ⚠️ **積んだぶんだけ盤を小さくすること**(2026-08-12)。--board-size は
+   「ウィンドウの高さから上下の行を引いた値」なので、行が増えたのに引く量を
+   変えないと**盤が縦にはみ出す**（`.board-area` は縮まないので、盤が画面の外へ出る）。
+   ここで上書きしておけば、訂正タブ側の盤の大きさは変わらない。 */
+#panel-study {
+  --board-size: min(calc(100vh - 260px - var(--eval-graph-h) - 24px), var(--board-max));
+}
+
 /* 設定タブ。項目は上から順に積むだけ(1 つしか無いうちは列にしない)。 */
 #panel-settings {
   overflow: auto;
@@ -842,6 +857,136 @@ html.is-main body {
 
 .analyze-score.is-white {
   color: #ffc46b;
+}
+
+/* 評価値グラフ（解析タブ。2026-08-12）。**手順の 1 手ごとの最善手の評価値。**
+   「次善手を選んだらどう転ぶか」を辿った結果がどう転んだかを見せる面。
+
+   ⚠️ **高さは固定する**（--eval-graph-h）。連続モードでは 1 手ごとに点が増えるので、
+   中身で伸び縮みすると**盤ごと画面が上下に跳ねる**（駒を掴んでいる最中に動くのが
+   一番困る。.analyze-lines を固定したのと同じ話）。
+   ⚠️ **この高さは #panel-study の --board-size から引いてある。** 変えるなら
+   あちらも直すこと（引き忘れると盤が縦にはみ出す）。 */
+.eval-graph-row {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.eval-graph-row[hidden] {
+  display: none;
+}
+
+.eval-graph-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 22px;
+}
+
+.eval-graph-range {
+  padding: 2px 6px;
+  font-size: 12.5px;
+  color: #f2f3f5;
+  background: #23262e;
+  border: 1px solid #3a3d47;
+  border-radius: 5px;
+}
+
+/* 触った位置の読み上げ。**行の高さを動かさないこと**（1 行に収めて溢れは省く）。 */
+.eval-graph-readout {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.eval-graph {
+  flex: 0 0 auto;
+  height: var(--eval-graph-h);
+  background: #23262e;
+  border-radius: 6px;
+  /* 押すとその局面へ戻る（手順のチップと同じ操作）。 */
+  cursor: pointer;
+}
+
+.eval-graph-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* 目盛り。0 の線だけ明るくする（**形勢が入れ替わる線**なので、そこだけは読めること）。 */
+.eval-axis {
+  stroke: #343843;
+  stroke-width: 1;
+}
+
+.eval-axis.is-zero {
+  stroke: #5a6170;
+}
+
+.eval-grid {
+  stroke: #2b2f38;
+  stroke-width: 1;
+}
+
+.eval-tick {
+  fill: #7d859a;
+  font-size: 9px;
+}
+
+.eval-empty {
+  fill: #7d859a;
+  font-size: 12px;
+}
+
+/* 凡例。**見出しの行に出す**（グラフの中に重ねると目盛りと重なるうえ、
+   折れ線の描ける範囲がそのぶん狭くなる）。色はエンジンの区別。 */
+.eval-graph-legend {
+  display: flex;
+  gap: 10px;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.eval-legend {
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+/* 線の色を短い線で示す（文字色だけだと、細い折れ線との対応が取りにくい）。 */
+.eval-legend::before {
+  content: "";
+  display: inline-block;
+  width: 12px;
+  height: 2px;
+  margin-right: 4px;
+  vertical-align: middle;
+  background: currentColor;
+}
+
+/* 折れ線。**色はエンジンの区別**であって、形勢の色（青＝先手/橙＝後手）ではない。 */
+.eval-line {
+  fill: none;
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+/* 今見ている手。**どこを見ているかが分からないと折れ線と盤が結びつかない。** */
+.eval-cursor {
+  stroke: #6ad3ff;
+  stroke-width: 1.5;
+}
+
+.eval-hover {
+  stroke: #7d859a;
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
 }
 
 /* 訂正データの送信。**確定してから出る行**なので、訂正中は場所を取らない。 */
