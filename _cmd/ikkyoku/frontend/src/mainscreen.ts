@@ -1918,6 +1918,11 @@ export function mountMainScreen(root: HTMLElement): void {
       showKifuStatus("読み込んでいます…");
       try {
         const load = await StudyService.LoadKifu(text);
+        // ⚠️ **タブを先に開いてから描くこと。** 手順のリストは「今見ている手」を
+        // scrollIntoView で見せるが、`display: none` の中では効かない。
+        // 逆順にすると、100 手の棋譜を読んでもリストが先頭のまま出る
+        // （最終手まで進んでいるのに、そこが見えない）。
+        selectTab(studyTab);
         showStudy(load.state);
         // ⚠️ **note が空でないことをエラー扱いしないこと。** 途中で止まっても
         // そこまでの手順は正しく、その局面は解析できる（設計原則3）。
@@ -1925,7 +1930,6 @@ export function mountMainScreen(root: HTMLElement): void {
           load.note ? `${load.summary}（${load.note}）` : load.summary,
           load.note ? "warn" : undefined,
         );
-        selectTab(studyTab);
       } catch (err) {
         showKifuStatus(
           `棋譜を読み込めませんでした: ${String(err instanceof Error ? err.message : err)}`,

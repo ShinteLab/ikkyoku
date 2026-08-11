@@ -9,6 +9,15 @@
      重ねる必要があるので、**箱のほうもここで頭打ちにする**(ずれると 1 マス違う
      マスを編集してしまう)。core/web 側の定数が変わったらここも直すこと。 */
   --board-max: 560px;
+
+  /* 実際に描かれる盤の大きさ（SVG は正方形なので縦も横もこれ）。
+     ウィンドウの高さから上下の行（タブ・SFEN・解析の行）を引いた値で頭打ちにする。
+
+     ⚠️ **盤の脇に置くもの（手順のリスト）の高さもこれで抑えること。**
+     脇の箱が盤より高くなると、`.board-area` は縮まない（`flex: 1 0 auto`）ので
+     **その箱の高さで行ごと伸び、`align-items: center` の盤が画面の外へ出る**
+     （100 手の棋譜を読み込むと初期表示で盤が見えなくなった。2026-08-12）。 */
+  --board-size: min(calc(100vh - 260px), var(--board-max));
 }
 
 html,
@@ -1125,7 +1134,7 @@ html.is-main body {
    駒の見た目とクリック領域がずれた。 */
 .board-stage {
   position: relative;
-  width: min(calc(100vh - 260px), var(--board-max));
+  width: var(--board-size);
   max-width: 100%;
   line-height: 0;
 }
@@ -1387,13 +1396,20 @@ html.is-main body {
 
    ⚠️ **幅を中身に依存させないこと**（`.capture-ref` と同じ理由）。手が増えて
    表記の長さが変わるたびに幅が動くと、**盤が横へずれてグリッドだけ取り残される**
-   （そのとき layoutGrid は呼ばれない）。縮むのはこちらだけ（盤は flex: 0 0 auto）。 */
+   （そのとき layoutGrid は呼ばれない）。縮むのはこちらだけ（盤は flex: 0 0 auto）。
+
+   ⚠️ **高さも中身に依存させないこと**（`--board-size` で頭打ちにする。2026-08-12）。
+   `.board-area` は縮まない（`flex: 1 0 auto`）ので、**この箱が盤より高くなると
+   行ごと伸び、`align-items: center` の盤が画面の外へ出る**。100 手の棋譜を
+   読み込むと初期表示で盤が見えなくなった。溢れたぶんは `.study-moves` の中で
+   スクロールさせる（**リストが伸びるのではなく、中が流れるのが正しい**）。 */
 .study-move-row {
   flex: 0 1 auto;
   width: min(34%, 260px);
   min-width: 0;
   align-self: stretch;
   min-height: 0;
+  max-height: var(--board-size);
   display: flex;
   flex-direction: column;
   gap: 6px;
