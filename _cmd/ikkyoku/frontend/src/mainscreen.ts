@@ -438,6 +438,18 @@ export function mountMainScreen(root: HTMLElement): void {
              盤が変わったあとも残っていると、別の局面の値を今の盤の評価だと読ませる。 -->
         <div id="analyze-row" class="analyze-row" hidden>
           <button id="analyze-run" class="ghost-btn" type="button">解析</button>
+          <!-- 連続モード（2026-08-11）。**既定で入**。
+               手を進めるたびに勝手に解析し直すので、押す操作が要らなくなる。
+               手順を辿りながら評価値の変化を追うのがこのタブの目的なので、
+               **1 手ごとにボタンを押すほうが例外的**。
+
+               ⚠️ **エンジンの寿命は変わらない**（解析 1 回ぶん）。前の解析を止めて
+               から起こし直すだけで、常駐にはしない。 -->
+          <label class="analyze-continuous"
+                 title="手を進めるたびに解析し直します。前の解析は止めてから起こし直すので、エンジンが常駐するわけではありません">
+            <input id="analyze-continuous" type="checkbox" checked />
+            <span>連続</span>
+          </label>
           <label class="analyze-time">
             <select id="analyze-seconds"
                     title="考える時間。途中で切っても、そこまでの評価値は出ます。「無制限」は停止するまで考え続けます（そのあいだエンジンは起動したままです）">
@@ -637,6 +649,9 @@ export function mountMainScreen(root: HTMLElement): void {
     // **こちらを落とすと、光った位置と実際に指す位置が 1 マスずれる。**
     if (target === studyTab) {
       studyBoardUI.relayout();
+      // **解析タブに来たら（連続モードなら）そのまま解析を始める。**
+      // まだ解析していない局面のときだけ動く（止めた解析を勝手に起こし直さない）。
+      autoAnalyze();
     }
   };
 
@@ -837,6 +852,7 @@ export function mountMainScreen(root: HTMLElement): void {
   const analyzeRow = root.querySelector<HTMLDivElement>("#analyze-row")!;
   const analyzeRun = root.querySelector<HTMLButtonElement>("#analyze-run")!;
   const analyzeSeconds = root.querySelector<HTMLSelectElement>("#analyze-seconds")!;
+  const analyzeContinuous = root.querySelector<HTMLInputElement>("#analyze-continuous")!;
   const analyzeEnginesBox = root.querySelector<HTMLDivElement>("#analyze-engines")!;
   const analyzeMeta = root.querySelector<HTMLElement>("#analyze-meta")!;
   const analyzeHint = root.querySelector<HTMLElement>("#analyze-hint")!;
@@ -1045,16 +1061,55 @@ export function mountMainScreen(root: HTMLElement): void {
   analyzeRun.addEventListener("click", () => {
     if (analyzeRunning) {
       // **打ち切っても、そこまでの評価値は残る**（設計原則3）。捨てる操作ではない。
+      //
+      // ⚠️ **連続モードでもここで止まったままにすること。** 止めた局面は
+      // 「解析済み」として記録されるので、勝手に起こし直さない
+      // （止めた直後にまた起動したら、止める手段が無くなる）。
       void AnalyzeService.Stop();
       return;
     }
     void startAnalyze();
   });
 
+  // 連続モードで自動解析を仕掛けた局面。
+  //
+  // ⚠️ **失敗しても覚えること。** 覚えないと、解析できない状態（エンジンが 1 つも
+  // 選ばれていない等）で**局面が変わるたびに起動を試み続ける**。
+  let autoAnalyzed = "";
+
+  // autoAnalyze は連続モードのときに解析を仕掛ける。
+  //
+  // **手を進めるたびに評価値を出し直すのがこのタブの目的**なので、既定で入。
+  // ⚠️ **エンジンの寿命は変わらない**（前の解析を止めてから起こし直すだけで、
+  // 常駐にはしない。`AnalyzeService.Start` が前の解析を打ち切る）。
+  const autoAnalyze = () => {
+    if (!analyzeContinuous.checked || !analyzeReady || analyzeRunning) {
+      return;
+    }
+    // 既に解析した局面と、仕掛けたばかりの局面は放っておく。
+    if (!studySfen || studySfen === analyzedSfen || studySfen === autoAnalyzed) {
+      return;
+    }
+    autoAnalyzed = studySfen;
+    void startAnalyze();
+  };
+
+  analyzeContinuous.addEventListener("change", () => {
+    // 入れた瞬間から効かせる。**仕掛け済みの記録は捨てる** ——
+    // 前に失敗した局面でも、入れ直したなら試すのが期待どおり。
+    autoAnalyzed = "";
+    autoAnalyze();
+  });
+
   // 解析タブの局面が変わったら、解析の可否と表示を追随させる。
   // **結果は局面と紐づける。**
   const syncAnalyze = () => {
     analyzeRow.hidden = !studyLoaded;
+    if (!studyLoaded) {
+      // 空に戻った（撮り直した）。**仕掛けた記録も捨てる** —— 同じ局面をもう一度
+      // 採ったときに、連続モードなのに解析が始まらない、ということが起きる。
+      autoAnalyzed = "";
+    }
     if (analyzedSfen && studySfen !== analyzedSfen) {
       // 採り直した・手を進めたので、前の評価値は今の盤の値ではなくなった。
       // ⚠️ **走っているなら止めること**（2026-08-11）。表示を消すだけだと、
@@ -1068,6 +1123,8 @@ export function mountMainScreen(root: HTMLElement): void {
       analyzeRunning = false;
     }
     syncAnalyzeButton();
+    // ⚠️ **押せるかどうかを決めたあと**に呼ぶこと（analyzeReady をここで見る）。
+    autoAnalyze();
   };
 
   // 届いたイベントの行き先は **seq（解析の世代）と engineId（どのエンジンか）の両方**で
