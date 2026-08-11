@@ -5,7 +5,7 @@
 //
 // 画面は 4 タブ(入力 / 訂正 / 解析 / 設定)。**2026-08-10 に 3 タブから割り**
 // (以前は「盤面」1 枚の中で訂正モードをトグルしていた)、**2026-08-11 に
-// デバッグタブを訂正タブの中の折りたたみ「認識のようす」へ畳んだ。**
+// デバッグタブを訂正タブの中の折りたたみ「認識詳細情報」へ畳んだ。**
 //
 // ⚠️ **訂正タブと解析タブは別の局面を持っている。** Go 側も 2 つに分かれており
 // (PositionService / StudyService)、繋がるのは「この局面を解析する」を押した
@@ -19,14 +19,14 @@
 //            (合法手だけを辿る)
 //   設定   … 設定
 //
-// 「認識のようす」(訂正タブの中の折りたたみ。旧デバッグタブ)は
+// 「認識詳細情報」(訂正タブの中の折りたたみ。旧デバッグタブ)は
 // **認識精度を追う**ところ(認識器の状態・検出の信頼度・盤面領域・推論器・
 // 保存先・撮った画像)。局面そのものの話ではないものはここ。
 // ⚠️ **既定で閉じる。** 訂正のあいだ盤の上に積む行は短く保つ。
 //
 // 足す項目がどこに載るかはこの区分で決める。**「項目を足すな」ではない。**
 //
-// **駒台と警告は訂正タブの盤の周りと「認識のようす」の両方に出す。** デバッグ側では「認識が
+// **駒台と警告は訂正タブの盤の周りと「認識詳細情報」の両方に出す。** デバッグ側では「認識が
 // どれくらい外したか」の記録(訂正しても変わらない)だが、訂正側では**局面を直すために
 // 要る情報**(駒台の枚数は駒数保存則の逆算そのもの、警告は「どこが怪しいか」の提示)。
 // 同じ見た目でも**出所が違う**ので、片方の更新をもう片方に流用しないこと。
@@ -224,7 +224,7 @@ export function mountMainScreen(root: HTMLElement): void {
         <!-- 上段。左に警告、右に「認識結果に戻す」。
              局面として成立していない点は**盤より上に出す**(訂正しながら見るものなので、
              盤の下だと見落とすし、件数で下の行が動く)。中身は**今の局面**(EditState)の
-             値で、「認識のようす」側の同じ見出しとは別物(あちらは認識した時点の記録)。
+             値で、「認識詳細情報」側の同じ見出しとは別物(あちらは認識した時点の記録)。
              やり直しのボタンは**訂正した内容を捨てる操作**なので、押し間違えないよう
              盤から遠い右上に離し、赤くしてある。 -->
         <div class="board-head">
@@ -233,7 +233,7 @@ export function mountMainScreen(root: HTMLElement): void {
                   title="訂正を捨てて、認識したときの盤面に戻します">認識結果に戻す</button>
         </div>
 
-        <!-- 認識のようす（旧デバッグタブ。2026-08-11 にタブから畳んでここへ移した）。
+        <!-- 認識詳細情報（旧デバッグタブ。2026-08-11 にタブから畳んでここへ移した）。
              **「どれくらい外したか」を見る面**で、訂正しながら開く。訂正の作業と
              同じ画面にあるほうが行き来が要らないので、独立したタブではなく
              **既定で閉じた折りたたみ**にしてある。
@@ -243,7 +243,7 @@ export function mountMainScreen(root: HTMLElement): void {
              1 つの画面に 2 度出ることになるが、**読む目的が違う**ので片方を消さないこと
              （上＝今の局面を直すための情報、ここ＝認識がどれくらい外したかの記録）。 -->
         <details id="debug-details" class="debug-details">
-          <summary id="debug-summary">認識のようす</summary>
+          <summary id="debug-summary">認識詳細情報</summary>
           <div class="debug-body">
             <div class="debug-row">
               <button id="reload-btn" class="ghost-btn" type="button"
@@ -300,7 +300,7 @@ export function mountMainScreen(root: HTMLElement): void {
                左の余白はもともと遊んでおり、ここに置くのは盤を狭めない。
 
                ⚠️ **出すのは画像そのものだけ。** 重ね表示・信頼度・保存先は
-               「認識がどれくらい外したか」の情報なので「認識のようす」に残す
+               「認識がどれくらい外したか」の情報なので「認識詳細情報」に残す
                (盤面タブの基準は「局面を読む・直す・動かすのに要るか」)。
                画像の src はデバッグ側と**同じ CaptureResult.thumbnail**。 -->
           <div id="capture-ref" class="capture-ref" hidden>
@@ -344,7 +344,7 @@ export function mountMainScreen(root: HTMLElement): void {
           <code id="sfen" class="sfen">-</code>
         </div>
         <!-- 駒台。**訂正中の局面の値**なので先後の割り振りが出る
-             (「認識のようす」側は認識した時点の推定枚数で「先後不明」のまま)。
+             (「認識詳細情報」側は認識した時点の推定枚数で「先後不明」のまま)。
              訂正中は盤の脇に駒そのものが並ぶので、こちらは文字の要約。 -->
         <div id="board-hand-row" class="hand-row" hidden>
           <span class="field-label">駒台</span>
@@ -519,7 +519,7 @@ export function mountMainScreen(root: HTMLElement): void {
   const confidenceOut = root.querySelector<HTMLElement>("#confidence")!;
   // 駒台と警告は両方のタブに出るが、**出所が違う**。
   //
-  //   「認識のようす」 … 撮って認識した時点の値。**訂正しても変わらない**
+  //   「認識詳細情報」 … 撮って認識した時点の値。**訂正しても変わらない**
   //                  (どれくらい外したかの記録なので、直した後の値では意味が無い)
   //   盤面タブ     … **今の局面**の値(EditState)。訂正するたびに変わる
   //
@@ -565,7 +565,7 @@ export function mountMainScreen(root: HTMLElement): void {
   const inputTab = tabs[0].tab;
   const editTab = tabs[1].tab;
   const studyTab = tabs[2].tab;
-  // 認識のようす（旧デバッグタブ）。**訂正タブの中の折りたたみ**（2026-08-11）。
+  // 認識詳細情報（旧デバッグタブ）。**訂正タブの中の折りたたみ**（2026-08-11）。
   const debugDetails = root.querySelector<HTMLDetailsElement>("#debug-details")!;
   const debugSummary = root.querySelector<HTMLElement>("#debug-summary")!;
 
@@ -605,6 +605,9 @@ export function mountMainScreen(root: HTMLElement): void {
     if (debugDetails.open) {
       debugSummary.classList.remove("has-warn", "has-error");
     }
+    // 開閉で盤が上下に動く。**大きさが変わりうる場面を 1 つでも落とすと、
+    // 駒の見た目とクリック領域がずれる**ので、ここでも測り直す。
+    editor.relayout();
   });
 
   // <shogi-board> は core/web の Web Component。Go 側が core の embed から
@@ -630,7 +633,7 @@ export function mountMainScreen(root: HTMLElement): void {
   // 盤・SFEN・駒台・警告がその場で追従する。**2 つの出所を混ぜないこと。**
   const boardStage = root.querySelector<HTMLElement>("#board-stage")!;
 
-  // 訂正中に盤の左へ出す「撮った画像」。**「認識のようす」のサムネイルと同じ値**を描くだけで、
+  // 訂正中に盤の左へ出す「撮った画像」。**「認識詳細情報」のサムネイルと同じ値**を描くだけで、
   // 別の経路で取り直さない(片方だけ更新されると、どちらが今の 1 枚か分からなくなる)。
   //
   // 出す条件は「訂正中」かつ「画像がある」の両方。撮る前と、確定したあとは畳む。
@@ -1092,7 +1095,7 @@ export function mountMainScreen(root: HTMLElement): void {
   });
 
   // 盤面タブの駒台。**訂正中の局面の値**で、先後の割り振りと**未決のぶん**まで出す
-  // (「認識のようす」側は認識した時点の推定枚数のまま)。
+  // (「認識詳細情報」側は認識した時点の推定枚数のまま)。
   //
   // 未決が残っているあいだは局面が確定しない(SFEN が組み上がらない)ので、
   // **訂正モードを開いていなくても見えるようにしておく**。
@@ -1152,7 +1155,7 @@ export function mountMainScreen(root: HTMLElement): void {
     confidenceRow.hidden = false;
   };
 
-  // 「認識のようす」側。**認識した時点の駒台の推定枚数**(先後不明)。
+  // 「認識詳細情報」側。**認識した時点の駒台の推定枚数**(先後不明)。
   const showHand = (hand: Record<string, number>) => {
     const parts = HAND_ORDER.filter((k) => (hand?.[k] ?? 0) > 0).map(
       (k) => `${HAND_LABEL[k]}${hand[k]}`,
@@ -1172,7 +1175,7 @@ export function mountMainScreen(root: HTMLElement): void {
     ul.hidden = items.length === 0;
   };
 
-  // 「認識のようす」側の警告。**認識した時点のもの**で、訂正しても書き換えない。
+  // 「認識詳細情報」側の警告。**認識した時点のもの**で、訂正しても書き換えない。
   const showWarnings = (list: string[]) => fillWarnings(warnings, list);
 
   // 設定で指定した学習データの置き場所(ikkyoku.Config の SutemeDataDir)。
