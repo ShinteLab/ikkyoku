@@ -522,6 +522,21 @@ export function mountMainScreen(root: HTMLElement): void {
               <option value="10">候補 10</option>
             </select>
           </label>
+          <!-- 全て解析（2026-08-12）。**手順の範囲をまとめて解析する。**
+               中身は「手順リストを 1 つずつ押しては、考える秒数だけ待つ」の
+               繰り返しで、押す操作を人がやらなくてよくなるだけ。
+               棋譜を読み込んだ直後に一度かけると、評価値グラフが全部埋まる。
+
+               ⚠️ **考える秒数が「無制限」だと使えない**（1 手目で止まったまま
+               次へ進めない）。理由は押せない側に出す。 -->
+          <span class="analyze-batch">
+            <button id="analyze-batch-run" class="ghost-btn" type="button">全て解析</button>
+            <input id="analyze-batch-from" class="analyze-batch-num" type="number"
+                   min="0" max="999" step="1" title="解析を始める手数" />
+            <span class="analyze-batch-dash">-</span>
+            <input id="analyze-batch-to" class="analyze-batch-num" type="number"
+                   min="0" max="999" step="1" title="解析を終える手数" />
+          </span>
           <span id="analyze-meta" class="note"></span>
           <!-- 押せない理由。**ツールチップだけにしない**（ホバーしないと読めない）。 -->
           <span id="analyze-hint" class="note is-caution" hidden></span>
@@ -959,6 +974,9 @@ export function mountMainScreen(root: HTMLElement): void {
   const analyzeHint = root.querySelector<HTMLElement>("#analyze-hint")!;
   const analyzeStatus = root.querySelector<HTMLParagraphElement>("#analyze-status")!;
   const evalGraphRow = root.querySelector<HTMLDivElement>("#eval-graph-row")!;
+  const batchRun = root.querySelector<HTMLButtonElement>("#analyze-batch-run")!;
+  const batchFrom = root.querySelector<HTMLInputElement>("#analyze-batch-from")!;
+  const batchTo = root.querySelector<HTMLInputElement>("#analyze-batch-to")!;
 
   // 今の解析の世代。**打ち切った解析の途中経過は後から届く**ので、これで捨てる。
   let analyzeSeq = -1;
@@ -1183,6 +1201,62 @@ export function mountMainScreen(root: HTMLElement): void {
     card.meta.textContent = parts.join(" / ");
   };
 
+  // ---- 全て解析（2026-08-12）---------------------------------------------
+  //
+  // **手順の範囲をまとめて解析する。** 中身は「手順リストを 1 つずつ押しては、
+  // 考える秒数だけ待つ」の繰り返しで、**押す操作を人がやらなくてよくなるだけ**。
+  // 棋譜を読み込んだ直後に一度かけると、評価値グラフが全部埋まる。
+  //
+  // ⚠️ **並べて走らせない。** 1 局面ずつ順に解析する —— エンジンのプロセスは
+  // 1 回の解析のあいだだけ生きる作りなので、まとめて起こすと**手数ぶんの
+  // プロセスが同時に立つ**（`USI_Hash` は GB 級になりうる）。
+  //
+  // ⚠️ **進めるのは「全部のエンジンが終わったら」**（`syncAnalyzeRunning`）。
+  // 1 つ終わっただけで次へ行くと、残りのエンジンの結果が次の局面の裏で届く。
+  //
+  // **ここが順番を決めているだけで、評価値の記録は普段と同じ経路**（Go 側の
+  // `recordEval`）。⚠️ **全て解析だけの特別な記録の道を作らないこと。**
+
+  // 解析する最後の手数。**-1 なら走っていない。**
+  let batchLast = -1;
+  // 次に解析する手数。
+  let batchNext = -1;
+  // 次へ進んでいる最中か（done はエンジンの数だけ届くので、二重に進めない）。
+  let batchStepping = false;
+  // 今見ている局面の棋譜の手数の範囲（`StudyState.first` 由来）。
+  let studyFirst = 0;
+  let studyMoveCount = 0;
+
+  const batchActive = () => batchLast >= 0;
+
+  // 全て解析を始められない理由。**空なら押せる。**
+  const batchBlockedReason = (): string => {
+    if (!analyzeReady) {
+      return "";
+    }
+    // ⚠️ **「無制限」では次へ進めない**（1 手目で考え続けて終わらない）。
+    // 押せないことより、**なぜ押せないか**が出ているほうが大事。
+    if ((Number(analyzeSeconds.value) || 0) <= 0) {
+      return "全て解析は、考える秒数を決めてから（「無制限」では次の手へ進めません）";
+    }
+    // ⚠️ **手が 1 つも無くても押せてよい**（根の局面だけを解析する範囲は正当）。
+    return "";
+  };
+
+  const syncBatchButton = () => {
+    const blocked = batchBlockedReason();
+    batchRun.textContent = batchActive() ? "停止" : "全て解析";
+    batchRun.classList.toggle("is-active", batchActive());
+    // 走っている最中は止められる。走っていないときは、解析できる局面かつ
+    // 秒数が決まっているときだけ押せる。
+    batchRun.disabled = !batchActive() && (!analyzeReady || blocked !== "");
+    batchRun.title = batchActive()
+      ? "全て解析を止めます（そこまでの評価値は残ります）"
+      : blocked || "入力した範囲の手を、1 つずつ順に解析します";
+    batchFrom.disabled = batchActive();
+    batchTo.disabled = batchActive();
+  };
+
   // 走っているエンジンが残っているか。**1 つ終わっただけでは解析は終わらない。**
   const syncAnalyzeRunning = () => {
     analyzeRunning = [...engineCards.values()].some((c) => c.pending);
@@ -1190,7 +1264,98 @@ export function mountMainScreen(root: HTMLElement): void {
       analyzeMeta.textContent = "";
     }
     syncAnalyzeButton();
+    // ⚠️ **全部終わってから次の手へ**（上の ⚠️）。
+    if (!analyzeRunning && batchActive()) {
+      void batchStep();
+    }
   };
+
+  // stopBatch は全て解析をやめる。**そこまでの評価値は残る**（設計原則3）。
+  const stopBatch = (message: string) => {
+    batchLast = -1;
+    batchNext = -1;
+    batchStepping = false;
+    syncBatchButton();
+    if (message) {
+      analyzeMeta.textContent = message;
+    }
+  };
+
+  // batchStep は次の手へ進めて解析を仕掛ける。
+  const batchStep = async () => {
+    if (batchStepping || !batchActive()) {
+      return;
+    }
+    batchStepping = true;
+    try {
+      if (batchNext > batchLast) {
+        stopBatch(`全て解析: ${batchLast}手目まで終わりました`);
+        return;
+      }
+      const n = batchNext;
+      batchNext++;
+      // ⚠️ **手順リストを押すのと同じ経路**（`GoTo`。手順は消さない）。
+      // 「解析のために局面を動かす」専用の道を作らないこと。
+      const ply = n - studyFirst;
+      showStudy(await StudyService.GoTo(ply));
+      // ⚠️ **`showStudy` の中の自動解析（連続モード）には任せない。**
+      // あちらは「まだ解析していない局面なら」という条件で動くので、
+      // **連続モードが切ってあると 1 手目で止まる。**
+      await startAnalyze();
+      analyzeMeta.textContent = `全て解析: ${n}〜${batchLast}手目のうち ${n}手目`;
+      if (!analyzeRunning) {
+        // 起動そのものに失敗した（エンジンが選ばれていない等）。
+        // **ここで止めないと、残りの手でも同じ失敗を繰り返す。**
+        stopBatch("");
+      }
+    } catch (err) {
+      stopBatch(`全て解析を止めました: ${String(err instanceof Error ? err.message : err)}`);
+    } finally {
+      batchStepping = false;
+    }
+  };
+
+  // 手順が変わったら範囲の欄を入れ直す（棋譜を読み込んだら 1〜151、など）。
+  //
+  // ⚠️ **走っている最中と、打っている最中の欄は触らないこと**（打ち込んだ値が
+  // 消える）。手順の長さが変わったときだけ入れ直すので、**絞って指定した範囲は
+  // 手を進めるまで残る。**
+  let batchFilledFor = "";
+  const fillBatchRange = () => {
+    const key = `${studyFirst}:${studyMoveCount}`;
+    if (batchActive() || key === batchFilledFor) {
+      return;
+    }
+    batchFilledFor = key;
+    if (document.activeElement !== batchFrom) {
+      batchFrom.value = String(studyFirst);
+    }
+    if (document.activeElement !== batchTo) {
+      batchTo.value = String(studyFirst + studyMoveCount);
+    }
+  };
+
+  batchRun.addEventListener("click", () => {
+    if (batchActive()) {
+      stopBatch("全て解析を止めました");
+      if (analyzeRunning) {
+        void AnalyzeService.Stop();
+      }
+      return;
+    }
+    // 範囲は棋譜の手数で受け取る（**評価値グラフの横軸と同じ数え方**）。
+    const lo = Math.max(studyFirst, Math.floor(Number(batchFrom.value) || 0));
+    const hi = Math.min(studyFirst + studyMoveCount, Math.floor(Number(batchTo.value) || 0));
+    if (hi < lo) {
+      analyzeMeta.textContent = "全て解析: その範囲に手がありません";
+      return;
+    }
+    batchLast = hi;
+    batchNext = lo;
+    syncBatchButton();
+    void batchStep();
+  });
+  analyzeSeconds.addEventListener("change", syncBatchButton);
 
   const startAnalyze = async () => {
     analyzeStatus.hidden = true;
@@ -1222,6 +1387,11 @@ export function mountMainScreen(root: HTMLElement): void {
   };
 
   analyzeRun.addEventListener("click", () => {
+    // ⚠️ **「停止」は全て解析も止めること。** 止めたのに次の手が始まったら、
+    // 止める手段が無い（連続モードで止めたら止まったままにするのと同じ話）。
+    if (batchActive()) {
+      stopBatch("全て解析を止めました");
+    }
     if (analyzeRunning) {
       // **打ち切っても、そこまでの評価値は残る**（設計原則3）。捨てる操作ではない。
       //
@@ -1246,6 +1416,12 @@ export function mountMainScreen(root: HTMLElement): void {
   // ⚠️ **エンジンの寿命は変わらない**（前の解析を止めてから起こし直すだけで、
   // 常駐にはしない。`AnalyzeService.Start` が前の解析を打ち切る）。
   const autoAnalyze = () => {
+    // ⚠️ **全て解析の最中は手を出さない。** あちらが局面と解析の順番を握って
+    // いるので、連続モードが横から起こすと**同じ局面を 2 回起こして片方が
+    // 打ち切られる**（打ち切られたほうの done で次の手へ進んでしまう）。
+    if (batchActive()) {
+      return;
+    }
     if (!analyzeContinuous.checked || !analyzeReady || analyzeRunning) {
       return;
     }
@@ -1292,7 +1468,8 @@ export function mountMainScreen(root: HTMLElement): void {
       analyzeRunning = false;
     }
     syncAnalyzeButton();
-    // ⚠️ **押せるかどうかを決めたあと**に呼ぶこと（analyzeReady をここで見る）。
+    // ⚠️ **analyzeReady を見るので、押せるかどうかを決めたあとに呼ぶこと。**
+    syncBatchButton();
     autoAnalyze();
   };
 
@@ -1392,6 +1569,11 @@ export function mountMainScreen(root: HTMLElement): void {
   const showStudy = (st: StudyState, o?: { fromBoard?: boolean }) => {
     studyLoaded = !!st.loaded;
     studySfen = st.sfen ?? "";
+    // 全て解析の範囲は**棋譜の手数**で受け取る（評価値グラフの横軸と同じ数え方）。
+    // ⚠️ **`Move.Number` は根からの手数**（`GoTo` の引数）なので、起点を足す。
+    studyFirst = st.first ?? 0;
+    studyMoveCount = (st.moves ?? []).length;
+    fillBatchRange();
     studyStage.hidden = !studyLoaded;
     studyBoard.hidden = !studyLoaded;
     studyPlaceholder.hidden = studyLoaded;
