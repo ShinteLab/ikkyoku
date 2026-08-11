@@ -501,8 +501,11 @@ export function mountMainScreen(root: HTMLElement): void {
           <label class="analyze-time">
             <select id="analyze-multipv"
                     title="候補手を何本出させるか（MultiPV）。対応していないエンジンでは 1 本のままです">
-              <option value="1" selected>候補 1</option>
-              <option value="3">候補 3</option>
+              <!-- 既定は**候補 3**（2026-08-12）。「次善手を選んだらどう転ぶか」を
+                   辿るのが構想の中心なので、最善手だけが出ている状態を既定にしない。
+                   ⚠️ 対応していないエンジン（同梱のもの）では 1 本のままになる。 -->
+              <option value="1">候補 1</option>
+              <option value="3" selected>候補 3</option>
               <option value="5">候補 5</option>
             </select>
           </label>

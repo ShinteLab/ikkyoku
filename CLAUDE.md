@@ -1153,7 +1153,9 @@ Step 2 で `client.Exec` に差し替えれば依存ごと消える
 
 #### 候補手（MultiPV）— **入っている**（2026-08-11）
 
-**解析の行で本数を選ぶ**（候補 1 / 3 / 5）。`AnalyzeService.Start(seconds, multiPV)` →
+**解析の行で本数を選ぶ**（候補 1 / 3 / 5。**既定は 3**。2026-08-12 に 1 から変えた ——
+「次善手を選んだらどう転ぶか」を辿るのが構想の中心なので、最善手だけが出ている状態を
+既定にしない）。`AnalyzeService.Start(seconds, multiPV)` →
 `analyze.Options.MultiPV` → `client.GoOptions.MultiPV` と素通しで、
 `setoption name MultiPV` は **`isready` のあと**に送られる（探索ごとに変えてよい
 option なので、初期化に効くものと違って間に合う）。
