@@ -25,6 +25,7 @@ import (
 	"embed"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -51,7 +52,7 @@ type appWindows struct {
 
 func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
+		Level: logLevel(),
 	}))
 	slog.SetDefault(logger)
 
@@ -131,6 +132,26 @@ func main() {
 	if err := app.Run(); err != nil {
 		logger.Error("アプリが異常終了しました", "error", err)
 		os.Exit(1)
+	}
+}
+
+// logLevel は環境変数 `IKKYOKU_LOG_LEVEL` でログの下限を決める(既定は info)。
+//
+// **debug を入口として残しておくためのもの。** 表示状態の記録(registerVisibilityLog)の
+// ように「普段は邪魔だが、現象を追うときだけ要る」ログがあるので、消してしまわずに
+// debug へ落として、必要なときに環境変数で戻せるようにしてある。
+//
+//	set IKKYOKU_LOG_LEVEL=debug
+func logLevel() slog.Level {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("IKKYOKU_LOG_LEVEL"))) {
+	case "debug":
+		return slog.LevelDebug
+	case "warn", "warning":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
 	}
 }
 
@@ -348,6 +369,11 @@ func registerMainHooks(app *application.App, wins *appWindows, st windowState, q
 
 // registerVisibilityLog は表示状態の変化(表示・非表示・最小化・復帰)をログに出す。
 //
+// ⚠️ **debug で出す**(2026-08-11)。枠を動かしたりリサイズしたりするだけで大量に出て、
+// **他のログがこれに埋もれる**ため。追いたいときは `IKKYOKU_LOG_LEVEL=debug` で戻す
+// (`logLevel`)。**消さないこと** —— 下記のとおり現象の再現待ちで要る記録なので、
+// 出すのをやめるのではなく既定で黙らせているだけ。
+//
 // **これだけは推測ではなく記録が要る。** メイン画面が真っ黒になって触れなくなる現象は、
 // Wails が最小化のときに WebView2 を不可視にし、復帰の分岐でしか戻さない作りに
 // 由来すると見ている(diagservice.go / CaptureService.revealMain)。だとすると
@@ -366,7 +392,7 @@ func registerVisibilityLog(wins *appWindows, logger *slog.Logger) {
 			"戻す":  events.Common.WindowRestore,
 		} {
 			w.OnWindowEvent(id, func(*application.WindowEvent) {
-				logger.Info("ウィンドウの表示状態", "window", name, "event", label)
+				logger.Debug("ウィンドウの表示状態", "window", name, "event", label)
 			})
 		}
 	}
