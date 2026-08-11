@@ -332,7 +332,7 @@ func (s *AnalyzeService) Start(seconds, multiPV int) (AnalyzeState, error) {
 		wg.Add(1)
 		go func(entry ikkyoku.EngineEntry) {
 			defer wg.Done()
-			s.runOne(ctx, seq, entry, target.Root, opt)
+			s.runOne(ctx, seq, entry, target, opt)
 		}(entry)
 	}
 	go func() {
@@ -352,23 +352,41 @@ func (s *AnalyzeService) Start(seconds, multiPV int) (AnalyzeState, error) {
 
 // runOne はエンジン 1 つぶんの解析。**他のエンジンの成否に影響しない。**
 func (s *AnalyzeService) runOne(
-	ctx context.Context, seq int, entry ikkyoku.EngineEntry, sfen string, opt analyze.Options,
+	ctx context.Context, seq int, entry ikkyoku.EngineEntry, target analyzeTarget, opt analyze.Options,
 ) {
 	label := entry.DisplayName()
-	res, err := session(entry).Analyze(ctx, sfen, opt, func(p analyze.Progress) {
+	// 評価値グラフに残すのは**最善手（順位 1）の評価値**。
+	//
+	// ⚠️ **途中経過のたびに書く**（`done` だけにしない）。時間で打ち切っても
+	// 「無制限」で止めても、**そこまでで一番深い答えが残っているのが正しい**
+	// （設計原則3）。同じ手数に上書きしていくだけなので、書き込みは安い。
+	//
+	// ⚠️ **記録先の判断は `StudyService` に任せる**（世代が合わなければ捨てられる）。
+	// ここで「まだ同じ局面か」を確かめようとしないこと —— 手順を持っていないので、
+	// 確かめようがない。
+	record := func(p analyze.Progress) {
+		if len(p.Lines) == 0 {
+			return
+		}
+		best := p.Lines[0] // Lines は Rank の昇順（analyze.Progress）
+		s.study.recordEval(target.Epoch, target.Ply, entry.ID, label, best.Score, best.Depth)
+	}
+	res, err := session(entry).Analyze(ctx, target.Root, opt, func(p analyze.Progress) {
+		record(p)
 		s.emit("analyze:info", AnalyzeProgress{
 			Seq: seq, EngineID: entry.ID, EngineName: s.engineName(entry.ID), Progress: p,
 		})
 	})
 	if err != nil {
 		s.logger.Warn("解析できませんでした",
-			"engine", label, "id", entry.ID, "sfen", sfen, "error", err)
+			"engine", label, "id", entry.ID, "sfen", target.Root, "error", err)
 		s.emit("analyze:failed", AnalyzeFailure{Seq: seq, EngineID: entry.ID, Error: err.Error()})
 		return
 	}
+	record(res.Progress)
 	s.rememberEngine(entry.ID, res.Engine)
 	s.logger.Info("解析しました",
-		"engine", res.Engine, "id", entry.ID, "sfen", sfen, "depth", res.Depth,
+		"engine", res.Engine, "id", entry.ID, "sfen", target.Root, "depth", res.Depth,
 		"best", res.Bestmove, "nodes", res.Nodes,
 		"elapsedMs", res.ElapsedMS, "startupMs", res.StartupMS, "stopped", res.Stopped)
 	s.emit("analyze:done", AnalyzeProgress{

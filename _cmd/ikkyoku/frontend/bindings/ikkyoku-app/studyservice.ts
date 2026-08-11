@@ -61,6 +61,19 @@ export function Clear(): $CancellablePromise<$models.StudyState> {
 }
 
 /**
+ * Evals は評価値グラフの中身を返す（解析タブ）。
+ * 
+ * **フロントはこれを描くだけ。** 点の並びも横軸の範囲を決める材料もここが返すので、
+ * **フロント側で `StudyState` と突き合わせて計算しないこと**
+ * （2 つの値が別のタイミングで届くぶんだけずれる）。
+ * 
+ * ⚠️ **エンジンごとに別の折れ線。** 合成しない（平均も多数決も取らない）。
+ */
+export function Evals(): $CancellablePromise<$models.EvalGraph> {
+    return $Call.ByID(1726375459);
+}
+
+/**
  * GoTo は手順の n 手目まで進めた局面を見る（0 なら根）。**手順は消さない。**
  */
 export function GoTo(n: number): $CancellablePromise<$models.StudyState> {

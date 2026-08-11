@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ShinteLab/core/kifu"
+	"github.com/ShinteLab/ikkyoku/analyze"
 	"github.com/ShinteLab/ikkyoku/kifuweb"
 	"github.com/ShinteLab/ikkyoku/legal"
 	"github.com/ShinteLab/ikkyoku/position"
@@ -52,6 +53,12 @@ type StudyService struct {
 	// ⚠️ **局面を単体で持たない。** 「今の局面」は根 + 手順から組み立てるもので、
 	// 別に持つと手順とずれる（どちらが本当か分からなくなる）。
 	study *position.Study
+	// evals は手順の 1 手ごとの評価値（評価値グラフ。2026-08-12）。
+	//
+	// ⚠️ **置き場所がここなのは、記録が手順に紐づくから。** 手順を切る操作
+	// （`Play` の分岐・`Undo`・根の入れ替え）を知っているのはここだけなので、
+	// **どこまでを捨てるかの判断もここに置く**（`AnalyzeService` は記録を頼むだけ）。
+	evals evalStore
 }
 
 func NewStudyService(logger *slog.Logger, src *PositionService) *StudyService {
@@ -126,6 +133,9 @@ func (s *StudyService) Adopt() (StudyState, error) {
 	// **根ごと入れ替える。** 前の手順と（呼び出し側が消す）解析結果は捨てる ——
 	// 別の局面の話になるので、残すと「どちらの局面の手順か」が分からなくなる。
 	s.study = position.NewStudy(p)
+	// **評価値グラフも捨てる。** 別の局面から始まる別の手順なので、前の折れ線を
+	// 残すと**違う対局の評価値が同じ横軸に並ぶ。**
+	s.evals.reset()
 	st := s.state()
 	s.mu.Unlock()
 
@@ -165,6 +175,7 @@ func (s *StudyService) LoadKifu(text string) (KifuLoad, error) {
 	s.mu.Lock()
 	// **根ごと入れ替える**（Adopt と同じ）。前の手順と解析結果は別の局面の話になる。
 	s.study = study
+	s.evals.reset()
 	st := s.state()
 	s.mu.Unlock()
 
@@ -239,8 +250,18 @@ func (s *StudyService) Play(move string) (StudyState, error) {
 	if s.study == nil {
 		return s.state(), fmt.Errorf("まだ局面がありません")
 	}
+	// ⚠️ **手順を切るかどうかは指す前にしか分からない。** 戻って見ている途中で
+	// 別の手を指すと、そこから先の手順は捨てられる（`position.Study.Play`）ので、
+	// **その先の評価値も一緒に捨てる**（別の手順に付いた値なので）。
+	// 同じ手を指し直しただけなら手順は変わらないので、評価値も残す。
+	ply := s.study.Ply()
+	prev := s.study.Moves()
+	branched := ply >= len(prev) || prev[ply].USI != move
 	if err := s.study.Play(move); err != nil {
 		return s.state(), err
+	}
+	if branched {
+		s.evals.dropAfter(ply)
 	}
 	return s.state(), nil
 }
@@ -257,6 +278,9 @@ func (s *StudyService) Undo() (StudyState, error) {
 	if err := s.study.Undo(); err != nil {
 		return s.state(), err
 	}
+	// **手順から消えた手の評価値も消す**（`GoTo` との違いがここにも出る。
+	// あちらは手順を消さないので、評価値もそのまま残す）。
+	s.evals.dropAfter(s.study.Ply())
 	return s.state(), nil
 }
 
@@ -286,7 +310,81 @@ func (s *StudyService) Clear() StudyState {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.study = nil
+	s.evals.reset()
 	return s.state()
+}
+
+// Evals は評価値グラフの中身を返す（解析タブ）。
+//
+// **フロントはこれを描くだけ。** 点の並びも横軸の範囲を決める材料もここが返すので、
+// **フロント側で `StudyState` と突き合わせて計算しないこと**
+// （2 つの値が別のタイミングで届くぶんだけずれる）。
+//
+// ⚠️ **エンジンごとに別の折れ線。** 合成しない（平均も多数決も取らない）。
+func (s *StudyService) Evals() EvalGraph {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	g := EvalGraph{Series: s.evals.series()}
+	if g.Series == nil {
+		g.Series = []EvalSeries{}
+	}
+	if s.study == nil {
+		return g
+	}
+	base := s.moveBaseLocked()
+	g.First = base
+	g.Ply = s.study.Ply()
+	g.Number = base + s.study.Ply()
+	g.Last = base + len(s.study.Moves())
+	return g
+}
+
+// moveBaseLocked は根の局面までに指された手数（＝横軸の左端）。
+//
+// ⚠️ **SFEN の手数は「次に指す手の番号」**なので 1 を引く（棋譜の数え方に直す）。
+// 根が初期局面なら 0、撮った 40 手目の局面が根なら 40 になる。手数が不明（0）の
+// ときは 0 として扱う —— **勝手に推測しない**（分からないものは分からない）。
+func (s *StudyService) moveBaseLocked() int {
+	n := s.study.Root().MoveNumber
+	if n <= 0 {
+		return 0
+	}
+	return n - 1
+}
+
+// recordEval は解析の途中経過を評価値グラフに書く（`AnalyzeService` から）。
+//
+// ⚠️ **公開しない**（Service の公開メソッドはフロントの API になる）。記録するのは
+// エンジンの答えであって、フロントが決めることではない。
+//
+// epoch は `analyzeTarget` で受け取った手順の世代。**食い違っていたら捨てる** ——
+// 解析は非同期なので、**手順を切った後に前の枝の途中経過が届く**。
+func (s *StudyService) recordEval(epoch, ply int, engineID, label string, sc analyze.Score, depth int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.study == nil {
+		return
+	}
+	moves := s.study.Moves()
+	if ply < 0 || ply > len(moves) {
+		return
+	}
+	text := ""
+	if ply > 0 {
+		text = moves[ply-1].Text
+		if text == "" {
+			text = moves[ply-1].USI
+		}
+	}
+	s.evals.record(epoch, engineID, label, EvalPoint{
+		Ply:    ply,
+		Number: s.moveBaseLocked() + ply,
+		CP:     sc.CP,
+		Mate:   sc.Mate,
+		Label:  sc.Label,
+		Depth:  depth,
+		Move:   text,
+	})
 }
 
 // analyzeTarget は解析にかける対象（AnalyzeService 用）。
@@ -301,6 +399,13 @@ type analyzeTarget struct {
 	// 値なのか」を出すためと、**局面が変わったら結果を消す**判定のため。
 	// ⚠️ 手を進めても Root は変わらないので、**Root で判定すると結果が残り続ける。**
 	Current string
+	// Ply は解析する局面が根から何手目か。**評価値グラフの横軸の位置。**
+	Ply int
+	// Epoch は手順の世代。**記録を書き戻すときの合鍵**（`recordEval`）。
+	//
+	// ⚠️ **解析は非同期なので、手順を切った後に途中経過が届く。** これが無いと
+	// **捨てたはずの枝の評価値がグラフに書き戻る。**
+	Epoch int
 }
 
 // analyzeTarget は解析にかける「根 + そこまでの手順」を返す。
@@ -325,7 +430,13 @@ func (s *StudyService) analyzeTarget() (analyzeTarget, error) {
 	if err != nil {
 		return analyzeTarget{}, err
 	}
-	return analyzeTarget{Root: root, Moves: s.study.Played(), Current: cur}, nil
+	return analyzeTarget{
+		Root:    root,
+		Moves:   s.study.Played(),
+		Current: cur,
+		Ply:     s.study.Ply(),
+		Epoch:   s.evals.epoch,
+	}, nil
 }
 
 // state はロックを取った状態で呼ぶこと。

@@ -54,6 +54,7 @@ import {
 } from "../bindings/ikkyoku-app";
 import { iconMarkup } from "./icon";
 import { mountEditor } from "./editor";
+import { mountEvalGraph } from "./evalgraph";
 import { mountStudyBoard } from "./study";
 import type { AppSettings, EngineSettings, KifuLoad, StudyState } from "../bindings/ikkyoku-app/models";
 import type { Stock } from "../bindings/github.com/ShinteLab/ikkyoku/position/models";
@@ -534,6 +535,38 @@ export function mountMainScreen(root: HTMLElement): void {
              出す** —— 次善手を辿るのが構想の中心なので、複数本になるのが前提の作り。 -->
         <div id="analyze-engines" class="analyze-engines" hidden></div>
         <p id="analyze-status" class="note is-caution" hidden></p>
+        <!-- 評価値グラフ（2026-08-12）。**手順の 1 手ごとの最善手の評価値**を
+             折れ線にする。**「次善手を選んだらどう転ぶか」を辿った結果が
+             どう転んだか**を見せる面で、この画面の目的そのもの。
+
+             ⚠️ **エンジンごとに別の折れ線**（合成しない。平均も多数決も取らない）。
+             ⚠️ **高さは CSS で固定すること**（--eval-graph-h）。連続モードでは
+             1 手ごとに点が増えるので、中身で伸び縮みすると盤ごと画面が跳ねる。 -->
+        <div id="eval-graph-row" class="eval-graph-row" hidden>
+          <div class="eval-graph-head">
+            <span class="field-label">評価値</span>
+            <!-- 横軸の範囲。**既定は自動（1〜今の手数）。**
+                 固定は「棋譜を最後まで並べたときの見え方」で読みたいとき用で、
+                 **手が増えても軸が動かない**ので中継と突き合わせやすい。 -->
+            <select id="eval-graph-range" class="eval-graph-range"
+                    title="横軸の範囲。自動は「1〜今の手数」、固定は手数が増えても軸が動きません">
+              <option value="0" selected>自動</option>
+              <option value="50">1-50</option>
+              <option value="100">1-100</option>
+              <option value="150">1-150</option>
+              <option value="200">1-200</option>
+              <option value="300">1-300</option>
+            </select>
+            <!-- どの色がどのエンジンか。**グラフの中に重ねない**（目盛りと重なるうえ、
+                 折れ線の描ける範囲がそのぶん狭くなる）。 -->
+            <span id="eval-graph-legend" class="eval-graph-legend"></span>
+            <!-- 触った位置の中身。**ツールチップだけにしない**（点の上にぴったり
+                 乗せないと出ないので、線を目で追いながらは読めない）。 -->
+            <span id="eval-graph-readout" class="note eval-graph-readout"></span>
+          </div>
+          <div id="eval-graph" class="eval-graph"
+               title="押すとその局面に戻ります（手順は消えません）"></div>
+        </div>
         <!-- ⚠️ **盤の下に SFEN と駒台の行を戻さないこと**（2026-08-12 に外した）。
              駒台は盤の脇に駒そのものが出ているので文字の要約は要らず、SFEN は
              手順の列の下に移した。**盤の下に積む行が増えるほど盤が小さくなる。** -->
@@ -705,6 +738,10 @@ export function mountMainScreen(root: HTMLElement): void {
     // **こちらを落とすと、光った位置と実際に指す位置が 1 マスずれる。**
     if (target === studyTab) {
       studyBoardUI.relayout();
+      // ⚠️ **グラフも測り直す。** 大きさは `clientWidth` で測っており、
+      // **`display: none` の中では 0 になる**（測らないと出ないか、前回の
+      // 大きさのまま残る）。盤のグリッドと同じ落とし穴。
+      evalGraphUI.relayout();
       // **解析タブに来たら（連続モードなら）そのまま解析を始める。**
       // まだ解析していない局面のときだけ動く（止めた解析を勝手に起こし直さない）。
       autoAnalyze();
@@ -914,6 +951,7 @@ export function mountMainScreen(root: HTMLElement): void {
   const analyzeMeta = root.querySelector<HTMLElement>("#analyze-meta")!;
   const analyzeHint = root.querySelector<HTMLElement>("#analyze-hint")!;
   const analyzeStatus = root.querySelector<HTMLParagraphElement>("#analyze-status")!;
+  const evalGraphRow = root.querySelector<HTMLDivElement>("#eval-graph-row")!;
 
   // 今の解析の世代。**打ち切った解析の途中経過は後から届く**ので、これで捨てる。
   let analyzeSeq = -1;
@@ -1226,6 +1264,9 @@ export function mountMainScreen(root: HTMLElement): void {
     // ⚠️ **局面があるあいだは枠を出しっぱなしにする**（中身が空でも）。
     // 解析のたびに畳むと、連続モードでは**1 手ごとに盤が上下に跳ねる**。
     analyzeEnginesBox.hidden = !studyLoaded;
+    // 評価値グラフも同じ（**まだ 1 点も無くても軸だけ出す**）。出たり消えたりすると
+    // 盤が上下に動くうえ、「解析すると点が並ぶ場所」が見えているほうが分かりやすい。
+    evalGraphRow.hidden = !studyLoaded;
     if (!studyLoaded) {
       // 空に戻った（撮り直した）。**仕掛けた記録も捨てる** —— 同じ局面をもう一度
       // 採ったときに、連続モードなのに解析が始まらない、ということが起きる。
@@ -1264,6 +1305,8 @@ export function mountMainScreen(root: HTMLElement): void {
     }
     showEngineName(card, event.data.engineName ?? "");
     showAnalyzeProgress(card, event.data.progress);
+    // 評価値グラフは**間引いて**取り直す（点そのものは Go 側が既に持っている）。
+    refreshEvalGraphSoon();
   });
   Events.On("analyze:done", (event: { data: AnalyzeDone }) => {
     const card = cardFor(event.data);
@@ -1276,6 +1319,8 @@ export function mountMainScreen(root: HTMLElement): void {
     showAnalyzeProgress(card, event.data.progress);
     // ⚠️ **1 つ終わっただけでは解析は終わらない**（他のエンジンはまだ読んでいる）。
     syncAnalyzeRunning();
+    // **その手の点はこれで確定する**（打ち切ったときも done は来る。設計原則3）。
+    refreshEvalGraph();
   });
   Events.On("analyze:failed", (event: { data: AnalyzeFailure }) => {
     const card = cardFor(event.data);
@@ -1373,6 +1418,8 @@ export function mountMainScreen(root: HTMLElement): void {
       studyBoardUI.render(st.loaded ? st : null);
     }
     syncAnalyze();
+    // 局面が変わったら点を取り直す（**戻った位置の縦線も動く**）。
+    refreshEvalGraph();
   };
 
   // 解析タブの駒台。**未決は残っていない**（確定した局面なので）。
@@ -1456,6 +1503,65 @@ export function mountMainScreen(root: HTMLElement): void {
     },
   });
   studyUndo.addEventListener("click", () => studyBoardUI.undo());
+
+  // 評価値グラフ（2026-08-12）。**手順の 1 手ごとの最善手の評価値**を折れ線にする。
+  //
+  // ⚠️ **点はここに溜めない。** 持っているのは Go 側（`StudyService.Evals`）で、
+  // **手順を切ったときにどこまで捨てるかを知っているのはあちらだけ**。
+  // フロントにも溜めると、戻って別の手を指したときに片方だけ古い値が残る。
+  const evalGraphUI = mountEvalGraph({
+    host: root.querySelector<HTMLElement>("#eval-graph")!,
+    range: root.querySelector<HTMLSelectElement>("#eval-graph-range")!,
+    legend: root.querySelector<HTMLElement>("#eval-graph-legend")!,
+    readout: root.querySelector<HTMLElement>("#eval-graph-readout")!,
+    // **押したらその局面へ戻る**（手順のチップと同じ「戻って見る」操作。手順は消さない）。
+    onSeek: (ply) => {
+      void (async () => {
+        try {
+          showStudy(await StudyService.GoTo(ply));
+        } catch (err) {
+          studyMoveStatus.textContent = String(err instanceof Error ? err.message : err);
+          studyMoveStatus.hidden = false;
+        }
+      })();
+    },
+  });
+
+  // 途中経過からの取り直しを間引くためのタイマー（0 なら待っていない）。
+  let evalGraphTimer = 0;
+
+  // refreshEvalGraph は Go から点を取り直して描く。
+  //
+  // **呼ぶのは「局面が変わったとき」と「解析が 1 つ終わったとき」。**
+  const refreshEvalGraph = () => {
+    if (evalGraphTimer !== 0) {
+      window.clearTimeout(evalGraphTimer);
+      evalGraphTimer = 0;
+    }
+    void (async () => {
+      try {
+        evalGraphUI.render(await StudyService.Evals());
+      } catch {
+        // 取れなくてもグラフが古いままになるだけ。**盤も解析も止めない**（設計原則3）。
+      }
+    })();
+  };
+
+  // 途中経過から呼ぶ側。**間引く。**
+  //
+  // ⚠️ **info のたびに取り直さないこと** —— 深さが 1 つ進むたびに、しかも
+  // エンジンの数だけ届くので、そのまま往復させると読み筋の更新より頻繁になる。
+  // ⚠️ **かといって done だけにもできない** —— 考える秒数が「無制限」のときは
+  // **止めるまで done が来ない**ので、その手の点がいつまでも出ない。
+  const refreshEvalGraphSoon = () => {
+    if (evalGraphTimer !== 0) {
+      return;
+    }
+    evalGraphTimer = window.setTimeout(() => {
+      evalGraphTimer = 0;
+      refreshEvalGraph();
+    }, 1000);
+  };
 
   // 解析タブ → 訂正タブ。**解析の結果は捨てる。**
   // 直した結果を採り直せば別の局面になるので、前の評価値を残す意味が無い。
