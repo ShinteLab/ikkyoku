@@ -150,10 +150,18 @@ func TestExecSessionRunsExternalEngine(t *testing.T) {
 	if len(r.Lines) > 0 && len(r.Lines[0].Moves) != 1 {
 		t.Errorf("読み筋が違います: %+v", r.Lines[0].Moves)
 	}
-	// ⚠️ **解析が終わったらプロセスも終わる**（exe を常駐させない）。
+	// ⚠️ **解析が終わってもプロセスは生きている**（2026-08-12。接続を使い回す）。
+	// **ここで終わっていたら、1 手ごとに `isready` を払う元の作りに戻っている。**
+	if _, err := os.Stat(mark); err == nil {
+		t.Fatal("解析が終わっただけでエンジンが終わっています（接続を使い回していない）")
+	}
+
+	// ⚠️ **終わらせるのは Close。** 呼ばなければプロセスが残る
+	// （Windows では親が消えても子は道連れにならない）。
+	s.Close()
 	got, err := os.ReadFile(mark)
 	if err != nil {
-		t.Fatalf("解析のあとにエンジンが終わっていません: %v", err)
+		t.Fatalf("Close のあとにエンジンが終わっていません: %v", err)
 	}
 	// ⚠️ **USI の手順どおりに送れていること。**
 	// `usinewgame` を落としていると、前の局面の探索結果を引きずるエンジンがある

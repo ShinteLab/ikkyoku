@@ -144,38 +144,66 @@ type Result struct {
 	Engine string `json:"engine"`
 	// StartupMS は起動から `readyok` までにかかったミリ秒。
 	//
-	// **解析のたびに払うコスト**（プロセスは 1 回の解析のあいだしか生きない）。
 	// NNUE の評価関数を読むエンジンでは数秒になりうるので、見えるようにしてある。
+	// ⚠️ **接続を使い回したときは 0**（＝**払っていない**。「速かった」ではない）。
 	StartupMS int64 `json:"startupMs"`
+	// Reused は繋ぎっぱなしの接続を使い回したか。
+	//
+	// **`StartupMS` が 0 の理由がこれ。** 出さないと、起動が速かったのか払って
+	// いないのかを区別できない —— あの値は「遅いのが探索のせいか起動のせいか」を
+	// 見るためのものなので、0 の意味が 2 通りあると読めなくなる。
+	Reused bool `json:"reused"`
 }
 
-// Session は「どのエンジンに繋ぐか」を持つ。**接続そのものは持たない。**
+// Session は 1 つのエンジンへの繋ぎ先と、**繋ぎっぱなしの接続**を持つ。
 //
-// ⚠️ **エンジンのプロセスは 1 回の解析のあいだだけ生きる**（2026-08-08 決定）。
-// 解析を始めるときに起こし、終わったら `quit` して閉じる。
+// ⚠️ **接続は解析をまたいで使い回す**（2026-08-12 に変えた。以前は
+// 「プロセスは 1 回の解析のあいだだけ生きる」だった）。
 //
-//	起動 → setoption → isready → position → go → bestmove → quit
+//	起動 → setoption → isready ─┬→ usinewgame → position → go → bestmove ─┐
+//	                            └──────────────────────────────────────────┘
+//	                            Close（解析タブを離れた・アプリの終了）→ quit
+//
+// **変えた理由は連続モードと全て解析。** 1 手ごとに解析し直すので、
+// **`isready`（NNUE の評価関数の読み込み。数秒になりうる）を手数ぶん払う**ことになり、
+// 151 手の棋譜を通しで解析すると待ち時間の大半がそれになる。
+//
+// 引き換えに払うもの（**どれも手当て済み。外さないこと**）:
+//
+//   - ⚠️ **1 接続 1 探索なので直列化が要る**（`runMu`）。前の `bestmove` が返る前に
+//     次の `position` を送ると噛み合わなくなる。**「止めて即次」を繰り返す
+//     連続モードと全て解析がまさにこれ**
+//   - ⚠️ **`setoption` は `isready` の前にしか効かない。** 設定を変えたら
+//     **繋ぎ直さないと反映されない**（毎回起こしていた頃は自動で解決していた）。
+//     繋ぎ直しの判断は呼び出し側（`AnalyzeService` が繋ぎ先の指紋で見る）
+//   - ⚠️ **待機中も `USI_Hash` ぶんのメモリを掴む**（GB 級になりうる）。だから
+//     **解析タブに居ないあいだは閉じる**（`Close`）
+//   - ⚠️ **壊れた接続を掴み続けないこと。** 解析がエラーで終わったら捨てる（`drop`）
 //
 // **「ずっと解析していたい」は時間無制限の解析 1 回**（`Options.Movetime = 0`）として
-// 表す。止めるまで `go` が続くので、そのあいだプロセスも生きている。
-// **アイドルタイマーも検討モードも要らない**のは、寿命が解析そのものと一致するから。
-//
-// この形にした理由は 2 つ:
-//
-//   - **exe を常駐させない。** 置換表は `isready` で確保されるので、待機中のプロセスが
-//     `USI_Hash` ぶん（GB 級になりうる）のメモリを掴んだままになる
-//   - **`setoption` は `isready` の前にしか効かない。** 毎回繋ぎ直すなら、
-//     設定を変えた結果が次の解析にそのまま反映される（作り直しの判断が要らない）
-//
-// 引き換えに、**解析のたびに `isready` のコストを払う**（NNUE の評価関数を読む
-// エンジンでは数秒かかりうる）。それがどれくらいかは `Result.StartupMS` に出る。
+// 表す、というのは変わらない。
 type Session struct {
 	// open はエンジンを開く関数。**繋ぎ先が変わるのはここだけ。**
 	open func(context.Context) (*client.Session, error)
 
+	// runMu は探索の直列化。
+	//
+	// ⚠️ **USI は 1 接続 1 探索。** 接続を使い回す以上、重ねて走らせられない
+	// （**前の `bestmove` が返る前に次の `position` を送ると噛み合わなくなる**）。
+	// 待ちは有界 —— `client.Session.Analyze` が `stop` のあと `BestmoveGrace` で
+	// 見切りをつける。
+	runMu sync.Mutex
+
 	mu sync.Mutex
+	// live は繋ぎっぱなしのエンジン（まだ繋いでいなければ nil）。
+	//
+	// ⚠️ **解析のたびに起こし直さない**（2026-08-12 に変えた）。評価関数の
+	// 読み込みは数秒かかることがあり、**連続モードと全て解析はその数秒を
+	// 1 手ごとに払う**ことになる。閉じるのは `Close`（解析タブを離れたとき・
+	// アプリの終了時）。
+	live *liveEngine
 	// lastEngine は最後に繋がったエンジンの名前。**表示用**
-	// （接続を持たないので、繋いでいないあいだも名前だけは出せるようにしておく）。
+	// （閉じたあとも名前だけは出せるようにしておく）。
 	lastEngine string
 }
 
@@ -247,7 +275,9 @@ type EngineInfo struct {
 
 // Connect は繋がるかどうかだけを確かめる（設定タブの「接続を確認」）。
 //
-// **確かめたら閉じる。** 解析していないのにプロセスを残さない。
+// ⚠️ **確かめたら閉じる。ここでは接続を残さない**（解析の使い回しとは別）。
+// 押すのは設定タブに居るときで、そこから解析に入るとは限らない。
+// **解析していないのに `USI_Hash` ぶんのメモリを掴んだままにしないこと。**
 func (s *Session) Connect(ctx context.Context) (EngineInfo, error) {
 	eng, startup, err := s.dial(ctx)
 	if err != nil {
@@ -263,7 +293,10 @@ func (s *Session) Connect(ctx context.Context) (EngineInfo, error) {
 	}, nil
 }
 
-// Analyze は局面を解析する。**このあいだだけエンジンのプロセスが生きている。**
+// Analyze は局面を解析する。
+//
+// **初回はエンジンを起こし、2 回目からは繋ぎっぱなしの接続を使い回す。**
+// ⚠️ **1 接続 1 探索なので、前の探索が畳まれるまでここで待つ**（`runMu`）。
 //
 // positionSFEN は**根の局面全体の SFEN**（盤面・手番・持ち駒・手数）。
 // `position.Position.SFEN()` が返すものをそのまま渡す。手を進めているなら
@@ -273,7 +306,7 @@ func (s *Session) Connect(ctx context.Context) (EngineInfo, error) {
 // goroutine から呼ばれる**ので、UI へ流すならイベント経由にすること。
 //
 // ctx をキャンセルすると `stop` を送り、**それまでに届いた結果**を返す（設計原則3）。
-// そのあとエンジンは `quit` して終わる。
+// ⚠️ **そのあともエンジンは生きたまま**（次の解析で使い回す）。終わらせるのは `Close`。
 func (s *Session) Analyze(ctx context.Context, positionSFEN string, opt Options, info func(Progress)) (Result, error) {
 	fields, err := checkSFEN(positionSFEN)
 	if err != nil {
@@ -298,19 +331,31 @@ func (s *Session) Analyze(ctx context.Context, positionSFEN string, opt Options,
 		cmd += " moves " + strings.Join(opt.Moves, " ")
 	}
 
-	eng, startup, err := s.dial(ctx)
+	// ⚠️ **1 接続 1 探索なので、前の探索が畳まれるまで待つ**（上の runMu）。
+	s.runMu.Lock()
+	defer s.runMu.Unlock()
+	// 待っているあいだに世代が進んでいたら、この結果はもう誰も読まない。
+	// **待たされたぶんだけ無駄に探索しないこと**（連続モードで手を速く進めると、
+	// ここに何本も積み上がる）。
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
+	}
+
+	eng, startup, reused, err := s.acquire(ctx)
 	if err != nil {
 		return Result{}, err
 	}
-	defer eng.close()
 
 	// ⚠️ **`position` の前に `usinewgame` を送る**（`readyok` の直後）。
 	// これが無いと、**前の局面の探索結果を引きずったまま次を読む**エンジンがある。
 	//
-	// ここでは局面ごとに 1 回になる（プロセスが 1 回の解析で終わるため）。
-	// **それが正しい** —— ikkyoku が渡すのは履歴を持たない独立した局面で、
-	// 前の解析と繋がっていない（設計原則1）。
+	// ⚠️ **接続を使い回すようになっても、解析ごとに送り続けること**（2026-08-12）。
+	// 送らなければ隣り合う局面で置換表が効いて全て解析は速くなるが、
+	// **前の解析の影響を受けた評価値**になる（設計原則1: 履歴に依存しない）。
+	// 使い回しで消したかったのは `isready`（評価関数の読み込み）のほうで、
+	// ここではない。
 	if err := eng.NewGame(); err != nil {
+		s.drop()
 		return Result{}, fmt.Errorf("エンジンに usinewgame を送れませんでした: %w", err)
 	}
 
@@ -324,6 +369,11 @@ func (s *Session) Analyze(ctx context.Context, positionSFEN string, opt Options,
 			}
 		})
 	if err != nil {
+		// ⚠️ **エラーが出たら接続は捨てること。** 通信が切れたときはもちろん、
+		// 「`stop` を送ったのに `bestmove` が返らない」ときも**そのまま使い回すと
+		// 次の探索ごと噛み合わなくなる**。捨てても次で開き直すだけ（数秒の損）で、
+		// **壊れた接続を掴み続けるほうがはるかに高くつく。**
+		s.drop()
 		return Result{}, err
 	}
 
@@ -336,6 +386,7 @@ func (s *Session) Analyze(ctx context.Context, positionSFEN string, opt Options,
 		Stopped:   res.Stopped,
 		Engine:    eng.ID,
 		StartupMS: startup.Milliseconds(),
+		Reused:    reused,
 	}, nil
 }
 
@@ -357,7 +408,8 @@ func (e *liveEngine) close() {
 // ⚠️ **プロセスの ctx は引数の ctx から切り離す**（`context.WithoutCancel`）。
 // `client.Exec` は `exec.CommandContext` で起こすので、解析の ctx をそのまま渡すと
 // **「停止」を押した瞬間にプロセスが死に、`stop` に対する bestmove を受け取れない**。
-// 片付けは close 側（`quit` → kill）で行う。
+// しかも**接続を使い回すようになった今は、1 回目の「停止」で接続ごと失う。**
+// 片付けは `Close` / `drop`（`quit` → kill）で行う。
 func (s *Session) dial(ctx context.Context) (*liveEngine, time.Duration, error) {
 	procCtx, kill := context.WithCancel(context.WithoutCancel(ctx))
 
@@ -369,6 +421,54 @@ func (s *Session) dial(ctx context.Context) (*liveEngine, time.Duration, error) 
 	}
 	s.rememberEngine(eng.ID)
 	return &liveEngine{Session: eng, kill: kill}, time.Since(started), nil
+}
+
+// acquire は使える接続を返す（無ければ起こす）。reused は使い回したかどうか。
+//
+// **起動にかかった時間は、実際に起こしたときだけ返る。** 使い回したときは 0 で、
+// それは「速かった」ではなく「払っていない」の意味 —— **画面ではこの 2 つを
+// 区別して出すこと**（`Result.Reused`）。
+func (s *Session) acquire(ctx context.Context) (*liveEngine, time.Duration, bool, error) {
+	s.mu.Lock()
+	live := s.live
+	s.mu.Unlock()
+	if live != nil {
+		return live, 0, true, nil
+	}
+
+	eng, startup, err := s.dial(ctx)
+	if err != nil {
+		return nil, 0, false, err
+	}
+	s.mu.Lock()
+	s.live = eng
+	s.mu.Unlock()
+	return eng, startup, false, nil
+}
+
+// drop は今の接続を捨てる（**壊れたと分かったとき**）。次の解析で開き直す。
+func (s *Session) drop() {
+	s.mu.Lock()
+	live := s.live
+	s.live = nil
+	s.mu.Unlock()
+	if live != nil {
+		live.close()
+	}
+}
+
+// Close はエンジンを終わらせる。
+//
+// **呼ぶのは「解析タブを離れたとき」と「アプリの終了時」**（`AnalyzeService`）。
+// ⚠️ **待機中のエンジンは `USI_Hash` ぶん（GB 級になりうる）のメモリを掴んだまま**
+// なので、**解析タブに居ないあいだまで生かしておかないこと。**
+//
+// ⚠️ **走っている探索が畳まれるのを待つ。** 探索の途中で `quit` を送ると、
+// `stop` に対する `bestmove` を受け取る前にプロセスが消える。
+func (s *Session) Close() {
+	s.runMu.Lock()
+	defer s.runMu.Unlock()
+	s.drop()
 }
 
 // accumulator は info 行を候補手ごとに畳んで Progress にする。

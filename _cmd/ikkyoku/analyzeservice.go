@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,9 +20,14 @@ import (
 // 外部エンジンの exe でも `prokishi.exe` でも、ここは変わらない
 // （`_docs/phase4-engine-usi.md`）。
 //
-// ⚠️ **エンジンのプロセスは 1 回の解析のあいだだけ生きる。** 解析を始めるときに
-// 起こし、終わったら `quit` する。「ずっと解析していたい」は**時間無制限の解析**
-// （考える秒数を「無制限」にする）として表すので、そのあいだは生きている。
+// ⚠️ **エンジンのプロセスは解析タブに居るあいだ生きる**（2026-08-12 に変えた。
+// 以前は「1 回の解析のあいだだけ」だった）。接続は登録 ID ごとに持ち回り、
+// **終わらせるのは `Release`（解析タブを離れた）とアプリの終了時。**
+//
+// 変えた理由は連続モードと全て解析 —— 1 手ごとに解析し直すので、
+// **`isready`（NNUE の読み込み。数秒になりうる）を手数ぶん払っていた。**
+// 引き換えの手当ては `analyze.Session` の注記にまとめてある（直列化・
+// 設定を変えたときの繋ぎ直し・待機中のメモリ・壊れた接続の始末）。
 //
 // **局面はここが持たない。** 解析するのは常に「今 StudyService が持っている確定局面」で、
 // フロントから SFEN を受け取らない（フロントに局面の写しを持たせない、という
@@ -74,8 +81,14 @@ type AnalyzeService struct {
 	// engines は今の世代で走らせたエンジン（表示用。登録順）。
 	engines []AnalyzeEngine
 	// lastEngine は登録 ID → 最後に名乗ったエンジン名。**表示用**
-	// （接続を持ち続けないので、繋いでいないあいだも名前だけは出せるようにする）。
+	// （閉じたあとも名前だけは出せるようにする）。
 	lastEngine map[string]string
+	// sessions は登録 ID → 繋ぎっぱなしの接続（2026-08-12）。
+	//
+	// ⚠️ **解析のたびに作り直さないこと。** それでは接続を使い回す意味が無い
+	// （`isready` を毎回払う）。作り直すのは**繋ぎ先が変わったとき**だけで、
+	// 判断は `engineKey` の指紋。
+	sessions map[string]*engineSlot
 }
 
 // AnalyzeEngine は解析に参加しているエンジン 1 つ（フロントの表示の単位）。
@@ -105,15 +118,17 @@ func (s *AnalyzeService) close() {
 	s.mu.Lock()
 	cancel, done := s.cancel, s.done
 	s.mu.Unlock()
-	if cancel == nil {
-		return
+	if cancel != nil {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(engineShutdownWait):
+			s.logger.Warn("エンジンの終了を待ちきれませんでした")
+		}
 	}
-	cancel()
-	select {
-	case <-done:
-	case <-time.After(engineShutdownWait):
-		s.logger.Warn("エンジンの終了を待ちきれませんでした")
-	}
+	// ⚠️ **打ち切っただけではプロセスは終わらない**（接続を使い回すので、
+	// 解析が終わってもエンジンは生きている）。**ここで閉じないと残る。**
+	s.closeSessions()
 }
 
 // engineShutdownWait は終了時にエンジンの後始末を待つ上限。
@@ -122,16 +137,95 @@ func (s *AnalyzeService) close() {
 // 閉じなくなるので、諦める線を引いておく。
 const engineShutdownWait = 5 * time.Second
 
-// session は登録 1 件ぶんのセッションを作る。
+// newSession は登録 1 件ぶんのセッションを作る。
 //
-// **毎回作ってよい。** Session は接続を持たない（繋ぐのは解析のあいだだけ）ので、
-// 作るコストはほぼ無い。**設定を変えたときの繋ぎ直しを気にしなくてよくなった**のが、
-// この寿命にした利点の 1 つ（以前は鍵を持って作り直しを判断していた）。
-func session(e ikkyoku.EngineEntry) *analyze.Session {
+// ⚠️ **接続を使い回すようになったので、作り直しは「繋ぎ先が変わったとき」だけ**
+// （2026-08-12）。判断は `engineKey` の指紋で行う（`sessionFor`）。
+func newSession(e ikkyoku.EngineEntry) *analyze.Session {
 	if e.Path == "" {
 		return analyze.NewLocalSession()
 	}
 	return analyze.NewExecSession(e.Path, e.Options)
+}
+
+// engineKey は繋ぎ先の指紋（実行ファイルと `setoption` の中身）。
+//
+// ⚠️ **options を含めること。** `setoption` は `isready` の前にしか効かないので、
+// **値を変えたら繋ぎ直さないと反映されない**（毎回起こしていた頃は自動で解決して
+// いた）。しかもエンジンは黙って古い値のまま動くので、**画面では気づけない。**
+func engineKey(e ikkyoku.EngineEntry) string {
+	names := make([]string, 0, len(e.Options))
+	for k := range e.Options {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	var b strings.Builder
+	b.WriteString(e.Path)
+	for _, k := range names {
+		b.WriteString("\x00")
+		b.WriteString(k)
+		b.WriteString("=")
+		b.WriteString(e.Options[k])
+	}
+	return b.String()
+}
+
+// sessionFor は登録 ID ごとに接続を持ち回る。**繋ぎ先が変わっていたら捨てて作り直す。**
+func (s *AnalyzeService) sessionFor(e ikkyoku.EngineEntry) *analyze.Session {
+	key := engineKey(e)
+
+	s.mu.Lock()
+	if s.sessions == nil {
+		s.sessions = map[string]*engineSlot{}
+	}
+	slot, ok := s.sessions[e.ID]
+	if ok && slot.key == key {
+		s.mu.Unlock()
+		return slot.session
+	}
+	next := &engineSlot{key: key, session: newSession(e)}
+	s.sessions[e.ID] = next
+	s.mu.Unlock()
+
+	// **古い接続は鍵の外で閉じる**（`Close` は走っている探索が畳まれるのを待つので、
+	// ロックを持ったまま呼ぶと解析中に設定を変えたときに固まる）。
+	if ok {
+		slot.session.Close()
+	}
+	return next.session
+}
+
+// engineSlot は登録 1 件ぶんの接続と、その繋ぎ先の指紋。
+type engineSlot struct {
+	key     string
+	session *analyze.Session
+}
+
+// closeSessions は持っている接続を全部終わらせる。
+//
+// **呼ぶのは「解析タブを離れたとき」（`Release`）と「アプリの終了時」。**
+// ⚠️ **待機中のエンジンは `USI_Hash` ぶん（GB 級になりうる）のメモリを掴んだまま**
+// なので、解析タブに居ないあいだまで生かしておかない。
+func (s *AnalyzeService) closeSessions() {
+	s.mu.Lock()
+	slots := s.sessions
+	s.sessions = nil
+	s.mu.Unlock()
+	for _, slot := range slots {
+		slot.session.Close()
+	}
+}
+
+// Release は走っている解析を打ち切って、エンジンのプロセスを終わらせる。
+//
+// **フロントが解析タブを離れるときに呼ぶ。** 接続を使い回す代わりに、
+// **タブを離れたら手放す**というのがこの作りの寿命の決め方
+// （アイドルタイマーを持たずに済むように、境界を目に見える操作に置いてある）。
+//
+// ⚠️ **走っている解析も止まる。** 全て解析の途中でタブを移ると止まるのは
+// そういう約束で、**そこまでの評価値は残る**（設計原則3）。
+func (s *AnalyzeService) Release() {
+	s.close()
 }
 
 // EngineCheck は「接続を確認」の結果。
@@ -161,7 +255,7 @@ type EngineCheck struct {
 	Applied int `json:"applied"`
 	// StartupMS は起動から `readyok` までの所要ミリ秒。
 	//
-	// **解析のたびにこれだけ待つ**（プロセスは 1 回の解析のあいだしか生きない）ので、
+	// **解析タブで最初に解析するときに 1 回だけ待つ**（そのあとは接続を使い回す）。
 	// 繋ぎ先を選ぶ材料として出す。
 	StartupMS int64 `json:"startupMs"`
 	// Error は繋がらなかった理由（日本語）。
@@ -189,7 +283,7 @@ func (s *AnalyzeService) CheckEngine(id string) EngineCheck {
 
 	ctx, cancel := context.WithTimeout(context.Background(), engineConnectTimeout)
 	defer cancel()
-	info, err := session(entry).Connect(ctx)
+	info, err := newSession(entry).Connect(ctx)
 	if err != nil {
 		out.Error = err.Error()
 		s.logger.Warn("エンジンに繋げませんでした", "id", entry.ID, "path", entry.Path, "error", err)
@@ -236,9 +330,14 @@ type AnalyzeProgress struct {
 	Done bool `json:"done"`
 	// StartupMS は起動から `readyok` までの所要ミリ秒（**done のときだけ入る**）。
 	//
-	// **解析のたびに払っているコスト**なので画面に出す。これが見えないと、
-	// 遅いのが探索のせいなのか起動のせいなのか分からない。
+	// **払ったコスト**なので画面に出す。これが見えないと、遅いのが探索のせいなのか
+	// 起動のせいなのか分からない。⚠️ **接続を使い回したときは 0**（下の Reused）。
 	StartupMS int64 `json:"startupMs"`
+	// Reused は繋ぎっぱなしの接続を使い回したか。
+	//
+	// **`StartupMS` が 0 の理由がこれ。** 「速かった」と「払っていない」を
+	// 画面で区別するために要る。
+	Reused bool `json:"reused"`
 }
 
 // AnalyzeFailure は解析が失敗したことの通知。
@@ -371,7 +470,7 @@ func (s *AnalyzeService) runOne(
 		best := p.Lines[0] // Lines は Rank の昇順（analyze.Progress）
 		s.study.recordEval(target.Epoch, target.Ply, entry.ID, label, best.Score, best.Depth)
 	}
-	res, err := session(entry).Analyze(ctx, target.Root, opt, func(p analyze.Progress) {
+	res, err := s.sessionFor(entry).Analyze(ctx, target.Root, opt, func(p analyze.Progress) {
 		record(p)
 		s.emit("analyze:info", AnalyzeProgress{
 			Seq: seq, EngineID: entry.ID, EngineName: s.engineName(entry.ID), Progress: p,
@@ -388,10 +487,11 @@ func (s *AnalyzeService) runOne(
 	s.logger.Info("解析しました",
 		"engine", res.Engine, "id", entry.ID, "sfen", target.Root, "depth", res.Depth,
 		"best", res.Bestmove, "nodes", res.Nodes,
-		"elapsedMs", res.ElapsedMS, "startupMs", res.StartupMS, "stopped", res.Stopped)
+		"elapsedMs", res.ElapsedMS, "startupMs", res.StartupMS, "reused", res.Reused,
+		"stopped", res.Stopped)
 	s.emit("analyze:done", AnalyzeProgress{
 		Seq: seq, EngineID: entry.ID, EngineName: res.Engine,
-		Progress: res.Progress, Done: true, StartupMS: res.StartupMS,
+		Progress: res.Progress, Done: true, StartupMS: res.StartupMS, Reused: res.Reused,
 	})
 }
 
