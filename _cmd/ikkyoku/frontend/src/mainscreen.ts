@@ -3,8 +3,9 @@
 // 撮った画像から割り出した盤面・SFEN・警告を出す画面。起動時は非表示で、最初の
 // キャプチャで現れる。**この画面を閉じるとアプリが終了する**(枠を閉じても終了しない)。
 //
-// 画面は 5 タブ(入力 / 訂正 / 解析 / デバッグ / 設定)。**2026-08-10 に 3 タブから
-// 割った**(以前は「盤面」1 枚の中で訂正モードをトグルしていた)。
+// 画面は 4 タブ(入力 / 訂正 / 解析 / 設定)。**2026-08-10 に 3 タブから割り**
+// (以前は「盤面」1 枚の中で訂正モードをトグルしていた)、**2026-08-11 に
+// デバッグタブを訂正タブの中の折りたたみ「認識のようす」へ畳んだ。**
 //
 // ⚠️ **訂正タブと解析タブは別の局面を持っている。** Go 側も 2 つに分かれており
 // (PositionService / StudyService)、繋がるのは「この局面を解析する」を押した
@@ -16,13 +17,16 @@
 //            (自由編集・合法性を問わない・手番も駒台の先後も未決でよい)
 //   解析   … **確定した局面**の面。評価値を出し、今後ここに手順と分岐ツリーが乗る
 //            (合法手だけを辿る)
-//   デバッグ … **認識精度を追う**面(認識器の状態・検出の信頼度・盤面領域・推論器・
-//            保存先・撮った画像)。局面そのものの話ではないものはここ
 //   設定   … 設定
+//
+// 「認識のようす」(訂正タブの中の折りたたみ。旧デバッグタブ)は
+// **認識精度を追う**ところ(認識器の状態・検出の信頼度・盤面領域・推論器・
+// 保存先・撮った画像)。局面そのものの話ではないものはここ。
+// ⚠️ **既定で閉じる。** 訂正のあいだ盤の上に積む行は短く保つ。
 //
 // 足す項目がどこに載るかはこの区分で決める。**「項目を足すな」ではない。**
 //
-// **駒台と警告は訂正タブとデバッグタブの両方に出す。** デバッグ側では「認識が
+// **駒台と警告は訂正タブの盤の周りと「認識のようす」の両方に出す。** デバッグ側では「認識が
 // どれくらい外したか」の記録(訂正しても変わらない)だが、訂正側では**局面を直すために
 // 要る情報**(駒台の枚数は駒数保存則の逆算そのもの、警告は「どこが怪しいか」の提示)。
 // 同じ見た目でも**出所が違う**ので、片方の更新をもう片方に流用しないこと。
@@ -181,8 +185,6 @@ export function mountMainScreen(root: HTMLElement): void {
                   role="tab" aria-selected="false" aria-controls="panel-edit">訂正</button>
           <button id="tab-study" class="tab" type="button"
                   role="tab" aria-selected="false" aria-controls="panel-study">解析</button>
-          <button id="tab-debug" class="tab" type="button"
-                  role="tab" aria-selected="false" aria-controls="panel-debug">デバッグ</button>
           <button id="tab-settings" class="tab" type="button"
                   role="tab" aria-selected="false" aria-controls="panel-settings">設定</button>
         </div>
@@ -222,7 +224,7 @@ export function mountMainScreen(root: HTMLElement): void {
         <!-- 上段。左に警告、右に「認識結果に戻す」。
              局面として成立していない点は**盤より上に出す**(訂正しながら見るものなので、
              盤の下だと見落とすし、件数で下の行が動く)。中身は**今の局面**(EditState)の
-             値で、デバッグタブ側の同じ見出しとは別物(あちらは認識した時点の記録)。
+             値で、「認識のようす」側の同じ見出しとは別物(あちらは認識した時点の記録)。
              やり直しのボタンは**訂正した内容を捨てる操作**なので、押し間違えないよう
              盤から遠い右上に離し、赤くしてある。 -->
         <div class="board-head">
@@ -230,14 +232,75 @@ export function mountMainScreen(root: HTMLElement): void {
           <button id="edit-reset" class="danger-btn" type="button" hidden
                   title="訂正を捨てて、認識したときの盤面に戻します">認識結果に戻す</button>
         </div>
+
+        <!-- 認識のようす（旧デバッグタブ。2026-08-11 にタブから畳んでここへ移した）。
+             **「どれくらい外したか」を見る面**で、訂正しながら開く。訂正の作業と
+             同じ画面にあるほうが行き来が要らないので、独立したタブではなく
+             **既定で閉じた折りたたみ**にしてある。
+
+             ⚠️ **中身は認識した時点の記録**（CaptureResult）。すぐ上の警告や盤の脇の
+             駒台（EditState）とは**別の値**で、訂正しても変わらない。同じ見出しが
+             1 つの画面に 2 度出ることになるが、**読む目的が違う**ので片方を消さないこと
+             （上＝今の局面を直すための情報、ここ＝認識がどれくらい外したかの記録）。 -->
+        <details id="debug-details" class="debug-details">
+          <summary id="debug-summary">認識のようす</summary>
+          <div class="debug-body">
+            <div class="debug-row">
+              <button id="reload-btn" class="ghost-btn" type="button"
+                      title="学習データを更新したあとに押すと、認識器を読み込み直します">認識器を再読み込み</button>
+              <p id="recognizer" class="recognizer"></p>
+            </div>
+
+            <div id="confidence-row" class="hand-row" hidden>
+              <span class="field-label">検出</span>
+              <span id="confidence" class="note"></span>
+            </div>
+            <div id="region-row" class="hand-row" hidden>
+              <span class="field-label">盤面</span>
+              <span id="region" class="note"></span>
+            </div>
+            <div id="predictor-row" class="hand-row" hidden>
+              <span class="field-label">推論器</span>
+              <span id="predictor" class="note"></span>
+            </div>
+            <div id="hand-row" class="hand-row" hidden>
+              <span class="field-label">駒台</span>
+              <span id="hand" class="hand"></span>
+              <span class="note">先後不明</span>
+            </div>
+            <ul id="warnings" class="warnings" hidden></ul>
+
+            <div class="debug-shot">
+              <div class="debug-shot-head">
+                <span class="field-label">撮った画像</span>
+                <button id="shot-path" class="path-btn" type="button" hidden>
+                  <span class="path-name"></span>${iconMarkup(FiCopy)}
+                </button>
+                <button id="shot-copy-image" class="path-btn is-icon-only" type="button" hidden
+                        aria-label="画像をコピー"
+                        title="画像そのものをクリップボードにコピー">${iconMarkup(FiImage)}</button>
+                <label class="overlay-toggle">
+                  <input id="overlay-toggle" type="checkbox" checked />
+                  認識の重ね表示
+                </label>
+              </div>
+              <div id="shot" class="shot" hidden>
+                <img id="thumbnail" class="thumbnail" alt="直近のキャプチャ" />
+                <svg id="overlay" class="overlay" preserveAspectRatio="none" aria-hidden="true"></svg>
+              </div>
+            </div>
+          </div>
+        </details>
+
         <div class="board-area">
           <!-- 撮った画像。**訂正中だけ盤の左に出す**(確定したら畳む)。
-               訂正は「原本を見ながら 1 マスずつ直す」作業なので、原本がデバッグタブの
-               向こう側にあると成立しない。**盤は 560px より大きくならない**ので、
+               訂正は「原本を見ながら 1 マスずつ直す」作業なので、原本が折りたたみの
+               中にあると成立しない（**畳んでいても必ず見えていること**）。
+               **盤は 560px より大きくならない**ので、
                左の余白はもともと遊んでおり、ここに置くのは盤を狭めない。
 
                ⚠️ **出すのは画像そのものだけ。** 重ね表示・信頼度・保存先は
-               「認識がどれくらい外したか」の情報なのでデバッグタブに残す
+               「認識がどれくらい外したか」の情報なので「認識のようす」に残す
                (盤面タブの基準は「局面を読む・直す・動かすのに要るか」)。
                画像の src はデバッグ側と**同じ CaptureResult.thumbnail**。 -->
           <div id="capture-ref" class="capture-ref" hidden>
@@ -281,7 +344,7 @@ export function mountMainScreen(root: HTMLElement): void {
           <code id="sfen" class="sfen">-</code>
         </div>
         <!-- 駒台。**訂正中の局面の値**なので先後の割り振りが出る
-             (デバッグタブ側は認識した時点の推定枚数で「先後不明」のまま)。
+             (「認識のようす」側は認識した時点の推定枚数で「先後不明」のまま)。
              訂正中は盤の脇に駒そのものが並ぶので、こちらは文字の要約。 -->
         <div id="board-hand-row" class="hand-row" hidden>
           <span class="field-label">駒台</span>
@@ -355,53 +418,6 @@ export function mountMainScreen(root: HTMLElement): void {
         <div id="study-hand-row" class="hand-row" hidden>
           <span class="field-label">駒台</span>
           <span id="study-hand" class="hand"></span>
-        </div>
-      </div>
-
-      <div id="panel-debug" class="panel" role="tabpanel" aria-labelledby="tab-debug" hidden>
-        <div class="debug-row">
-          <button id="reload-btn" class="ghost-btn" type="button"
-                  title="学習データを更新したあとに押すと、認識器を読み込み直します">認識器を再読み込み</button>
-          <p id="recognizer" class="recognizer"></p>
-        </div>
-
-        <div id="confidence-row" class="hand-row" hidden>
-          <span class="field-label">検出</span>
-          <span id="confidence" class="note"></span>
-        </div>
-        <div id="region-row" class="hand-row" hidden>
-          <span class="field-label">盤面</span>
-          <span id="region" class="note"></span>
-        </div>
-        <div id="predictor-row" class="hand-row" hidden>
-          <span class="field-label">推論器</span>
-          <span id="predictor" class="note"></span>
-        </div>
-        <div id="hand-row" class="hand-row" hidden>
-          <span class="field-label">駒台</span>
-          <span id="hand" class="hand"></span>
-          <span class="note">先後不明</span>
-        </div>
-        <ul id="warnings" class="warnings" hidden></ul>
-
-        <div class="debug-shot">
-          <div class="debug-shot-head">
-            <span class="field-label">撮った画像</span>
-            <button id="shot-path" class="path-btn" type="button" hidden>
-              <span class="path-name"></span>${iconMarkup(FiCopy)}
-            </button>
-            <button id="shot-copy-image" class="path-btn is-icon-only" type="button" hidden
-                    aria-label="画像をコピー"
-                    title="画像そのものをクリップボードにコピー">${iconMarkup(FiImage)}</button>
-            <label class="overlay-toggle">
-              <input id="overlay-toggle" type="checkbox" checked />
-              認識の重ね表示
-            </label>
-          </div>
-          <div id="shot" class="shot" hidden>
-            <img id="thumbnail" class="thumbnail" alt="直近のキャプチャ" />
-            <svg id="overlay" class="overlay" preserveAspectRatio="none" aria-hidden="true"></svg>
-          </div>
         </div>
       </div>
 
@@ -503,7 +519,7 @@ export function mountMainScreen(root: HTMLElement): void {
   const confidenceOut = root.querySelector<HTMLElement>("#confidence")!;
   // 駒台と警告は両方のタブに出るが、**出所が違う**。
   //
-  //   デバッグタブ … 撮って認識した時点の値。**訂正しても変わらない**
+  //   「認識のようす」 … 撮って認識した時点の値。**訂正しても変わらない**
   //                  (どれくらい外したかの記録なので、直した後の値では意味が無い)
   //   盤面タブ     … **今の局面**の値(EditState)。訂正するたびに変わる
   //
@@ -545,11 +561,13 @@ export function mountMainScreen(root: HTMLElement): void {
     tab: root.querySelector<HTMLButtonElement>(`#tab-${name}`)!,
     panel: root.querySelector<HTMLElement>(`#panel-${name}`)!,
   });
-  const tabs = ["input", "edit", "study", "debug", "settings"].map(tabOf);
+  const tabs = ["input", "edit", "study", "settings"].map(tabOf);
   const inputTab = tabs[0].tab;
   const editTab = tabs[1].tab;
   const studyTab = tabs[2].tab;
-  const debugTab = tabs[3].tab;
+  // 認識のようす（旧デバッグタブ）。**訂正タブの中の折りたたみ**（2026-08-11）。
+  const debugDetails = root.querySelector<HTMLDetailsElement>("#debug-details")!;
+  const debugSummary = root.querySelector<HTMLElement>("#debug-summary")!;
 
   const selectTab = (target: HTMLButtonElement) => {
     for (const { tab, panel } of tabs) {
@@ -558,9 +576,6 @@ export function mountMainScreen(root: HTMLElement): void {
       tab.setAttribute("aria-selected", String(active));
       panel.classList.toggle("is-active", active);
       panel.hidden = !active;
-    }
-    if (target === debugTab) {
-      debugTab.classList.remove("has-warn", "has-error");
     }
     // ⚠️ **隠れているパネルの中では盤に重ねるグリッドの位置が測れない**
     // （`getScreenCTM()` が null を返す）。開いた瞬間に測り直さないと、
@@ -574,15 +589,23 @@ export function mountMainScreen(root: HTMLElement): void {
     tab.addEventListener("click", () => selectTab(tab));
   }
 
-  // 警告やエラーはデバッグタブの中にあるので、盤面タブを見ているあいだは気づけない。
-  // タブ側に印を出して「見に行くべきものがある」ことだけ伝える。
+  // 警告やエラーは折りたたみの中にあるので、畳んでいるあいだは気づけない。
+  // 見出しに点を出して「開くべきものがある」ことだけ伝える（開けば消える）。
+  //
+  // ⚠️ **勝手に開かない。** 訂正のあいだ盤の上に積む行は短く保ちたいので、
+  // 開くかどうかはユーザーが決める（警告そのものは上の board-head にも出ている）。
   const markDebug = (level: "" | "warn" | "error") => {
-    debugTab.classList.remove("has-warn", "has-error");
-    if (debugTab.classList.contains("is-active") || level === "") {
+    debugSummary.classList.remove("has-warn", "has-error");
+    if (debugDetails.open || level === "") {
       return;
     }
-    debugTab.classList.add(level === "error" ? "has-error" : "has-warn");
+    debugSummary.classList.add(level === "error" ? "has-error" : "has-warn");
   };
+  debugDetails.addEventListener("toggle", () => {
+    if (debugDetails.open) {
+      debugSummary.classList.remove("has-warn", "has-error");
+    }
+  });
 
   // <shogi-board> は core/web の Web Component。Go 側が core の embed から
   // /shinte-web/ 配下に配信している(shinteweb.go)。**フロントにファイルをコピーしない**
@@ -607,7 +630,7 @@ export function mountMainScreen(root: HTMLElement): void {
   // 盤・SFEN・駒台・警告がその場で追従する。**2 つの出所を混ぜないこと。**
   const boardStage = root.querySelector<HTMLElement>("#board-stage")!;
 
-  // 訂正中に盤の左へ出す「撮った画像」。**デバッグタブのサムネイルと同じ値**を描くだけで、
+  // 訂正中に盤の左へ出す「撮った画像」。**「認識のようす」のサムネイルと同じ値**を描くだけで、
   // 別の経路で取り直さない(片方だけ更新されると、どちらが今の 1 枚か分からなくなる)。
   //
   // 出す条件は「訂正中」かつ「画像がある」の両方。撮る前と、確定したあとは畳む。
@@ -1069,7 +1092,7 @@ export function mountMainScreen(root: HTMLElement): void {
   });
 
   // 盤面タブの駒台。**訂正中の局面の値**で、先後の割り振りと**未決のぶん**まで出す
-  // (デバッグタブ側は認識した時点の推定枚数のまま)。
+  // (「認識のようす」側は認識した時点の推定枚数のまま)。
   //
   // 未決が残っているあいだは局面が確定しない(SFEN が組み上がらない)ので、
   // **訂正モードを開いていなくても見えるようにしておく**。
@@ -1129,7 +1152,7 @@ export function mountMainScreen(root: HTMLElement): void {
     confidenceRow.hidden = false;
   };
 
-  // デバッグタブ側。**認識した時点の駒台の推定枚数**(先後不明)。
+  // 「認識のようす」側。**認識した時点の駒台の推定枚数**(先後不明)。
   const showHand = (hand: Record<string, number>) => {
     const parts = HAND_ORDER.filter((k) => (hand?.[k] ?? 0) > 0).map(
       (k) => `${HAND_LABEL[k]}${hand[k]}`,
@@ -1149,7 +1172,7 @@ export function mountMainScreen(root: HTMLElement): void {
     ul.hidden = items.length === 0;
   };
 
-  // デバッグタブ側の警告。**認識した時点のもの**で、訂正しても書き換えない。
+  // 「認識のようす」側の警告。**認識した時点のもの**で、訂正しても書き換えない。
   const showWarnings = (list: string[]) => fillWarnings(warnings, list);
 
   // 設定で指定した学習データの置き場所(ikkyoku.Config の SutemeDataDir)。

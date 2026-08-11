@@ -409,8 +409,9 @@ html.is-main body {
   background: #3a3d47;
 }
 
-/* 警告・エラーはデバッグタブの中にあるので、盤面タブを見ているあいだは気づけない。
-   タブに点を出して「見に行くべきものがある」ことだけ伝える(開けば消える)。 */
+/* タブに点を出して「見に行くべきものがある」ことだけ伝える(開けば消える)。
+   ⚠️ **今は使っていない**（警告の印は「認識のようす」の見出しへ移った。
+   .debug-details > summary.has-warn）。印を出したいタブが増えたときのために残す。 */
 .tab.has-warn::after,
 .tab.has-error::after {
   content: "";
@@ -441,7 +442,10 @@ html.is-main body {
   display: flex;
 }
 
-#panel-debug {
+/* 訂正タブは「認識のようす」を開くと縦に伸びるのでスクロールさせる。
+   ⚠️ スクロールしても訂正のグリッドはずれない(盤と同じ箱の中に絶対配置しているので
+   一緒に動く)。位置は offsetParent 基準で測っており、スクロール量に依存しない。 */
+#panel-edit {
   overflow: auto;
 }
 
@@ -632,6 +636,56 @@ html.is-main body {
 /* 送る前に知らせる妥協点。エラーではないので赤にはしない。 */
 .note.is-caution {
   color: #ffc46b;
+}
+
+/* 認識のようす(旧デバッグタブ)。訂正タブの中に**既定で閉じて**置く。
+   訂正しながら見るものなので同じ画面にあるが、常に開いていると盤が下へ押される。 */
+.debug-details {
+  flex: 0 0 auto;
+  border: 1px solid #2a2d36;
+  border-radius: 6px;
+}
+
+.debug-details > summary {
+  position: relative;
+  padding: 5px 10px;
+  font-size: 12.5px;
+  color: #9aa6c0;
+  cursor: pointer;
+  user-select: none;
+}
+
+.debug-details > summary:hover {
+  color: #f2f3f5;
+}
+
+.debug-details[open] > summary {
+  border-bottom: 1px solid #2a2d36;
+}
+
+/* 警告・エラーは畳んでいるあいだ見えないので、見出しに点を出して
+   「開くべきものがある」ことだけ伝える(開けば消える)。**勝手には開かない。** */
+.debug-details > summary.has-warn::after,
+.debug-details > summary.has-error::after {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 6px;
+  vertical-align: middle;
+  border-radius: 50%;
+  background: #ffc46b;
+}
+
+.debug-details > summary.has-error::after {
+  background: #ff7a7a;
+}
+
+.debug-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
 }
 
 .debug-row {
