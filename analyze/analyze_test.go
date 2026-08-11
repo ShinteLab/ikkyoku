@@ -258,11 +258,88 @@ func TestAccumulatorGroupsMultiPV(t *testing.T) {
 		t.Errorf("順位で並んでいません: %+v", p.Lines)
 	}
 
-	// 深さが進んだら前の深さの候補は残さない。
+	// 深さが進んだら前の深さの候補は残さない（**混ぜると読み筋が食い違う**）。
+	// ⚠️ これは **add が返す途中経過**の話。最終結果（snapshot）は別（下）。
+	live, ok := a.add(coreusi.Info{Depth: 4, MultiPV: 1, ScoreCP: 120, HasScore: true, PV: []string{"7g7f"}})
+	if !ok {
+		t.Fatal("更新が表に出ていません")
+	}
+	if len(live.Lines) != 1 || live.Depth != 4 {
+		t.Errorf("深さが変わったのに前の候補が残っています: depth=%d lines=%+v", live.Depth, live.Lines)
+	}
+}
+
+// ⚠️ **打ち切ったときに、一度出した候補より貧しい最終結果を返さないこと。**
+//
+// 打ち切りは深さの途中で起きるので、新しい深さの候補が 1 本も揃っていない状態で
+// 止まることがある。そのまま返すと**秒数が過ぎた瞬間に候補手が消え、
+// 結局どれが最善だったのか分からなくなる**（実際にそうなっていた）。
+func TestAccumulatorFinalKeepsFullestResult(t *testing.T) {
+	a := &accumulator{black: true, started: time.Now(), sfen: startpos}
+	a.add(coreusi.Info{Depth: 3, MultiPV: 1, ScoreCP: 100, HasScore: true, PV: []string{"7g7f"}})
+	a.add(coreusi.Info{Depth: 3, MultiPV: 2, ScoreCP: 50, HasScore: true, PV: []string{"2g2f"}})
+	// 深さ 4 に入ったところで打ち切られた（順位 1 しか届いていない）。
 	a.add(coreusi.Info{Depth: 4, MultiPV: 1, ScoreCP: 120, HasScore: true, PV: []string{"7g7f"}})
+
+	p := a.snapshot()
+	if len(p.Lines) != 2 {
+		t.Fatalf("最終結果の候補が %d 本。揃っていた深さ 3 の 2 本を返すはず: %+v", len(p.Lines), p.Lines)
+	}
+	if p.Depth != 3 {
+		t.Errorf("深さ = %d, want 3（返した候補と揃っていること）", p.Depth)
+	}
+}
+
+// ⚠️ **順位 1 が届いていなくても候補を落とさないこと。**
+//
+// 以前は順位を「1 から本数まで」で回しており、**順位 1 が無いと候補が丸ごと消え**、
+// 順位が本数を超えるものは黙って落ちていた（エンジンが順位 1 から順に送ってくるとは
+// 限らない）。
+func TestAccumulatorKeepsOutOfOrderRanks(t *testing.T) {
+	a := &accumulator{black: true, started: time.Now(), sfen: startpos}
+	a.add(coreusi.Info{Depth: 3, MultiPV: 2, ScoreCP: 50, HasScore: true, PV: []string{"2g2f"}})
+	p := a.snapshot()
+	if len(p.Lines) != 1 || p.Lines[0].Rank != 2 {
+		t.Fatalf("順位 2 だけの候補が消えています: %+v", p.Lines)
+	}
+
+	a.add(coreusi.Info{Depth: 3, MultiPV: 3, ScoreCP: 10, HasScore: true, PV: []string{"5g5f"}})
+	a.add(coreusi.Info{Depth: 3, MultiPV: 1, ScoreCP: 100, HasScore: true, PV: []string{"7g7f"}})
 	p = a.snapshot()
-	if len(p.Lines) != 1 || p.Depth != 4 {
-		t.Errorf("深さが変わったのに前の候補が残っています: depth=%d lines=%+v", p.Depth, p.Lines)
+	if len(p.Lines) != 3 {
+		t.Fatalf("候補が %d 本。3 本とも出るはず: %+v", len(p.Lines), p.Lines)
+	}
+	for i, want := range []int{1, 2, 3} {
+		if p.Lines[i].Rank != want {
+			t.Errorf("順位で並んでいません: %+v", p.Lines)
+			break
+		}
+	}
+}
+
+// ⚠️ **読み筋の無い更新で、既に出している読み筋を消さないこと。**
+//
+// エンジンは探索の終わり際に「評価値だけ更新して読み筋を書かない info」を出すことが
+// ある（`stop` を受けた直後が特にそう）。そのまま上書きすると**候補手が画面から消え、
+// 打ち切ったあとに何が最善だったのか分からなくなる**（実際にそうなっていた）。
+func TestAccumulatorKeepsPVOnScoreOnlyUpdate(t *testing.T) {
+	a := &accumulator{black: true, started: time.Now(), sfen: startpos}
+	a.add(coreusi.Info{Depth: 3, MultiPV: 1, ScoreCP: 100, HasScore: true, PV: []string{"7g7f", "3c3d"}})
+	// 読み筋の無い更新（評価値だけ）。
+	a.add(coreusi.Info{Depth: 3, MultiPV: 1, ScoreCP: 110, HasScore: true})
+
+	p := a.snapshot()
+	if len(p.Lines) != 1 {
+		t.Fatalf("候補が消えています: %+v", p.Lines)
+	}
+	if got := p.Lines[0].Score.CP; got != 110 {
+		t.Errorf("評価値 = %d, want 110（新しい値を採ること）", got)
+	}
+	if len(p.Lines[0].Moves) != 2 {
+		t.Errorf("読み筋が消えています: %+v", p.Lines[0].Moves)
+	}
+	if len(p.Lines[0].Text) != 2 || p.Lines[0].Text[0] != "▲７六歩" {
+		t.Errorf("日本語表記が消えています: %+v", p.Lines[0].Text)
 	}
 }
 

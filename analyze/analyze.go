@@ -19,6 +19,7 @@ package analyze
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -385,6 +386,24 @@ type accumulator struct {
 	depth int
 	nodes int64
 	lines map[int]Line
+	// lastPV は順位ごとの**最後に届いた読み筋**。⚠️ **深さが変わっても捨てない。**
+	//
+	// エンジンは探索の終わり際に「評価値だけ更新して読み筋を書かない info」を
+	// 出すことがある（`stop` を受けた直後が特にそう）。そのまま上書きすると
+	// **画面から候補手が消え、打ち切ったあとに何が最善だったのか分からなくなる**。
+	lastPV map[int]pvLine
+	// kept は**これまでで一番良かった結果**（読み筋つきで、候補が一番多いもの）。
+	//
+	// ⚠️ **打ち切りは深さの途中で起きる。** 新しい深さに入ってすぐ止められると、
+	// その深さの候補は 1 本も揃っていないことがある。**一度画面に出した答えより
+	// 貧しい結果を最終結果にしない**ための拠り所。
+	kept Progress
+}
+
+// pvLine は読み筋 1 本（USI と日本語表記）。
+type pvLine struct {
+	moves []string
+	text  []string
 }
 
 // add は info 行 1 本を取り込む。表に出す価値がある更新なら ok=true。
@@ -410,13 +429,48 @@ func (a *accumulator) add(in coreusi.Info) (Progress, bool) {
 	if rank <= 0 {
 		rank = 1
 	}
+
+	// ⚠️ **読み筋の無い更新で、既に出している読み筋を消さないこと。**
+	// エンジンは探索の終わり際に評価値だけの info を出すことがあり、そのまま
+	// 上書きすると**候補手が画面から消える**（実際にそうなっていた）。
+	moves, text := in.PV, a.moveText(in.PV)
+	if len(moves) == 0 {
+		if prev, ok := a.lastPV[rank]; ok {
+			moves, text = prev.moves, prev.text
+		}
+	} else {
+		if a.lastPV == nil {
+			a.lastPV = map[int]pvLine{}
+		}
+		a.lastPV[rank] = pvLine{moves: moves, text: text}
+	}
+
 	a.lines[rank] = Line{
 		Rank:  rank,
 		Score: newScore(in, a.black),
-		Moves: in.PV,
-		Text:  a.moveText(in.PV),
+		Moves: moves,
+		Text:  text,
 	}
-	return a.progressLocked(), true
+	p := a.progressLocked()
+	a.keepLocked(p)
+	return p, true
+}
+
+// keepLocked は「これまでで一番良かった結果」を覚える。ロックを取った状態で呼ぶこと。
+//
+// **良い＝読み筋が付いていて、候補が今まで以上に揃っている。** 候補の本数は
+// MultiPV の指定で決まるので探索中は変わらない。**少ないのは「その深さがまだ
+// 途中」という意味**なので、そこで打ち切られた結果を最終結果にしない。
+func (a *accumulator) keepLocked(p Progress) {
+	if len(p.Lines) < len(a.kept.Lines) {
+		return
+	}
+	for _, l := range p.Lines {
+		if len(l.Moves) > 0 {
+			a.kept = p
+			return
+		}
+	}
 }
 
 // moveText は読み筋を日本語表記にする。
@@ -445,19 +499,59 @@ func (a *accumulator) moveText(pv []string) []string {
 	return out
 }
 
+// snapshot は最終結果を返す。
+//
+// ⚠️ **一度画面に出した答えより貧しい結果を返さない。** 打ち切りは深さの途中で
+// 起きるので、そのままだと「秒数が過ぎた瞬間に候補手が消える」ことがある
+// （実際にそうなっていた）。**最終結果が読めないのが一番困る**ので、
+// 今の深さが揃っていなければ、直前に揃っていた答えを返す。
+//
+// **ノード数だけは最新にする**（累計なので、途中で止めても数えたぶんは正しい）。
 func (a *accumulator) snapshot() Progress {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.progressLocked()
+
+	p := a.progressLocked()
+	if a.thinnerThanKeptLocked(p) {
+		kept := a.kept
+		kept.ElapsedMS = p.ElapsedMS
+		kept.Nodes = p.Nodes
+		return kept
+	}
+	return p
+}
+
+// thinnerThanKeptLocked は p が kept より貧しいかを返す。ロックを取った状態で呼ぶこと。
+func (a *accumulator) thinnerThanKeptLocked(p Progress) bool {
+	if len(a.kept.Lines) == 0 {
+		return false // 比べる相手が無い
+	}
+	if len(p.Lines) < len(a.kept.Lines) {
+		return true
+	}
+	for _, l := range p.Lines {
+		if len(l.Moves) > 0 {
+			return false
+		}
+	}
+	return true // 候補はあるが読み筋が 1 本も無い（＝何を指すのか分からない）
 }
 
 // progressLocked はロックを取った状態で呼ぶこと。
+//
+// ⚠️ **順位は「1 から本数まで」で回さないこと。** 以前そうしていて、
+// **順位 1 が届いていないと候補が丸ごと消え**、順位が本数を超えるものは
+// 黙って落ちていた（エンジンが順位 1 から順に送ってくるとは限らない）。
+// 実際にある順位を並べ替えて返す。
 func (a *accumulator) progressLocked() Progress {
-	lines := make([]Line, 0, len(a.lines))
-	for rank := 1; rank <= len(a.lines); rank++ {
-		if l, ok := a.lines[rank]; ok {
-			lines = append(lines, l)
-		}
+	ranks := make([]int, 0, len(a.lines))
+	for rank := range a.lines {
+		ranks = append(ranks, rank)
+	}
+	sort.Ints(ranks)
+	lines := make([]Line, 0, len(ranks))
+	for _, rank := range ranks {
+		lines = append(lines, a.lines[rank])
 	}
 	return Progress{
 		Depth:     a.depth,
