@@ -1311,16 +1311,24 @@ html.is-main body {
 }
 
 /* 盤面タブの上段。左に警告、右に「認識結果に戻す」。 */
+/* 盤の上段（警告 + 右上のボタン）。
+   ⚠️ **高さを固定すること**(警告 4 行ぶん)。件数で伸び縮みすると、警告が出たり
+   消えたりするたびに**下の盤ごと画面が動く**(訂正のたびに警告は増減するので、
+   駒を掴んでいる最中に盤が跳ねる)。溢れたぶんは中でスクロールさせる。
+   行の高さは .warnings の font-size 12px × line-height 1.6。 */
 .board-head {
   flex: 0 0 auto;
   display: flex;
   align-items: flex-start;
   gap: 12px;
+  height: calc(12px * 1.6 * 4);
 }
 
 .board-head .warnings {
   flex: 1 1 auto;
   min-width: 0;
+  height: 100%;
+  overflow-y: auto;
 }
 
 /* 訂正した内容を捨てるボタン。**押し間違えると作業が消える**ので、盤の近くの
@@ -1349,8 +1357,11 @@ html.is-main body {
 
 /* 盤面タブ側の警告。件数が増えても盤を押し潰さないよう高さを頭打ちにして送る
    (全文はデバッグタブに同じものが出ている)。 */
+/* 盤の上段に置く警告リスト。高さは .board-head が固定しているので、ここは
+   はみ出さないことだけ担保する（**独自の max-height を持たせないこと**。
+   .board-head の高さと食い違うと、また件数で下が動く）。 */
 .warnings.is-compact {
-  max-height: 5.5em;
+  max-height: 100%;
   overflow-y: auto;
 }
 
