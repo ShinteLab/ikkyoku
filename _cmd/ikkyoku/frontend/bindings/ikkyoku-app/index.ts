@@ -19,6 +19,7 @@ export {
 };
 
 export type {
+    AnalyzeEngine,
     AnalyzeState,
     AppSettings,
     CaptureResult,

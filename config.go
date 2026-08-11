@@ -38,21 +38,46 @@ type Config struct {
 	// Training は訂正した局面を suteme の学習用サーバへ送る設定。
 	Training TrainingConfig `json:"training"`
 
-	// Engine は解析に使う USI エンジン。
-	Engine EngineConfig `json:"engine"`
+	// Engines は登録した USI エンジンの一覧。
+	//
+	// **1 つに絞らない**（2026-08-11）。検討ツールとして実用になるかは繋ぐエンジンの
+	// 棋力で決まるが、**どのエンジンが正しいかは局面によって違う**。同じ局面を
+	// 複数のエンジンに読ませて評価値を並べられることが「別の選択も一つの局として
+	// 辿る」という構想に効く（`Enabled` を付けたものが同時に走る）。
+	//
+	// **空なら同梱のエンジン 1 つ**として扱う（`EngineList`）。設定ファイルを
+	// 作っていない状態でも解析できる、という既定の挙動を変えないため。
+	Engines []EngineEntry `json:"engines,omitempty"`
+
+	// Engine は**旧形式**（単一エンジン）の設定。
+	//
+	// ⚠️ **読み込んだ時点で Engines へ移し、この欄は捨てる**（`LoadConfig`）。
+	// 次に保存したときにファイルからも消える。**新しいコードはここを読まないこと。**
+	Engine *EngineConfig `json:"engine,omitempty"`
 }
 
-// EngineConfig は解析に使う USI エンジンの指定。
+// EngineEntry は登録した USI エンジン 1 つ。
 //
 // **繋ぎ先は「USI を話すプロセス」なら何でもよい**（やねうら王・水匠・prokishi.exe）。
 // 検討ツールとして実用になるかは繋ぐエンジンの棋力で決まるので、そこを差し替え
 // られるようにしてある（`_docs/phase4-engine-usi.md`）。
-type EngineConfig struct {
+type EngineEntry struct {
+	// ID は一覧の中でこのエンジンを指す識別子。**設定ファイルの中だけで通じればよい。**
+	//
+	// パスを鍵にしないのは、**同じ実行ファイルを別の option で 2 つ登録する**のが
+	// 正当な使い方だから（置換表やスレッド数を変えて比べる）。
+	ID string `json:"id"`
+
+	// Name は画面に出す名前。空ならパスのファイル名（同梱なら「同梱エンジン」）。
+	//
+	// ⚠️ **エンジンが `id name` で名乗る名前とは別物。** あちらは繋いで初めて分かるので、
+	// 繋いでいないあいだの表示と、同じ exe を 2 つ登録したときの区別にこちらが要る。
+	Name string `json:"name,omitempty"`
+
 	// Path は USI エンジンの実行ファイル。
 	//
 	// **空なら同梱のエンジンを使う。** 「外部エンジンを使うかどうか」の真偽値は
 	// 別に持たない —— 2 つ持つと、パスが入っているのに無効、という食い違いが起きる。
-	// 使うのをやめたければ空にする。
 	Path string `json:"path,omitempty"`
 
 	// Options は接続時に `setoption` で送る値（option 名 → 値）。
@@ -66,6 +91,98 @@ type EngineConfig struct {
 	// ⚠️ **`isready` の前に送られる**（置換表の確保や評価関数の読み込みに間に合わせるため。
 	// `core/usi/client.Open` の注記）。探索ごとに変えるもの（MultiPV）はここではない。
 	Options map[string]string `json:"options,omitempty"`
+
+	// Enabled は解析のときに使うか。**外した登録は消さずに残る**
+	// （エンジンを入れ替えて比べる作業では、外したものをまた戻すことが多い）。
+	//
+	// omitempty を付けないのは、**外してあること自体を設定ファイルに残す**ため。
+	Enabled bool `json:"enabled"`
+}
+
+// EngineConfig は**旧形式**の単一エンジン設定（`Config.Engine`）。
+//
+// ⚠️ **移行のためだけに残してある。** 今の設定は `Config.Engines`。
+type EngineConfig struct {
+	Path    string            `json:"path,omitempty"`
+	Options map[string]string `json:"options,omitempty"`
+}
+
+// BuiltinEngineName は同梱エンジンの表示名（パスが空のエントリ）。
+const BuiltinEngineName = "同梱エンジン"
+
+// DisplayName は画面に出す名前を返す（Name が空ならパスのファイル名）。
+func (e EngineEntry) DisplayName() string {
+	if e.Name != "" {
+		return e.Name
+	}
+	if e.Path == "" {
+		return BuiltinEngineName
+	}
+	return filepath.Base(e.Path)
+}
+
+// EngineList は登録済みのエンジン一覧を返す。
+//
+// ⚠️ **空なら同梱エンジン 1 つを返す。** 設定ファイルを作っていない状態でも
+// 解析できる、という既定の挙動をここで担保している。**呼び出し側が
+// 「空だったら同梱」を書かないこと**（2 か所に散る）。
+func (c Config) EngineList() []EngineEntry {
+	if len(c.Engines) == 0 {
+		return []EngineEntry{{ID: DefaultEngineID, Enabled: true}}
+	}
+	out := make([]EngineEntry, len(c.Engines))
+	copy(out, c.Engines)
+	return out
+}
+
+// EnabledEngines は解析に使うエンジンだけを返す（順番は登録順）。
+func (c Config) EnabledEngines() []EngineEntry {
+	var out []EngineEntry
+	for _, e := range c.EngineList() {
+		if e.Enabled {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// DefaultEngineID は同梱エンジンを既定で登録したときの ID。
+const DefaultEngineID = "builtin"
+
+// NextEngineID は既存の一覧とぶつからない ID を作る。
+func NextEngineID(engines []EngineEntry) string {
+	used := make(map[string]bool, len(engines))
+	for _, e := range engines {
+		used[e.ID] = true
+	}
+	for i := 1; ; i++ {
+		id := fmt.Sprintf("engine-%d", i)
+		if !used[id] {
+			return id
+		}
+	}
+}
+
+// migrateEngines は旧形式（`engine`）の設定を `engines` へ移す。
+//
+// **読み込みの一度きり。** 移したら旧欄は捨てるので、次に保存した時点で
+// ファイルからも消える。`engines` が既にあれば旧欄は無視する（手で両方書いた
+// ときに、新しいほうを正とする）。
+func migrateEngines(c *Config) {
+	old := c.Engine
+	c.Engine = nil
+	if old == nil || len(c.Engines) > 0 {
+		return
+	}
+	if old.Path == "" && len(old.Options) == 0 {
+		return
+	}
+	c.Engines = []EngineEntry{{
+		ID:      NextEngineID(nil),
+		Path:    old.Path,
+		Options: old.Options,
+		Enabled: true,
+	}}
 }
 
 // TrainingConfig は訂正済みの局面を suteme に登録するための接続設定。
@@ -113,6 +230,9 @@ func LoadConfig(path string) (Config, error) {
 	if err := json.Unmarshal(b, &c); err != nil {
 		return Config{}, fmt.Errorf("ikkyoku: 設定の解析に失敗しました: %w", err)
 	}
+	// 旧形式（単一エンジン）をここで吸収する。**読み込みの入口 1 か所だけ**で行い、
+	// これより上のコードは新しい形（Engines）しか知らない。
+	migrateEngines(&c)
 	return c, nil
 }
 

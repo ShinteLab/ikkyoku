@@ -9,6 +9,34 @@ import * as position$0 from "../github.com/ShinteLab/ikkyoku/position/models.js"
 import * as recognize$0 from "../github.com/ShinteLab/ikkyoku/recognize/models.js";
 
 /**
+ * AnalyzeEngine は解析に参加しているエンジン 1 つ（フロントの表示の単位）。
+ */
+export interface AnalyzeEngine {
+    /**
+     * ID は設定の登録 ID。**イベントの振り分けはこれ。**
+     */
+    "id": string;
+
+    /**
+     * Label は設定タブで付けた名前（未設定ならファイル名 / 「同梱エンジン」）。
+     * 
+     * **繋ぐ前から出せる名前。** エンジンが `id name` で名乗る名前は繋いで初めて
+     * 分かるので、起動を待っているあいだの見出しにはこちらが要る。
+     */
+    "label": string;
+
+    /**
+     * Name はエンジンが名乗った名前（`id name`。まだ繋いでいなければ空）。
+     */
+    "name": string;
+
+    /**
+     * Builtin は同梱のエンジンか。
+     */
+    "builtin": boolean;
+}
+
+/**
  * AnalyzeState は今解析中かどうか。フロントの初期表示と、開始・停止の応答に使う。
  */
 export interface AnalyzeState {
@@ -21,12 +49,13 @@ export interface AnalyzeState {
     "sfen": string;
 
     /**
-     * Engine は繋がっているエンジンの名前（未接続なら空）。
+     * Engines は解析に参加しているエンジン（登録順）。
      * 
      * **何が出した評価値なのかは見せること。** 繋ぎ先を差し替えられる以上、
-     * 評価値だけ出して出所を伏せると比べようがない。
+     * 評価値だけ出して出所を伏せると比べようがない。**複数走るなら尚更**で、
+     * フロントはこの並びのぶんだけ結果の枠を作る（起動を待つあいだも見出しが出る）。
      */
-    "engine": string;
+    "engines": AnalyzeEngine[] | null;
 }
 
 /**
@@ -48,9 +77,12 @@ export interface AppSettings {
     "training": TrainingSettings;
 
     /**
-     * Engine は解析に使う USI エンジン。
+     * Engines は登録した USI エンジンの一覧（登録順）。
+     * 
+     * ⚠️ **1 つに絞らない**（2026-08-11）。「解析に使う」を付けたものが
+     * **同時に走って結果が並ぶ**ので、ここは常に一覧で扱う。
      */
-    "engine": EngineSettings;
+    "engines": EngineSettings[] | null;
 
     /**
      * Path は設定ファイルの場所。**表示のためだけ。** 手で編集したくなったときに
@@ -212,6 +244,17 @@ export interface EditState {
  */
 export interface EngineCheck {
     /**
+     * ID は確かめた登録の ID。**どの行の結果なのかを示す**（設定タブには
+     * エンジンが並んでいるので、結果を返す先が分からないと出せない）。
+     */
+    "id": string;
+
+    /**
+     * Label は設定タブで付けた名前。
+     */
+    "label": string;
+
+    /**
      * Path は確かめた実行ファイル（同梱なら空）。
      */
     "path": string;
@@ -259,13 +302,32 @@ export interface EngineCheck {
 }
 
 /**
- * EngineSettings は解析に使う USI エンジンの設定。
+ * EngineSettings は登録した USI エンジン 1 つ（設定タブの 1 行）。
  * 
  * **「外部エンジンを使うか」の真偽値は持たない。** パスが空なら同梱のエンジン、
  * 入っていれば外部エンジン。2 つ持つと「パスが入っているのに無効」という
- * 食い違いが起きる（ikkyoku.EngineConfig の注記と同じ）。
+ * 食い違いが起きる（ikkyoku.EngineEntry の注記と同じ）。
  */
 export interface EngineSettings {
+    /**
+     * ID は一覧の中でこのエンジンを指す識別子（操作のときに渡す）。
+     */
+    "id": string;
+
+    /**
+     * Name は画面に出す名前。**空欄なら Go 側が解決した既定の名前が入る**
+     * （パスのファイル名 / 「同梱エンジン」）。フロントで組み立てないこと。
+     */
+    "name": string;
+
+    /**
+     * Custom は名前を人が付けたか（false なら Name は既定の解決結果）。
+     * 
+     * 入力欄に既定の名前を書き込んでしまうと、パスを変えても名前が追従しなく
+     * なるので、フロントは Custom のときだけ Name を欄に入れる。
+     */
+    "custom": boolean;
+
     /**
      * Path は USI エンジンの実行ファイル。空なら同梱。
      */
@@ -284,6 +346,11 @@ export interface EngineSettings {
      * **書いたものが効いていることだけ**は見えるようにしておく。
      */
     "optionCount": number;
+
+    /**
+     * Enabled は解析に使うか。**外した登録も残る。**
+     */
+    "enabled": boolean;
 }
 
 /**

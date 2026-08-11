@@ -22,17 +22,27 @@
  * フロントが見てボタンを止めていたが、**タブを分けたことで構造上そこに手が届かなくなった**
  * （2026-08-10）。
  * 
- * **同時に走るのは 1 本だけ。** 新しく始めると前の解析は打ち切る。検討ツリー
- * （Phase 5）で複数の枝を並べて解析したくなったらここを増やすが、**そのときも
- * 「今どの枝を見ているか」は UI 側の話**で、解析そのものは 1 局面ずつ独立している
- * （設計原則1）。
+ * **解析する局面は常に 1 つ、エンジンは複数**（2026-08-11）。設定で「解析に使う」を
+ * 付けたエンジンが**同時に走り、結果が並ぶ**。エンジンが違えば同じ局面の評価が
+ * 食い違うのが普通で、**その食い違いこそ見たいもの**（どれが正しいかは局面による）。
+ * 
+ * ⚠️ **1 エンジン 1 プロセス・1 接続。** USI は 1 接続で 1 探索なので、束ねる方法は
+ * 「エンジンの数だけ起こす」以外に無い。**エンジンをまたいで結果を合成しないこと**
+ * （平均も多数決も取らない。並べて人が読む）。
+ * 
+ * **新しく始めると前の解析は全部打ち切る。** 検討ツリー（Phase 5）で複数の枝を
+ * 並べて解析したくなったらここを増やすが、**そのときも「今どの枝を見ているか」は
+ * UI 側の話**で、解析そのものは 1 局面ずつ独立している（設計原則1）。
  * 
  * 途中経過はイベントで流す。反復深化は深さが 1 つ終わるたびに答えが更新されるので、
  * 終わるまで黙っていると数秒間固まったように見える。
  * 
  * 	analyze:info    深さが 1 つ完走した（Progress）
- * 	analyze:done    解析が終わった（Result）
- * 	analyze:failed  始められなかった・エラーになった（理由の文字列）
+ * 	analyze:done    そのエンジンの解析が終わった（Result）
+ * 	analyze:failed  そのエンジンが始められなかった・エラーになった（理由の文字列）
+ * 
+ * ⚠️ **どのイベントにも engineId が載る。** 複数のエンジンが同時に喋るので、
+ * **seq だけでは行き先を決められない**（フロントはエンジンごとに表示を持つ）。
  * @module
  */
 
@@ -45,13 +55,16 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 import * as $models from "./models.js";
 
 /**
- * CheckEngine は設定したエンジンに実際に繋いでみる（設定タブの「接続を確認」）。
+ * CheckEngine は登録したエンジン 1 つに実際に繋いでみる（設定タブの「接続を確認」）。
+ * 
+ * **1 つずつ確かめる。** まとめて起こすと、どれが遅いのか・どれが落ちたのかが
+ * 分からなくなる（複数を同時に起こすのは解析のときだけ）。
  * 
  * **確かめたら閉じる。** 解析していないのにプロセスを残さない。
  * 起動にかかった時間も返すので、**解析のたびに払うコストがここで分かる。**
  */
-export function CheckEngine(): $CancellablePromise<$models.EngineCheck> {
-    return $Call.ByID(232459897);
+export function CheckEngine(id: string): $CancellablePromise<$models.EngineCheck> {
+    return $Call.ByID(232459897, id);
 }
 
 /**
@@ -64,6 +77,8 @@ export function CheckEngine(): $CancellablePromise<$models.EngineCheck> {
  * ⚠️ **局面が確定していなければエラー。** 手番か駒台の先後が未決だと SFEN が
  * 組み上がらない（決めていないことを勝手に決めない。設計原則5）。訂正 UI で
  * 決めてもらう以外に手は無いので、ここは警告ではなくエラーにする。
+ * ⚠️ **設定で「解析に使う」が 1 つも無ければエラー。** 何も起きないより、
+ * 設定を直す先が分かるほうがよい。
  */
 export function Start(seconds: number): $CancellablePromise<$models.AnalyzeState> {
     return $Call.ByID(3590958719, seconds);
@@ -79,6 +94,9 @@ export function State(): $CancellablePromise<$models.AnalyzeState> {
 /**
  * Stop は走っている解析を打ち切る。**打ち切っても評価値は出る**ので、
  * 「やめる」というより「ここまでで良い」に近い。
+ * 
+ * ⚠️ **止めるときは全部のエンジンを止める。** 同じ局面を読ませている以上、
+ * 片方だけ生かしておく意味が無い（比べるための同時解析なので）。
  */
 export function Stop(): $CancellablePromise<$models.AnalyzeState> {
     return $Call.ByID(3300023813);

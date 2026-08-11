@@ -542,6 +542,131 @@ html.is-main body {
   min-width: 0;
 }
 
+/* 登録した解析エンジンの一覧（設定タブ。2026-08-11）。
+   **1 行 = 1 エンジン**で、「解析に使う」を付けたものが同時に走る。 */
+.engine-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0 0 0 22px;
+  list-style: none;
+}
+
+.engine-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  padding: 6px 8px;
+  background: #23262e;
+  border: 1px solid #2f323b;
+  border-radius: 6px;
+}
+
+/* 解析に使わない登録も**消さずに残す**（入れ替えて比べる作業では戻すことが多い）。
+   走らないことが一目で分かるように落として見せるだけ。 */
+.engine-row.is-off {
+  opacity: 0.55;
+}
+
+.engine-use {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: #c9ccd3;
+  white-space: nowrap;
+}
+
+.engine-row input[type="text"] {
+  padding: 4px 7px;
+  font-size: 12.5px;
+  color: #f2f3f5;
+  background: #1b1e25;
+  border: 1px solid #3a3d47;
+  border-radius: 5px;
+}
+
+.engine-row input[type="text"]:focus {
+  outline: none;
+  border-color: #6ad3ff;
+}
+
+/* 名前は短く、パスは長い。パスに行の残りを全部使わせる。 */
+.engine-row .engine-name {
+  flex: 0 1 140px;
+  min-width: 0;
+}
+
+.engine-row .engine-path {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+/* 「接続を確認」の答えと、保存できなかった理由。**行ごとに出す**
+   （どのエンジンの話か分からないと直しようがない）。 */
+.engine-note {
+  flex: 1 0 100%;
+  word-break: break-word;
+}
+
+.engine-note.is-error {
+  color: #ff8d8d;
+}
+
+/* エンジンごとの解析結果（解析タブ。2026-08-11）。
+   **同時に走ったエンジンが縦に並ぶ。** ⚠️ **結果を合成しない**
+   （平均も多数決も取らない。食い違うところを人が読む）。 */
+.analyze-engines {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  /* エンジンが増えても盤を押し出さない。盤はできるだけ大きく見せたい。 */
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.analyze-engines[hidden] {
+  display: none;
+}
+
+.analyze-engine {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 6px;
+  background: #23262e;
+  border-radius: 6px;
+}
+
+.analyze-engine-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+/* エンジン名。**評価値の出所**なので、候補手より先に目に入る位置に置く。 */
+.analyze-engine-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #9aa6c0;
+  white-space: nowrap;
+}
+
+.analyze-engine-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ⚠️ **1 つのエンジンが落ちても他は続く**（設計原則3）。
+   その行にだけ理由を出し、他の結果は消さない。 */
+.analyze-engine-error[hidden] {
+  display: none;
+}
+
 /* エンジン解析の行（Phase 4）。盤のすぐ下に 1 行だけ。
    **評価値はこの画面の主役の 1 つ**なので、他の行より大きく出す。
    盤をできるだけ大きく見せたいので、行そのものは増やさないこと。 */

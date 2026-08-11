@@ -54,7 +54,7 @@ import {
 } from "../bindings/ikkyoku-app";
 import { iconMarkup } from "./icon";
 import { mountEditor } from "./editor";
-import type { StudyState } from "../bindings/ikkyoku-app/models";
+import type { AppSettings, EngineSettings, StudyState } from "../bindings/ikkyoku-app/models";
 import type { Stock } from "../bindings/github.com/ShinteLab/ikkyoku/position/models";
 // 認識の観測情報。**型を手で書き写さない**(Go 側は suteme の型をそのまま通しており、
 // ここで別に定義すると矩形の意味がずれても気づけない)。
@@ -101,6 +101,11 @@ interface AnalyzeLine {
 
 interface AnalyzeProgress {
   seq: number;
+  // ⚠️ **どのエンジンが喋ったか。** 複数のエンジンが同時に走るので、
+  // **seq だけでは行き先を決められない**（seq は解析の世代であって、エンジンの区別ではない）。
+  engineId: string;
+  // engineName はそのエンジンが名乗った名前（`id name`）。
+  engineName: string;
   done: boolean;
   progress: {
     depth: number;
@@ -115,8 +120,11 @@ interface AnalyzeDone extends AnalyzeProgress {
   startupMs: number;
 }
 
+// ⚠️ **1 つのエンジンが落ちても、他のエンジンの解析は続く**（設計原則3）。
+// **解析全体の失敗として扱わないこと。**
 interface AnalyzeFailure {
   seq: number;
+  engineId: string;
   error: string;
 }
 
@@ -418,9 +426,14 @@ export function mountMainScreen(root: HTMLElement): void {
           <!-- 押せない理由。**ツールチップだけにしない**（ホバーしないと読めない）。 -->
           <span id="analyze-hint" class="note is-caution" hidden></span>
         </div>
-        <!-- 候補手（MultiPV）。**1 本しか来なくても一覧の形で出す** ——
-             次善手を辿るのが構想の中心なので、ここが複数本になるのが前提の作り。 -->
-        <ol id="analyze-lines" class="analyze-lines" hidden></ol>
+        <!-- エンジンごとの結果（2026-08-11）。設定で「解析に使う」を付けたエンジンが
+             **同時に走り、ここに縦に並ぶ**。エンジンが違えば同じ局面の評価が食い違う
+             のが普通で、**その食い違いこそ見たいもの**（どれが正しいかは局面による）。
+
+             ⚠️ **エンジンをまたいで結果を合成しないこと**（平均も多数決も取らない）。
+             並べて人が読む。中の候補手（MultiPV）は **1 本しか来なくても一覧の形で
+             出す** —— 次善手を辿るのが構想の中心なので、複数本になるのが前提の作り。 -->
+        <div id="analyze-engines" class="analyze-engines" hidden></div>
         <p id="analyze-status" class="note is-caution" hidden></p>
         <div class="sfen-row">
           <span class="field-label">SFEN</span>
@@ -449,28 +462,28 @@ export function mountMainScreen(root: HTMLElement): void {
              （やねうら王・水匠・prokishi.exe・同梱のエンジン）。検討ツールとして
              実用になるかは繋ぐエンジンの棋力で決まるので、ここで差し替えられる。
 
+             ⚠️ **1 つに絞らない**（2026-08-11）。**複数登録でき、「解析に使う」を
+             付けたものが同時に走る。** どのエンジンが正しいかは局面によって違うので、
+             評価が食い違うところを並べて読めることに意味がある。
+
              ⚠️ **「外部を使う」のチェックボックスは置かない。** パスが空なら同梱、
              入っていれば外部。2 つ持つと「パスが入っているのに無効」という
              食い違いが起きる。 -->
         <div class="setting-group">
           <span class="setting-title">解析エンジン</span>
           <span class="setting-note">
-            USI を話すエンジンの実行ファイルを指定します（やねうら王・水匠など）。
-            <strong>空にすると同梱のエンジン</strong>に戻ります。
-            <code>setoption</code> で送る値は設定ファイルの <code>engine.options</code> に書けます。
+            USI を話すエンジンの実行ファイルを登録します（やねうら王・水匠など）。
+            <strong>「解析に使う」を付けたエンジンが同時に走り、解析タブに結果が並びます。</strong>
+            実行ファイルを<strong>空にするとその登録は同梱のエンジン</strong>になります。
+            同じエンジンを <code>setoption</code> 違いで 2 つ登録して比べることもできます
+            （送る値は設定ファイルの <code>engines[].options</code>）。
           </span>
+          <ul id="engine-list" class="engine-list"></ul>
           <div class="setting-fields">
-            <label class="field is-wide">
-              <span class="field-label">実行ファイル</span>
-              <input id="engine-path" type="text" spellcheck="false"
-                     placeholder="空なら同梱のエンジンを使います" />
-            </label>
-            <button id="engine-browse" class="ghost-btn" type="button"
-                    title="実行ファイルを選びます">参照…</button>
-            <button id="engine-clear" class="ghost-btn" type="button"
-                    title="同梱のエンジンに戻します">同梱に戻す</button>
-            <button id="engine-check" class="ghost-btn" type="button"
-                    title="実際に起動して、USI で応答するか確かめます">接続を確認</button>
+            <button id="engine-add" class="ghost-btn" type="button"
+                    title="実行ファイルを選んで登録します">エンジンを追加…</button>
+            <button id="engine-add-builtin" class="ghost-btn" type="button"
+                    title="同梱のエンジンを登録します">同梱エンジンを追加</button>
           </div>
           <p id="engine-status" class="status" role="status" aria-live="polite"></p>
         </div>
@@ -793,7 +806,7 @@ export function mountMainScreen(root: HTMLElement): void {
   const analyzeRow = root.querySelector<HTMLDivElement>("#analyze-row")!;
   const analyzeRun = root.querySelector<HTMLButtonElement>("#analyze-run")!;
   const analyzeSeconds = root.querySelector<HTMLSelectElement>("#analyze-seconds")!;
-  const analyzeLines = root.querySelector<HTMLOListElement>("#analyze-lines")!;
+  const analyzeEnginesBox = root.querySelector<HTMLDivElement>("#analyze-engines")!;
   const analyzeMeta = root.querySelector<HTMLElement>("#analyze-meta")!;
   const analyzeHint = root.querySelector<HTMLElement>("#analyze-hint")!;
   const analyzeStatus = root.querySelector<HTMLParagraphElement>("#analyze-status")!;
@@ -809,11 +822,26 @@ export function mountMainScreen(root: HTMLElement): void {
   // （EditState）ではない。** 混ぜると、直している最中の盤の評価値を出すことになる。
   let studySfen = "";
   let studyLoaded = false;
-  // 答えたエンジンの名前。**何が出した評価値なのかは見せる**（繋ぎ先を差し替えられる以上、
-  // 出所を伏せると比べようがない）。
-  let analyzeEngine = "";
-  // 起動〜readyok にかかった時間（done で届く）。
-  let analyzeStartupMs = 0;
+
+  // エンジンごとの表示（2026-08-11）。**複数のエンジンが同時に走る**ので、
+  // 届いたイベントは engineId で振り分ける。**seq だけでは行き先を決められない。**
+  //
+  // ⚠️ **エンジンをまたいで結果を合成しないこと**（平均も多数決も取らない）。
+  // 食い違うところを並べて人が読むのが目的。
+  interface EngineCard {
+    // label は設定タブで付けた名前。**エンジンが名乗る名前とは別に持つ**
+    // （同じ exe を option 違いで 2 つ登録していると、名乗る名前では区別が付かない）。
+    label: string;
+    // まだ結果が届いていないエンジンか（走っているエンジンの数を数えるのに使う）。
+    pending: boolean;
+    // 起動〜readyok にかかった時間（done で届く）。**エンジンごとに違う。**
+    startupMs: number;
+    name: HTMLElement;
+    meta: HTMLElement;
+    lines: HTMLOListElement;
+    error: HTMLElement;
+  }
+  const engineCards = new Map<string, EngineCard>();
 
   // 解析できない理由。**空なら解析できる。**
   //
@@ -849,16 +877,62 @@ export function mountMainScreen(root: HTMLElement): void {
 
   const clearAnalyzeResult = () => {
     analyzedSfen = "";
-    analyzeLines.replaceChildren();
-    analyzeLines.hidden = true;
+    engineCards.clear();
+    analyzeEnginesBox.replaceChildren();
+    analyzeEnginesBox.hidden = true;
     analyzeMeta.textContent = "";
     analyzeStatus.hidden = true;
     analyzeStatus.textContent = "";
   };
 
-  const showAnalyzeProgress = (p: AnalyzeProgress["progress"]) => {
+  // 解析に参加するエンジンぶんの枠を先に作る。
+  //
+  // **起動を待っているあいだも見出しを出す**（エンジンによっては評価関数の読み込みで
+  // 数秒かかる）。何も出ないと、走っていないのか遅いのかが分からない。
+  const buildEngineCards = (engines: { id: string; label: string; name: string }[]) => {
+    engineCards.clear();
+    analyzeEnginesBox.replaceChildren();
+    for (const e of engines) {
+      const card = document.createElement("section");
+      card.className = "analyze-engine";
+      card.dataset.id = e.id;
+      card.innerHTML = `
+        <div class="analyze-engine-head">
+          <span class="analyze-engine-name"></span>
+          <span class="analyze-engine-meta note"></span>
+        </div>
+        <ol class="analyze-lines"></ol>
+        <p class="analyze-engine-error note is-caution" hidden></p>
+      `;
+      const entry: EngineCard = {
+        label: e.label,
+        pending: true,
+        startupMs: 0,
+        name: card.querySelector<HTMLElement>(".analyze-engine-name")!,
+        meta: card.querySelector<HTMLElement>(".analyze-engine-meta")!,
+        lines: card.querySelector<HTMLOListElement>(".analyze-lines")!,
+        error: card.querySelector<HTMLElement>(".analyze-engine-error")!,
+      };
+      // 見出しは**設定タブで付けた名前**。エンジンが名乗る名前（`id name`）は
+      // 繋いで初めて分かるので、届いたら括弧で足す（下の showEngineName）。
+      showEngineName(entry, e.name ?? "");
+      entry.meta.textContent = "エンジンを起動しています…";
+      engineCards.set(e.id, entry);
+      analyzeEnginesBox.appendChild(card);
+    }
+    analyzeEnginesBox.hidden = engines.length === 0;
+  };
+
+  // エンジンが名乗った名前を見出しに足す。**設定の名前は消さない**
+  // （同じ exe を option 違いで 2 つ登録していると、名乗る名前だけでは区別が付かない）。
+  const showEngineName = (card: EngineCard, name: string) => {
+    card.name.textContent =
+      name && name !== card.label ? `${card.label}（${name}）` : card.label;
+  };
+
+  const showAnalyzeProgress = (card: EngineCard, p: AnalyzeProgress["progress"]) => {
     const lines = p.lines ?? [];
-    analyzeLines.replaceChildren();
+    card.lines.replaceChildren();
     for (const l of lines) {
       const li = document.createElement("li");
       li.className = "analyze-line";
@@ -884,9 +958,9 @@ export function mountMainScreen(root: HTMLElement): void {
       moves.title = l.moves?.join(" ") ?? "";
 
       li.append(score, moves);
-      analyzeLines.appendChild(li);
+      card.lines.appendChild(li);
     }
-    analyzeLines.hidden = lines.length === 0;
+    card.lines.hidden = lines.length === 0;
 
     const parts = [`深さ ${p.depth}`];
     if (p.nodes > 0) {
@@ -895,29 +969,39 @@ export function mountMainScreen(root: HTMLElement): void {
     parts.push(`${(p.elapsedMs / 1000).toFixed(1)} 秒`);
     // ⚠️ **起動の時間は解析のたびに払っている。** エンジンは 1 回の解析のあいだしか
     // 生きないので、これが見えないと「遅い理由」が分からない。
-    if (analyzeStartupMs > 0) {
-      parts.push(`起動 ${(analyzeStartupMs / 1000).toFixed(1)} 秒`);
+    // **エンジンごとに違う**（NNUE を読むものは数秒かかる）ので、その行に出す。
+    if (card.startupMs > 0) {
+      parts.push(`起動 ${(card.startupMs / 1000).toFixed(1)} 秒`);
     }
-    if (analyzeEngine) {
-      parts.push(analyzeEngine);
+    card.meta.textContent = parts.join(" / ");
+  };
+
+  // 走っているエンジンが残っているか。**1 つ終わっただけでは解析は終わらない。**
+  const syncAnalyzeRunning = () => {
+    analyzeRunning = [...engineCards.values()].some((c) => c.pending);
+    if (!analyzeRunning) {
+      analyzeMeta.textContent = "";
     }
-    analyzeMeta.textContent = parts.join(" / ");
+    syncAnalyzeButton();
   };
 
   const startAnalyze = async () => {
     analyzeStatus.hidden = true;
     analyzeStatus.textContent = "";
-    analyzeLines.replaceChildren();
-    analyzeLines.hidden = true;
+    engineCards.clear();
+    analyzeEnginesBox.replaceChildren();
+    analyzeEnginesBox.hidden = true;
     analyzeMeta.textContent = "エンジンを起動しています…";
     try {
       const st = await AnalyzeService.Start(Number(analyzeSeconds.value) || 0);
       analyzeSeq = st.seq;
       analyzedSfen = st.sfen;
-      analyzeEngine = st.engine;
-      // 起動の時間は今回の解析のもの。前回の値を持ち越さない。
-      analyzeStartupMs = 0;
-      analyzeRunning = true;
+      // 参加するエンジンは Go 側が決める（設定で「解析に使う」を付けたもの）。
+      // **フロントで設定を読み直さないこと** —— 走っているのと違う顔ぶれが並ぶ。
+      buildEngineCards(st.engines ?? []);
+      analyzeRunning = engineCards.size > 0;
+      analyzeMeta.textContent =
+        engineCards.size > 1 ? `${engineCards.size} つのエンジンで解析しています` : "";
     } catch (err) {
       clearAnalyzeResult();
       analyzeStatus.textContent = `解析できません: ${String(err instanceof Error ? err.message : err)}`;
@@ -949,30 +1033,47 @@ export function mountMainScreen(root: HTMLElement): void {
     syncAnalyzeButton();
   };
 
-  Events.On("analyze:info", (event: { data: AnalyzeProgress }) => {
-    if (event.data.seq !== analyzeSeq) {
-      return; // 打ち切った解析の遅れてきた途中経過
+  // 届いたイベントの行き先は **seq（解析の世代）と engineId（どのエンジンか）の両方**で
+  // 決まる。⚠️ **engineId を落とすと、複数エンジンの結果が 1 か所で上書きし合う。**
+  const cardFor = (d: { seq: number; engineId: string }): EngineCard | undefined => {
+    if (d.seq !== analyzeSeq) {
+      return undefined; // 打ち切った解析の遅れてきた途中経過
     }
-    showAnalyzeProgress(event.data.progress);
+    return engineCards.get(d.engineId);
+  };
+
+  Events.On("analyze:info", (event: { data: AnalyzeProgress }) => {
+    const card = cardFor(event.data);
+    if (!card) {
+      return;
+    }
+    showEngineName(card, event.data.engineName ?? "");
+    showAnalyzeProgress(card, event.data.progress);
   });
   Events.On("analyze:done", (event: { data: AnalyzeDone }) => {
-    if (event.data.seq !== analyzeSeq) {
+    const card = cardFor(event.data);
+    if (!card) {
       return;
     }
-    analyzeRunning = false;
-    analyzeStartupMs = event.data.startupMs ?? 0;
-    showAnalyzeProgress(event.data.progress);
-    syncAnalyzeButton();
+    card.pending = false;
+    card.startupMs = event.data.startupMs ?? 0;
+    showEngineName(card, event.data.engineName ?? "");
+    showAnalyzeProgress(card, event.data.progress);
+    // ⚠️ **1 つ終わっただけでは解析は終わらない**（他のエンジンはまだ読んでいる）。
+    syncAnalyzeRunning();
   });
   Events.On("analyze:failed", (event: { data: AnalyzeFailure }) => {
-    if (event.data.seq !== analyzeSeq) {
+    const card = cardFor(event.data);
+    if (!card) {
       return;
     }
-    analyzeRunning = false;
-    clearAnalyzeResult();
-    analyzeStatus.textContent = `解析できません: ${event.data.error}`;
-    analyzeStatus.hidden = false;
-    syncAnalyzeButton();
+    // ⚠️ **そのエンジンの失敗であって、解析全体の失敗ではない**（設計原則3）。
+    // 他のエンジンの評価値は出るので、**表示を消さずにその行にだけ理由を出す。**
+    card.pending = false;
+    card.meta.textContent = "";
+    card.error.textContent = `解析できません: ${event.data.error}`;
+    card.error.hidden = false;
+    syncAnalyzeRunning();
   });
 
   // ---- 解析タブの盤 --------------------------------------------------------
@@ -1608,31 +1709,21 @@ export function mountMainScreen(root: HTMLElement): void {
   const trainCheckStatus = root.querySelector<HTMLParagraphElement>("#train-check-status")!;
 
   // 解析エンジン。**パスが空なら同梱**（「外部を使う」のトグルは持たない）。
-  const enginePath = root.querySelector<HTMLInputElement>("#engine-path")!;
-  const engineBrowse = root.querySelector<HTMLButtonElement>("#engine-browse")!;
-  const engineClear = root.querySelector<HTMLButtonElement>("#engine-clear")!;
-  const engineCheck = root.querySelector<HTMLButtonElement>("#engine-check")!;
+  // ⚠️ **一覧**（2026-08-11）。行ごとに「解析に使う」があり、付けたものが同時に走る。
+  const engineList = root.querySelector<HTMLUListElement>("#engine-list")!;
+  const engineAdd = root.querySelector<HTMLButtonElement>("#engine-add")!;
+  const engineAddBuiltin = root.querySelector<HTMLButtonElement>("#engine-add-builtin")!;
   const engineStatus = root.querySelector<HTMLParagraphElement>("#engine-status")!;
 
   const showSettings = (s: {
     fitOnStartup: boolean;
     path: string;
     training: { enabled: boolean; host: string; port: number; token: string; target: string };
-    engine: { path: string; builtin: boolean; optionCount: number };
+    engines: EngineSettings[] | null;
   }) => {
     fitOnStartup.checked = s.fitOnStartup;
     settingsPath.textContent = s.path || "(保存先を決められませんでした)";
-    // 入力中は上書きしない（保存のたびに読み直すので、打っている途中で飛ぶ）。
-    if (document.activeElement !== enginePath) {
-      enginePath.value = s.engine.path;
-    }
-    engineClear.disabled = s.engine.builtin;
-    // **同梱かどうかの判定は Go 側の値を使う**（フロントで path === "" を書かない）。
-    const opts = s.engine.optionCount > 0 ? `（setoption ${s.engine.optionCount} 件）` : "";
-    engineStatus.classList.remove("is-error");
-    engineStatus.textContent = s.engine.builtin
-      ? "同梱のエンジンを使います。"
-      : `外部のエンジンを使います${opts}。`;
+    showEngineList(s.engines ?? []);
     // 既定値の解決は Go 側(training パッケージ)が済ませて返す。**フロントに
     // 既定値を書かないこと**(2 か所に持つと、既定を変えたときに食い違う)。
     const t = s.training;
@@ -1683,77 +1774,173 @@ export function mountMainScreen(root: HTMLElement): void {
     });
   }
 
-  // ---- 解析エンジンの指定 --------------------------------------------------
+  // ---- 解析エンジンの一覧 --------------------------------------------------
   //
   // **保存と接続の確認は別の操作。** まだ置いていないパスを先に書いておく、という
   // 順序が普通にあるので、保存時に起動はしない（存在の確認だけ Go 側でする）。
-  const saveEnginePath = async (path: string) => {
+  //
+  // **変えたその場で保存する**（他の設定と同じ。適用ボタンは置かない）。
+  const engineFailed = (err: unknown) => {
+    engineStatus.textContent = String(err instanceof Error ? err.message : err);
+    engineStatus.classList.add("is-error");
+  };
+
+  // 設定の書き換えはどれも AppSettings を返すので、返ってきたものでそのまま描き直す。
+  // ⚠️ **フロントに一覧の写しを持たないこと**（局面と同じ理由。ずれたときに
+  // どちらが本当か分からなくなる）。
+  const applyEngineChange = async (op: () => Promise<AppSettings>) => {
     engineStatus.classList.remove("is-error");
     try {
-      showSettings(await SettingsService.SetEnginePath(path));
+      showSettings(await op());
     } catch (err) {
-      engineStatus.textContent = String(err instanceof Error ? err.message : err);
-      engineStatus.classList.add("is-error");
+      engineFailed(err);
+      // 画面を設定ファイルの内容に戻す（食い違ったまま使わせない）。
+      try {
+        showSettings(await SettingsService.Settings());
+      } catch {
+        /* 読み直せないなら画面はそのまま。理由は上に出ている。 */
+      }
     }
   };
 
-  enginePath.addEventListener("change", () => {
-    void saveEnginePath(enginePath.value);
-  });
+  // 1 行ぶんの結果表示（「接続を確認」の答えと、保存できなかった理由）。
+  const engineRowNote = (row: HTMLElement) =>
+    row.querySelector<HTMLElement>(".engine-note")!;
 
-  engineBrowse.addEventListener("click", () => {
+  // エンジン 1 つに実際に繋いでみる。**1 行ずつ**（まとめて起こすと、どれが遅くて
+  // どれが落ちたのか分からない）。確かめたら閉じるので、プロセスは残らない。
+  const checkEngine = async (id: string, row: HTMLElement, btn: HTMLButtonElement) => {
+    const note = engineRowNote(row);
+    btn.disabled = true;
+    note.classList.remove("is-error");
+    note.textContent = "起動して確かめています…";
+    try {
+      const r = await AnalyzeService.CheckEngine(id);
+      if (!r.ok) {
+        note.textContent = `繋がりません: ${r.error}`;
+        note.classList.add("is-error");
+        return;
+      }
+      // **何を送ったかまで出す。** setoption には応答が返らないので、
+      // 効いているかどうかを確かめる手掛かりがこれしかない。
+      const applied =
+        r.options > 0
+          ? `option ${r.options} 件を宣言、${r.applied} 件を送信（既定値を含む）`
+          : "option の宣言はありません";
+      // ⚠️ **起動の時間は解析のたびに払う**（エンジンは解析のあいだしか生きない）。
+      // 繋ぎ先を選ぶ材料になるので出しておく。
+      const startup = `起動 ${(r.startupMs / 1000).toFixed(1)} 秒（解析のたびにかかります）`;
+      note.textContent = `繋がりました: ${r.name} / ${applied} / ${startup}`;
+    } catch (err) {
+      note.textContent = `確認できませんでした: ${String(err instanceof Error ? err.message : err)}`;
+      note.classList.add("is-error");
+    } finally {
+      btn.disabled = false;
+    }
+  };
+
+  // 一覧を描き直す。
+  //
+  // ⚠️ **入力中の欄は上書きしない。** 保存のたびに描き直すので、打っている途中の
+  // 名前やパスが飛ぶ（フォーカスのある行だけ残す）。
+  const showEngineList = (engines: EngineSettings[]) => {
+    const active = document.activeElement as HTMLElement | null;
+    const keep = active?.closest<HTMLElement>(".engine-row")?.dataset.id;
+    const keepValue = active instanceof HTMLInputElement ? active.value : "";
+    const keepClass = active?.className ?? "";
+
+    engineList.replaceChildren();
+    for (const e of engines) {
+      const row = document.createElement("li");
+      row.className = "engine-row";
+      row.dataset.id = e.id;
+      row.innerHTML = `
+        <label class="engine-use" title="解析のときにこのエンジンを使います（複数選べます）">
+          <input class="engine-enabled" type="checkbox" />
+          <span>解析に使う</span>
+        </label>
+        <input class="engine-name" type="text" spellcheck="false" />
+        <input class="engine-path" type="text" spellcheck="false"
+               placeholder="空なら同梱のエンジン" />
+        <button class="ghost-btn engine-browse" type="button"
+                title="実行ファイルを選び直します">参照…</button>
+        <button class="ghost-btn engine-check" type="button"
+                title="実際に起動して、USI で応答するか確かめます">接続を確認</button>
+        <button class="ghost-btn engine-remove" type="button"
+                title="この登録を消します">削除</button>
+        <span class="engine-note note"></span>
+      `;
+      const enabled = row.querySelector<HTMLInputElement>(".engine-enabled")!;
+      const name = row.querySelector<HTMLInputElement>(".engine-name")!;
+      const path = row.querySelector<HTMLInputElement>(".engine-path")!;
+      enabled.checked = e.enabled;
+      // ⚠️ **既定の名前は placeholder に出し、value には入れない。**
+      // 入れてしまうと、パスを変えても名前が追従しなくなる（Go 側が
+      // 「人が付けた名前か」を custom で返しているのはこのため）。
+      name.value = e.custom ? e.name : "";
+      name.placeholder = e.name;
+      path.value = e.path;
+      // **同梱かどうかの判定は Go 側の値を使う**（フロントで path === "" を書かない）。
+      const opts = e.optionCount > 0 ? ` / setoption ${e.optionCount} 件` : "";
+      engineRowNote(row).textContent = (e.builtin ? "同梱のエンジン" : "") + opts;
+      row.classList.toggle("is-off", !e.enabled);
+
+      enabled.addEventListener("change", () => {
+        void applyEngineChange(() => SettingsService.SetEngineEnabled(e.id, enabled.checked));
+      });
+      name.addEventListener("change", () => {
+        void applyEngineChange(() => SettingsService.SetEngineName(e.id, name.value));
+      });
+      path.addEventListener("change", () => {
+        void applyEngineChange(() => SettingsService.SetEnginePath(e.id, path.value));
+      });
+      row.querySelector<HTMLButtonElement>(".engine-browse")!.addEventListener("click", () => {
+        // 参照は「追加」ではなく**この行の差し替え**（取り消したら何も変わらない）。
+        void applyEngineChange(() => SettingsService.BrowseEngineFor(e.id));
+      });
+      const checkBtn = row.querySelector<HTMLButtonElement>(".engine-check")!;
+      checkBtn.addEventListener("click", () => {
+        void checkEngine(e.id, row, checkBtn);
+      });
+      row.querySelector<HTMLButtonElement>(".engine-remove")!.addEventListener("click", () => {
+        void applyEngineChange(() => SettingsService.RemoveEngine(e.id));
+      });
+
+      engineList.appendChild(row);
+    }
+
+    // 打っている最中だった欄にフォーカスと文字を戻す。
+    if (keep) {
+      const row = engineList.querySelector<HTMLElement>(`.engine-row[data-id="${keep}"]`);
+      const el = row?.querySelector<HTMLInputElement>(`.${keepClass.split(" ")[0]}`);
+      if (el) {
+        if (el.type === "text") {
+          el.value = keepValue;
+        }
+        el.focus();
+      }
+    }
+  };
+
+  // エンジンを足す。**足したものはそのまま使える状態**にする（Go 側で enabled）。
+  engineAdd.addEventListener("click", () => {
     void (async () => {
-      engineBrowse.disabled = true;
+      engineAdd.disabled = true;
       engineStatus.classList.remove("is-error");
       try {
         // 取り消したときは Go 側が何も変えずに今の設定を返す。
         showSettings(await SettingsService.BrowseEngine());
       } catch (err) {
-        engineStatus.textContent = String(err instanceof Error ? err.message : err);
-        engineStatus.classList.add("is-error");
+        engineFailed(err);
       } finally {
-        engineBrowse.disabled = false;
+        engineAdd.disabled = false;
       }
     })();
   });
 
-  engineClear.addEventListener("click", () => {
-    void saveEnginePath("");
-  });
-
-  // 実際に起動して USI で応答するか確かめる。**繋いだ接続はそのまま解析に使う**
-  // ので、確認したあとの 1 回目が速い。
-  engineCheck.addEventListener("click", () => {
-    void (async () => {
-      engineCheck.disabled = true;
-      engineStatus.classList.remove("is-error");
-      engineStatus.textContent = "起動して確かめています…";
-      try {
-        const r = await AnalyzeService.CheckEngine();
-        if (!r.ok) {
-          engineStatus.textContent = `繋がりません: ${r.error}`;
-          engineStatus.classList.add("is-error");
-          return;
-        }
-        // **何を送ったかまで出す。** setoption には応答が返らないので、
-        // 効いているかどうかを確かめる手掛かりがこれしかない。
-        const applied =
-          r.options > 0
-            ? `option ${r.options} 件を宣言、${r.applied} 件を送信（既定値を含む）`
-            : "option の宣言はありません";
-        // ⚠️ **起動の時間は解析のたびに払う**（エンジンは解析のあいだしか生きない）。
-        // 繋ぎ先を選ぶ材料になるので出しておく。
-        const startup = `起動 ${(r.startupMs / 1000).toFixed(1)} 秒（解析のたびにかかります）`;
-        engineStatus.textContent = r.builtin
-          ? `同梱のエンジンに繋がりました（${r.name}）。${applied}。${startup}。`
-          : `繋がりました: ${r.name} / ${applied} / ${startup}`;
-      } catch (err) {
-        engineStatus.textContent = `確認できませんでした: ${String(err instanceof Error ? err.message : err)}`;
-        engineStatus.classList.add("is-error");
-      } finally {
-        engineCheck.disabled = false;
-      }
-    })();
+  // 同梱エンジンを足す（パスが空の登録）。**外部エンジンと並べて比べるため。**
+  engineAddBuiltin.addEventListener("click", () => {
+    void applyEngineChange(() => SettingsService.AddEngine(""));
   });
 
   // 「今このサーバに送ってよいか」の問い合わせ(`GET /api/status`)。

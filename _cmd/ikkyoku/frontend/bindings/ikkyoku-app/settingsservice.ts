@@ -18,29 +18,71 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 import * as $models from "./models.js";
 
 /**
- * BrowseEngine は実行ファイルを選ぶダイアログを出し、選ばれたパスを保存する。
+ * AddEngine は一覧にエンジンを 1 つ足す（**空のパスなら同梱エンジン**）。
  * 
- * **パスを手で打たせない。** 将棋エンジンは深いディレクトリに置かれることが多く、
- * 打ち間違いが一番起きやすい入口。取り消したら何もしない(空文字が返る)。
+ * **同じ実行ファイルを 2 つ登録できる。** option（置換表・スレッド数）を変えて
+ * 比べるのは正当な使い方なので、パスの重複では断らない。
+ */
+export function AddEngine(path: string): $CancellablePromise<$models.AppSettings> {
+    return $Call.ByID(590488953, path);
+}
+
+/**
+ * BrowseEngine は実行ファイルを選ぶダイアログを出し、選ばれたものを一覧に**足す**。
+ * 
+ * 取り消したら何もしない。
  */
 export function BrowseEngine(): $CancellablePromise<$models.AppSettings> {
     return $Call.ByID(1533817116);
 }
 
 /**
- * SetEnginePath は解析に使う USI エンジンの実行ファイルを保存する。
+ * BrowseEngineFor は既存の登録の実行ファイルを**選び直す**（一覧の行の「参照…」）。
  * 
- * **空にすると同梱のエンジンに戻る。**
- * 
- * ⚠️ **起動して繋がるかは確かめない。** 設定を保存する操作と、実際に繋がるかを見る
- * 操作(AnalyzeService.CheckEngine)は別にしてある。まだ置いていないパスを先に
- * 書いておく、という順序が普通にあるため(接続設定と同じ考え方)。
- * 
- * 存在の確認だけはする。**打ち間違いは「解析を押したら繋がらない」より、
- * ここで分かるほうが早い。**
+ * ⚠️ **BrowseEngine（追加）と混ぜないこと。** 差し替えのつもりで押したら
+ * 登録が増えていた、という事故になる。
  */
-export function SetEnginePath(path: string): $CancellablePromise<$models.AppSettings> {
-    return $Call.ByID(1535611797, path);
+export function BrowseEngineFor(id: string): $CancellablePromise<$models.AppSettings> {
+    return $Call.ByID(843000435, id);
+}
+
+/**
+ * RemoveEngine は登録を消す。
+ * 
+ * **全部消すと同梱エンジン 1 つに戻る**（`ikkyoku.Config.EngineList`）。
+ * 解析できない状態に落とし込まないため。
+ */
+export function RemoveEngine(id: string): $CancellablePromise<$models.AppSettings> {
+    return $Call.ByID(2761370694, id);
+}
+
+/**
+ * SetEngineEnabled は「解析に使う」を切り替える。
+ * 
+ * **外しても登録は消えない。** エンジンを入れ替えて比べる作業では、外したものを
+ * また戻すことが多い。
+ */
+export function SetEngineEnabled(id: string, enabled: boolean): $CancellablePromise<$models.AppSettings> {
+    return $Call.ByID(632833467, id, enabled);
+}
+
+/**
+ * SetEngineName は表示名を付ける（空にすると既定の名前に戻る）。
+ * 
+ * **同じ exe を option 違いで 2 つ登録したときに、どちらか分かるようにするため。**
+ * エンジンが `id name` で名乗る名前は繋がないと分からないので、それとは別に要る。
+ */
+export function SetEngineName(id: string, name: string): $CancellablePromise<$models.AppSettings> {
+    return $Call.ByID(2068350557, id, name);
+}
+
+/**
+ * SetEnginePath は登録済みエンジンの実行ファイルを差し替える。
+ * 
+ * **空にするとその登録は同梱のエンジンになる**（登録そのものは消えない）。
+ */
+export function SetEnginePath(id: string, path: string): $CancellablePromise<$models.AppSettings> {
+    return $Call.ByID(1535611797, id, path);
 }
 
 /**
