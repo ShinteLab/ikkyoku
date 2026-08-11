@@ -781,6 +781,10 @@ html.is-main body {
 .analyze-first {
   flex: 0 0 auto;
   width: var(--analyze-first-w);
+  /* 幅を取ってあるぶんの余りは**左右に振り分ける**。表記の長さが「▲同　銀」から
+     「▲２二角不成」まで違うので、左寄せだと短い手のときに右が大きく空いて、
+     評価値との間だけが詰まって見える。 */
+  text-align: center;
   font-size: var(--analyze-main-size);
   font-weight: 600;
   color: #f2f3f5;
