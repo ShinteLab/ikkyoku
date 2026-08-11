@@ -448,6 +448,15 @@ export function mountMainScreen(root: HTMLElement): void {
             </div>
             <div id="study-moves" class="study-moves"></div>
             <p id="study-move-status" class="note is-caution" hidden></p>
+            <!-- 今見ている局面の SFEN。**盤の下ではなくここに置く**（2026-08-12）。
+                 盤の下に積む行はそのぶん盤を小さくするうえ、SFEN は
+                 「今どの局面を見ているか」の値なので手順の列にあるほうが素直。
+                 ⚠️ **高さを中身に依存させないこと** —— 長さで列が伸びると、
+                 上の手順リストの取り分が動く。折り返して 3 行で頭打ちにする。 -->
+            <div class="study-sfen-row">
+              <span class="field-label">SFEN</span>
+              <code id="study-sfen" class="sfen" title="今見ている局面">-</code>
+            </div>
           </div>
           <p id="study-placeholder" class="board-placeholder">
             訂正タブで「この局面を解析する」を押すと、ここに局面が出ます。
@@ -510,14 +519,9 @@ export function mountMainScreen(root: HTMLElement): void {
              出す** —— 次善手を辿るのが構想の中心なので、複数本になるのが前提の作り。 -->
         <div id="analyze-engines" class="analyze-engines" hidden></div>
         <p id="analyze-status" class="note is-caution" hidden></p>
-        <div class="sfen-row">
-          <span class="field-label">SFEN</span>
-          <code id="study-sfen" class="sfen">-</code>
-        </div>
-        <div id="study-hand-row" class="hand-row" hidden>
-          <span class="field-label">駒台</span>
-          <span id="study-hand" class="hand"></span>
-        </div>
+        <!-- ⚠️ **盤の下に SFEN と駒台の行を戻さないこと**（2026-08-12 に外した）。
+             駒台は盤の脇に駒そのものが出ているので文字の要約は要らず、SFEN は
+             手順の列の下に移した。**盤の下に積む行が増えるほど盤が小さくなる。** -->
       </div>
 
       <div id="panel-settings" class="panel" role="tabpanel" aria-labelledby="tab-settings" hidden>
@@ -1284,8 +1288,6 @@ export function mountMainScreen(root: HTMLElement): void {
   const studyBoard = root.querySelector<HTMLElement>("#study-board")!;
   const studyPlaceholder = root.querySelector<HTMLParagraphElement>("#study-placeholder")!;
   const studySfenOut = root.querySelector<HTMLElement>("#study-sfen")!;
-  const studyHandRow = root.querySelector<HTMLDivElement>("#study-hand-row")!;
-  const studyHandOut = root.querySelector<HTMLElement>("#study-hand")!;
   const studyWarnings = root.querySelector<HTMLUListElement>("#study-warnings")!;
   const studyBack = root.querySelector<HTMLButtonElement>("#study-back")!;
   // 盤の脇の駒台（読み取り専用）。**訂正タブの駒台とは別物**で、
@@ -1388,23 +1390,9 @@ export function mountMainScreen(root: HTMLElement): void {
       }
       zone.classList.toggle("is-empty", total === 0);
     }
-
-    const fmt = (pick: (s: Stock) => number) =>
-      inv
-        .filter((s) => pick(s) > 0)
-        .map((s) => `${s.name}${pick(s)}`)
-        .join(" ");
-    const black = fmt((s) => s.handBlack);
-    const white = fmt((s) => s.handWhite);
-    const parts: string[] = [];
-    if (black) {
-      parts.push(`先手 ${black}`);
-    }
-    if (white) {
-      parts.push(`後手 ${white}`);
-    }
-    studyHandOut.textContent = parts.join(" / ");
-    studyHandRow.hidden = parts.length === 0;
+    // ⚠️ **文字の要約（「先手 歩2 / 後手 角1」）は出さない**（2026-08-12 に外した）。
+    // 盤の脇に駒そのものが並んでいるので同じことを 2 度言っており、
+    // **盤の下に行を積むぶんだけ盤が小さくなっていた。**
   };
 
   // 訂正タブ → 解析タブ。**受け渡しはこの 1 か所だけ。**

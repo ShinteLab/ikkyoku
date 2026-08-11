@@ -1198,6 +1198,30 @@ html.is-main body {
   color: #c7cbd4;
 }
 
+/* 解析タブの SFEN。**手順の列の下**に置く（2026-08-12 に盤の下から移した）。
+   盤の下に積む行はそのぶん盤を小さくするうえ、SFEN は「今どの局面を見ているか」の
+   値なので手順と同じ列にあるほうが素直。
+
+   ⚠️ **高さを中身に依存させないこと。** 長さで列の取り分が動くと、上の手順リストが
+   伸び縮みする。折り返したうえで頭打ちにし、溢れたら中でスクロールさせる。 */
+.study-sfen-row {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 1px solid #2a2d36;
+}
+
+.study-sfen-row .sfen {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-height: 4.5em;
+  overflow: auto;
+  line-height: 1.5;
+  user-select: text;
+}
+
 .note {
   font-size: 11px;
   color: #6f7787;
