@@ -75,9 +75,8 @@ func TestFitGeometry(t *testing.T) {
 	}
 }
 
-// 検出結果は毎回 数px 揺れる(実測で 5〜10px)。呼び出し側は余白と同じ値を slop に
-// 渡しており、**余白より小さいずれは盤の収まり方を変えない**ので動かさない。
-// ここが 2px 固定に戻ると、押すたびに枠が少し動く。
+// 検出結果は毎回 数px 揺れる(実測で 5〜10px)。そこまで直しにいくと押すたびに
+// 枠が少し動くので、slop 以内は動かさない。
 func TestFitGeometrySlop(t *testing.T) {
 	cur := windowState{X: 100, Y: 200, Width: 480, Height: 420}
 	region := ikkyoku.Region{X: 0, Y: 0, Width: 476, Height: 384}
@@ -91,8 +90,28 @@ func TestFitGeometrySlop(t *testing.T) {
 	}
 }
 
+// ⚠️ **slop に余白そのものを渡さないこと。** 余白と同じ幅のずれを許すと、
+// ずれた向きの余白がちょうど 0 になるところまで見逃す(＝盤の外枠線が画像の端に
+// 来て、suteme が検出を外す)。余白を広げた意味が無くなる。
+func TestFitSlopIsSmallerThanMargin(t *testing.T) {
+	for _, board := range []image.Rectangle{
+		image.Rect(100, 200, 730, 830), // マス 70px
+		image.Rect(0, 0, 900, 900),     // マス 100px
+		image.Rect(0, 0, 81, 81),       // 下限に落ちる小さい盤
+	} {
+		m, s := fitMargin(board), fitSlop(board)
+		if s >= m {
+			t.Errorf("board=%v: slop %d が余白 %d 以上", board, s, m)
+		}
+	}
+}
+
 // **盤ぴったりに合わせると次のキャプチャが認識しづらくなる**ので、
 // マスの大きさに比例した余白を残す。ここが 0 に戻るとフィットが逆効果になる。
+//
+// 比率は 0.3(suteme の見解: 外枠線を含めたうえで、さらに外側へ 0.3 マス程度・
+// 最低 8px)。**0.1 に戻さないこと** —— 実機で「合わせた枠で撮ると認識できず、
+// 少し広げると拾う」が出た値。
 func TestWithFitMargin(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -100,22 +119,22 @@ func TestWithFitMargin(t *testing.T) {
 		want  image.Rectangle
 	}{
 		{
-			// マス 70px → 余白 7px。
-			name:  "マスの1割",
+			// マス 70px → 余白 21px。
+			name:  "マスの3割",
 			board: image.Rect(100, 200, 730, 830),
-			want:  image.Rect(93, 193, 737, 837),
+			want:  image.Rect(79, 179, 751, 851),
 		},
 		{
-			// 縦長の矩形では狭いほう(横 45px)に合わせる → 余白 5px(4.5 の四捨五入)。
+			// 縦長の矩形では狭いほう(横 45px)に合わせる → 余白 14px(13.5 の四捨五入)。
 			name:  "縦横で違えば狭いほう",
 			board: image.Rect(0, 0, 405, 630),
-			want:  image.Rect(-5, -5, 410, 635),
+			want:  image.Rect(-14, -14, 419, 644),
 		},
 		{
-			// 小さすぎる盤でも下限は残す(マス 9px → 0.9px → 2px)。
+			// 小さすぎる盤でも下限は残す(マス 9px → 2.7px → 8px)。
 			name:  "下限",
 			board: image.Rect(0, 0, 81, 81),
-			want:  image.Rect(-2, -2, 83, 83),
+			want:  image.Rect(-8, -8, 89, 89),
 		},
 	}
 	for _, tt := range tests {

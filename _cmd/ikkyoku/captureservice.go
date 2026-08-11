@@ -69,18 +69,32 @@ const fitMinBoardPx = 90
 // ここで余白を取らないと機能として本末転倒になる。**
 //
 // 余白はマスの大きさに比例させる(盤の見かけの大きさは中継によって 2 倍以上違う)。
-// 同じ実測で +2〜+8px(マス 70〜100px に対して 2〜11%)がどれも安定していたので、
-// その真ん中を取っている。**大きくしすぎないこと**(余白に写った中継の UI が
-// 盤の格子と競合しうる)。
 //
-// **この余白は「もう合っている」の判定にもそのまま使う**(fitGeometry の slop)。
-// 検出結果は毎回 数px 揺れるので、余白より小さいずれまで直しにいくと押すたびに
-// 枠が動く。余白より小さいずれは**盤が枠に収まっているかどうかを変えない**ので、
-// 直す必要が無い。
+// **2026-08-11 に 0.1 → 0.3 へ広げた。** 合わせた枠で撮った画像を suteme が
+// 認識できず、少し広げて送ると拾う、という事象が実際に出た。suteme 側の見解は
+// 「**外枠線を含めたうえで、さらに外側へ 0.3 マス程度**(その解像度で 15〜20px)、
+// 最低でも 8px」。以前の 0.1(マス 70〜100px で 7〜10px)は通ることもあるが、
+// **枠自体が数px 揺れる前提だと余裕が足りない**。
+// **大きくしすぎないこと**(余白に写った中継の UI が盤の格子と競合しうる)。
 const (
-	fitMarginCellRatio = 0.1
-	fitMinMarginPx     = 2
+	fitMarginCellRatio = 0.3
+	fitMinMarginPx     = 8
 )
+
+// fitSlop は「もう合っている」とみなすずれ(物理px。fitGeometry に渡す)。
+//
+// 検出結果は毎回 5〜10px 揺れるので、そこまで直しにいくと押すたびに枠が動く。
+//
+// ⚠️ **余白そのものを渡さないこと**(2026-08-11 まではそうしていた)。余白と同じ
+// 幅のずれを許すと、**ずれた向きの余白がちょうど 0 になるところまで見逃す**ことに
+// なり、余白を広げた意味が無くなる。余白の半分なら、どちらへ揺れても
+// 余白の半分は必ず残る。
+//
+// 下限は余白の下限の半分(4px)。揺れの実測(5〜10px)よりは小さいが、そこまで
+// 小さい盤は 1 マスが 27px 未満で、そもそもこの機能の想定の外側。
+func fitSlop(board image.Rectangle) int {
+	return fitMargin(board) / 2
+}
 
 // fitMinShrinkRatio は自動フィットで許す縮小の下限(今のキャプチャ領域に対する一辺の比)。
 //
@@ -566,7 +580,7 @@ func (s *CaptureService) FitFrame() (FitResult, error) {
 	w, h := s.wins.frame.Size()
 	cur := windowState{X: x, Y: y, Width: w, Height: h}
 	// **盤ぴったりではなく、少し外側に合わせる**(fitMarginCellRatio 参照)。
-	next, moved := fitGeometry(cur, region, withFitMargin(b), fitMargin(b), scale)
+	next, moved := fitGeometry(cur, region, withFitMargin(b), fitSlop(b), scale)
 	if !moved {
 		return FitResult{
 			Fitted:     true,
@@ -793,7 +807,8 @@ func withFitMargin(board image.Rectangle) image.Rectangle {
 // 位置とサイズの両方に同じだけ乗っているので、差分にすると消える(足し引き不要)。
 //
 // scale は CSS px → 物理 px の係数で、ウィンドウの座標系(DIP)へ割り戻すのに使う。
-// slop は「もう合っている」とみなすずれ(物理px。呼び出し側は余白と同じ値を渡す)。
+// slop は「もう合っている」とみなすずれ(物理px。呼び出し側は fitSlop の値を渡す。
+// **余白と同じ値ではない** —— 理由は fitSlop のコメント)。
 //
 // **サイズは外側に倒す**(scaleUp と同じ理由の裏返し。丸めで縮むと盤の端が欠ける。
 // 1px 広いぶんには盤の外周が少し余分に写るだけで実害が無い)。
