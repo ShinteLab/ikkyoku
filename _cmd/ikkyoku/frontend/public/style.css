@@ -619,10 +619,25 @@ html.is-main body {
    **同時に走ったエンジンが縦に並ぶ。** ⚠️ **結果を合成しない**
    （平均も多数決も取らない。食い違うところを人が読む）。 */
 .analyze-engines {
+  /* 候補手 1 行ぶんの高さ。**評価値と次の 1 手を同じ大きさで出す**ので、
+     行の高さはその文字サイズで決まる。ここを 1 か所に持っておくと、
+     枠の最低高さ(下)と食い違わない。 */
+  --analyze-line-h: 28px;
+  /* 候補手の一覧の高さ。**max ではなく固定**（下の .analyze-lines）。
+     候補 2 本ぶん（28*2 + gap 2）。⚠️ **本数ぶん全部を確保しないこと** ——
+     MultiPV を上げると候補は何本にもなるので、そのぶん盤の下が伸びる。
+     溢れたら中でスクロールさせる。 */
+  --analyze-lines-h: 58px;
+
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   gap: 6px;
+  /* ⚠️ **エンジン 1 つぶんの高さは必ず確保する**（2026-08-11）。連続モードでは
+     1 手指すたびに「消す → 起こす → 結果が届く」を繰り返すので、中身の有無で
+     伸び縮みすると**盤ごと画面が上下に跳ねる**（駒を掴んでいる最中に動くのが
+     一番困る）。カード = 上下の padding(4+4) + 見出し(17) + gap(2) + 一覧。 */
+  min-height: calc(var(--analyze-lines-h) + 27px);
   /* エンジンが増えても盤を押し出さない。盤はできるだけ大きく見せたい。 */
   max-height: 220px;
   overflow-y: auto;
@@ -705,6 +720,9 @@ html.is-main body {
 
 /* 候補手（MultiPV）。**1 本しか来なくても一覧の形**にしておく
    （次善手を辿るのが構想の中心で、複数本になるのが前提）。 */
+/* ⚠️ **高さは固定**（max-height ではない。2026-08-11）。候補の本数は深さごとに
+   変わりうるので、中身で高さが決まると**そのたびに盤が上下に動く**。
+   **空でも畳まないこと**（畳むと結果が届いた瞬間に跳ねる）。 */
 .analyze-lines {
   flex: 0 0 auto;
   margin: 0;
@@ -713,23 +731,35 @@ html.is-main body {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  /* 候補が増えても盤を押し出さない。盤はできるだけ大きく見せたい。 */
-  max-height: 96px;
+  height: var(--analyze-lines-h);
   overflow-y: auto;
 }
 
-.analyze-lines[hidden] {
-  display: none;
-}
-
+/* 行の高さも固定する（読み筋が空の行と、届いた行で高さが変わらないように）。 */
 .analyze-line {
+  flex: 0 0 auto;
   display: flex;
   align-items: baseline;
   gap: 10px;
+  height: var(--analyze-line-h);
+  min-width: 0;
 }
 
-/* 読み筋。⚠️ **長さはエンジン次第**（自作 engine は 1 手だけ）。 */
+/* 次の 1 手。**評価値と同じ大きさで出す**（読むのはほぼ「この評価値が付いているのは
+   どの手か」なので、そこだけ拾えれば足りる）。 */
+.analyze-first {
+  flex: 0 0 auto;
+  font-size: 20px;
+  font-weight: 600;
+  color: #f2f3f5;
+  white-space: nowrap;
+}
+
+/* その先の読み筋。**手順の裏付け**として小さいまま並べる。
+   ⚠️ **長さはエンジン次第**（自作 engine は 1 手だけなので、ここは空になる）。 */
 .analyze-moves {
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: 13px;
   font-family: "Consolas", "Menlo", monospace;
   color: #c9ccd3;
@@ -738,12 +768,16 @@ html.is-main body {
   white-space: nowrap;
 }
 
-/* 評価値。**符号は Go 側が先手視点に揃えている**ので、色は値の符号を見るだけ。 */
+/* 評価値。**符号は Go 側が先手視点に揃えている**ので、色は値の符号を見るだけ。
+   **左寄せ**（幅を取ってあるのは桁が増えても次の 1 手がずれないようにするためで、
+   数字そのものは行の左端に揃っているほうが縦に読み比べやすい）。 */
 .analyze-score {
+  flex: 0 0 auto;
   font-size: 20px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   min-width: 5em;
+  text-align: left;
   color: #c9ccd3;
 }
 

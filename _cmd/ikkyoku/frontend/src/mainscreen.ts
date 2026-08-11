@@ -922,11 +922,15 @@ export function mountMainScreen(root: HTMLElement): void {
     analyzeHint.hidden = analyzeHint.textContent === "";
   };
 
+  // ⚠️ **枠は畳まない**（2026-08-11）。連続モードでは 1 手指すたびに
+  // 「消す → 起こす → 結果が届く」を繰り返すので、そのたびに枠が伸び縮みすると
+  // **盤ごと画面が上下に跳ねる**（駒を掴んでいる最中に動くのが一番困る）。
+  // 高さは CSS(.analyze-engines の min-height / .analyze-lines の height)で
+  // 確保してあるので、ここでは中身を空にするだけにする。
   const clearAnalyzeResult = () => {
     analyzedSfen = "";
     engineCards.clear();
     analyzeEnginesBox.replaceChildren();
-    analyzeEnginesBox.hidden = true;
     analyzeMeta.textContent = "";
     analyzeStatus.hidden = true;
     analyzeStatus.textContent = "";
@@ -967,7 +971,6 @@ export function mountMainScreen(root: HTMLElement): void {
       engineCards.set(e.id, entry);
       analyzeEnginesBox.appendChild(card);
     }
-    analyzeEnginesBox.hidden = engines.length === 0;
   };
 
   // エンジンが名乗った名前を見出しに足す。**設定の名前は消さない**
@@ -991,8 +994,6 @@ export function mountMainScreen(root: HTMLElement): void {
       score.className =
         "analyze-score" + (side > 0 ? " is-black" : side < 0 ? " is-white" : "");
 
-      const moves = document.createElement("span");
-      moves.className = "analyze-moves";
       // ⚠️ **読み筋の長さはエンジン次第。** 自作 engine は 1 手しか返さないので、
       // 深い読み筋があるかのように見せないこと（無ければ何も出さない）。
       //
@@ -1000,14 +1001,26 @@ export function mountMainScreen(root: HTMLElement): void {
       // Go 側は変換に失敗した手も USI のまま text に入れて返すので、text が空なのは
       // 「読み筋そのものが無い」ときだけ。落とすと、古い Go と繋いだときに
       // 静かに USI 表記へ戻る（気づけない）。
-      moves.textContent = l.text?.join(" ") ?? "";
-      // USI 表記はツールチップに残す（エンジンの出力をそのまま確かめたいとき用）。
-      moves.title = l.moves?.join(" ") ?? "";
+      const text = l.text ?? [];
 
-      li.append(score, moves);
+      // **次の 1 手だけ評価値と同じ大きさで出す。** 読むのはほぼ「今この評価値が
+      // 付いているのはどの手か」なので、そこだけ拾えれば足りる。以降の手は
+      // **手順の裏付け**として小さいまま並べる（読み筋が長くても場所を取らない）。
+      const first = document.createElement("span");
+      first.className = "analyze-first";
+      first.textContent = text[0] ?? "";
+
+      const moves = document.createElement("span");
+      moves.className = "analyze-moves";
+      moves.textContent = text.slice(1).join(" ");
+      // USI 表記はツールチップに残す（エンジンの出力をそのまま確かめたいとき用）。
+      const usi = l.moves?.join(" ") ?? "";
+      first.title = usi;
+      moves.title = usi;
+
+      li.append(score, first, moves);
       card.lines.appendChild(li);
     }
-    card.lines.hidden = lines.length === 0;
 
     const parts = [`深さ ${p.depth}`];
     if (p.nodes > 0) {
@@ -1037,7 +1050,6 @@ export function mountMainScreen(root: HTMLElement): void {
     analyzeStatus.textContent = "";
     engineCards.clear();
     analyzeEnginesBox.replaceChildren();
-    analyzeEnginesBox.hidden = true;
     analyzeMeta.textContent = "エンジンを起動しています…";
     try {
       const st = await AnalyzeService.Start(Number(analyzeSeconds.value) || 0);
@@ -1105,6 +1117,9 @@ export function mountMainScreen(root: HTMLElement): void {
   // **結果は局面と紐づける。**
   const syncAnalyze = () => {
     analyzeRow.hidden = !studyLoaded;
+    // ⚠️ **局面があるあいだは枠を出しっぱなしにする**（中身が空でも）。
+    // 解析のたびに畳むと、連続モードでは**1 手ごとに盤が上下に跳ねる**。
+    analyzeEnginesBox.hidden = !studyLoaded;
     if (!studyLoaded) {
       // 空に戻った（撮り直した）。**仕掛けた記録も捨てる** —— 同じ局面をもう一度
       // 採ったときに、連続モードなのに解析が始まらない、ということが起きる。
