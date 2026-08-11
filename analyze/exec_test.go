@@ -29,6 +29,14 @@ const fakeEngineEnv = "IKKYOKU_TEST_USI_ENGINE"
 //     usinewgame → position → go の並び）
 const quitMarkEnv = "IKKYOKU_TEST_USI_QUITMARK"
 
+// multiPVMarkEnv に指すファイルがあれば、エンジンは `setoption name MultiPV` を
+// 受け取ったときにその値をそこに書き残す。
+//
+// ⚠️ **quitMark の並びとは別に持つ。** あちらは「語」だけを順に記録するので、
+// 値までは見えない。**MultiPV は値が届かないと意味が無い**（候補が 1 本のままになる）
+// のに、画面では「このエンジンは MultiPV 非対応」と見分けが付かない。
+const multiPVMarkEnv = "IKKYOKU_TEST_USI_MULTIPVMARK"
+
 // runFakeEngine は最低限の USI エンジンとして振る舞う。
 func runFakeEngine() {
 	sc := bufio.NewScanner(os.Stdin)
@@ -61,6 +69,13 @@ func runFakeEngine() {
 				"option name BookDir type string default <empty>",
 				"usiok")
 		case strings.HasPrefix(line, "setoption "):
+			// MultiPV は**探索ごとに変わる**ので、isready のあとに来るのが正しい。
+			if f := strings.Fields(line); len(f) == 5 && f[2] == "MultiPV" {
+				if mark := os.Getenv(multiPVMarkEnv); mark != "" {
+					_ = os.WriteFile(mark, []byte(f[4]), 0o644)
+				}
+				continue
+			}
 			if ready {
 				continue // 間に合っていない。実際のエンジンと同じく無視する。
 			}
@@ -164,5 +179,52 @@ func TestExecSessionReportsMissingBinary(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "エンジン") {
 		t.Errorf("理由が伝わりません: %v", err)
+	}
+}
+
+// ⚠️ **候補手の本数（MultiPV）がエンジンまで届くこと。**
+//
+// 届かないと候補は 1 本のままだが、**画面では「このエンジンは MultiPV 非対応」と
+// 見分けが付かない**（対応していないエンジンでも 1 本しか返らないのが正常なので）。
+// 値まで観測しないと、黙って効いていない状態に気づけない。
+//
+// **`isready` のあとに送るのが正しい**（探索ごとに変えてよい option なので、
+// 初期化に効く option と違って間に合う）。
+func TestAnalyzeSendsMultiPV(t *testing.T) {
+	t.Setenv(fakeEngineEnv, "1")
+	mark := filepath.Join(t.TempDir(), "multipv.mark")
+	t.Setenv(multiPVMarkEnv, mark)
+
+	s := NewExecSession(os.Args[0], nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	if _, err := s.Analyze(ctx, startpos, Options{Movetime: 3 * time.Second, MultiPV: 3}, nil); err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	got, err := os.ReadFile(mark)
+	if err != nil {
+		t.Fatalf("MultiPV が送られていません: %v", err)
+	}
+	if string(got) != "3" {
+		t.Errorf("MultiPV = %q, want %q", got, "3")
+	}
+}
+
+// 本数を指定しなければ MultiPV は送らない（1 本でよいときに余計な option を送らない）。
+func TestAnalyzeOmitsMultiPVWhenNotAsked(t *testing.T) {
+	t.Setenv(fakeEngineEnv, "1")
+	mark := filepath.Join(t.TempDir(), "multipv.mark")
+	t.Setenv(multiPVMarkEnv, mark)
+
+	s := NewExecSession(os.Args[0], nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	if _, err := s.Analyze(ctx, startpos, Options{Movetime: 3 * time.Second}, nil); err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	if _, err := os.Stat(mark); err == nil {
+		t.Error("本数を指定していないのに MultiPV を送っています")
 	}
 }

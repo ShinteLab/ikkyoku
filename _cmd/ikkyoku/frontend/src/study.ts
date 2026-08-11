@@ -47,6 +47,11 @@ export interface StudyBoardHandle {
   // undo は 1 手戻す（**手順からも消す**。「指し間違えた」の取り消し）。
   // 戻って見るだけなら手順のチップを押す（そちらは手順を消さない）。
   undo(): void;
+  // play は USI の手をそのまま指す（解析結果の候補手を押したとき）。
+  //
+  // **盤の操作と同じ入口を通す** —— 手順の記録も表示の更新も 1 か所で済む。
+  // 合法かどうかは Go 側が言うので、**呼ぶ前に確かめなくてよい**。
+  play(usi: string): void;
 }
 
 export interface StudyBoardOptions {
@@ -426,6 +431,13 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
     undo() {
       // **判定は Go 側**（根から更に戻せないなら向こうがエラーを返す）。
       void run(() => StudyService.Undo());
+    },
+    play(usi: string) {
+      // 成る / 成らずは聞かない。**候補手はどちらかに決まった手**として届く
+      // （エンジンが返す USI に "+" が入っているかどうかがその答え）。
+      closeAsk();
+      pick = null;
+      void run(() => StudyService.Play(usi));
     },
   };
 }

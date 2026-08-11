@@ -271,12 +271,17 @@ type AnalyzeState struct {
 // エンジンも生きている）。時間で打ち切っても、それまでに完走した深さの評価値は出る
 // （設計原則3）。
 //
+// multiPV は候補手を何本出させるか（0/1 なら最善手だけ）。**次善手を辿るのが
+// 構想の中心**なので、ここは畳まずに素通しする。⚠️ **対応していないエンジンでは
+// 無視される**（自作 `engine` が今それ。engine/TODO.md の 1）ので、
+// **1 本しか返らないことを異常扱いしないこと。**
+//
 // ⚠️ **局面が確定していなければエラー。** 手番か駒台の先後が未決だと SFEN が
 // 組み上がらない（決めていないことを勝手に決めない。設計原則5）。訂正 UI で
 // 決めてもらう以外に手は無いので、ここは警告ではなくエラーにする。
 // ⚠️ **設定で「解析に使う」が 1 つも無ければエラー。** 何も起きないより、
 // 設定を直す先が分かるほうがよい。
-func (s *AnalyzeService) Start(seconds int) (AnalyzeState, error) {
+func (s *AnalyzeService) Start(seconds, multiPV int) (AnalyzeState, error) {
 	// ⚠️ **根と手順を分けて受け取る。** 組み立て直した 1 つの SFEN を渡すと、
 	// 千日手と連続王手をエンジンが判定できない（`position sfen <根> moves ...`）。
 	target, err := s.study.analyzeTarget()
@@ -315,7 +320,7 @@ func (s *AnalyzeService) Start(seconds int) (AnalyzeState, error) {
 
 	// ⚠️ **seconds が 0 以下なら「止めるまで考え続ける」。**
 	// これが「ずっと解析していたい」の表し方で、そのあいだプロセスも生きている。
-	opt := analyze.Options{Moves: target.Moves}
+	opt := analyze.Options{Moves: target.Moves, MultiPV: multiPV}
 	if seconds > 0 {
 		opt.Movetime = time.Duration(seconds) * time.Second
 	}

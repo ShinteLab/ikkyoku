@@ -460,6 +460,19 @@ export function mountMainScreen(root: HTMLElement): void {
               <option value="0">無制限</option>
             </select>
           </label>
+          <!-- 候補手の本数（MultiPV。2026-08-11）。**次善手を辿るのが構想の中心**
+               なので、最善手だけに絞らずここで増やせるようにする。
+
+               ⚠️ **対応していないエンジンでは無視される**（自作エンジンが今それ）。
+               1 本しか返らないことを異常扱いしないこと。 -->
+          <label class="analyze-time">
+            <select id="analyze-multipv"
+                    title="候補手を何本出させるか（MultiPV）。対応していないエンジンでは 1 本のままです">
+              <option value="1" selected>候補 1</option>
+              <option value="3">候補 3</option>
+              <option value="5">候補 5</option>
+            </select>
+          </label>
           <span id="analyze-meta" class="note"></span>
           <!-- 押せない理由。**ツールチップだけにしない**（ホバーしないと読めない）。 -->
           <span id="analyze-hint" class="note is-caution" hidden></span>
@@ -853,6 +866,7 @@ export function mountMainScreen(root: HTMLElement): void {
   const analyzeRun = root.querySelector<HTMLButtonElement>("#analyze-run")!;
   const analyzeSeconds = root.querySelector<HTMLSelectElement>("#analyze-seconds")!;
   const analyzeContinuous = root.querySelector<HTMLInputElement>("#analyze-continuous")!;
+  const analyzeMultiPV = root.querySelector<HTMLSelectElement>("#analyze-multipv")!;
   const analyzeEnginesBox = root.querySelector<HTMLDivElement>("#analyze-engines")!;
   const analyzeMeta = root.querySelector<HTMLElement>("#analyze-meta")!;
   const analyzeHint = root.querySelector<HTMLElement>("#analyze-hint")!;
@@ -936,6 +950,22 @@ export function mountMainScreen(root: HTMLElement): void {
     analyzeStatus.textContent = "";
   };
 
+  // reserveLines は候補手の一覧に確保する高さを、本数の指定に合わせて決める。
+  //
+  // ⚠️ **高さは固定しておく**（`--analyze-lines-h`）。連続モードでは 1 手ごとに
+  // 「消す → 起こす → 結果が届く」を繰り返すので、届いた本数で伸び縮みすると
+  // **盤ごと画面が上下に跳ねる**。本数を変えたときだけ高さが変わればよい。
+  //
+  // ⚠️ **本数ぶん全部は確保しない**（4 本ぶんで頭打ち）。MultiPV を上げると
+  // 候補は何本にもなるので、そのぶん盤の下が伸びる。溢れたら中でスクロールさせる。
+  const reserveLines = () => {
+    const want = Math.min(Math.max(Number(analyzeMultiPV.value) || 1, 1), 4);
+    // 1 行 28px + 行間 2px（CSS の --analyze-line-h と揃えること）。
+    analyzeEnginesBox.style.setProperty("--analyze-lines-h", `${want * 28 + (want - 1) * 2}px`);
+  };
+  analyzeMultiPV.addEventListener("change", reserveLines);
+  reserveLines();
+
   // 解析に参加するエンジンぶんの枠を先に作る。
   //
   // **起動を待っているあいだも見出しを出す**（エンジンによっては評価関数の読み込みで
@@ -1018,6 +1048,27 @@ export function mountMainScreen(root: HTMLElement): void {
       first.title = usi;
       moves.title = usi;
 
+      // ⚠️ **押すとその手を指す。** MultiPV を増やす目的がまさにこれ ——
+      // 「次善手を選んだらどう転ぶか」を辿るのに、候補を読んでから盤の上で
+      // 同じ手を探し直させるのでは遠回りになる。
+      //
+      // **合法かどうかは Go 側が言う**（局面が変わると結果は消えるので、
+      // ここに並んでいる手は今の局面のものだが、判定はフロントに書かない）。
+      const play = l.moves?.[0] ?? "";
+      if (play) {
+        li.classList.add("is-playable");
+        li.tabIndex = 0;
+        li.title = `${text[0] ?? play} を指します（${usi}）`;
+        const go = () => studyBoardUI.play(play);
+        li.addEventListener("click", go);
+        li.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            go();
+          }
+        });
+      }
+
       li.append(score, first, moves);
       card.lines.appendChild(li);
     }
@@ -1051,8 +1102,12 @@ export function mountMainScreen(root: HTMLElement): void {
     engineCards.clear();
     analyzeEnginesBox.replaceChildren();
     analyzeMeta.textContent = "エンジンを起動しています…";
+    reserveLines();
     try {
-      const st = await AnalyzeService.Start(Number(analyzeSeconds.value) || 0);
+      const st = await AnalyzeService.Start(
+        Number(analyzeSeconds.value) || 0,
+        Number(analyzeMultiPV.value) || 1,
+      );
       analyzeSeq = st.seq;
       analyzedSfen = st.sfen;
       // 参加するエンジンは Go 側が決める（設定で「解析に使う」を付けたもの）。

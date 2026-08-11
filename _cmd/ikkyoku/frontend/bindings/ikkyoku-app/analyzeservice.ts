@@ -74,14 +74,19 @@ export function CheckEngine(id: string): $CancellablePromise<$models.EngineCheck
  * エンジンも生きている）。時間で打ち切っても、それまでに完走した深さの評価値は出る
  * （設計原則3）。
  * 
+ * multiPV は候補手を何本出させるか（0/1 なら最善手だけ）。**次善手を辿るのが
+ * 構想の中心**なので、ここは畳まずに素通しする。⚠️ **対応していないエンジンでは
+ * 無視される**（自作 `engine` が今それ。engine/TODO.md の 1）ので、
+ * **1 本しか返らないことを異常扱いしないこと。**
+ * 
  * ⚠️ **局面が確定していなければエラー。** 手番か駒台の先後が未決だと SFEN が
  * 組み上がらない（決めていないことを勝手に決めない。設計原則5）。訂正 UI で
  * 決めてもらう以外に手は無いので、ここは警告ではなくエラーにする。
  * ⚠️ **設定で「解析に使う」が 1 つも無ければエラー。** 何も起きないより、
  * 設定を直す先が分かるほうがよい。
  */
-export function Start(seconds: number): $CancellablePromise<$models.AnalyzeState> {
-    return $Call.ByID(3590958719, seconds);
+export function Start(seconds: number, multiPV: number): $CancellablePromise<$models.AnalyzeState> {
+    return $Call.ByID(3590958719, seconds, multiPV);
 }
 
 /**

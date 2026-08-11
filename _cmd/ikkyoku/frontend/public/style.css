@@ -624,9 +624,10 @@ html.is-main body {
      枠の最低高さ(下)と食い違わない。 */
   --analyze-line-h: 28px;
   /* 候補手の一覧の高さ。**max ではなく固定**（下の .analyze-lines）。
-     候補 2 本ぶん（28*2 + gap 2）。⚠️ **本数ぶん全部を確保しないこと** ——
-     MultiPV を上げると候補は何本にもなるので、そのぶん盤の下が伸びる。
-     溢れたら中でスクロールさせる。 */
+     ⚠️ **実際の値は JS が入れる**（mainscreen.ts の reserveLines。候補の本数の
+     指定に合わせて、4 本ぶんで頭打ち）。ここにあるのは、まだ入っていないときの既定。
+     ⚠️ **本数ぶん全部を確保しないこと** —— MultiPV を上げると候補は何本にもなるので、
+     そのぶん盤の下が伸びる。溢れたら中でスクロールさせる。 */
   --analyze-lines-h: 58px;
 
   flex: 0 0 auto;
@@ -743,6 +744,22 @@ html.is-main body {
   gap: 10px;
   height: var(--analyze-line-h);
   min-width: 0;
+  padding: 0 4px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+}
+
+/* 押すとその手を指す。**MultiPV を増やす目的がこれ** ——
+   「次善手を選んだらどう転ぶか」を、候補を読んだその場で辿れるようにする。 */
+.analyze-line.is-playable {
+  cursor: pointer;
+}
+
+.analyze-line.is-playable:hover,
+.analyze-line.is-playable:focus-visible {
+  border-color: #5ea0ff;
+  background: rgba(94, 160, 255, 0.1);
+  outline: none;
 }
 
 /* 次の 1 手。**評価値と同じ大きさで出す**（読むのはほぼ「この評価値が付いているのは
