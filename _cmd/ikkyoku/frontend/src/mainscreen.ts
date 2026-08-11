@@ -305,8 +305,17 @@ export function mountMainScreen(root: HTMLElement): void {
                   title="訂正タブへ戻ります。解析の結果は捨てられます">訂正に戻る</button>
         </div>
         <div class="board-area">
-          <div id="study-stage" class="board-stage">
-            <shogi-board id="study-board" hidden></shogi-board>
+          <!-- 盤と駒台の配置。**後手の駒台は盤の左上、先手の駒台は右下**
+               (訂正タブと同じ並び＝実際の将棋盤と同じ)。
+               ⚠️ **こちらは読み取り専用**（駒を掴めない）。訂正タブの
+               「足りない駒」はここには無い —— 未決が残った局面はそもそも
+               このタブに来ない（StudyService.Adopt が断る）。 -->
+          <div id="study-board-with-hands" class="board-with-hands">
+            <div id="study-hand-white-slot" class="hand-slot" hidden></div>
+            <div id="study-stage" class="board-stage">
+              <shogi-board id="study-board" hidden></shogi-board>
+            </div>
+            <div id="study-hand-black-slot" class="hand-slot" hidden></div>
           </div>
           <p id="study-placeholder" class="board-placeholder">
             訂正タブで「この局面を解析する」を押すと、ここに局面が出ます。
@@ -893,6 +902,24 @@ export function mountMainScreen(root: HTMLElement): void {
   const studyHandOut = root.querySelector<HTMLElement>("#study-hand")!;
   const studyWarnings = root.querySelector<HTMLUListElement>("#study-warnings")!;
   const studyBack = root.querySelector<HTMLButtonElement>("#study-back")!;
+  // 盤の脇の駒台（読み取り専用）。**訂正タブの駒台とは別物**で、
+  // ドラッグの入口も「足りない駒」も持たない。
+  const studyHandSlots = {
+    black: root.querySelector<HTMLElement>("#study-hand-black-slot")!,
+    white: root.querySelector<HTMLElement>("#study-hand-white-slot")!,
+  };
+  // 中身は訂正タブと同じ .hand-zone（見た目を揃えるため）。掴めないので
+  // is-readonly を足してカーソルだけ変える。
+  const studyHandZones = [true, false].map((black) => {
+    const zone = document.createElement("div");
+    zone.className = "hand-zone is-readonly";
+    zone.dataset.black = String(black);
+    zone.innerHTML =
+      `<span class="hand-zone-label">${black ? "先手" : "後手"}の駒台</span>` +
+      `<div class="hand-chips"></div>`;
+    (black ? studyHandSlots.black : studyHandSlots.white).appendChild(zone);
+    return zone;
+  });
   // 訂正タブ側の一行。訂正の操作が通らなかった理由と、確定できない理由を出す。
   const editStatus = root.querySelector<HTMLParagraphElement>("#edit-status")!;
 
@@ -903,6 +930,10 @@ export function mountMainScreen(root: HTMLElement): void {
     studyBoard.hidden = !studyLoaded;
     studyPlaceholder.hidden = studyLoaded;
     studyBack.hidden = !studyLoaded;
+    // 駒台は局面の一部なので、局面があるあいだは**空でも出す**
+    // （持ち駒が 0 枚であることも局面の情報）。
+    studyHandSlots.black.hidden = !studyLoaded;
+    studyHandSlots.white.hidden = !studyLoaded;
     if (studyLoaded) {
       studyBoard.setAttribute("sfen", st.boardSfen);
       // 手番と手数は SFEN に入っているが、読むのに要るのは文字のほう。
@@ -912,7 +943,7 @@ export function mountMainScreen(root: HTMLElement): void {
       showStudyHand(st.hands ?? []);
     } else {
       studySfenOut.textContent = "-";
-      studyHandRow.hidden = true;
+      showStudyHand([]);
     }
     // 確定した局面でも警告は出うる（詰将棋のように「論理的におかしくても正しい」
     // 局面があるため。設計原則3）。変な評価値が出たときの手掛かりになる。
@@ -921,7 +952,33 @@ export function mountMainScreen(root: HTMLElement): void {
   };
 
   // 解析タブの駒台。**未決は残っていない**（確定した局面なので）。
+  //
+  // ⚠️ **盤の脇の駒台と、下の文字の行の両方をここで更新する。**
+  // 同じ値を 2 か所に描くだけにすること（片方だけ更新する経路を作ると、
+  // どちらが今の局面の持ち駒なのか分からなくなる）。
   const showStudyHand = (inv: Stock[]) => {
+    // 盤の脇。**枚数は数字ではなく駒そのものの数で見せる**（訂正タブと同じ）。
+    for (const zone of studyHandZones) {
+      const black = zone.dataset.black === "true";
+      const chips = zone.querySelector<HTMLDivElement>(".hand-chips")!;
+      chips.replaceChildren();
+      let total = 0;
+      // 並びは Go 側の Inventory の順（歩香桂銀金角飛王）。
+      // **後手は逆順**（駒が 180 度回っているので、そちら側から読んで同じ並びになる）。
+      for (const s of black ? inv : [...inv].reverse()) {
+        const n = black ? s.handBlack : s.handWhite;
+        for (let i = 0; i < n; i++) {
+          total++;
+          const chip = document.createElement("div");
+          chip.className = black ? "stock-chip" : "stock-chip is-white";
+          chip.textContent = black ? s.letter : s.letter.toLowerCase();
+          chip.title = `${black ? "先手" : "後手"}の${s.name}（${n}枚）`;
+          chips.appendChild(chip);
+        }
+      }
+      zone.classList.toggle("is-empty", total === 0);
+    }
+
     const fmt = (pick: (s: Stock) => number) =>
       inv
         .filter((s) => pick(s) > 0)

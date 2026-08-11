@@ -744,10 +744,10 @@ html.is-main body {
   border-radius: 6px;
 }
 
-.board-area > .board-with-hands,
-/* 解析タブの盤は駒台を脇に置かない(駒台は下に文字で出る)ので、.board-stage が
-   そのまま .board-area の子になる。**縮ませないこと** —— .board-stage の幅は
+/* 訂正タブ・解析タブとも盤の脇に駒台を置くので .board-with-hands が
+   .board-area の子になる。**縮ませないこと** —— .board-stage の幅は
    盤の SVG とぴったり同じ前提で、縮むと盤の絵が箱の中で中央寄せになり余白ができる。 */
+.board-area > .board-with-hands,
 .board-area > .board-stage {
   flex: 0 0 auto;
 }
@@ -780,7 +780,8 @@ html.is-main body {
 
 /* 駒台は**盤の高さの半分ぶん**を使う(1 行が盤の半分になる)。
    駒を枚数ぶん並べるので、狭いとすぐ溢れる。 */
-#hand-white-slot {
+#hand-white-slot,
+#study-hand-white-slot {
   grid-column: 1;
   grid-row: 1;
   justify-self: end;
@@ -795,7 +796,10 @@ html.is-main body {
   align-self: stretch;
 }
 
-#hand-black-slot {
+/* 解析タブには「足りない駒」が無い(未決が残った局面はこのタブに来ない)ので、
+   先手の駒台は右列の下段だけを使う。 */
+#hand-black-slot,
+#study-hand-black-slot {
   grid-column: 3;
   grid-row: 2;
   align-self: stretch;
@@ -1172,6 +1176,12 @@ html.is-main body {
   padding: 6px 4px;
   border: 1px dashed #3a3d47;
   border-radius: 6px;
+}
+
+/* 解析タブの駒台は**見るだけ**。掴めるように見せないこと
+   （駒を動かせるのは訂正タブだけ）。 */
+.hand-zone.is-readonly .stock-chip {
+  cursor: default;
 }
 
 .hand-zone.is-over {
