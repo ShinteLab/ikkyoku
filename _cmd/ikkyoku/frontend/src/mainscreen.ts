@@ -130,6 +130,11 @@ const LOW_CONFIDENCE = 0.75;
 // 「似た候補が競っている」＝訂正の候補、という読み方になる。
 const LOW_CELL_CONFIDENCE = 0.8;
 
+// 撮った PNG の座標系での盤面矩形（`Debug.Region` から `ImageBounds.Min` を引いたもの）。
+// **使い道は 2 つ**——suteme へ送る学習サンプルの切り出し位置と、訂正タブの参照画像の
+// 切り取り。**同じ 1 つの値から両方を出すこと**（別々に持つと片方だけずれる）。
+type ShotRegion = { x1: number; y1: number; x2: number; y2: number };
+
 // 盤面領域の決め方の表示名。**どれも異常ではない。**
 // ikkyoku はガイド枠を盤に合わせて撮るので、盤の縁が画像端に来る whole は
 // むしろ想定どおりの経路(枠が合っているほど whole になる)。
@@ -299,10 +304,16 @@ export function mountMainScreen(root: HTMLElement): void {
                **盤は 560px より大きくならない**ので、
                左の余白はもともと遊んでおり、ここに置くのは盤を狭めない。
 
+               ⚠️ **認識が使った盤面領域(Debug.Region)で切り取って出す**(2026-08-11)。
+               画面いっぱいに広げたときに盤が小さすぎて 1 マスずつ見比べられないのと、
+               **盤面領域を誤認識していても気づけない**ため。切り取ると、ずれていれば
+               「盤が欠けた画像」として一目で分かる。**領域が無いときは全体を出す**
+               (撮った 1 枚を見せないより良い。設計原則3)。
+
                ⚠️ **出すのは画像そのものだけ。** 重ね表示・信頼度・保存先は
                「認識がどれくらい外したか」の情報なので「認識詳細情報」に残す
                (盤面タブの基準は「局面を読む・直す・動かすのに要るか」)。
-               画像の src はデバッグ側と**同じ CaptureResult.thumbnail**。 -->
+               もとの画像は「認識詳細情報」と**同じ CaptureResult.thumbnail**。 -->
           <div id="capture-ref" class="capture-ref" hidden>
             <img id="capture-ref-img" class="capture-ref-img" alt="訂正のもとになった画像" />
           </div>
@@ -649,6 +660,58 @@ export function mountMainScreen(root: HTMLElement): void {
     captureRef.hidden = !hasShot;
   };
 
+  // 参照画像は**認識が使った盤面領域で切り取って**出す（2026-08-11）。
+  //
+  // 全体のままだと、ウィンドウを広げたときに盤が小さいままで 1 マスずつ見比べられず、
+  // **盤面領域そのものを誤認識していても気づけない**（重ね表示は「認識詳細情報」の
+  // 中で、畳んでいると見えない）。切り取れば、ずれていれば盤の欠けた画像として出る。
+  //
+  // ⚠️ **切り取りはここでやる（Go 側に 2 枚目を作らせない）。** サムネイルは既に
+  // 等倍 PNG の base64 なので、切り取った画像も返すとイベントのペイロードが倍になる。
+  // 重ね表示の SVG と同じ考え方で、**Go が返すのは座標だけ**。
+  //
+  // ⚠️ **領域が無い（認識に失敗した）ときは全体を出す。** 撮った 1 枚を見せないより
+  // 良い（設計原則3）。**画像が壊れていて読めないときも同じ。**
+  let captureRefSeq = 0;
+  const showCaptureRefImage = (
+    thumbnail: string,
+    region: ShotRegion | null,
+    path: string,
+  ) => {
+    // 撮り直しの競合よけ。切り取りは画像の読み込みを挟む非同期なので、
+    // 遅れて終わった前の 1 枚が新しい画像を上書きしないようにする。
+    const seq = ++captureRefSeq;
+    captureRefImg.title = path;
+    captureRefImg.src = thumbnail;
+    if (!region) {
+      return;
+    }
+    const img = new Image();
+    img.onload = () => {
+      if (seq !== captureRefSeq) {
+        return;
+      }
+      // 画像からはみ出す座標は詰める（はみ出したまま drawImage すると空白が入る）。
+      const x = Math.max(0, Math.min(region.x1, img.naturalWidth));
+      const y = Math.max(0, Math.min(region.y1, img.naturalHeight));
+      const w = Math.max(0, Math.min(region.x2, img.naturalWidth) - x);
+      const h = Math.max(0, Math.min(region.y2, img.naturalHeight) - y);
+      if (w <= 0 || h <= 0) {
+        return; // 切り取れないので全体のまま
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        return;
+      }
+      ctx.drawImage(img, x, y, w, h, 0, 0, w, h);
+      captureRefImg.src = canvas.toDataURL("image/png");
+    };
+    img.src = thumbnail;
+  };
+
   // ---- 訂正データの送信（suteme への還元） --------------------------------
   //
   // **確定してから出す。** 訂正の途中の盤面を送る意味が無いので、訂正モードを
@@ -669,7 +732,7 @@ export function mountMainScreen(root: HTMLElement): void {
   // 持ち駒を落とした）。**送る前に出す**（何が落ちるか分からないまま送らせない）。
   let editNotes: string[] = [];
   let editLoaded = false;
-  let lastRegion: { x1: number; y1: number; x2: number; y2: number } | null = null;
+  let lastRegion: ShotRegion | null = null;
 
   const syncTrain = () => {
     const ready = editLoaded && !!shotFullPath && !!lastRegion;
@@ -1413,20 +1476,13 @@ export function mountMainScreen(root: HTMLElement): void {
       thumbnail.src = result.thumbnail;
       shot.hidden = false;
     }
-    // 訂正中に盤の左へ出す参照画像。**同じ 1 枚を 2 か所に描くだけ**にすること
-    // (別々に更新すると、どちらが今の画像か分からなくなる)。
-    hasShot = !!result.thumbnail;
-    if (hasShot) {
-      captureRefImg.src = result.thumbnail;
-      captureRefImg.title = result.path;
-    }
-    syncCaptureRef();
     // 前の 1 枚の送信結果を残さない（別の画像の話になるため）。
     trainSendStatus.textContent = "";
     trainSendStatus.classList.remove("is-error");
-    // suteme へ送るときの盤面矩形。**保存した PNG の座標系に直して覚える**
+    // 盤面矩形。**保存した PNG の座標系に直して覚える**
     // （認識はメモリ上の画像の座標系で答えるが、PNG は原点 (0,0) に正規化される。
     //  今は常に一致するはずだが、ずれると学習サンプルの切り出しが黙って 1 マスずれる）。
+    // suteme へ送るときと、下の参照画像の切り取りに使う。**同じ値から両方を出す。**
     const dbg = result.debug;
     lastRegion = dbg
       ? {
@@ -1436,6 +1492,13 @@ export function mountMainScreen(root: HTMLElement): void {
           y2: dbg.region.Max.Y - dbg.image_bounds.Min.Y,
         }
       : null;
+    // 訂正中に盤の左へ出す参照画像。**もとの 1 枚は「認識詳細情報」と同じ**で、
+    // ここではそれを盤面領域で切り取って出すだけ（別の経路で取り直さない）。
+    hasShot = !!result.thumbnail;
+    if (hasShot) {
+      showCaptureRefImage(result.thumbnail, lastRegion, result.path);
+    }
+    syncCaptureRef();
     syncTrain();
     drawOverlay(result.debug);
 
