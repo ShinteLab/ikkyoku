@@ -788,6 +788,12 @@ html.is-main body {
   align-self: stretch;
 }
 
+/* 解析タブの駒台は正方形で高さを使い切らないので、**盤の外側の角に寄せる**
+   (後手は盤の上端、先手は盤の下端)。伸ばすと正方形でなくなる。 */
+#study-hand-white-slot {
+  align-self: start;
+}
+
 /* 足りない駒は先手の駒台の**上**（後手の駒台と左右対称）。縦 1 列に 8 種を
    並べるので、こちらも盤の半分の高さを使う。 */
 #missing-slot {
@@ -796,13 +802,18 @@ html.is-main body {
   align-self: stretch;
 }
 
-/* 解析タブには「足りない駒」が無い(未決が残った局面はこのタブに来ない)ので、
-   先手の駒台は右列の下段だけを使う。 */
-#hand-black-slot,
-#study-hand-black-slot {
+#hand-black-slot {
   grid-column: 3;
   grid-row: 2;
   align-self: stretch;
+}
+
+/* 解析タブには「足りない駒」が無い(未決が残った局面はこのタブに来ない)ので、
+   先手の駒台は右列の下段だけを使い、**盤の下端に寄せる**。 */
+#study-hand-black-slot {
+  grid-column: 3;
+  grid-row: 2;
+  align-self: end;
 }
 
 /* 先手側のスロットには「足りない駒」と駒台が縦に積まれる(足りない駒が上)。
@@ -1178,9 +1189,27 @@ html.is-main body {
   border-radius: 6px;
 }
 
-/* 解析タブの駒台は**見るだけ**。掴めるように見せないこと
-   （駒を動かせるのは訂正タブだけ）。 */
+/* 解析タブの駒台。**見るだけ**なので、訂正タブの駒台とは寸法の考え方が違う。
+   あちらはドラッグの落とし先なので当たり判定として縦に大きく取るが、こちらは
+   **実際の駒台に近い正方形**にして、駒も盤の駒に近い大きさで出す。
+   見出し(.hand-zone-label)は付けない —— 盤との位置関係が説明になっている。 */
+.hand-zone.is-readonly {
+  width: 140px;
+  height: auto;
+  min-height: 0;
+  aspect-ratio: 1;
+  padding: 4px;
+  /* 破線は「ここへ落とせる」の合図なので、掴めないこちらは実線にする。 */
+  border-style: solid;
+  border-color: #33363f;
+}
+
+/* 掴めるように見せないこと（駒を動かせるのは訂正タブだけ）。
+   大きさは盤の駒(CELL=56px)に寄せる。 */
 .hand-zone.is-readonly .stock-chip {
+  width: 40px;
+  height: 40px;
+  font-size: 34px;
   cursor: default;
 }
 

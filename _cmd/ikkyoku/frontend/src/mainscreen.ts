@@ -908,15 +908,16 @@ export function mountMainScreen(root: HTMLElement): void {
     black: root.querySelector<HTMLElement>("#study-hand-black-slot")!,
     white: root.querySelector<HTMLElement>("#study-hand-white-slot")!,
   };
-  // 中身は訂正タブと同じ .hand-zone（見た目を揃えるため）。掴めないので
-  // is-readonly を足してカーソルだけ変える。
+  // 中身は訂正タブと同じ .hand-zone だが、**見出しは出さない**（`is-readonly`）。
+  // 盤との位置関係そのものが「どちらの駒台か」の説明になっているので、
+  // 掴む相手でもない箱に文字を足すと、そのぶん駒台が縦に伸びるだけになる。
+  // 読み上げ用に aria-label だけ持たせる。
   const studyHandZones = [true, false].map((black) => {
     const zone = document.createElement("div");
     zone.className = "hand-zone is-readonly";
     zone.dataset.black = String(black);
-    zone.innerHTML =
-      `<span class="hand-zone-label">${black ? "先手" : "後手"}の駒台</span>` +
-      `<div class="hand-chips"></div>`;
+    zone.setAttribute("aria-label", `${black ? "先手" : "後手"}の駒台`);
+    zone.innerHTML = `<div class="hand-chips"></div>`;
     (black ? studyHandSlots.black : studyHandSlots.white).appendChild(zone);
     return zone;
   });
