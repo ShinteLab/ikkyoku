@@ -88,6 +88,11 @@ interface CaptureResult {
 // （engine/TODO.md の 1 が入れば増える）。
 interface AnalyzeLine {
   rank: number;
+  // depth はこの候補が届いたときの深さ。
+  //
+  // ⚠️ **候補ごとに違うことがある。** MultiPV では順位ごとに別々の info が来て、
+  // 進み方も揃わない（見出しの「深さ」は一番深いところ）。
+  depth: number;
   score: { cp: number; mate: number; label: string };
   // moves は USI 表記（"8h2b+"）。**手を辿るのに使うのはこちら。**
   moves: string[];
@@ -1048,9 +1053,13 @@ export function mountMainScreen(root: HTMLElement): void {
       moves.className = "analyze-moves";
       moves.textContent = text.slice(1).join(" ");
       // USI 表記はツールチップに残す（エンジンの出力をそのまま確かめたいとき用）。
+      // ⚠️ **深さは候補ごとに違うことがある**（MultiPV は順位ごとに別々の info が
+      // 来て、進み方も揃わない）。見出しの「深さ」は一番深いところなので、
+      // その候補がどこまで読まれた答えなのかはここで確かめられるようにする。
       const usi = l.moves?.join(" ") ?? "";
-      first.title = usi;
-      moves.title = usi;
+      const hint = l.depth > 0 ? `深さ ${l.depth}　${usi}` : usi;
+      first.title = hint;
+      moves.title = hint;
 
       // ⚠️ **押すとその手を指す。** MultiPV を増やす目的がまさにこれ ——
       // 「次善手を選んだらどう転ぶか」を辿るのに、候補を読んでから盤の上で
@@ -1062,7 +1071,7 @@ export function mountMainScreen(root: HTMLElement): void {
       if (play) {
         li.classList.add("is-playable");
         li.tabIndex = 0;
-        li.title = `${text[0] ?? play} を指します（${usi}）`;
+        li.title = `${text[0] ?? play} を指します（${hint}）`;
         const go = () => studyBoardUI.play(play);
         li.addEventListener("click", go);
         li.addEventListener("keydown", (e) => {

@@ -258,35 +258,71 @@ func TestAccumulatorGroupsMultiPV(t *testing.T) {
 		t.Errorf("順位で並んでいません: %+v", p.Lines)
 	}
 
-	// 深さが進んだら前の深さの候補は残さない（**混ぜると読み筋が食い違う**）。
-	// ⚠️ これは **add が返す途中経過**の話。最終結果（snapshot）は別（下）。
+	// ⚠️ **深さが進んでも候補は消えない。** 順位ごとに上書きするだけなので、
+	// まだ更新されていない順位は 1 つ前の深さの値のまま残る。
+	// **揃うまで待つと候補が消える**（それが以前の壊れ方だった）。
 	live, ok := a.add(coreusi.Info{Depth: 4, MultiPV: 1, ScoreCP: 120, HasScore: true, PV: []string{"7g7f"}})
 	if !ok {
 		t.Fatal("更新が表に出ていません")
 	}
-	if len(live.Lines) != 1 || live.Depth != 4 {
-		t.Errorf("深さが変わったのに前の候補が残っています: depth=%d lines=%+v", live.Depth, live.Lines)
+	if len(live.Lines) != 2 {
+		t.Fatalf("深さが進んだら候補が減りました: %+v", live.Lines)
+	}
+	if live.Depth != 4 {
+		t.Errorf("深さ = %d, want 4", live.Depth)
+	}
+	// 更新された順位だけ新しい深さになっていること（**候補ごとに違ってよい**）。
+	if live.Lines[0].Depth != 4 || live.Lines[1].Depth != 3 {
+		t.Errorf("候補ごとの深さが違います: %+v", live.Lines)
+	}
+	if live.Lines[0].Score.CP != 120 || live.Lines[1].Score.CP != 50 {
+		t.Errorf("順位ごとの上書きになっていません: %+v", live.Lines)
 	}
 }
 
-// ⚠️ **打ち切ったときに、一度出した候補より貧しい最終結果を返さないこと。**
+// ⚠️ **MultiPV の info は順位の順にも深さの順にも並ばない。**
 //
-// 打ち切りは深さの途中で起きるので、新しい深さの候補が 1 本も揃っていない状態で
-// 止まることがある。そのまま返すと**秒数が過ぎた瞬間に候補手が消え、
-// 結局どれが最善だったのか分からなくなる**（実際にそうなっていた）。
-func TestAccumulatorFinalKeepsFullestResult(t *testing.T) {
+// 実測で `multipv 2` → `multipv 1` → `multipv 3` の順に、しかも深さがばらついて
+// 届く。以前は「深さが変わったら全部捨てる」だったので、**そのたびに 1 本だけの
+// 状態に戻り、最後に来た順位しか残らなかった**（「三番手の手だけが残る」）。
+func TestAccumulatorKeepsAllRanksWhenInfoIsOutOfOrder(t *testing.T) {
 	a := &accumulator{black: true, started: time.Now(), sfen: startpos}
-	a.add(coreusi.Info{Depth: 3, MultiPV: 1, ScoreCP: 100, HasScore: true, PV: []string{"7g7f"}})
-	a.add(coreusi.Info{Depth: 3, MultiPV: 2, ScoreCP: 50, HasScore: true, PV: []string{"2g2f"}})
-	// 深さ 4 に入ったところで打ち切られた（順位 1 しか届いていない）。
-	a.add(coreusi.Info{Depth: 4, MultiPV: 1, ScoreCP: 120, HasScore: true, PV: []string{"7g7f"}})
+	// 順位もばらばら、深さもばらばらに届く。
+	a.add(coreusi.Info{Depth: 21, MultiPV: 2, ScoreCP: 50, HasScore: true, PV: []string{"2g2f"}})
+	a.add(coreusi.Info{Depth: 20, MultiPV: 1, ScoreCP: 100, HasScore: true, PV: []string{"7g7f"}})
+	a.add(coreusi.Info{Depth: 21, MultiPV: 3, ScoreCP: 10, HasScore: true, PV: []string{"5g5f"}})
 
 	p := a.snapshot()
-	if len(p.Lines) != 2 {
-		t.Fatalf("最終結果の候補が %d 本。揃っていた深さ 3 の 2 本を返すはず: %+v", len(p.Lines), p.Lines)
+	if len(p.Lines) != 3 {
+		t.Fatalf("候補が %d 本。3 本とも残るはず: %+v", len(p.Lines), p.Lines)
 	}
-	if p.Depth != 3 {
-		t.Errorf("深さ = %d, want 3（返した候補と揃っていること）", p.Depth)
+	for i, want := range []int{1, 2, 3} {
+		if p.Lines[i].Rank != want {
+			t.Fatalf("順位で並んでいません: %+v", p.Lines)
+		}
+	}
+	// 深さが下がった報告（順位 1 の depth 20）でも候補そのものは残ること。
+	if p.Lines[0].Score.CP != 100 {
+		t.Errorf("順位 1 が反映されていません: %+v", p.Lines[0])
+	}
+	// 全体の深さは一番深いところ（下がらない）。
+	if p.Depth != 21 {
+		t.Errorf("深さ = %d, want 21", p.Depth)
+	}
+}
+
+// 古い深さの報告で新しい値を上書きしないこと。
+func TestAccumulatorIgnoresStaleDepth(t *testing.T) {
+	a := &accumulator{black: true, started: time.Now(), sfen: startpos}
+	a.add(coreusi.Info{Depth: 20, MultiPV: 1, ScoreCP: 100, HasScore: true, PV: []string{"7g7f"}})
+	a.add(coreusi.Info{Depth: 21, MultiPV: 1, ScoreCP: 200, HasScore: true, PV: []string{"2g2f"}})
+	// 遅れて届いた深さ 20 の報告。**捨てること。**
+	if _, ok := a.add(coreusi.Info{Depth: 20, MultiPV: 1, ScoreCP: 100, HasScore: true, PV: []string{"7g7f"}}); ok {
+		t.Error("古い深さの報告で表示が更新されています")
+	}
+	p := a.snapshot()
+	if p.Lines[0].Score.CP != 200 {
+		t.Errorf("古い深さの値で上書きされました: %+v", p.Lines[0])
 	}
 }
 

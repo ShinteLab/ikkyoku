@@ -91,6 +91,12 @@ type Score struct {
 type Line struct {
 	// Rank は候補の順位（1 が最善）。MultiPV を宣言しないエンジンでは常に 1。
 	Rank int `json:"rank"`
+	// Depth はこの候補が届いたときの深さ。
+	//
+	// ⚠️ **候補ごとに違うことがある。** MultiPV では順位ごとに別々の info が来て、
+	// **順位が更新されるタイミングも深さもばらつく**。深い順位だけ先に進むのは
+	// 正常な状態で、**揃うまで待つと候補が消える**（それが以前の壊れ方だった）。
+	Depth int `json:"depth"`
 	// Score は先手視点の評価値。
 	Score Score `json:"score"`
 	// Moves は読み筋（USI 表記）。
@@ -392,12 +398,6 @@ type accumulator struct {
 	// 出すことがある（`stop` を受けた直後が特にそう）。そのまま上書きすると
 	// **画面から候補手が消え、打ち切ったあとに何が最善だったのか分からなくなる**。
 	lastPV map[int]pvLine
-	// kept は**これまでで一番良かった結果**（読み筋つきで、候補が一番多いもの）。
-	//
-	// ⚠️ **打ち切りは深さの途中で起きる。** 新しい深さに入ってすぐ止められると、
-	// その深さの候補は 1 本も揃っていないことがある。**一度画面に出した答えより
-	// 貧しい結果を最終結果にしない**ための拠り所。
-	kept Progress
 }
 
 // pvLine は読み筋 1 本（USI と日本語表記）。
@@ -415,9 +415,19 @@ func (a *accumulator) add(in coreusi.Info) (Progress, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	if in.Depth > 0 && in.Depth != a.depth {
+	// ⚠️ **深さが変わっても候補を消さないこと。**
+	//
+	// 以前は「深さが変わったら全部捨てる」だったが、**MultiPV では順位ごとに
+	// 別々の info が来るうえ、順位の順にも深さの順にも並ばない**。実測で
+	// `multipv 2` → `multipv 1` → `multipv 3` の順に、しかも深さがばらついて届く。
+	// 全消しすると**そのたびに 1 本だけの状態に戻り、最後に来た順位しか残らない**
+	// （「三番手の手だけが残る」がこれ）。
+	//
+	// 代わりに **順位ごとに上書きし、古い深さの報告だけ捨てる**。順位が更新されない
+	// あいだは 1 つ前の深さの値が残るが、**候補が消えるよりはるかにまし**で、
+	// どの深さの答えかは `Line.Depth` に出る（将棋 UI の一般的な挙動でもある）。
+	if in.Depth > a.depth {
 		a.depth = in.Depth
-		a.lines = nil
 	}
 	if a.lines == nil {
 		a.lines = map[int]Line{}
@@ -428,6 +438,15 @@ func (a *accumulator) add(in coreusi.Info) (Progress, bool) {
 	rank := in.MultiPV
 	if rank <= 0 {
 		rank = 1
+	}
+
+	// ⚠️ **捨てるのは「その順位が既に持っている答えより浅い報告」だけ。**
+	// **全体の深さと比べて捨てないこと** —— 順位ごとに進み方が違うので、
+	// ある順位の**最初の報告**が他より浅いことは普通にある。全体と比べると
+	// その候補を丸ごと落とすことになる（「三番手しか残らない」の一因）。
+	prev, seen := a.lines[rank]
+	if seen && in.Depth > 0 && prev.Depth > in.Depth {
+		return Progress{}, false
 	}
 
 	// ⚠️ **読み筋の無い更新で、既に出している読み筋を消さないこと。**
@@ -445,33 +464,20 @@ func (a *accumulator) add(in coreusi.Info) (Progress, bool) {
 		a.lastPV[rank] = pvLine{moves: moves, text: text}
 	}
 
+	depth := in.Depth
+	if depth <= 0 {
+		depth = a.depth // 深さを書かないエンジン向け
+	}
 	a.lines[rank] = Line{
 		Rank:  rank,
+		Depth: depth,
 		Score: newScore(in, a.black),
 		Moves: moves,
 		Text:  text,
 	}
-	p := a.progressLocked()
-	a.keepLocked(p)
-	return p, true
+	return a.progressLocked(), true
 }
 
-// keepLocked は「これまでで一番良かった結果」を覚える。ロックを取った状態で呼ぶこと。
-//
-// **良い＝読み筋が付いていて、候補が今まで以上に揃っている。** 候補の本数は
-// MultiPV の指定で決まるので探索中は変わらない。**少ないのは「その深さがまだ
-// 途中」という意味**なので、そこで打ち切られた結果を最終結果にしない。
-func (a *accumulator) keepLocked(p Progress) {
-	if len(p.Lines) < len(a.kept.Lines) {
-		return
-	}
-	for _, l := range p.Lines {
-		if len(l.Moves) > 0 {
-			a.kept = p
-			return
-		}
-	}
-}
 
 // moveText は読み筋を日本語表記にする。
 //
@@ -501,40 +507,12 @@ func (a *accumulator) moveText(pv []string) []string {
 
 // snapshot は最終結果を返す。
 //
-// ⚠️ **一度画面に出した答えより貧しい結果を返さない。** 打ち切りは深さの途中で
-// 起きるので、そのままだと「秒数が過ぎた瞬間に候補手が消える」ことがある
-// （実際にそうなっていた）。**最終結果が読めないのが一番困る**ので、
-// 今の深さが揃っていなければ、直前に揃っていた答えを返す。
-//
-// **ノード数だけは最新にする**（累計なので、途中で止めても数えたぶんは正しい）。
+// ⚠️ **打ち切っても候補は減らない。** 深さの途中で止められても、順位ごとの値は
+// 消さずに持っているため（上の add）。ここで拾い直す仕掛けは要らない。
 func (a *accumulator) snapshot() Progress {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-
-	p := a.progressLocked()
-	if a.thinnerThanKeptLocked(p) {
-		kept := a.kept
-		kept.ElapsedMS = p.ElapsedMS
-		kept.Nodes = p.Nodes
-		return kept
-	}
-	return p
-}
-
-// thinnerThanKeptLocked は p が kept より貧しいかを返す。ロックを取った状態で呼ぶこと。
-func (a *accumulator) thinnerThanKeptLocked(p Progress) bool {
-	if len(a.kept.Lines) == 0 {
-		return false // 比べる相手が無い
-	}
-	if len(p.Lines) < len(a.kept.Lines) {
-		return true
-	}
-	for _, l := range p.Lines {
-		if len(l.Moves) > 0 {
-			return false
-		}
-	}
-	return true // 候補はあるが読み筋が 1 本も無い（＝何を指すのか分からない）
+	return a.progressLocked()
 }
 
 // progressLocked はロックを取った状態で呼ぶこと。
