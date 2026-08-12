@@ -1031,14 +1031,19 @@ html.is-main #app {
 
 /* 全て解析（2026-08-12）。**手順の範囲をまとめて解析する。**
    中身は「手順リストを 1 つずつ押しては、考える秒数だけ待つ」の繰り返し。 */
+/* 連続解析（旧「全て解析」）。⚠️ **手順の見出しとリストのあいだに置く**
+   （2026-08-12 に解析の行から移した）。**解析する対象は「今の局面」ではなく
+   「下に並んでいる手順」**なので、リストのすぐ上にあるのが素直。 */
 .analyze-batch {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 4px;
-  /* 単発の解析（左側）と目で分ける。同じ行に並んでいるが別の操作。 */
-  padding-left: 10px;
-  border-left: 1px solid #3a3d47;
+}
+
+/* 手数の範囲は右端へ寄せる（上の行の「1手戻す」と右が揃う）。 */
+.analyze-batch .analyze-batch-num:first-of-type {
+  margin-left: auto;
 }
 
 .analyze-batch-num {

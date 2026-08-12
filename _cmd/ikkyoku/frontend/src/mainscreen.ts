@@ -572,21 +572,6 @@ export function mountMainScreen(root: HTMLElement): void {
                   <option value="10">候補 10</option>
                 </select>
               </label>
-              <!-- 全て解析（2026-08-12）。**手順の範囲をまとめて解析する。**
-                   中身は「手順リストを 1 つずつ押しては、考える秒数だけ待つ」の
-                   繰り返しで、押す操作を人がやらなくてよくなるだけ。
-                   棋譜を読み込んだ直後に一度かけると、評価値グラフが全部埋まる。
-
-                   ⚠️ **考える秒数が「無制限」だと使えない**（1 手目で止まったまま
-                   次へ進めない）。理由は押せない側に出す。 -->
-              <span class="analyze-batch">
-                <button id="analyze-batch-run" class="ghost-btn" type="button">全て解析</button>
-                <input id="analyze-batch-from" class="analyze-batch-num" type="number"
-                       min="0" max="999" step="1" title="解析を始める手数" />
-                <span class="analyze-batch-dash">-</span>
-                <input id="analyze-batch-to" class="analyze-batch-num" type="number"
-                       min="0" max="999" step="1" title="解析を終える手数" />
-              </span>
               <span id="analyze-meta" class="note"></span>
               <!-- 押せない理由。**ツールチップだけにしない**（ホバーしないと読めない）。 -->
               <span id="analyze-hint" class="note is-caution" hidden></span>
@@ -606,6 +591,31 @@ export function mountMainScreen(root: HTMLElement): void {
               <span class="field-label">手順</span>
               <button id="study-undo" class="ghost-btn" type="button"
                       title="最後の 1 手を取り消します（手順からも消えます）">1手戻す</button>
+            </div>
+            <!-- 連続解析（旧「全て解析」。2026-08-12 に手順の側へ移して改名した）。
+                 **下に並んでいる手順を、1 手ずつ順に解析していく。**
+                 中身は「手順リストを 1 つずつ押しては、考える秒数だけ待つ」の
+                 繰り返しで、押す操作を人がやらなくてよくなるだけ。
+                 棋譜を読み込んだ直後に一度かけると、評価値グラフが全部埋まる。
+
+                 ⚠️ **置き場所は手順の側**（解析の行ではない）。**解析する対象が
+                 「今の局面」ではなく「そこに書いてある手順」**なので、リストの
+                 すぐ上に置いて、何を解析するのかが見えるようにする。
+
+                 ⚠️ **解析の行の「連続」（連続モード）とは別物。** あちらは
+                 「手を進めるたびに今の局面を解析し直す」で、局面を動かすのは人。
+                 こちらは**局面を動かすほうも自分でやる**。名前が似ているので、
+                 片方を直すときにもう片方と混同しないこと。
+
+                 ⚠️ **考える秒数が「無制限」だと使えない**（1 手目で止まったまま
+                 次へ進めない）。理由は押せない側に出す。 -->
+            <div class="analyze-batch">
+              <button id="analyze-batch-run" class="ghost-btn" type="button">連続解析</button>
+              <input id="analyze-batch-from" class="analyze-batch-num" type="number"
+                     min="0" max="999" step="1" title="解析を始める手数" />
+              <span class="analyze-batch-dash">-</span>
+              <input id="analyze-batch-to" class="analyze-batch-num" type="number"
+                     min="0" max="999" step="1" title="解析を終える手数" />
             </div>
             <div id="study-moves" class="study-moves"></div>
             <p id="study-move-status" class="note is-caution" hidden></p>
@@ -840,7 +850,7 @@ export function mountMainScreen(root: HTMLElement): void {
     // `USI_Hash` ぶん（GB 級になりうる）のメモリを掴んだまま**になる。
     // タブの境界を寿命にしてあるのは、アイドルタイマーを持たずに済ませるため。
     //
-    // **走っている解析（全て解析を含む）も止まる。** タブを移ると止まるのは
+    // **走っている解析（連続解析を含む）も止まる。** タブを移ると止まるのは
     // そういう約束で、**そこまでの評価値は残る**（設計原則3）。
     if (target !== studyTab && studyTab.classList.contains("is-active")) {
       stopBatch("");
@@ -1441,11 +1451,19 @@ export function mountMainScreen(root: HTMLElement): void {
     card.meta.textContent = parts.join(" / ");
   };
 
-  // ---- 全て解析（2026-08-12）---------------------------------------------
+  // ---- 連続解析（旧「全て解析」。2026-08-12）-------------------------------
   //
   // **手順の範囲をまとめて解析する。** 中身は「手順リストを 1 つずつ押しては、
   // 考える秒数だけ待つ」の繰り返しで、**押す操作を人がやらなくてよくなるだけ**。
   // 棋譜を読み込んだ直後に一度かけると、評価値グラフが全部埋まる。
+  //
+  // ⚠️ **ボタンは手順の側にある**（解析の行ではない）。**解析する対象が「今の局面」
+  // ではなく「そこに書いてある手順」**なので、リストのすぐ上に置いてある。
+  //
+  // ⚠️ **解析の行の「連続」（連続モード。`analyzeContinuous`）とは別物。**
+  // あちらは「手を進めるたびに今の局面を解析し直す」で、**局面を動かすのは人**。
+  // こちらは**局面を動かすほうも自分でやる**（`GoTo` を順に押していく）。
+  // 名前が似ているので、片方を直すときにもう片方と混同しないこと。
   //
   // ⚠️ **並べて走らせない。** 1 局面ずつ順に解析する —— エンジンのプロセスは
   // 1 回の解析のあいだだけ生きる作りなので、まとめて起こすと**手数ぶんの
@@ -1455,7 +1473,7 @@ export function mountMainScreen(root: HTMLElement): void {
   // 1 つ終わっただけで次へ行くと、残りのエンジンの結果が次の局面の裏で届く。
   //
   // **ここが順番を決めているだけで、評価値の記録は普段と同じ経路**（Go 側の
-  // `recordEval`）。⚠️ **全て解析だけの特別な記録の道を作らないこと。**
+  // `recordEval`）。⚠️ **連続解析だけの特別な記録の道を作らないこと。**
 
   // 解析する最後の手数。**-1 なら走っていない。**
   let batchLast = -1;
@@ -1469,7 +1487,7 @@ export function mountMainScreen(root: HTMLElement): void {
 
   const batchActive = () => batchLast >= 0;
 
-  // 全て解析を始められない理由。**空なら押せる。**
+  // 連続解析を始められない理由。**空なら押せる。**
   const batchBlockedReason = (): string => {
     if (!analyzeReady) {
       return "";
@@ -1477,7 +1495,7 @@ export function mountMainScreen(root: HTMLElement): void {
     // ⚠️ **「無制限」では次へ進めない**（1 手目で考え続けて終わらない）。
     // 押せないことより、**なぜ押せないか**が出ているほうが大事。
     if ((Number(analyzeSeconds.value) || 0) <= 0) {
-      return "全て解析は、考える秒数を決めてから（「無制限」では次の手へ進めません）";
+      return "連続解析は、考える秒数を決めてから（「無制限」では次の手へ進めません）";
     }
     // ⚠️ **手が 1 つも無くても押せてよい**（根の局面だけを解析する範囲は正当）。
     return "";
@@ -1485,13 +1503,13 @@ export function mountMainScreen(root: HTMLElement): void {
 
   const syncBatchButton = () => {
     const blocked = batchBlockedReason();
-    batchRun.textContent = batchActive() ? "停止" : "全て解析";
+    batchRun.textContent = batchActive() ? "停止" : "連続解析";
     batchRun.classList.toggle("is-active", batchActive());
     // 走っている最中は止められる。走っていないときは、解析できる局面かつ
     // 秒数が決まっているときだけ押せる。
     batchRun.disabled = !batchActive() && (!analyzeReady || blocked !== "");
     batchRun.title = batchActive()
-      ? "全て解析を止めます（そこまでの評価値は残ります）"
+      ? "連続解析を止めます（そこまでの評価値は残ります）"
       : blocked || "入力した範囲の手を、1 つずつ順に解析します";
     batchFrom.disabled = batchActive();
     batchTo.disabled = batchActive();
@@ -1510,7 +1528,7 @@ export function mountMainScreen(root: HTMLElement): void {
     }
   };
 
-  // stopBatch は全て解析をやめる。**そこまでの評価値は残る**（設計原則3）。
+  // stopBatch は連続解析をやめる。**そこまでの評価値は残る**（設計原則3）。
   const stopBatch = (message: string) => {
     batchLast = -1;
     batchNext = -1;
@@ -1529,7 +1547,7 @@ export function mountMainScreen(root: HTMLElement): void {
     batchStepping = true;
     try {
       if (batchNext > batchLast) {
-        stopBatch(`全て解析: ${batchLast}手目まで終わりました`);
+        stopBatch(`連続解析: ${batchLast}手目まで終わりました`);
         return;
       }
       const n = batchNext;
@@ -1542,14 +1560,14 @@ export function mountMainScreen(root: HTMLElement): void {
       // あちらは「まだ解析していない局面なら」という条件で動くので、
       // **連続モードが切ってあると 1 手目で止まる。**
       await startAnalyze();
-      analyzeMeta.textContent = `全て解析: ${n}〜${batchLast}手目のうち ${n}手目`;
+      analyzeMeta.textContent = `連続解析: ${n}〜${batchLast}手目のうち ${n}手目`;
       if (!analyzeRunning) {
         // 起動そのものに失敗した（エンジンが選ばれていない等）。
         // **ここで止めないと、残りの手でも同じ失敗を繰り返す。**
         stopBatch("");
       }
     } catch (err) {
-      stopBatch(`全て解析を止めました: ${String(err instanceof Error ? err.message : err)}`);
+      stopBatch(`連続解析を止めました: ${String(err instanceof Error ? err.message : err)}`);
     } finally {
       batchStepping = false;
     }
@@ -1577,7 +1595,7 @@ export function mountMainScreen(root: HTMLElement): void {
 
   batchRun.addEventListener("click", () => {
     if (batchActive()) {
-      stopBatch("全て解析を止めました");
+      stopBatch("連続解析を止めました");
       if (analyzeRunning) {
         void AnalyzeService.Stop();
       }
@@ -1587,7 +1605,7 @@ export function mountMainScreen(root: HTMLElement): void {
     const lo = Math.max(studyFirst, Math.floor(Number(batchFrom.value) || 0));
     const hi = Math.min(studyFirst + studyMoveCount, Math.floor(Number(batchTo.value) || 0));
     if (hi < lo) {
-      analyzeMeta.textContent = "全て解析: その範囲に手がありません";
+      analyzeMeta.textContent = "連続解析: その範囲に手がありません";
       return;
     }
     batchLast = hi;
@@ -1628,10 +1646,10 @@ export function mountMainScreen(root: HTMLElement): void {
   };
 
   analyzeRun.addEventListener("click", () => {
-    // ⚠️ **「停止」は全て解析も止めること。** 止めたのに次の手が始まったら、
+    // ⚠️ **「停止」は連続解析も止めること。** 止めたのに次の手が始まったら、
     // 止める手段が無い（連続モードで止めたら止まったままにするのと同じ話）。
     if (batchActive()) {
-      stopBatch("全て解析を止めました");
+      stopBatch("連続解析を止めました");
     }
     if (analyzeRunning) {
       // **打ち切っても、そこまでの評価値は残る**（設計原則3）。捨てる操作ではない。
@@ -1657,7 +1675,7 @@ export function mountMainScreen(root: HTMLElement): void {
   // ⚠️ **エンジンの寿命は変わらない**（前の解析を止めてから起こし直すだけで、
   // 常駐にはしない。`AnalyzeService.Start` が前の解析を打ち切る）。
   const autoAnalyze = () => {
-    // ⚠️ **全て解析の最中は手を出さない。** あちらが局面と解析の順番を握って
+    // ⚠️ **連続解析の最中は手を出さない。** あちらが局面と解析の順番を握って
     // いるので、連続モードが横から起こすと**同じ局面を 2 回起こして片方が
     // 打ち切られる**（打ち切られたほうの done で次の手へ進んでしまう）。
     if (batchActive()) {
@@ -1815,7 +1833,7 @@ export function mountMainScreen(root: HTMLElement): void {
   const showStudy = (st: StudyState, o?: { fromBoard?: boolean }) => {
     studyLoaded = !!st.loaded;
     studySfen = st.sfen ?? "";
-    // 全て解析の範囲は**棋譜の手数**で受け取る（評価値グラフの横軸と同じ数え方）。
+    // 連続解析の範囲は**棋譜の手数**で受け取る（評価値グラフの横軸と同じ数え方）。
     // ⚠️ **`Move.Number` は根からの手数**（`GoTo` の引数）なので、起点を足す。
     studyFirst = st.first ?? 0;
     studyMoveCount = (st.moves ?? []).length;
