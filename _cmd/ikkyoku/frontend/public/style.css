@@ -1321,6 +1321,38 @@ html.is-main #app {
   transition: background-color 0.15s ease-out;
 }
 
+/* 解析の列を畳んだ状態（2026-08-13）。**列を消して、盤を中央に寄せる。**
+   ⚠️ **左上を起点にしているのは右に列があるから**で、列が無くなれば寄せる理由も
+   無くなる（盤だけの画面で左に寄っていると、右の余白が「何かあるはず」に見える）。
+
+   ⚠️ **`.study-side` を `hidden` で消さないこと。** あの属性は「局面があるか」を
+   表しており（`showStudy` が持ち主）、2 つの意味を載せるとどちらが今の話か
+   分からなくなる。畳むほうは class で消す。 */
+#panel-study.is-side-collapsed .study-side {
+  display: none;
+}
+
+/* ⚠️ **スプリットバーを流れから外して右端へ逃がす。** 流れに残すと、
+   中央寄せの対象が「盤 + gap + バー」になって**盤が 10px 左へずれる**
+   （「真ん中に来る」が崩れる）。 */
+#panel-study.is-side-collapsed .board-area {
+  position: relative;
+  justify-content: center;
+}
+
+#panel-study.is-side-collapsed #study-split {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+}
+
+/* ⚠️ **盤の左の 8px も外す**（畳んでいないときは窓の端に貼り付かないための余白
+   だが、中央寄せでは 4px ぶん右へずらす邪魔になる）。 */
+#panel-study.is-side-collapsed #study-board-with-hands {
+  margin-left: 0;
+}
+
 /* 縦のスプリットバー（2026-08-13）。**盤と、右の解析の列の境目。**
    ⚠️ **幅 8px と .board-area の gap 12px は #panel-study の --board-size の
    横の定数（86px）が見込んでいる。** 変えたらあちらも直すこと。 */
@@ -1343,6 +1375,37 @@ html.is-main #app {
      引いているので、そのままだと縦の線との間に 1px の隙間が空く
      （2 本が繋がって見えない）。 */
   bottom: -1px;
+}
+
+/* 折り畳みのトグル（2026-08-13）。**バーの上に載せる** —— 畳むと解析の列ごと
+   消えるので、列の中に置いたら戻す手段が無くなる。
+   ⚠️ **バー（8px）より少しはみ出す**ので、押しやすさのために左右へ 3px ずつ
+   食い込む。⚠️ **押してもドラッグが始まらないよう、JS 側で pointerdown を
+   止めている**（止めないと離すまで幅が動き続ける）。 */
+.split-toggle {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 34px;
+  padding: 0;
+  /* react-icons は 1em / currentColor。 */
+  font-size: 11px;
+  color: #9aa6c0;
+  background: #23262e;
+  border: 1px solid #3a3d47;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.split-toggle:hover {
+  color: #f2f3f5;
+  border-color: #5ea0ff;
 }
 
 /* ⚠️ **目立たせるのはここだけ**（ホバー・掴んでいるあいだ・キーボードの

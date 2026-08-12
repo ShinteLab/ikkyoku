@@ -46,6 +46,8 @@
 import { Clipboard, Events, Window } from "@wailsio/runtime";
 import {
   FiChevronDown,
+  FiChevronLeft,
+  FiChevronRight,
   FiChevronUp,
   FiCopy,
   FiImage,
@@ -564,7 +566,15 @@ export function mountMainScreen(root: HTMLElement): void {
                判定は**実際の盤の幅を測って**行う（式の定数を JS に写さない）。 -->
           <div id="study-split" class="split-bar is-vertical" role="separator"
                aria-orientation="vertical" aria-label="盤と解析の列の幅" tabindex="0"
-               title="ドラッグで盤と解析の列の幅を変えます（盤がこれ以上大きくならないところで止まります）。左右キーでも動きます"></div>
+               title="ドラッグで盤と解析の列の幅を変えます（盤がこれ以上大きくならないところで止まります）。左右キーでも動きます">
+            <!-- 解析の列の折り畳み（2026-08-13）。⚠️ **バーの上に置くのが要点** ——
+                 畳むと列ごと消えるので、列の中に置いたら戻す手段が無くなる
+                 （評価値グラフで見出しの行を残しているのと同じ話）。
+                 ⚠️ **押してもドラッグが始まらないようにすること**
+                 （pointerdown を止める）。 -->
+            <button id="study-split-toggle" class="split-toggle" type="button"
+                    aria-expanded="true"></button>
+          </div>
           <!-- 盤の右の列（2026-08-12 に作り替えた）。**解析のものは全部ここに入る**
                —— 解析の行・エンジンごとの結果・評価値グラフ・手順・SFEN。
 
@@ -1928,6 +1938,9 @@ export function mountMainScreen(root: HTMLElement): void {
     studyHandSlots.black.hidden = !studyLoaded;
     studyHandSlots.white.hidden = !studyLoaded;
     studySide.hidden = !studyLoaded;
+    // ⚠️ **縦のスプリットバーも局面があるときだけ出す。** 局面が無いときは
+    // 分ける相手（解析の列）が出ていないので、バーだけが宙に浮く。
+    studySplit.hidden = !studyLoaded;
     studyUndo.disabled = (st.ply ?? 0) === 0;
     if (studyLoaded) {
       studyBoard.setAttribute("sfen", st.boardSfen);
@@ -2239,8 +2252,11 @@ export function mountMainScreen(root: HTMLElement): void {
     if (evalGraphH > 0) {
       setEvalGraphH(evalGraphH);
     }
-    if (boardW() > 0 && boardW() < STUDY_BOARD_MIN) {
+    // ⚠️ **畳んでいるときは触らない**（0 を上書きすると、窓を動かしただけで
+    // 勝手に開く）。畳んでいれば列は幅を取っていないので、そもそも起きない。
+    if (studySideW > 0 && boardW() > 0 && boardW() < STUDY_BOARD_MIN) {
       studySideW = STUDY_SIDE_MIN;
+      studySideOpenW = STUDY_SIDE_MIN;
       rawSide(STUDY_SIDE_MIN);
     }
     settleStudySide();
@@ -2274,7 +2290,12 @@ export function mountMainScreen(root: HTMLElement): void {
   // ⚠️ **解析の列をこれより詰めない。** 盤を優先して詰め切ると、窓が狭いときに
   // **解析の行が入らない幅まで潰れて読めなくなる**（`.study-side` の下限の話）。
   const STUDY_SIDE_MIN = 300;
+  // ⚠️ **0 は「畳んでいる」。** 評価値グラフの高さと同じで、**真偽値を別に
+  // 持たない**（畳んでいるのに幅がある、という食い違いを作らないため）。
+  // ドラッグの下限は STUDY_SIDE_MIN なので、**0 になるのは畳んだときだけ**。
   let studySideW = STUDY_SIDE_MIN; // style.css の --study-side-min と同じ既定
+  // 開き直すときの幅。**畳む前の幅に戻す**（既定に戻すと、広げたのが失われる）。
+  let studySideOpenW = STUDY_SIDE_MIN;
 
   // 盤の実寸（`.board-stage` の幅 = `--board-size`）。タブが隠れていれば 0。
   const boardW = () => studyStage.getBoundingClientRect().width;
@@ -2290,8 +2311,8 @@ export function mountMainScreen(root: HTMLElement): void {
   // ⚠️ **既に盤が縮んでいるときは触らないこと** —— それはユーザーが自分で
   // 列を広げた状態なので、勝手に戻すと設定を奪う。
   const settleStudySide = () => {
-    if (boardW() <= 0) {
-      return; // タブが隠れている（測れない）
+    if (studySideW === 0 || boardW() <= 0) {
+      return; // 畳んでいる / タブが隠れている（測れない）
     }
     // **詰め切ったとき（＝列を下限まで狭めたとき）の盤**が、この窓で取れる上限。
     // ⚠️ **0 で測らないこと** —— 窓が狭いと盤は横で決まるので、0 まで詰めた
@@ -2315,13 +2336,14 @@ export function mountMainScreen(root: HTMLElement): void {
       }
     }
     studySideW = Math.round(lo);
+    studySideOpenW = studySideW;
     rawSide(studySideW);
   };
 
   // setStudySideW は幅を変える。**効果が無い方向へは動かさない。**
   const setStudySideW = (px: number) => {
-    if (boardW() <= 0) {
-      return;
+    if (studySideW === 0 || boardW() <= 0) {
+      return; // 畳んでいるあいだは幅を変えない（戻すのはトグルの仕事）
     }
     const next = Math.max(Math.round(px), STUDY_SIDE_MIN);
     if (next === studySideW) {
@@ -2341,6 +2363,7 @@ export function mountMainScreen(root: HTMLElement): void {
       return;
     }
     studySideW = next;
+    studySideOpenW = next;
     studySplit.setAttribute("aria-valuenow", String(next));
     // 盤の大きさが変わったので、重ねたグリッドとグラフを測り直す。
     studyBoardUI.relayout();
@@ -2382,6 +2405,50 @@ export function mountMainScreen(root: HTMLElement): void {
   });
 
   studySplit.setAttribute("aria-valuenow", String(studySideW));
+
+  // ---- 解析の列の折り畳み（2026-08-13）------------------------------------
+  //
+  // ⚠️ **畳むと列ごと消える**ので、トグルは**縦のスプリットバーの上**に置く
+  // （列の中に置いたら戻す手段が無くなる。評価値グラフで見出しの行を残して
+  // あるのと同じ話）。
+  //
+  // ⚠️ **畳んだら盤を中央に寄せる。** 左上を起点にしているのは右に列があるから
+  // で、列が無くなれば寄せる理由も無くなる（盤だけがある画面で左に寄っていると、
+  // 右の余白が「何かあるはず」に見える）。
+  //
+  // ⚠️ **畳んでいるあいだはドラッグしない**（`studySideW === 0` で弾く）。
+  // 幅は 0 と STUDY_SIDE_MIN のあいだが飛んでいるので、ドラッグの続きにならない。
+  const studySplitToggle = root.querySelector<HTMLButtonElement>("#study-split-toggle")!;
+
+  const applyStudySideCollapsed = () => {
+    const open = studySideW > 0;
+    panelStudy.classList.toggle("is-side-collapsed", !open);
+    // ⚠️ **`.study-side` の `hidden` は触らないこと** —— あちらは
+    // 「局面があるか」を表しており（`showStudy`）、持ち主が 2 つになると
+    // どちらが今の話か分からなくなる。畳むほうは class で消す。
+    studySplitToggle.innerHTML = iconMarkup(open ? FiChevronRight : FiChevronLeft);
+    studySplitToggle.setAttribute("aria-expanded", String(open));
+    studySplitToggle.title = open
+      ? "解析の列を畳みます（盤が中央に来ます）"
+      : "解析の列を開きます";
+    studySplit.setAttribute("aria-valuenow", String(studySideW));
+    // 畳むあいだは幅の予約も外す（窓が狭いときに盤が取れる幅が増える）。
+    rawSide(open ? studySideW : 0);
+    studyBoardUI.relayout();
+    evalGraphUI.relayout();
+  };
+
+  studySplitToggle.addEventListener("click", () => {
+    studySideW = studySideW > 0 ? 0 : studySideOpenW;
+    applyStudySideCollapsed();
+    // 開いたら遊びを取り直す（畳んでいるあいだは測れていない）。
+    settleStudySide();
+  });
+  // ⚠️ **押してもドラッグが始まらないようにする。** バーの上に載っているので、
+  // 止めないと「掴んだ」と解釈されて、離すまで幅が動き続ける。
+  studySplitToggle.addEventListener("pointerdown", (e) => e.stopPropagation());
+
+  applyStudySideCollapsed();
 
   // ⚠️ **「訂正に戻る」ボタンは無くした**（2026-08-12）。**上のタブで戻れる**うえ、
   // タブを離れたときの後始末（走っている解析を止めてエンジンを手放す）は
