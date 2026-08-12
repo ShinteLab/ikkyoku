@@ -331,7 +331,12 @@ func (s *CaptureService) ShowMain(tab string) {
 	s.revealMain()
 }
 
-// Quit はアプリを終了する。枠のツールバーのメニュー(▼ → 閉じる)から呼ばれる。
+// Quit はアプリを終了する。**フロントの自前の✕はどちらもここへ来る**
+// (枠のツールバーのメニュー ▼ → 終了 / メイン画面のタイトルバーの ✕)。
+//
+// ⚠️ **メイン画面も Frameless にしたので、あちらの✕も `WindowClosing` を通らない**
+// (自前のボタンなので OS の WM_CLOSE が飛ばない。wails3 skill pitfalls.md)。
+// 終了時にやることを 2 か所に書かないよう、**入口はこの 1 本に寄せる**。
 //
 // **枠の✕は「隠す」であって「終了」ではない**(HideFrame。領域の定義を生かすため)。
 // そのため枠しか出ていない状態では終了する手段が無く、メイン画面を一度出してから
@@ -347,7 +352,7 @@ func (s *CaptureService) Quit() {
 	if s.beforeQuit != nil {
 		s.beforeQuit()
 	}
-	s.logger.Info("枠のメニューから終了します")
+	s.logger.Info("終了します")
 	s.app.Quit()
 }
 

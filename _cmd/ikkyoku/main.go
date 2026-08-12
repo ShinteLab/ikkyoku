@@ -191,6 +191,25 @@ func newFrameWindow(app *application.App, st windowState) *application.WebviewWi
 // 位置決め(`placeMainBesideFrame`)も座標の記録も `revealMain` が面倒を見ており、
 // そこを通らないと初回のキャプチャで**ウィンドウが突然動く**。
 //
+// ⚠️ **メイン画面も Frameless**(2026-08-12)。OS のタイトルバーを外し、**その場所に
+// タブの行を上げてある**(mainscreen.ts の `.main-toolbar`)。狙いは**縦の領域**で、
+// 「タイトルバー + タブの行」で 2 段使っていたところが 1 段になる。解析タブの盤は
+// `100vh` から引いて決まる(style.css の `--board-size`)ので、**そのぶん盤が大きくなる**。
+//
+// 引き換えに OS が面倒を見ていたものを自前で持つ:
+//
+//   - 移動   … `.main-toolbar` の `--wails-draggable: drag`(タブとボタンは `no-drag`)
+//   - リサイズ … Wails ランタイムのウィンドウ端の検出。**`DisableResize` を付けないこと**
+//   - 最小化 / 最大化 / 閉じる … ツールバー右端の自前のボタン
+//
+// ⚠️ **自前の✕は `WindowClosing` を通らない**(wails3 skill pitfalls.md)。そのため
+// フロントは `CaptureService.Quit` を呼ぶ(位置・サイズの保存を含む終了の入口)。
+// `registerMainHooks` の `WindowClosing` フックは Alt+F4・OS シャットダウン用に残す。
+//
+// ⚠️ **枠と違って `DisableFramelessWindowDecorations` は付けない。** あちらは中継映像に
+// 重ねる透過ウィンドウなので影も角丸も邪魔だったが、こちらは普通のアプリの窓で、
+// 影と角丸が無いと**どこまでがウィンドウか分からなくなる**。
+//
 // 2 つ目の戻り値は「保存された位置を持っているか」で、初回だけ枠の外へ逃がす判断に使う。
 func newMainWindow(app *application.App, st windowState) (*application.WebviewWindow, bool) {
 	w, h := safeFallback(st, defaultMainWidth, defaultMainHeight)
@@ -202,6 +221,8 @@ func newMainWindow(app *application.App, st windowState) (*application.WebviewWi
 		MinWidth:  minMainWidth,
 		MinHeight: minMainHeight,
 		URL:       "/?window=main",
+		// 上の ⚠️ を読むこと。タイトルバーのぶんを画面に返すための Frameless。
+		Frameless: true,
 		// 出すのは revealMain。上の ⚠️ を読むこと。
 		Hidden: true,
 		// AlwaysOnTop は付けない。中継を観ながら使う画面なので、最前面に居座ると

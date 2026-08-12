@@ -43,8 +43,8 @@
 // 枠(frame.ts)とは別ウィンドウなので、ここに置いた要素はキャプチャに写り込まない
 // ——ただし**枠に重なる位置に動かすと写り込む**(画面の合成結果を撮るため)。初回だけ
 // Go 側が枠の外へ逃がす(captureservice.go の placeMainBesideFrame)。
-import { Clipboard, Events } from "@wailsio/runtime";
-import { FiCopy, FiImage } from "react-icons/fi";
+import { Clipboard, Events, Window } from "@wailsio/runtime";
+import { FiCopy, FiImage, FiMinus, FiSquare, FiX } from "react-icons/fi";
 import {
   AnalyzeService,
   CaptureService,
@@ -208,6 +208,17 @@ export function mountMainScreen(root: HTMLElement): void {
   // ずっと下の行に出る**（実際に踏んだ）ので、原因に辿り着きにくい。
   root.innerHTML = `
     <div class="main-screen">
+      <!-- ⚠️ **これがタイトルバーそのもの**（2026-08-12 にメイン画面を Frameless にした）。
+           OS のタイトルバーを外して、その場所にタブの行を上げてある。狙いは**縦の領域**で、
+           「タイトルバー + タブの行」の 2 段が 1 段になったぶん、解析タブの盤が大きくなる
+           （盤の大きさは 100vh から引いて決まる。style.css の --board-size）。
+
+           ⚠️ **ここが移動ハンドル**（.main-toolbar に --wails-draggable: drag）。
+           押せるものは全部 no-drag に戻すこと（.tabs / .win-controls）。**外すと
+           ボタンがドラッグ扱いになってクリックが効かなくなる**（枠の .frame-actions と同じ話）。
+
+           ⚠️ **アプリ名は出さない。** 出す場所はタブの行しか無く、そのぶん横が狭くなる。
+           窓の識別はタスクバーの表示（Title オプション）が持っている。 -->
       <div class="main-toolbar">
         <div class="tabs" role="tablist">
           <button id="tab-input" class="tab is-active" type="button"
@@ -222,6 +233,19 @@ export function mountMainScreen(root: HTMLElement): void {
         <!-- ⚠️ **ここに「枠を表示」も撮り方の案内も戻さないこと**（2026-08-10 に外した）。
              枠は「撮るときだけ使う道具」で、入力の口はこれから増える
              （SFEN / KIF / 画像ファイル）。取り込みの話は入力タブに寄せる。 -->
+
+        <!-- ウィンドウ操作。**OS のタイトルバーを外した代わり**なので、右端に置いて
+             最小化 → 最大化 → 閉じる の順（Windows のタイトルバーと同じ並び）。
+             ⚠️ **✕ は Go 側の Quit を呼ぶ** —— 自前のボタンは WindowClosing を
+             通らないので、ランタイムの Window.Close() では**位置・サイズが保存されない**。 -->
+        <div class="win-controls">
+          <button id="win-minimise" class="win-btn" type="button"
+                  aria-label="最小化" title="最小化">${iconMarkup(FiMinus)}</button>
+          <button id="win-maximise" class="win-btn" type="button"
+                  aria-label="最大化" title="最大化 / 元に戻す">${iconMarkup(FiSquare)}</button>
+          <button id="win-close" class="win-btn is-danger" type="button"
+                  aria-label="閉じる" title="ikkyoku を終了します">${iconMarkup(FiX)}</button>
+        </div>
       </div>
 
       <!-- 入力タブ。**局面を取り込む面。** 今はキャプチャだけだが、ここに
@@ -789,6 +813,7 @@ export function mountMainScreen(root: HTMLElement): void {
   //
   // 隠すのは表示だけで、パネルの中身は常に更新する(タブを切り替えた瞬間に
   // 古い内容が出ることが無いように)。
+  const mainToolbar = root.querySelector<HTMLDivElement>(".main-toolbar")!;
   const tabOf = (name: string) => ({
     tab: root.querySelector<HTMLButtonElement>(`#tab-${name}`)!,
     panel: root.querySelector<HTMLElement>(`#panel-${name}`)!,
@@ -843,6 +868,33 @@ export function mountMainScreen(root: HTMLElement): void {
   for (const { tab } of tabs) {
     tab.addEventListener("click", () => selectTab(tab));
   }
+
+  // ---- ウィンドウ操作（Frameless の代償） ----------------------------------
+  //
+  // OS のタイトルバーを外したので、最小化・最大化・閉じるを自前で持つ。
+  //
+  // ⚠️ **✕ だけランタイムではなく Go 側を呼ぶ**（`CaptureService.Quit`）。
+  // 自前のボタンは `WindowClosing` を通らないので、`Window.Close()` では
+  // **位置・サイズが保存されない**（wails3 skill pitfalls.md）。終了時の後始末は
+  // Go 側の 1 本（`quit`）に寄せてある。
+  const winMinimise = root.querySelector<HTMLButtonElement>("#win-minimise")!;
+  const winMaximise = root.querySelector<HTMLButtonElement>("#win-maximise")!;
+  const winClose = root.querySelector<HTMLButtonElement>("#win-close")!;
+  winMinimise.addEventListener("click", () => void Window.Minimise());
+  winMaximise.addEventListener("click", () => void Window.ToggleMaximise());
+  winClose.addEventListener("click", () => void CaptureService.Quit());
+
+  // タイトルバーのダブルクリックで最大化 / 元に戻す（OS のタイトルバーと同じ）。
+  //
+  // ⚠️ **ボタンの上では無視する**（押した直後にもう一度押すと最大化する、では驚く）。
+  // macOS ではランタイムが capture 段階で dblclick を横取りして自分で
+  // ToggleMaximise を呼ぶので、ここは呼ばれない（**二重に切り替わらない**）。
+  mainToolbar.addEventListener("dblclick", (e) => {
+    if ((e.target as HTMLElement).closest("button")) {
+      return;
+    }
+    void Window.ToggleMaximise();
+  });
 
   // 警告やエラーは折りたたみの中にあるので、畳んでいるあいだは気づけない。
   // 見出しに点を出して「開くべきものがある」ことだけ伝える（開けば消える）。

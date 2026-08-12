@@ -396,26 +396,87 @@ html.is-frame.is-layout-error .frame-toolbar {
 }
 
 /* ---- メイン画面(?window=main) --------------------------------------------
-   アプリ本体。撮った画像・保存先・(将来は)認識結果と設定を置く。 */
+   アプリ本体。撮った画像・保存先・(将来は)認識結果と設定を置く。
+
+   ⚠️ **この画面も Frameless**(2026-08-12)。OS のタイトルバーを外し、その場所に
+   タブの行(.main-toolbar)を上げてある。**2 段だったものが 1 段になったぶん、
+   解析タブの盤が縦に大きくなる**(--board-size は 100vh から引いて決まる)。 */
 html.is-main,
 html.is-main body {
   background: #1b1d23;
   color: #f2f3f5;
 }
 
-.main-screen {
-  height: 100%;
-  padding: 14px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+/* Frameless なのでウィンドウ全体がクライアント領域。**ページごとスクロールさせない**
+   (タイトルバーが無いので、ずれると掴む場所ごと画面外へ出る)。中身のスクロールは
+   パネルの側が受ける。 */
+html.is-main,
+html.is-main body,
+html.is-main #app {
+  overflow: hidden;
 }
 
+/* ⚠️ **余白は .main-screen ではなくパネルが持つ**(2026-08-12)。ツールバーは
+   タイトルバーそのものなので、**左右と上に余白があってはいけない**
+   (掴める帯がウィンドウの端まで届かず、最大化のときに角が空く)。 */
+.main-screen {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ⚠️ **これがタイトルバー。** 高さを内容で変えないこと —— 解析タブの盤は
+   `100vh` からこの行のぶんを引いて決まる(--board-size の 82px に含む)ので、
+   伸びると盤が縦にはみ出す。 */
 .main-toolbar {
   flex: 0 0 auto;
+  height: 34px;
   display: flex;
   align-items: center;
   gap: 10px;
+  padding-left: 10px;
+  /* ⚠️ **ウィンドウの移動ハンドル。** これが無いと Frameless の窓を動かせない。
+     押せるもの(.tabs / .win-controls)は no-drag に戻すこと —— 戻し忘れると
+     ドラッグ扱いになってクリックが効かなくなる(枠の .frame-actions と同じ話)。
+     ⚠️ 効くのは frontend/src/main.ts の素の `import "@wailsio/runtime"` が前提。 */
+  --wails-draggable: drag;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ---- ウィンドウ操作(Frameless の代償) ------------------------------------
+   OS のタイトルバーを外した代わりの最小化・最大化・閉じる。右端に、
+   Windows のタイトルバーと同じ並びで置く。 */
+.win-controls {
+  flex: 0 0 auto;
+  margin-left: auto;
+  display: flex;
+  align-items: stretch;
+  align-self: stretch;
+  --wails-draggable: no-drag;
+}
+
+.win-btn {
+  width: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  color: #9aa6c0;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.win-btn:hover {
+  color: #f2f3f5;
+  background: #3a3d47;
+}
+
+/* ✕ だけ赤くする。押すとアプリが終わるので、隣の 2 つと同じ見た目にしない。 */
+.win-btn.is-danger:hover {
+  color: #ffffff;
+  background: #c0392b;
 }
 
 /* ---- タブ ----------------------------------------------------------------
@@ -429,6 +490,9 @@ html.is-main body {
   padding: 2px;
   background: #23262e;
   border-radius: 7px;
+  /* ⚠️ タイトルバーの中に居るので、no-drag に戻さないと**押しても切り替わらない**
+     (押した瞬間にウィンドウのドラッグとして扱われる)。 */
+  --wails-draggable: no-drag;
 }
 
 .tab {
@@ -471,13 +535,18 @@ html.is-main body {
 }
 
 /* パネル。hidden は JS 側で付け外しする(display の指定と競合しないよう
-   :not([hidden]) ではなく is-active で組む)。 */
+   :not([hidden]) ではなく is-active で組む)。
+
+   ⚠️ **余白はここが持つ**(2026-08-12)。以前は .main-screen の padding(14px 16px)
+   だったが、**ツールバーがタイトルバーになったので画面の端まで届かせる**必要があり、
+   こちらへ移した。上が薄いのは、タブの行との間隔(以前の gap 10px)のぶん。 */
 .panel {
   flex: 1 1 auto;
   min-height: 0;
   display: none;
   flex-direction: column;
   gap: 10px;
+  padding: 8px 16px 14px;
 }
 
 .panel.is-active {
@@ -519,9 +588,15 @@ html.is-main body {
   /* ⚠️ **盤の大きさはこの式で決まる。DOM から自動では決まらない。**
      行を減らしても、**この式から引く量を減らさない限り盤は大きくならない**
      （減らした行のぶんが余白として残るだけ）。逆に行を増やしたら足すこと。
-     92px の内訳: タブの行 + パネルの余白 + 盤とグラフのあいだ。 */
+     82px の内訳: タブの行（= タイトルバー 34px）+ パネルの余白（上 8 + 下 14）
+     + 盤とグラフのあいだ。
+
+     ⚠️ **メイン画面を Frameless にしたぶんは 100vh 側で返ってくる**（2026-08-12）。
+     OS のタイトルバーが無くなったので `100vh` がそのぶん増え、**引く量も
+     92px → 82px に減った**（タブの行がタイトルバーを兼ねるようになったため）。
+     両方が効いて盤が縦に大きくなる。 */
   --board-size: min(
-    calc(100vh - var(--winrate-h) - var(--eval-graph-h) - 92px),
+    calc(100vh - var(--winrate-h) - var(--eval-graph-h) - 82px),
     calc((100vw - var(--study-side-min) - 90px) / 1.4)
   );
 }
