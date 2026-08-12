@@ -1031,36 +1031,6 @@ html.is-main #app {
 
 /* 全て解析（2026-08-12）。**手順の範囲をまとめて解析する。**
    中身は「手順リストを 1 つずつ押しては、考える秒数だけ待つ」の繰り返し。 */
-/* 連続解析（旧「全て解析」）。⚠️ **手順の見出しとリストのあいだに置く**
-   （2026-08-12 に解析の行から移した）。**解析する対象は「今の局面」ではなく
-   「下に並んでいる手順」**なので、リストのすぐ上にあるのが素直。 */
-.analyze-batch {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-/* 手数の範囲は右端へ寄せる（上の行の「1手戻す」と右が揃う）。 */
-.analyze-batch .analyze-batch-num:first-of-type {
-  margin-left: auto;
-}
-
-.analyze-batch-num {
-  width: 52px;
-  padding: 2px 4px;
-  font-size: 12.5px;
-  color: #f2f3f5;
-  background: #23262e;
-  border: 1px solid #3a3d47;
-  border-radius: 5px;
-}
-
-.analyze-batch-dash {
-  font-size: 12.5px;
-  color: #9aa6c0;
-}
-
 .analyze-time select {
   padding: 4px 6px;
   font-size: 12.5px;
@@ -1959,12 +1929,19 @@ html.is-main #app {
   overflow-y: auto;
 }
 
+/* 手順の見出しの行。「手順」は左、ボタン（連続解析 / 1手戻す）は右にまとめる。
+   ⚠️ **連続解析もここに置く**（2026-08-12 に解析の行から移した）——
+   対象が「下に並んでいる手順」なので、位置でそれを示している。 */
 .study-move-head {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
+}
+
+/* 見出しのすぐ後ろを空けて、ボタンを右へ寄せる。 */
+.study-move-head > .field-label {
+  margin-right: auto;
 }
 
 /* **溢れたら中でスクロールさせる。** 盤の高さを超えて伸ばすと、盤ごと画面が動く。

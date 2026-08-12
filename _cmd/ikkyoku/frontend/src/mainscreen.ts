@@ -587,35 +587,30 @@ export function mountMainScreen(root: HTMLElement): void {
             <p id="analyze-status" class="note is-caution" hidden></p>
             <!-- 手順（Phase 5「手を進める UI」）。**盤の右の列の下半分。**
                  ⚠️ **高さを中身に依存させないこと**（中でスクロールさせる）。 -->
-            <div class="study-move-head">
-              <span class="field-label">手順</span>
-              <button id="study-undo" class="ghost-btn" type="button"
-                      title="最後の 1 手を取り消します（手順からも消えます）">1手戻す</button>
-            </div>
-            <!-- 連続解析（旧「全て解析」。2026-08-12 に手順の側へ移して改名した）。
-                 **下に並んでいる手順を、1 手ずつ順に解析していく。**
-                 中身は「手順リストを 1 つずつ押しては、考える秒数だけ待つ」の
-                 繰り返しで、押す操作を人がやらなくてよくなるだけ。
-                 棋譜を読み込んだ直後に一度かけると、評価値グラフが全部埋まる。
+            <!-- 手順の見出しの行。**連続解析もここに置く**（2026-08-12）。
+                 「1手戻す」と同じ高さに並べて、**手順に対する操作**であることを
+                 位置で示す（下に並んでいるリストが対象）。
 
-                 ⚠️ **置き場所は手順の側**（解析の行ではない）。**解析する対象が
-                 「今の局面」ではなく「そこに書いてある手順」**なので、リストの
-                 すぐ上に置いて、何を解析するのかが見えるようにする。
+                 ⚠️ **解析の行に戻さないこと。** あちらは「今の局面」に対する操作の行。
 
                  ⚠️ **解析の行の「連続」（連続モード）とは別物。** あちらは
                  「手を進めるたびに今の局面を解析し直す」で、局面を動かすのは人。
                  こちらは**局面を動かすほうも自分でやる**。名前が似ているので、
                  片方を直すときにもう片方と混同しないこと。
 
+                 ⚠️ **範囲の指定は無い**（2026-08-12 に手数の欄を外した）。
+                 **今見ている局面から最後の手まで**を順に解析する。始点は
+                 手順リストや評価値グラフを押して決める —— **どこから始めるかは
+                 「今どこを見ているか」で既に決まっている**ので、同じことを
+                 数字でもう一度言わせない。
+
                  ⚠️ **考える秒数が「無制限」だと使えない**（1 手目で止まったまま
                  次へ進めない）。理由は押せない側に出す。 -->
-            <div class="analyze-batch">
+            <div class="study-move-head">
+              <span class="field-label">手順</span>
               <button id="analyze-batch-run" class="ghost-btn" type="button">連続解析</button>
-              <input id="analyze-batch-from" class="analyze-batch-num" type="number"
-                     min="0" max="999" step="1" title="解析を始める手数" />
-              <span class="analyze-batch-dash">-</span>
-              <input id="analyze-batch-to" class="analyze-batch-num" type="number"
-                     min="0" max="999" step="1" title="解析を終える手数" />
+              <button id="study-undo" class="ghost-btn" type="button"
+                      title="最後の 1 手を取り消します（手順からも消えます）">1手戻す</button>
             </div>
             <div id="study-moves" class="study-moves"></div>
             <p id="study-move-status" class="note is-caution" hidden></p>
@@ -1115,8 +1110,6 @@ export function mountMainScreen(root: HTMLElement): void {
   const analyzeStatus = root.querySelector<HTMLParagraphElement>("#analyze-status")!;
   const evalGraphRow = root.querySelector<HTMLDivElement>("#eval-graph-row")!;
   const batchRun = root.querySelector<HTMLButtonElement>("#analyze-batch-run")!;
-  const batchFrom = root.querySelector<HTMLInputElement>("#analyze-batch-from")!;
-  const batchTo = root.querySelector<HTMLInputElement>("#analyze-batch-to")!;
 
   // 今の解析の世代。**打ち切った解析の途中経過は後から届く**ので、これで捨てる。
   let analyzeSeq = -1;
@@ -1453,12 +1446,19 @@ export function mountMainScreen(root: HTMLElement): void {
 
   // ---- 連続解析（旧「全て解析」。2026-08-12）-------------------------------
   //
-  // **手順の範囲をまとめて解析する。** 中身は「手順リストを 1 つずつ押しては、
-  // 考える秒数だけ待つ」の繰り返しで、**押す操作を人がやらなくてよくなるだけ**。
-  // 棋譜を読み込んだ直後に一度かけると、評価値グラフが全部埋まる。
+  // **今見ている局面から最後の手までを、順にまとめて解析する。** 中身は
+  // 「手順リストを 1 つずつ押しては、考える秒数だけ待つ」の繰り返しで、
+  // **押す操作を人がやらなくてよくなるだけ**。棋譜を読み込んだ直後に一度かけると、
+  // 評価値グラフが全部埋まる。
   //
-  // ⚠️ **ボタンは手順の側にある**（解析の行ではない）。**解析する対象が「今の局面」
-  // ではなく「そこに書いてある手順」**なので、リストのすぐ上に置いてある。
+  // ⚠️ **ボタンは手順の見出しの行にある**（解析の行ではない）。**解析する対象が
+  // 「今の局面」ではなく「そこに書いてある手順」**なので、「1手戻す」と同じ高さに
+  // 置いて、位置で対象を示している。
+  //
+  // ⚠️ **範囲は指定しない**（2026-08-12 に手数の欄を外した）。**今見ている局面から
+  // 最後の手まで**を順に解析する。始点を決めるのは手順リストや評価値グラフを押す操作で、
+  // **「どこから始めるか」は「今どこを見ているか」で既に決まっている** ——
+  // 同じことを数字でもう一度言わせない（2 か所に持つと食い違う）。
   //
   // ⚠️ **解析の行の「連続」（連続モード。`analyzeContinuous`）とは別物。**
   // あちらは「手を進めるたびに今の局面を解析し直す」で、**局面を動かすのは人**。
@@ -1481,9 +1481,13 @@ export function mountMainScreen(root: HTMLElement): void {
   let batchNext = -1;
   // 次へ進んでいる最中か（done はエンジンの数だけ届くので、二重に進めない）。
   let batchStepping = false;
-  // 今見ている局面の棋譜の手数の範囲（`StudyState.first` 由来）。
+  // 今見ている局面の棋譜の手数（`StudyState` 由来）。
+  //
+  // ⚠️ **`studyPly` は根からの手数**（`GoTo` に渡す値）で、`studyFirst` を足すと
+  // 棋譜の手数になる。**連続解析の始点はこれ** —— カーソル位置がそのまま始点。
   let studyFirst = 0;
   let studyMoveCount = 0;
+  let studyPly = 0;
 
   const batchActive = () => batchLast >= 0;
 
@@ -1497,7 +1501,7 @@ export function mountMainScreen(root: HTMLElement): void {
     if ((Number(analyzeSeconds.value) || 0) <= 0) {
       return "連続解析は、考える秒数を決めてから（「無制限」では次の手へ進めません）";
     }
-    // ⚠️ **手が 1 つも無くても押せてよい**（根の局面だけを解析する範囲は正当）。
+    // ⚠️ **手が 1 つも無くても押せてよい**（根の局面だけを解析するのは正当）。
     return "";
   };
 
@@ -1508,11 +1512,12 @@ export function mountMainScreen(root: HTMLElement): void {
     // 走っている最中は止められる。走っていないときは、解析できる局面かつ
     // 秒数が決まっているときだけ押せる。
     batchRun.disabled = !batchActive() && (!analyzeReady || blocked !== "");
+    // **どこから始まるかをツールチップに出す。** 範囲の欄が無くなったぶん、
+    // 「今の位置から」であることが読めるようにしておく。
     batchRun.title = batchActive()
       ? "連続解析を止めます（そこまでの評価値は残ります）"
-      : blocked || "入力した範囲の手を、1 つずつ順に解析します";
-    batchFrom.disabled = batchActive();
-    batchTo.disabled = batchActive();
+      : blocked ||
+        `今見ている ${studyFirst + studyPly}手目から ${studyFirst + studyMoveCount}手目まで、1 手ずつ順に解析します`;
   };
 
   // 走っているエンジンが残っているか。**1 つ終わっただけでは解析は終わらない。**
@@ -1573,26 +1578,6 @@ export function mountMainScreen(root: HTMLElement): void {
     }
   };
 
-  // 手順が変わったら範囲の欄を入れ直す（棋譜を読み込んだら 1〜151、など）。
-  //
-  // ⚠️ **走っている最中と、打っている最中の欄は触らないこと**（打ち込んだ値が
-  // 消える）。手順の長さが変わったときだけ入れ直すので、**絞って指定した範囲は
-  // 手を進めるまで残る。**
-  let batchFilledFor = "";
-  const fillBatchRange = () => {
-    const key = `${studyFirst}:${studyMoveCount}`;
-    if (batchActive() || key === batchFilledFor) {
-      return;
-    }
-    batchFilledFor = key;
-    if (document.activeElement !== batchFrom) {
-      batchFrom.value = String(studyFirst);
-    }
-    if (document.activeElement !== batchTo) {
-      batchTo.value = String(studyFirst + studyMoveCount);
-    }
-  };
-
   batchRun.addEventListener("click", () => {
     if (batchActive()) {
       stopBatch("連続解析を止めました");
@@ -1601,15 +1586,11 @@ export function mountMainScreen(root: HTMLElement): void {
       }
       return;
     }
-    // 範囲は棋譜の手数で受け取る（**評価値グラフの横軸と同じ数え方**）。
-    const lo = Math.max(studyFirst, Math.floor(Number(batchFrom.value) || 0));
-    const hi = Math.min(studyFirst + studyMoveCount, Math.floor(Number(batchTo.value) || 0));
-    if (hi < lo) {
-      analyzeMeta.textContent = "連続解析: その範囲に手がありません";
-      return;
-    }
-    batchLast = hi;
-    batchNext = lo;
+    // ⚠️ **始点は「今どこを見ているか」**（カーソル位置）。範囲を打ち込ませない
+    // ——手順リストや評価値グラフを押して戻れば、そこが始点になる。
+    // 数え方は**棋譜の手数**（評価値グラフの横軸と同じ）。
+    batchNext = studyFirst + studyPly;
+    batchLast = studyFirst + studyMoveCount;
     syncBatchButton();
     void batchStep();
   });
@@ -1833,11 +1814,13 @@ export function mountMainScreen(root: HTMLElement): void {
   const showStudy = (st: StudyState, o?: { fromBoard?: boolean }) => {
     studyLoaded = !!st.loaded;
     studySfen = st.sfen ?? "";
-    // 連続解析の範囲は**棋譜の手数**で受け取る（評価値グラフの横軸と同じ数え方）。
-    // ⚠️ **`Move.Number` は根からの手数**（`GoTo` の引数）なので、起点を足す。
+    // 連続解析が進む範囲。**棋譜の手数で数える**（評価値グラフの横軸と同じ）。
+    // ⚠️ **`Move.Number` も `Ply` も根からの手数**（`GoTo` の引数）なので、起点を足す。
     studyFirst = st.first ?? 0;
     studyMoveCount = (st.moves ?? []).length;
-    fillBatchRange();
+    // ⚠️ **連続解析の始点になる。** 手順リストで戻れば、そこから解析し直せる。
+    studyPly = st.ply ?? 0;
+    syncBatchButton();
     studyStage.hidden = !studyLoaded;
     studyBoard.hidden = !studyLoaded;
     studyPlaceholder.hidden = studyLoaded;
