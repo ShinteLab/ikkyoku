@@ -429,11 +429,6 @@ export function mountMainScreen(root: HTMLElement): void {
            **これから**: 手を進める UI（合法手だけ・1 手ごとに手番が入れ替わる）と
            分岐ツリーがここに乗る。 -->
       <div id="panel-study" class="panel" role="tabpanel" aria-labelledby="tab-study" hidden>
-        <div class="board-head">
-          <ul id="study-warnings" class="warnings is-compact" hidden></ul>
-          <button id="study-back" class="ghost-btn" type="button" hidden
-                  title="訂正タブへ戻ります。解析の結果は捨てられます">訂正に戻る</button>
-        </div>
         <div class="board-area">
           <!-- 盤と駒台の配置。**後手の駒台は盤の左上、先手の駒台は右下**
                (訂正タブと同じ並び＝実際の将棋盤と同じ)。
@@ -492,6 +487,11 @@ export function mountMainScreen(root: HTMLElement): void {
                戻れるが、手順は消えない**（進め直せる）。消えるのは戻った先で別の手を
                指したとき。「1手戻す」は指し間違えの取り消しなので**手順からも消す**。 -->
           <div id="study-side" class="study-side" hidden>
+            <!-- 確定した局面でも警告は出うる（詰将棋のように「論理的におかしくても
+                 正しい」局面があるため。設計原則3）。変な評価値が出たときの手掛かり。
+                 ⚠️ **盤の上に置かないこと**（2026-08-12 に上段ごと外した）——
+                 めったに出ないもののために、盤の高さを常に削ることになる。 -->
+            <ul id="study-warnings" class="warnings is-compact" hidden></ul>
             <!-- エンジン解析（Phase 4）。**確定した局面にだけかかる。**
                  確定していない局面はそもそもこのタブに来ない（Go 側の
                  StudyService.Adopt が断る）ので、ここでの「押せない理由」は
@@ -1731,7 +1731,6 @@ export function mountMainScreen(root: HTMLElement): void {
   const studyPlaceholder = root.querySelector<HTMLParagraphElement>("#study-placeholder")!;
   const studySfenOut = root.querySelector<HTMLElement>("#study-sfen")!;
   const studyWarnings = root.querySelector<HTMLUListElement>("#study-warnings")!;
-  const studyBack = root.querySelector<HTMLButtonElement>("#study-back")!;
   // 盤の脇の駒台（読み取り専用）。**訂正タブの駒台とは別物**で、
   // ドラッグの入口も「足りない駒」も持たない。
   const studyHandSlots = {
@@ -1777,7 +1776,6 @@ export function mountMainScreen(root: HTMLElement): void {
     studyStage.hidden = !studyLoaded;
     studyBoard.hidden = !studyLoaded;
     studyPlaceholder.hidden = studyLoaded;
-    studyBack.hidden = !studyLoaded;
     // 駒台は局面の一部なので、局面があるあいだは**空でも出す**
     // （持ち駒が 0 枚であることも局面の情報）。
     studyHandSlots.black.hidden = !studyLoaded;
@@ -1961,14 +1959,10 @@ export function mountMainScreen(root: HTMLElement): void {
     }, 1000);
   };
 
-  // 解析タブ → 訂正タブ。**解析の結果は捨てる。**
-  // 直した結果を採り直せば別の局面になるので、前の評価値を残す意味が無い。
-  studyBack.addEventListener("click", () => {
-    if (analyzeRunning) {
-      void AnalyzeService.Stop();
-    }
-    selectTab(editTab);
-  });
+  // ⚠️ **「訂正に戻る」ボタンは無くした**（2026-08-12）。**上のタブで戻れる**うえ、
+  // タブを離れたときの後始末（走っている解析を止めてエンジンを手放す）は
+  // `selectTab` が既にやっているので、ボタンは同じことを 2 つ目の入口でしていた。
+  // **盤の上の段ごと外して、そのぶん盤を大きくしてある。**
 
   const editor = mountEditor({
     stage: boardStage,
