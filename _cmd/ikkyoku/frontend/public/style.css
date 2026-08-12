@@ -1316,6 +1316,9 @@ html.is-main #app {
   transform: translateY(-50%);
   height: 6px;
   background: #23262e;
+  /* ⚠️ **ここは「戻り」の速さ。** 点くほうは :hover 側で上書きしている（下記）。
+     離したらすぐ消えるのが要点で、**遅いのは点くときだけ**。 */
+  transition: background-color 0.15s ease-out;
 }
 
 /* 縦のスプリットバー（2026-08-13）。**盤と、右の解析の列の境目。**
@@ -1343,11 +1346,29 @@ html.is-main #app {
 }
 
 /* ⚠️ **目立たせるのはここだけ**（ホバー・掴んでいるあいだ・キーボードの
-   フォーカス）。普段の色との差そのものが「掴める」の合図になる。 */
+   フォーカス）。普段の色との差そのものが「掴める」の合図になる。
+
+   ⚠️ **点くのはゆっくり（2s・ease-in）。** 盤とグラフの境目は**通り道**でもある
+   ので、カーソルが横切るたびに光ると鬱陶しい。立ち上がりを寝かせておくと、
+   **通り過ぎるだけでは点かず、掴もうとして留まったときにだけ光って見える**
+   （＝サイズを変えるときだけ光っているように見える）。実際に条件で分けている
+   わけではなく、**速さだけでそう見せている**。
+   ⚠️ **戻りは速いまま**（0.15s。base 側）—— 離したのにいつまでも光っていると、
+   今どこを掴んでいるのか分からなくなる。 */
 .split-bar:hover::after,
-.split-bar.is-dragging::after,
 .split-bar:focus-visible::after {
   background: #5ea0ff;
+  transition: background-color 2s ease-in;
+}
+
+/* ⚠️ **掴んでいるあいだは即座に光る。** そこはもう「サイズを変えている」ので、
+   2s かけて点くのを待たせる意味が無い（掴んだ手応えが要る）。
+   ⚠️ **:hover より後に置くこと** —— 詳細度が同じなので、順番で勝たせている。
+   ⚠️ **pointer capture を取っているとバーの外へ出ても掴んだままなので、
+   :hover では代用できない。** */
+.split-bar.is-dragging::after {
+  background: #5ea0ff;
+  transition: background-color 0s;
 }
 
 .split-bar:focus-visible {
