@@ -536,16 +536,19 @@ export function mountMainScreen(root: HTMLElement): void {
                  **合成ではない** —— 複数走っていても、今見ているのはどれか 1 つ。
                  ⚠️ **数字とエンジン名は出さない**（盤の上に文字を積むと、そのぶん
                  盤が小さくなる）。値はカーソルを当てたときに出す。 -->
-            <div id="winrate-row" class="winrate-row" hidden>
-              <!-- 対局者（2026-08-13）。**バーの左右の空きに出す。**
-                   左が後手・右が先手で、**バーの色（左=青=後手 / 右=赤=先手）と
-                   同じ並び**にしてある。⚠️ **視点を反転しても入れ替えないこと** ——
-                   バーそのものが反転しないので、名前だけ動くと対応が壊れる。
+            <!-- 対局者（2026-08-13）。**グリッドの左右の列**（駒台の上の空きセル）に
+                 出す。勝率バーは盤と同じ幅のまま **1 行目の真ん中の列**なので、
+                 その左右がちょうど空いている。
 
-                   ⚠️ **名前が無いときの「後手」「先手」は表示側の既定。**
-                   Go 側は空を返す（名前が分かっているのか、既定を出しているだけ
-                   なのかを区別できるようにするため）。 -->
-              <span id="winrate-name-white" class="winrate-name is-white"></span>
+                 ⚠️ **左が後手・右が先手**（バーの左右と同じ並び）。
+                 ⚠️ **視点を反転しても入れ替えないこと** —— 勝率バーそのものが
+                 反転しないので、名前だけ動くと帯との対応が壊れる。
+
+                 ⚠️ **名前が無いときの「後手」「先手」は表示側の既定。**
+                 Go 側は空を返す（名前が分かっているのか、既定を出しているだけ
+                 なのかを区別できるようにするため）。 -->
+            <span id="player-name-white" class="player-name is-white" hidden></span>
+            <div id="winrate-row" class="winrate-row" hidden>
               <button id="winrate-bar" class="winrate-bar is-empty" type="button">
                 <span class="winrate-track">
                   <span id="winrate-white" class="winrate-white"></span>
@@ -554,8 +557,8 @@ export function mountMainScreen(root: HTMLElement): void {
                   <span class="winrate-mid" aria-hidden="true"></span>
                 </span>
               </button>
-              <span id="winrate-name-black" class="winrate-name is-black"></span>
             </div>
+            <span id="player-name-black" class="player-name is-black" hidden></span>
             <div id="study-hand-white-slot" class="hand-slot" hidden></div>
             <div id="study-stage" class="board-stage">
               <!-- ⚠️ fluid: 置き場所の幅いっぱいに広げる（core/web の属性。2026-08-12）。
@@ -1262,9 +1265,9 @@ export function mountMainScreen(root: HTMLElement): void {
   }
   const engineCards = new Map<string, EngineCard>();
   const winrateRow = root.querySelector<HTMLDivElement>("#winrate-row")!;
-  const winrateNames = {
-    black: root.querySelector<HTMLElement>("#winrate-name-black")!,
-    white: root.querySelector<HTMLElement>("#winrate-name-white")!,
+  const playerNames = {
+    black: root.querySelector<HTMLElement>("#player-name-black")!,
+    white: root.querySelector<HTMLElement>("#player-name-white")!,
   };
   // showPlayers は勝率バーの左右に対局者を出す。
   //
@@ -1273,8 +1276,8 @@ export function mountMainScreen(root: HTMLElement): void {
   // ⚠️ **▲△ は常に付ける** —— 名前が入ると、どちらがどちらか分からなくなる。
   const showPlayers = (black: string, white: string) => {
     for (const [el, mark, name, side] of [
-      [winrateNames.white, "△", white, "後手"],
-      [winrateNames.black, "▲", black, "先手"],
+      [playerNames.white, "△", white, "後手"],
+      [playerNames.black, "▲", black, "先手"],
     ] as const) {
       el.textContent = `${mark}${name || side}`;
       el.title = name ? `${side} ${name}` : `${side}（棋譜を読み込むと名前が出ます）`;
@@ -1818,6 +1821,8 @@ export function mountMainScreen(root: HTMLElement): void {
     // 勝率バーも同じ（**まだ結果が無くても枠だけ出す**）。出たり消えたりすると
     // 盤が上下に動くうえ、盤の**上**の行なので動くと盤ごと押し下げる。
     winrateRow.hidden = !studyLoaded;
+    playerNames.black.hidden = !studyLoaded;
+    playerNames.white.hidden = !studyLoaded;
     // 評価値グラフも同じ（**まだ 1 点も無くても軸だけ出す**）。出たり消えたりすると
     // 盤が上下に動くうえ、「解析すると点が並ぶ場所」が見えているほうが分かりやすい。
     evalGraphRow.hidden = !studyLoaded;

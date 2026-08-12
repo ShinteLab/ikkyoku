@@ -990,40 +990,49 @@ html.is-main #app {
      **`--winrate-h` に入っているので、変えたらあちらも直すこと**（引き忘れると
      盤が縦にはみ出す）。 */
   padding: 6px 5%;
-  /* 対局者 ｜ バー ｜ 対局者 の 3 つを 1 行に並べる（2026-08-13）。 */
-  display: flex;
-  align-items: center;
-  gap: 8px;
 }
 
-/* 対局者（2026-08-13）。**バーの左右の空きに出す。**
-   左が後手・右が先手で、**バーの色（左=青=後手 / 右=赤=先手）と同じ並び**。
-   ⚠️ **視点を反転しても入れ替えないこと** —— バーそのものが反転しないので、
-   名前だけ動くと対応が壊れる。
+/* 対局者（2026-08-13）。**グリッドの左右の列**（駒台の上の空きセル）に出す。
+   勝率バーは盤と同じ幅のまま真ん中の列に居るので、その左右がちょうど空いている。
+   ⚠️ **帯の中に入れないこと** —— 名前のぶん帯が短くなり、
+   **形勢を一目で読むという帯の役目が痩せる**。
 
-   ⚠️ **幅を中身に依存させすぎないこと。** 長い名前で帯が押し潰されると、
-   形勢を一目で読むという帯の役目が消える。**箱の 18% で頭打ち**にして、
-   溢れたら省略（全文は title で読ませる）。 */
-.winrate-name {
-  flex: 0 1 auto;
+   ⚠️ **左が後手・右が先手**（帯の左右と同じ並び）。
+   ⚠️ **視点を反転しても入れ替えないこと** —— 帯そのものが反転しないので、
+   名前だけ動くと帯との対応が壊れる（駒台とは揃わなくなるが、名前が並んでいる
+   のは帯の行なので、そちらに合わせる）。
+
+   ⚠️ **色は付けない。** 先後は ▲△ が示しており、盤の上の狭い帯に色を増やすと
+   帯そのものの赤青が読みにくくなる。 */
+.player-name {
+  grid-row: 1;
+  align-self: center;
+  justify-self: center;
   min-width: 0;
-  max-width: 18%;
+  /* ⚠️ **駒台と同じ幅で頭打ちにすること。** グリッドの列は `auto`（中身で決まる）
+     なので、長い名前を入れると**列が広がって盤が押し出される**。
+     ⚠️ **`%` は使えない** —— 中身で決まる列に対する `%` は循環するので効かない。
+     0.2 は `.hand-zone.is-readonly` の幅と同じ係数で、**片方を変えたら両方直す**。
+     溢れたぶんは省略（全文は `title` で読ませる）。 */
+  max-width: calc(var(--board-size) * 0.2);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 12px;
   line-height: var(--winrate-row-h);
+  color: #9aa6c0;
 }
 
-/* 帯と同じ色で先後を示す（文字だけ見ても、どちら側の名前か分かる）。 */
-.winrate-name.is-white {
-  color: #7fb2ff;
-  text-align: right;
+.player-name[hidden] {
+  display: none;
 }
 
-.winrate-name.is-black {
-  color: #ff9c96;
-  text-align: left;
+.player-name.is-white {
+  grid-column: 1;
+}
+
+.player-name.is-black {
+  grid-column: 3;
 }
 
 .winrate-row[hidden] {
@@ -1035,9 +1044,7 @@ html.is-main #app {
    小さくなる）。値はカーソルを当てたときに title で出す。 */
 .winrate-bar {
   display: block;
-  /* ⚠️ **残りの幅を全部もらう**（対局者の名前は中身ぶんだけ取る）。 */
-  flex: 1 1 auto;
-  min-width: 0;
+  width: 100%;
   height: var(--winrate-row-h);
   padding: 0;
   border: 0;
