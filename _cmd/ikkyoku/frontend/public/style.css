@@ -1281,10 +1281,14 @@ html.is-main #app {
   touch-action: none;
 }
 
-/* 掴む場所が分かるように線を出す。**横いっぱいに引く**（2026-08-13。以前は
-   真ん中に 56px だけ出していた）—— 境目そのものなので、端まで引いてあるほうが
-   「ここで区切られている」ことが読み取れる。**バー全体は塗らない**
-   （盤のすぐ下に太い帯が入ると、盤の一部に見える）。 */
+/* 掴む場所が分かるように線を出す。**横いっぱい・角丸なしの長方形**
+   （2026-08-13。以前は真ん中に 56px・角丸 2px だった）—— 境目そのものなので、
+   端まで引いてあるほうが「ここで区切られている」ことが読み取れる。
+
+   ⚠️ **普段は目立たせない。** 色は地（#1b1d23）に近い #2a2d36 で、
+   **掴めることが分かる程度に留める**。盤と評価値グラフのあいだに明るい帯が
+   常時入っていると、盤の一部に見えるし、目が先にそちらへ行く。
+   **目立つのはホバー（と掴んでいるあいだ）だけ。** */
 .split-bar::after {
   content: "";
   position: absolute;
@@ -1292,9 +1296,8 @@ html.is-main #app {
   right: 0;
   top: 50%;
   transform: translateY(-50%);
-  height: 3px;
-  background: #3a3d47;
-  border-radius: 2px;
+  height: 6px;
+  background: #2a2d36;
 }
 
 /* 縦のスプリットバー（2026-08-13）。**盤と、右の解析の列の境目。**
@@ -1312,11 +1315,13 @@ html.is-main #app {
   right: auto;
   top: 0;
   bottom: 0;
-  width: 3px;
+  width: 6px;
   height: auto;
   transform: translateX(-50%);
 }
 
+/* ⚠️ **目立たせるのはここだけ**（ホバー・掴んでいるあいだ・キーボードの
+   フォーカス）。普段の色との差そのものが「掴める」の合図になる。 */
 .split-bar:hover::after,
 .split-bar.is-dragging::after,
 .split-bar:focus-visible::after {
