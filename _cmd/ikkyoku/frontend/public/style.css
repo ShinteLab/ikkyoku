@@ -708,7 +708,37 @@ html.is-main #app {
    盤に重ねたグリッドを測り直す場面が増えるうえ、目で追う位置も毎回変わる。 */
 #panel-study .board-area {
   align-items: flex-start;
-  justify-content: flex-start;
+  /* ⚠️ **`center` だが、開いているあいだは `flex-start` と同じ見え方**になる
+     （`.study-side` が `flex: 1 1 auto` で余りを全部もらうので、寄せる余白が
+     そもそも無い）。**畳んだときだけ効く** —— 列が縮むにつれて余白が生まれ、
+     盤がなめらかに中央へ寄る。`justify-content` は補間できないので、
+     **畳むときに切り替える作りにはできない**（その瞬間に飛ぶ）。 */
+  justify-content: center;
+}
+
+/* ---- 折り畳みのアニメーション（2026-08-13）--------------------------------
+   ⚠️ **畳む/開くときだけ付ける**（JS が `is-animating` を 0.3s だけ足す）。
+   常時付けるとスプリットバーの**ドラッグが 0.3s 遅れて追ってくる**ので、
+   掴んでいる位置と盤がずれる。 */
+#panel-study.is-animating .study-side {
+  transition:
+    max-width 0.3s ease,
+    opacity 0.3s ease;
+}
+
+#panel-study.is-animating #study-board-with-hands {
+  transition: margin-left 0.3s ease;
+}
+
+/* 盤そのものの大きさ（評価値グラフを畳むと縦に伸びる）。
+   ⚠️ **重ねたグリッドは ResizeObserver が毎フレーム追いかける**ので、
+   途中でずれたままにはならない。 */
+#panel-study.is-animating .board-stage {
+  transition: width 0.3s ease;
+}
+
+#panel-study.is-animating .eval-graph {
+  transition: height 0.3s ease;
 }
 
 /* ⚠️ **解析タブに盤の上段（.board-head）は無い**（2026-08-12 に外した）。
@@ -1304,28 +1334,27 @@ html.is-main #app {
    表しており（`showStudy` が持ち主）、2 つの意味を載せるとどちらが今の話か
    分からなくなる。畳むほうは class で消す。 */
 #panel-study.is-side-collapsed .study-side {
-  display: none;
+  /* ⚠️ **`display: none` にしないこと**（2026-08-13）。畳むのをアニメーション
+     させるので、幅を 0 へ縮める形にする。中身は残るが `overflow: hidden` で
+     切られ、`pointer-events: none` で触れなくなる。
+     ⚠️ **起点の幅は JS が inline で入れる** —— `max-width` の初期値は `none` で
+     補間できないし、`100%` からだと**畳み始めの 7 割が空振りする**
+     （列の実幅は箱の 3 割ほどしかないため）。 */
+  max-width: 0;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
 }
 
-/* ⚠️ **スプリットバーを流れから外して右端へ逃がす。** 流れに残すと、
-   中央寄せの対象が「盤 + gap + バー」になって**盤が 10px 左へずれる**
-   （「真ん中に来る」が崩れる）。 */
-#panel-study.is-side-collapsed .board-area {
-  position: relative;
-  justify-content: center;
-}
+/* ⚠️ **盤の左の余白で中央に寄せる**（2026-08-13）。畳んでも
+   **スプリットバーは流れに残す** —— 流れから外すと `position` が変わって
+   **アニメーションできない**（トグルのボタンが瞬間移動して見える）。
 
-#panel-study.is-side-collapsed #study-split {
-  position: absolute;
-  right: 0;
-  top: 0;
-  bottom: 0;
-}
-
-/* ⚠️ **盤の左の 8px も外す**（畳んでいないときは窓の端に貼り付かないための余白
-   だが、中央寄せでは 4px ぶん右へずらす邪魔になる）。 */
+   ⚠️ **32px は「盤の後ろに残るもの」の合計**（gap 12 + バー 8 + gap 12）。
+   畳んだ側（`.study-side`）は幅 0 でも**flex の gap は残る**ので、そのぶんを
+   盤の左に足すと左右が釣り合う。**gap かバーの太さを変えたら計算し直すこと。** */
 #panel-study.is-side-collapsed #study-board-with-hands {
-  margin-left: 0;
+  margin-left: 32px;
 }
 
 /* 縦のスプリットバー（2026-08-13）。**盤と、右の解析の列の境目。**

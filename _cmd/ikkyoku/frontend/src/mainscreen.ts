@@ -2211,6 +2211,9 @@ export function mountMainScreen(root: HTMLElement): void {
   };
 
   evalGraphToggle.addEventListener("click", () => {
+    // ⚠️ **ドラッグ側（`setEvalGraphH` を毎フレーム呼ぶ経路）では付けないこと。**
+    // 高さは変数 1 つなので、こちらは起点を作る小細工が要らない。
+    beginAnimation();
     setEvalGraphH(evalGraphH > 0 ? 0 : evalGraphOpenH);
   });
   // ⚠️ **押してもドラッグが始まらないようにする**（縦のバーのトグルと同じ）。
@@ -2222,6 +2225,7 @@ export function mountMainScreen(root: HTMLElement): void {
   // 出ることが普通にあるので、取らないと途中で追従が切れる。
   evalGraphSplit.addEventListener("pointerdown", (e) => {
     e.preventDefault();
+    cancelAnimation();
     evalGraphSplit.setPointerCapture(e.pointerId);
     evalGraphSplit.classList.add("is-dragging");
     const startY = e.clientY;
@@ -2322,6 +2326,11 @@ export function mountMainScreen(root: HTMLElement): void {
     if (studySideW === 0 || boardW() <= 0) {
       return; // 畳んでいる / タブが隠れている（測れない）
     }
+    // ⚠️ **折り畳みのアニメーション中は測らない。** 盤の幅が動いている最中なので、
+    // 二分探索が途中の値を掴んで**でたらめな幅で確定する**。終わったら呼び直す。
+    if (panelStudy.classList.contains("is-animating")) {
+      return;
+    }
     // **詰め切ったとき（＝列を下限まで狭めたとき）の盤**が、この窓で取れる上限。
     // ⚠️ **0 で測らないこと** —— 窓が狭いと盤は横で決まるので、0 まで詰めた
     // 大きさを上限にすると**解析の列を潰し切るまで詰めてしまう**。
@@ -2382,6 +2391,7 @@ export function mountMainScreen(root: HTMLElement): void {
   // 右へ引き始めても盤の右端が動かない区間ができる。
   studySplit.addEventListener("pointerdown", (e) => {
     e.preventDefault();
+    cancelAnimation();
     settleStudySide();
     studySplit.setPointerCapture(e.pointerId);
     studySplit.classList.add("is-dragging");
@@ -2446,11 +2456,62 @@ export function mountMainScreen(root: HTMLElement): void {
     evalGraphUI.relayout();
   };
 
-  studySplitToggle.addEventListener("click", () => {
-    studySideW = studySideW > 0 ? 0 : studySideOpenW;
-    applyStudySideCollapsed();
-    // 開いたら遊びを取り直す（畳んでいるあいだは測れていない）。
+  // ---- 折り畳みのアニメーション（2026-08-13）------------------------------
+  //
+  // ⚠️ **畳む/開くときだけ付ける。** 常時付けると、スプリットバーの**ドラッグが
+  // 0.3s 遅れて追ってくる**（掴んでいる位置と盤がずれる）。
+  //
+  // ⚠️ **後始末（遊びの取り直しと測り直し）は終わってから。** 途中で測ると
+  // 動いている最中の値を掴む。
+  const ANIM_MS = 300;
+  let animTimer = 0;
+  const endAnimation = () => {
+    window.clearTimeout(animTimer);
+    animTimer = 0;
+    panelStudy.classList.remove("is-animating");
+    // 起点として入れた inline の max-width を外す（畳んだ側は CSS が 0 を持つ）。
+    studySide.style.maxWidth = "";
     settleStudySide();
+    studyBoardUI.relayout();
+    evalGraphUI.relayout();
+  };
+  const beginAnimation = () => {
+    panelStudy.classList.add("is-animating");
+    window.clearTimeout(animTimer);
+    animTimer = window.setTimeout(endAnimation, ANIM_MS + 40);
+  };
+  // ⚠️ **掴んだら即座に終わらせる。** 畳んだ直後にバーを掴むと、残りの 0.3s は
+  // トランジションが効いたままで**ドラッグが遅れて追ってくる**。
+  const cancelAnimation = () => {
+    if (animTimer !== 0) {
+      endAnimation();
+    }
+  };
+
+  studySplitToggle.addEventListener("click", () => {
+    const opening = studySideW === 0;
+    studySideW = opening ? studySideOpenW : 0;
+    if (opening) {
+      // ⚠️ **開く幅は「開いてみないと分からない」**（列は余りをもらうので）。
+      // ① いったん最終状態にして測り、② 見た目だけ畳んだ状態へ戻して起点にし、
+      // ③ トランジションを入れてから最終状態へ、という順で動かす。
+      // **①〜②は同じタスクの中なので、途中の状態は描かれない。**
+      applyStudySideCollapsed();
+      const target = studySide.getBoundingClientRect().width;
+      panelStudy.classList.add("is-side-collapsed");
+      studySide.style.maxWidth = "0px";
+      void studySide.offsetWidth; // ここまでをレイアウトに反映させる
+      beginAnimation();
+      panelStudy.classList.remove("is-side-collapsed");
+      studySide.style.maxWidth = `${target}px`;
+    } else {
+      // 畳むほうは起点が今の幅そのもの。
+      studySide.style.maxWidth = `${studySide.getBoundingClientRect().width}px`;
+      void studySide.offsetWidth;
+      beginAnimation();
+      applyStudySideCollapsed();
+      studySide.style.maxWidth = "0px";
+    }
   });
   // ⚠️ **押してもドラッグが始まらないようにする。** バーの上に載っているので、
   // 止めないと「掴んだ」と解釈されて、離すまで幅が動き続ける。
