@@ -659,15 +659,20 @@ html.is-main #app {
   /* ⚠️ **盤の大きさはこの式で決まる。DOM から自動では決まらない。**
      行を減らしても、**この式から引く量を減らさない限り盤は大きくならない**
      （減らした行のぶんが余白として残るだけ）。逆に行を増やしたら足すこと。
-     82px の内訳: タブの行（= タイトルバー 34px）+ パネルの余白（上 8 + 下 14）
-     + 盤とグラフのあいだ。
+     92px の内訳: タブの行（= タイトルバー 34px）+ パネルの余白（上 8 + 下 14）
+     + 盤とグラフのあいだ + **スプリットバー 8px と、それが増やした gap 2px**
+     （2026-08-13 に 82px → 92px。⚠️ **スプリットバーの太さを変えたらここも直す**）。
+
+     ⚠️ **グラフの高さそのもの（--eval-graph-h）は式が引いているので、
+     畳めばそのぶん盤が大きくなる。** 折り畳みもスプリットバーも、
+     やっているのは「--eval-graph-h を書き換える」ことだけ。
 
      ⚠️ **メイン画面を Frameless にしたぶんは 100vh 側で返ってくる**（2026-08-12）。
      OS のタイトルバーが無くなったので `100vh` がそのぶん増え、**引く量も
      92px → 82px に減った**（タブの行がタイトルバーを兼ねるようになったため）。
      両方が効いて盤が縦に大きくなる。 */
   --board-size: min(
-    calc(100vh - var(--winrate-h) - var(--eval-graph-h) - 82px),
+    calc(100vh - var(--winrate-h) - var(--eval-graph-h) - 92px),
     calc((100vw - var(--study-side-min) - 90px) / 1.4)
   );
 }
@@ -1227,6 +1232,78 @@ html.is-main #app {
   min-height: 22px;
 }
 
+/* 折り畳みのボタン（2026-08-13）。**見出しの行の高さを変えないこと**
+   （--board-size の式が見出しのぶんを定数で見込んでいる）。 */
+.icon-btn {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  /* react-icons は width/height="1em"・色は currentColor なので、
+     大きさと色はここで決まる（.win-btn と同じやり方）。 */
+  font-size: 13px;
+  color: #9aa6c0;
+  background: #23262e;
+  border: 1px solid #3a3d47;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.icon-btn:hover {
+  color: #f2f3f5;
+  border-color: #5ea0ff;
+}
+
+/* スプリットバー（2026-08-13）。**盤とグラフの境目。**
+   ⚠️ **高さ 8px + .eval-graph-row の gap 2px = 10px を、#panel-study の
+   --board-size の定数（92px）が見込んでいる。** 太さを変えたらあちらも直すこと
+   （引き忘れると盤が縦にはみ出す）。
+
+   ⚠️ **畳んでも出しっぱなしにすること。** これと見出しの行が残っているから
+   開き直せる（両方消すと戻す手段が無くなる）。畳んだ状態から上へ引けば開く。 */
+.split-bar {
+  flex: 0 0 auto;
+  position: relative;
+  height: 8px;
+  cursor: row-resize;
+  /* ドラッグ中に文字が選択されるのを防ぐ（掴んだまま盤の上まで動かすので）。 */
+  user-select: none;
+  touch-action: none;
+}
+
+/* 掴む場所が分かるように、真ん中に短い線を出す。**バー全体を塗らない**
+   （盤のすぐ下に濃い帯が入ると、盤の一部に見える）。 */
+.split-bar::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 56px;
+  height: 3px;
+  background: #3a3d47;
+  border-radius: 2px;
+}
+
+.split-bar:hover::after,
+.split-bar.is-dragging::after,
+.split-bar:focus-visible::after {
+  background: #5ea0ff;
+}
+
+.split-bar:focus-visible {
+  outline: none;
+}
+
+/* 畳んだ状態。**高さは JS が --eval-graph-h に 0 を入れて作る**ので、ここでは
+   枠だけ消す（0 の箱に背景と角丸が残ると、1px の線として見える）。 */
+.eval-graph-row.is-collapsed .eval-graph {
+  background: none;
+}
+
 .eval-graph-range,
 .eval-graph-num {
   padding: 2px 6px;
@@ -1271,6 +1348,8 @@ html.is-main #app {
 .eval-graph {
   flex: 0 0 auto;
   height: var(--eval-graph-h);
+  /* ⚠️ **高さ 0（畳んだ状態）でも中の SVG が食み出さないこと。** */
+  overflow: hidden;
   background: #23262e;
   border-radius: 6px;
   /* 押すとその局面へ戻る（手順のチップと同じ操作）。 */

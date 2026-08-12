@@ -693,7 +693,20 @@ export function mountMainScreen(root: HTMLElement): void {
              ⚠️ **高さは CSS で固定すること**（--eval-graph-h）。連続モードでは
              1 手ごとに点が増えるので、中身で伸び縮みすると盤ごと画面が跳ねる。 -->
         <div id="eval-graph-row" class="eval-graph-row" hidden>
+          <!-- スプリットバー（2026-08-13）。**盤とグラフの境目。**
+               ドラッグでグラフの高さを変える。⚠️ **変えているのは
+               --eval-graph-h ただ 1 つ**で、盤の大きさはその式から自動で
+               付いてくる（--board-size がこれを引いている）。
+               ⚠️ **一番下まで下げると畳む**（＝高さ 0）ので、
+               「畳む」と「高さを変える」は**同じ 1 つの値**。 -->
+          <div id="eval-graph-split" class="split-bar" role="separator"
+               aria-orientation="horizontal" aria-label="評価値グラフの高さ" tabindex="0"
+               title="ドラッグで高さを変えます（一番下まで下げると畳みます）。上下キーでも動きます"></div>
           <div class="eval-graph-head">
+            <!-- 折り畳み。**畳むと高さ 0** になり、そのぶん盤が大きくなる
+                 （見出しの行とスプリットバーは残す —— 残さないと戻す手段が無い）。 -->
+            <button id="eval-graph-toggle" class="icon-btn" type="button"
+                    aria-expanded="true"></button>
             <span class="field-label">評価値</span>
             <!-- 横軸の範囲。**既定は「全て」＝ 指した手が全部見えている状態。**
                  ⚠️ **1 から始まるとは限らない** —— 根は初期局面とは限らないので、
@@ -2102,6 +2115,116 @@ export function mountMainScreen(root: HTMLElement): void {
       refreshEvalGraph();
     }, 1000);
   };
+
+  // ---- 評価値グラフの高さ（折り畳み + スプリットバー。2026-08-13）-----------
+  //
+  // ⚠️ **持っている値は「グラフの高さ」1 つだけ。** 折り畳みは**高さ 0** で表す。
+  // 「畳んでいるか」の真偽値を別に持つと、**畳んでいるのに高さがある**という
+  // 食い違いが起きうる（「外部エンジンを使う」の真偽値を持たないのと同じ話）。
+  //
+  // ⚠️ **書き込む先は `:root` の `--eval-graph-h` 1 か所。** 盤の大きさ
+  // （`#panel-study` の `--board-size`）がこれを引いているので、**グラフを縮めた
+  // ぶんだけ盤が自動で大きくなる**。⚠️ **カスタムプロパティは下へしか継承しない**
+  // ので、グラフの箱に直接高さを書かないこと（盤の式から読めなくなる）。
+  //
+  // **その場かぎりの値**（config.json には持たない。視点と同じ扱い）。
+  const evalGraphSplit = root.querySelector<HTMLDivElement>("#eval-graph-split")!;
+  const evalGraphToggle = root.querySelector<HTMLButtonElement>("#eval-graph-toggle")!;
+  // 既定値は style.css の `--eval-graph-h` と同じにすること（起動直後に
+  // JS が書き込むまでは CSS 側の値が出ているので、食い違うと初回だけ跳ねる）。
+  const EVAL_GRAPH_DEFAULT = 116;
+  // これより低いと折れ線が読めないので、ここが「畳んでいない」ときの下限。
+  const EVAL_GRAPH_MIN = 48;
+  // ⚠️ **下限より下へドラッグしたら畳む**（0 にする）。下限で止めると、
+  // ドラッグだけでは畳めないのに「一番下まで下げた」ようには見える。
+  const EVAL_GRAPH_SNAP = 32;
+  let evalGraphH = EVAL_GRAPH_DEFAULT;
+  // 畳む前の高さ。**畳んで開き直したときに元の高さへ戻すため**に覚えておく
+  // （既定に戻すと、せっかく広げたのが畳むたびに失われる）。
+  let evalGraphOpenH = EVAL_GRAPH_DEFAULT;
+
+  // 上限は窓の高さから決める。**盤が潰れるところまで伸ばさせない**
+  // （`#panel-study` はスクロールしないので、伸ばしすぎると盤がはみ出す）。
+  // 360px は「タブの行 + 余白 + グラフの見出し + 勝率バー + 最低限の盤」の見積もり。
+  const evalGraphMax = () => Math.max(EVAL_GRAPH_MIN, window.innerHeight - 360);
+
+  const setEvalGraphH = (px: number) => {
+    const next =
+      px < EVAL_GRAPH_SNAP ? 0 : Math.min(Math.max(px, EVAL_GRAPH_MIN), evalGraphMax());
+    if (next === evalGraphH) {
+      return;
+    }
+    evalGraphH = next;
+    if (next > 0) {
+      evalGraphOpenH = next;
+    }
+    // ⚠️ **`documentElement` に入れること**（`:root`）。盤の式が読む先はここ。
+    document.documentElement.style.setProperty("--eval-graph-h", `${next}px`);
+    const open = next > 0;
+    evalGraphRow.classList.toggle("is-collapsed", !open);
+    evalGraphToggle.innerHTML = iconMarkup(open ? FiChevronDown : FiChevronUp);
+    evalGraphToggle.setAttribute("aria-expanded", String(open));
+    evalGraphToggle.title = open
+      ? "評価値グラフを畳みます（そのぶん盤が大きくなります）"
+      : "評価値グラフを開きます";
+    evalGraphSplit.setAttribute("aria-valuenow", String(next));
+    // ⚠️ **測り直しを 2 つとも落とさないこと。** グラフは `clientHeight` で
+    // 描いており、**盤は式で大きさが変わる**ので重ねたグリッドがずれる。
+    evalGraphUI.relayout();
+    studyBoardUI.relayout();
+  };
+
+  evalGraphToggle.addEventListener("click", () => {
+    setEvalGraphH(evalGraphH > 0 ? 0 : evalGraphOpenH);
+  });
+
+  // ドラッグ。**上へ引くと高くなる**（境目そのものを掴んでいる感覚に合わせる）。
+  // ⚠️ **pointer capture を取ること** —— 掴んだまま盤の上やウィンドウの外へ
+  // 出ることが普通にあるので、取らないと途中で追従が切れる。
+  evalGraphSplit.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    evalGraphSplit.setPointerCapture(e.pointerId);
+    evalGraphSplit.classList.add("is-dragging");
+    const startY = e.clientY;
+    const startH = evalGraphH;
+    const onMove = (ev: PointerEvent) => setEvalGraphH(startH - (ev.clientY - startY));
+    const onUp = () => {
+      evalGraphSplit.classList.remove("is-dragging");
+      evalGraphSplit.removeEventListener("pointermove", onMove);
+      evalGraphSplit.removeEventListener("pointerup", onUp);
+      evalGraphSplit.removeEventListener("pointercancel", onUp);
+    };
+    evalGraphSplit.addEventListener("pointermove", onMove);
+    evalGraphSplit.addEventListener("pointerup", onUp);
+    evalGraphSplit.addEventListener("pointercancel", onUp);
+  });
+
+  // キーボードでも動かせるようにする（`role="separator"` の作法）。
+  // ⚠️ **畳んだ状態からの ↑ は「開く」にすること** —— 8px 足しても
+  // スナップの下限に届かず、押しても何も起きないように見える。
+  evalGraphSplit.addEventListener("keydown", (e) => {
+    const step = e.shiftKey ? 32 : 8;
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setEvalGraphH(evalGraphH === 0 ? evalGraphOpenH : evalGraphH + step);
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setEvalGraphH(evalGraphH - step);
+    }
+  });
+
+  // 窓が低くなると上限も下がる。**はみ出したままにしないこと。**
+  window.addEventListener("resize", () => {
+    if (evalGraphH > 0) {
+      setEvalGraphH(evalGraphH);
+    }
+  });
+
+  // ⚠️ **一度は通すこと**（ボタンのアイコンと `aria-*` はここで入れている）。
+  // ⚠️ **`setEvalGraphH` は値が同じなら何もしない**ので、既定値そのものは通らない。
+  evalGraphToggle.innerHTML = iconMarkup(FiChevronDown);
+  evalGraphToggle.title = "評価値グラフを畳みます（そのぶん盤が大きくなります）";
+  evalGraphSplit.setAttribute("aria-valuenow", String(evalGraphH));
 
   // ⚠️ **「訂正に戻る」ボタンは無くした**（2026-08-12）。**上のタブで戻れる**うえ、
   // タブを離れたときの後始末（走っている解析を止めてエンジンを手放す）は
