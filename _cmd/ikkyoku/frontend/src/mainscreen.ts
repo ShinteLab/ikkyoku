@@ -1351,27 +1351,14 @@ export function mountMainScreen(root: HTMLElement): void {
       first.title = hint;
       moves.title = hint;
 
-      // ⚠️ **押すとその手を指す。** MultiPV を増やす目的がまさにこれ ——
-      // 「次善手を選んだらどう転ぶか」を辿るのに、候補を読んでから盤の上で
-      // 同じ手を探し直させるのでは遠回りになる。
+      // ⚠️ **候補手を押しても指さない**（2026-08-12 に外した）。
       //
-      // **合法かどうかは Go 側が言う**（局面が変わると結果は消えるので、
-      // ここに並んでいる手は今の局面のものだが、判定はフロントに書かない）。
-      const play = l.moves?.[0] ?? "";
-      if (play) {
-        li.classList.add("is-playable");
-        li.tabIndex = 0;
-        li.title = `${text[0] ?? play} を指します（${hint}）`;
-        const go = () => studyBoardUI.play(play);
-        li.addEventListener("click", go);
-        li.addEventListener("keydown", (e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            go();
-          }
-        });
-      }
-
+      // ここに並んでいるのは**エンジンが読んだ枝**であって、本譜（＝実際に現れた
+      // 指し手）ではない。**押しただけで手順が伸びる**と、枝と本譜の区別が曖昧に
+      // なるうえ、戻って別の手を指したときに先を捨てる仕掛けと噛み合わない
+      // （`TODO.md` の「本譜のロック」）。**辿るのは盤の上で駒を動かす操作**。
+      //
+      // ⚠️ **「押すと指す」を戻すなら、先に本譜と枝の区別を決めること。**
       li.append(score, first, moves);
       card.lines.appendChild(li);
     }

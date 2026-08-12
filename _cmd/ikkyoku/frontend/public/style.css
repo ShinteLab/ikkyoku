@@ -512,17 +512,27 @@ html.is-main body {
    盤が小さくなる（引き忘れると盤が縦にはみ出す）。今そこにあるのは
    **評価値グラフだけ**（手順の推移を見る面なので、横に長いほうが読める）。 */
 #panel-study {
-  /* 右の列の幅。**固定** —— ここが伸び縮みすると盤の大きさが落ち着かない。
-     解析の行（解析・連続・秒数・候補・全て解析）が入る幅として決めてある。 */
-  --study-side-w: 340px;
+  /* 右の列に**最低限残す幅**。⚠️ **これは「固定幅」ではない**（2026-08-12 に変えた）——
+     盤は**取れるだけ取り**、右の列が**残りの幅を全部もらう**。ここに書いてあるのは
+     「窓が狭いときに、盤より先に譲ってもらう下限」。 */
+  --study-side-min: 300px;
   /* ⚠️ **盤の大きさはこの式で決まる。DOM から自動では決まらない。**
      行を減らしても、**この式から引く量を減らさない限り盤は大きくならない**
      （減らした行のぶんが余白として残るだけ）。逆に行を増やしたら足すこと。
      92px の内訳: タブの行 + パネルの余白 + 盤とグラフのあいだ。 */
   --board-size: min(
     calc(100vh - var(--winrate-h) - var(--eval-graph-h) - 92px),
-    calc((100vw - var(--study-side-w) - 90px) / 1.4)
+    calc((100vw - var(--study-side-min) - 90px) / 1.4)
   );
+}
+
+/* 解析タブの盤は**左上を起点**に置く（2026-08-12）。**取れるだけ取った盤**を
+   左上に固定して、右の列（解析・手順）が**残りの幅**をもらう形。
+   ⚠️ **中央寄せに戻さないこと** —— 窓の大きさで盤の位置が動くと、
+   盤に重ねたグリッドを測り直す場面が増えるうえ、目で追う位置も毎回変わる。 */
+#panel-study .board-area {
+  align-items: flex-start;
+  justify-content: flex-start;
 }
 
 /* ⚠️ **解析タブに盤の上段（.board-head）は無い**（2026-08-12 に外した）。
@@ -825,6 +835,10 @@ html.is-main body {
   height: var(--analyze-engines-h);
   min-height: var(--analyze-card-h);
   overflow-y: auto;
+  /* ⚠️ **横には流さない**（2026-08-12）。読み筋は行の幅で切って `title` で読ませる
+     作りなので、横スクロールバーが出ても得るものが無い。しかも**出た横バーが
+     高さを食って、縦バーまで出る**（実際にそうなっていた）。 */
+  overflow-x: hidden;
 }
 
 .analyze-engines[hidden] {
@@ -947,6 +961,7 @@ html.is-main body {
   gap: 2px;
   height: var(--analyze-lines-h);
   overflow-y: auto;
+  overflow-x: hidden;
 }
 
 /* 行の高さも固定する（読み筋が空の行と、届いた行で高さが変わらないように）。 */
@@ -962,18 +977,9 @@ html.is-main body {
   border-radius: 4px;
 }
 
-/* 押すとその手を指す。**MultiPV を増やす目的がこれ** ——
-   「次善手を選んだらどう転ぶか」を、候補を読んだその場で辿れるようにする。 */
-.analyze-line.is-playable {
-  cursor: pointer;
-}
-
-.analyze-line.is-playable:hover,
-.analyze-line.is-playable:focus-visible {
-  border-color: #5ea0ff;
-  background: rgba(94, 160, 255, 0.1);
-  outline: none;
-}
+/* ⚠️ **候補手の行は押せない**（2026-08-12 に外した）。ここに並ぶのはエンジンが
+   読んだ**枝**であって本譜ではないので、押しただけで手順が伸びる場所にしない。
+   辿るのは盤の上で駒を動かす操作（`TODO.md` の「本譜のロック」）。 */
 
 /* 次の 1 手。**評価値と同じ大きさで出す**（読むのはほぼ「この評価値が付いているのは
    どの手か」なので、そこだけ拾えれば足りる）。
@@ -1801,10 +1807,13 @@ html.is-main body {
    中の箱（`.analyze-engines` / `.study-moves`）でスクロールさせる。 */
 .study-side {
   flex: 0 1 auto;
-  /* ⚠️ **幅は固定**（`--study-side-w`）。**ここが伸び縮みすると盤の大きさが
-     落ち着かない**（盤は「残り全部」をもらう側なので）。狭くしすぎないこと ——
-     解析の行が入る幅が要る。 */
-  width: var(--study-side-w);
+  /* ⚠️ **残りの幅を全部もらう**（2026-08-12）。盤が先に「取れるだけ」取り、
+     こちらがその残り。窓を広げたぶんは**この列が広くなる**（盤の高さは
+     ウィンドウの高さで決まっているので、横に広げても盤は伸びない）。
+     下限だけ決めておく —— 解析の行が入らない幅まで潰れると読めなくなる。 */
+  flex: 1 1 auto;
+  width: auto;
+  min-width: var(--study-side-min);
   min-width: 0;
   align-self: stretch;
   min-height: 0;
