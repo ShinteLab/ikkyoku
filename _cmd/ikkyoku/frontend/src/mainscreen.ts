@@ -568,45 +568,6 @@ export function mountMainScreen(root: HTMLElement): void {
                  出す** —— 次善手を辿るのが構想の中心なので、複数本になるのが前提の作り。 -->
             <div id="analyze-engines" class="analyze-engines" hidden></div>
             <p id="analyze-status" class="note is-caution" hidden></p>
-            <!-- 評価値グラフ（2026-08-12）。**手順の 1 手ごとの最善手の評価値**を
-                 折れ線にする。**「次善手を選んだらどう転ぶか」を辿った結果が
-                 どう転んだか**を見せる面で、この画面の目的そのもの。
-
-                 ⚠️ **エンジンごとに別の折れ線**（合成しない。平均も多数決も取らない）。
-                 ⚠️ **高さは CSS で固定すること**（--eval-graph-h）。連続モードでは
-                 1 手ごとに点が増えるので、中身で伸び縮みすると盤ごと画面が跳ねる。 -->
-            <div id="eval-graph-row" class="eval-graph-row" hidden>
-              <div class="eval-graph-head">
-                <span class="field-label">評価値</span>
-                <!-- 横軸の範囲。**既定は「全て」＝ 指した手が全部見えている状態。**
-                     ⚠️ **1 から始まるとは限らない** —— 根は初期局面とは限らないので、
-                     撮った 40 手目の局面から始めたなら 40 手目から始まる。
-
-                     **絞るのはグラフの上をドラッグする**のが本筋で、選んだ範囲は
-                     そのまま下の欄に入る（＝見えている数字が今の範囲）。
-                     「1-150 の中のどこに居るか」で読みたいときは欄に直接書く。 -->
-                <select id="eval-graph-range" class="eval-graph-range"
-                        title="横軸の範囲。「全て」は指した手が全部見える範囲、「自由入力」は書いたとおりの手数です">
-                  <option value="all" selected>全て</option>
-                  <option value="custom">自由入力</option>
-                </select>
-                <span id="eval-graph-fields" class="eval-graph-fields" hidden>
-                  <input id="eval-graph-from" class="eval-graph-num" type="number"
-                         min="0" max="999" step="1" value="1" title="左端の手数" />
-                  <span class="eval-graph-dash">-</span>
-                  <input id="eval-graph-to" class="eval-graph-num" type="number"
-                         min="1" max="999" step="1" value="150" title="右端の手数" />
-                </span>
-                <!-- どの色がどのエンジンか。**グラフの中に重ねない**（目盛りと重なるうえ、
-                     折れ線の描ける範囲がそのぶん狭くなる）。 -->
-                <span id="eval-graph-legend" class="eval-graph-legend"></span>
-                <!-- 触った位置の中身。**ツールチップだけにしない**（点の上にぴったり
-                     乗せないと出ないので、線を目で追いながらは読めない）。 -->
-                <span id="eval-graph-readout" class="note eval-graph-readout"></span>
-              </div>
-              <div id="eval-graph" class="eval-graph"
-                   title="押すとその局面に戻ります（手順は消えません）。横にドラッグするとその範囲に絞ります"></div>
-            </div>
             <!-- 手順（Phase 5「手を進める UI」）。**盤の右の列の下半分。**
                  ⚠️ **高さを中身に依存させないこと**（中でスクロールさせる）。 -->
             <div class="study-move-head">
@@ -629,6 +590,45 @@ export function mountMainScreen(root: HTMLElement): void {
           <p id="study-placeholder" class="board-placeholder">
             訂正タブで「この局面を解析する」を押すと、ここに局面が出ます。
           </p>
+        </div>
+        <!-- 評価値グラフ（2026-08-12）。**手順の 1 手ごとの最善手の評価値**を
+             折れ線にする。**「次善手を選んだらどう転ぶか」を辿った結果が
+             どう転んだか**を見せる面で、この画面の目的そのもの。
+
+             ⚠️ **エンジンごとに別の折れ線**（合成しない。平均も多数決も取らない）。
+             ⚠️ **高さは CSS で固定すること**（--eval-graph-h）。連続モードでは
+             1 手ごとに点が増えるので、中身で伸び縮みすると盤ごと画面が跳ねる。 -->
+        <div id="eval-graph-row" class="eval-graph-row" hidden>
+          <div class="eval-graph-head">
+            <span class="field-label">評価値</span>
+            <!-- 横軸の範囲。**既定は「全て」＝ 指した手が全部見えている状態。**
+                 ⚠️ **1 から始まるとは限らない** —— 根は初期局面とは限らないので、
+                 撮った 40 手目の局面から始めたなら 40 手目から始まる。
+
+                 **絞るのはグラフの上をドラッグする**のが本筋で、選んだ範囲は
+                 そのまま下の欄に入る（＝見えている数字が今の範囲）。
+                 「1-150 の中のどこに居るか」で読みたいときは欄に直接書く。 -->
+            <select id="eval-graph-range" class="eval-graph-range"
+                    title="横軸の範囲。「全て」は指した手が全部見える範囲、「自由入力」は書いたとおりの手数です">
+              <option value="all" selected>全て</option>
+              <option value="custom">自由入力</option>
+            </select>
+            <span id="eval-graph-fields" class="eval-graph-fields" hidden>
+              <input id="eval-graph-from" class="eval-graph-num" type="number"
+                     min="0" max="999" step="1" value="1" title="左端の手数" />
+              <span class="eval-graph-dash">-</span>
+              <input id="eval-graph-to" class="eval-graph-num" type="number"
+                     min="1" max="999" step="1" value="150" title="右端の手数" />
+            </span>
+            <!-- どの色がどのエンジンか。**グラフの中に重ねない**（目盛りと重なるうえ、
+                 折れ線の描ける範囲がそのぶん狭くなる）。 -->
+            <span id="eval-graph-legend" class="eval-graph-legend"></span>
+            <!-- 触った位置の中身。**ツールチップだけにしない**（点の上にぴったり
+                 乗せないと出ないので、線を目で追いながらは読めない）。 -->
+            <span id="eval-graph-readout" class="note eval-graph-readout"></span>
+          </div>
+          <div id="eval-graph" class="eval-graph"
+               title="押すとその局面に戻ります（手順は消えません）。横にドラッグするとその範囲に絞ります"></div>
         </div>
       </div>
 
