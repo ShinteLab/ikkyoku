@@ -722,12 +722,17 @@ export function mountMainScreen(root: HTMLElement): void {
                「畳む」と「高さを変える」は**同じ 1 つの値**。 -->
           <div id="eval-graph-split" class="split-bar" role="separator"
                aria-orientation="horizontal" aria-label="評価値グラフの高さ" tabindex="0"
-               title="ドラッグで高さを変えます（一番下まで下げると畳みます）。上下キーでも動きます"></div>
-          <div class="eval-graph-head">
-            <!-- 折り畳み。**畳むと高さ 0** になり、そのぶん盤が大きくなる
-                 （見出しの行とスプリットバーは残す —— 残さないと戻す手段が無い）。 -->
-            <button id="eval-graph-toggle" class="icon-btn" type="button"
+               title="ドラッグで高さを変えます（一番下まで下げると畳みます）。上下キーでも動きます">
+            <!-- 折り畳み。**畳むと高さ 0** になり、そのぶん盤が大きくなる。
+                 ⚠️ **縦のバーと同じくバーの上に載せる**（2026-08-13 に見出しの行から
+                 移した）。畳んでも残るのはバーと見出しの行の両方だが、**戻す入口は
+                 バーの上に統一する** —— 2 本のバーで操作の形が違うと、どちらが
+                 どうだったかを覚えることになる。
+                 ⚠️ **押してもドラッグが始まらないようにすること**（pointerdown を止める）。 -->
+            <button id="eval-graph-toggle" class="split-toggle" type="button"
                     aria-expanded="true"></button>
+          </div>
+          <div class="eval-graph-head">
             <span class="field-label">評価値</span>
             <!-- 横軸の範囲。**既定は「全て」＝ 指した手が全部見えている状態。**
                  ⚠️ **1 から始まるとは限らない** —— 根は初期局面とは限らないので、
@@ -2208,6 +2213,9 @@ export function mountMainScreen(root: HTMLElement): void {
   evalGraphToggle.addEventListener("click", () => {
     setEvalGraphH(evalGraphH > 0 ? 0 : evalGraphOpenH);
   });
+  // ⚠️ **押してもドラッグが始まらないようにする**（縦のバーのトグルと同じ）。
+  // 止めないと「掴んだ」と解釈されて、離すまで高さが動き続ける。
+  evalGraphToggle.addEventListener("pointerdown", (e) => e.stopPropagation());
 
   // ドラッグ。**上へ引くと高くなる**（境目そのものを掴んでいる感覚に合わせる）。
   // ⚠️ **pointer capture を取ること** —— 掴んだまま盤の上やウィンドウの外へ

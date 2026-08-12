@@ -1257,31 +1257,6 @@ html.is-main #app {
   min-height: 22px;
 }
 
-/* 折り畳みのボタン（2026-08-13）。**見出しの行の高さを変えないこと**
-   （--board-size の式が見出しのぶんを定数で見込んでいる）。 */
-.icon-btn {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  padding: 0;
-  /* react-icons は width/height="1em"・色は currentColor なので、
-     大きさと色はここで決まる（.win-btn と同じやり方）。 */
-  font-size: 13px;
-  color: #9aa6c0;
-  background: #23262e;
-  border: 1px solid #3a3d47;
-  border-radius: 5px;
-  cursor: pointer;
-}
-
-.icon-btn:hover {
-  color: #f2f3f5;
-  border-color: #5ea0ff;
-}
-
 /* スプリットバー（2026-08-13）。**盤とグラフの境目。**
    ⚠️ **高さ 8px + .eval-graph-row の gap 2px = 10px を、#panel-study の
    --board-size の定数（92px）が見込んでいる。** 太さを変えたらあちらも直すこと
@@ -1377,11 +1352,14 @@ html.is-main #app {
   bottom: -1px;
 }
 
-/* 折り畳みのトグル（2026-08-13）。**バーの上に載せる** —— 畳むと解析の列ごと
-   消えるので、列の中に置いたら戻す手段が無くなる。
-   ⚠️ **バー（8px）より少しはみ出す**ので、押しやすさのために左右へ 3px ずつ
-   食い込む。⚠️ **押してもドラッグが始まらないよう、JS 側で pointerdown を
-   止めている**（止めないと離すまで幅が動き続ける）。 */
+/* 折り畳みのトグル（2026-08-13）。**2 本のバーとも、バーの上に載せる。**
+   縦のバーは畳むと解析の列ごと消えるので、列の中に置いたら戻す手段が無くなる。
+   横のバー（評価値グラフ）は見出しの行が残るのでそちらでも成立するが、
+   **2 本で操作の形を揃える**ほうが覚えることが少ない。
+
+   ⚠️ **バー（8px）より少しはみ出す**ので、押しやすさのために 3px ずつ食い込む。
+   ⚠️ **押してもドラッグが始まらないよう、JS 側で pointerdown を止めている**
+   （止めないと離すまで幅・高さが動き続ける）。 */
 .split-toggle {
   position: absolute;
   left: 50%;
@@ -1391,8 +1369,9 @@ html.is-main #app {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 14px;
-  height: 34px;
+  /* 横のバー: 横長。バーの向きに沿って寝かせる。 */
+  width: 34px;
+  height: 14px;
   padding: 0;
   /* react-icons は 1em / currentColor。 */
   font-size: 11px;
@@ -1401,6 +1380,12 @@ html.is-main #app {
   border: 1px solid #3a3d47;
   border-radius: 4px;
   cursor: pointer;
+}
+
+/* 縦のバー: 縦長（向きだけ入れ替える）。 */
+.split-bar.is-vertical .split-toggle {
+  width: 14px;
+  height: 34px;
 }
 
 .split-toggle:hover {
