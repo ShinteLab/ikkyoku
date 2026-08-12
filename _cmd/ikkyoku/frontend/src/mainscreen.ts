@@ -559,6 +559,17 @@ export function mountMainScreen(root: HTMLElement): void {
               </button>
             </div>
             <span id="player-name-black" class="player-name is-black" hidden></span>
+            <!-- 視点（2026-08-13 に右の列から移した）。**表示だけの反転で、
+                 局面には効かない。**
+
+                 ⚠️ **置き場所はグリッドの右の列の真ん中のセル**（先手の対局者名の下・
+                 先手の駒台の上）。ここは元から空いているので、**盤の上下にも
+                 右の列にも行が増えない**（＝盤が小さくならない）。
+
+                 ⚠️ **視点を反転しても列を移さないこと。** 駒台は左右が入れ替わるが、
+                 **押すたびにボタンが飛ぶと、もう一度押すのに探すことになる**。
+                 どちら側が手前かはボタンの文字が言っている。 -->
+            <button id="study-flip" class="ghost-btn view-flip" type="button" hidden></button>
             <div id="study-hand-white-slot" class="hand-slot" hidden></div>
             <div id="study-stage" class="board-stage">
               <!-- ⚠️ fluid: 置き場所の幅いっぱいに広げる（core/web の属性。2026-08-12）。
@@ -689,14 +700,6 @@ export function mountMainScreen(root: HTMLElement): void {
 
                  ⚠️ **考える秒数が「無制限」だと使えない**（1 手目で止まったまま
                  次へ進めない）。理由は押せない側に出す。 -->
-            <!-- 視点（2026-08-13）。**表示だけの反転。局面には効かない。**
-                 ⚠️ **盤の上下に行を積まないこと**（そのぶん盤が小さくなる）ので、
-                 解析タブ側の置き場所は**右の列**。訂正タブのものと**同じ 1 つの値**で、
-                 どちらで切り替えても両方の盤が変わる。 -->
-            <div class="study-view-head">
-              <span class="field-label">視点</span>
-              <button id="study-flip" class="ghost-btn" type="button"></button>
-            </div>
             <div class="study-move-head">
               <span class="field-label">手順</span>
               <button id="analyze-batch-run" class="ghost-btn" type="button">連続解析</button>
@@ -1823,6 +1826,8 @@ export function mountMainScreen(root: HTMLElement): void {
     winrateRow.hidden = !studyLoaded;
     playerNames.black.hidden = !studyLoaded;
     playerNames.white.hidden = !studyLoaded;
+    // 視点のボタンも盤と一緒（盤が出ていないのに向きだけ変えても意味が無い）。
+    studyFlip.hidden = !studyLoaded;
     // 評価値グラフも同じ（**まだ 1 点も無くても軸だけ出す**）。出たり消えたりすると
     // 盤が上下に動くうえ、「解析すると点が並ぶ場所」が見えているほうが分かりやすい。
     evalGraphRow.hidden = !studyLoaded;
@@ -1943,6 +1948,10 @@ export function mountMainScreen(root: HTMLElement): void {
   });
   // 訂正タブ側の一行。訂正の操作が通らなかった理由と、確定できない理由を出す。
   const editStatus = root.querySelector<HTMLParagraphElement>("#edit-status")!;
+
+  // 視点のボタン（解析タブ）。**盤のグリッドの右の列**に置いてある
+  // （先手の対局者名の下・先手の駒台の上）。
+  const studyFlip = root.querySelector<HTMLButtonElement>("#study-flip")!;
 
   // 視点（手前が先手 / 手前が後手）。**表示だけの反転で、局面には効かない。**
   // 切り替えの中身は下の「視点」の節にまとめてある（ここは値の置き場所だけ）。
@@ -2634,7 +2643,7 @@ export function mountMainScreen(root: HTMLElement): void {
   const studyBoardWithHands = root.querySelector<HTMLElement>("#study-board-with-hands")!;
   const flipButtons = [
     root.querySelector<HTMLButtonElement>("#edit-flip")!,
-    root.querySelector<HTMLButtonElement>("#study-flip")!,
+    studyFlip,
   ];
 
   const applyViewpoint = () => {

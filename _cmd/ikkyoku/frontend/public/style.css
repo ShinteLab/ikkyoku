@@ -1046,6 +1046,32 @@ html.is-main #app {
   grid-column: 3;
 }
 
+/* 視点のボタン（2026-08-13 に右の列から移した）。**グリッドの右の列の
+   真ん中のセル** —— 先手の対局者名（1 行目）の下、先手の駒台（3 行目）の上で、
+   ここは元から空いている。**盤の上下にも右の列にも行が増えない**ので、
+   盤の大きさに一切効かない。
+
+   ⚠️ **視点を反転しても列を移さないこと。** 駒台は左右が入れ替わるが、
+   **押すたびにボタンが飛ぶと、もう一度押すのに探すことになる。**
+
+   ⚠️ **幅は駒台と同じで頭打ちにすること**（対局者名と同じ理由）。列は `auto` なので、
+   はみ出すと**列が広がって盤が押し出される**。 */
+.view-flip {
+  grid-column: 3;
+  grid-row: 2;
+  /* 「先手の駒台の上」に寄せる（真ん中に浮かせると、どちらの持ち物か曖昧になる）。 */
+  align-self: end;
+  justify-self: center;
+  max-width: calc(var(--board-size) * 0.2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.view-flip[hidden] {
+  display: none;
+}
+
 .winrate-row[hidden] {
   display: none;
 }
@@ -2480,20 +2506,6 @@ html.is-main #app {
   display: flex;
   align-items: center;
   gap: 6px;
-}
-
-/* 視点の行（2026-08-13）。**盤の上下ではなく右の列に置く** —— 盤の上下に行を
-   積むとそのぶん盤が小さくなる（--board-size の式）。ここなら盤の大きさに効かず、
-   減るのは手順リストの取り分だけ。 */
-.study-view-head {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.study-view-head > .field-label {
-  margin-right: auto;
 }
 
 /* 見出しのすぐ後ろを空けて、ボタンを右へ寄せる。 */
