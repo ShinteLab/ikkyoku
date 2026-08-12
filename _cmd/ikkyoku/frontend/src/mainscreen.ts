@@ -11,7 +11,7 @@
 // (PositionService / StudyService)、繋がるのは「この局面を解析する」を押した
 // ときの 1 回だけ(写しを渡す)。**片方の値をもう片方に流用しないこと。**
 //
-//   入力   … 局面を**取り込む**面。キャプチャと**棋譜(KIF)の貼り付け**。今後 SFEN / 画像ファイル
+//   入力   … 局面を**取り込む**面。**新規対局**・キャプチャ・**棋譜(KIF)の貼り付け**。今後 SFEN / 画像ファイル
 //            (画像は認識を通るので訂正タブへ、SFEN/KIF は確定済みなので解析タブへ)
 //   訂正   … 認識の誤りを**直す**面。**ここに居ること自体が訂正モード**
 //            (自由編集・合法性を問わない・手番も駒台の先後も未決でよい)
@@ -260,6 +260,49 @@ export function mountMainScreen(root: HTMLElement): void {
            SFEN・KIF・画像ファイルの入口が並ぶ（そのとき行き先が分かれる:
            画像は認識を通るので訂正タブへ、SFEN/KIF は確定済みなので解析タブへ）。 -->
       <div id="panel-input" class="panel is-active" role="tabpanel" aria-labelledby="tab-input">
+        <!-- 何もないところから始める（2026-08-13）。**3 つめの入力の口。**
+             行き先は棋譜と同じ**解析タブ**で、訂正タブは通らない
+             （初期局面は手合割で一意に決まるので、直すものが無い）。
+
+             ⚠️ **初期局面をここに書かない。** 手合割 → 盤面は将棋の**仕様**なので
+             core/kifu.StartSFEN の 1 か所だけが持つ（Go 側の position.NewGame
+             がそれを引く）。フロントに SFEN を書き写すと、棋譜から読んだ平手と
+             新規で作った平手が食い違いうる。
+
+             ⚠️ **手合割は select にしてある。** 今出しているのは平手だけだが、
+             駒落ちは Go 側（core/kifu）が既に全部持っているので、**option を
+             足すだけで通る**。詰将棋は初期局面が無い（人が並べる）ので別の口になる
+             —— そちらは訂正タブ側の話で、ここには並ばない。
+
+             ⚠️ **「あなたの手番」が今決めているのは視点（画面の向き）だけ。**
+             平手の初期局面はどちらを持っても同じなので、局面には効かない。
+             対局モード（片側を人、もう片側をエンジンが指す）を入れる段になったら、
+             この選択がそのまま「自分の側」になる。 -->
+        <div class="setting-group">
+          <span class="setting-title">新しく対局を始める</span>
+          <span class="setting-note">
+            初期局面から始めます。<strong>解析タブ</strong>が開いて、
+            盤の駒を押せばそのまま手を進められます。
+            <strong>あなたの手番に選んだ側が手前に来ます</strong>
+            （盤の向きが変わるだけで、局面は変わりません）。
+          </span>
+          <div class="setting-fields">
+            <span class="field-label">手合割</span>
+            <select id="newgame-handicap" title="今は平手だけです（駒落ち・詰将棋はこれから）">
+              <option value="平手" selected>平手</option>
+            </select>
+            <span class="field-label">あなたの手番</span>
+            <div class="turn-group" role="group" aria-label="あなたの手番">
+              <button id="newgame-black" class="turn-btn is-active" type="button"
+                      data-side="black">先手</button>
+              <button id="newgame-white" class="turn-btn" type="button"
+                      data-side="white">後手</button>
+            </div>
+            <button id="newgame-start" class="ghost-btn is-primary" type="button">対局を始める</button>
+          </div>
+          <p id="newgame-status" class="status" role="status" aria-live="polite" hidden></p>
+        </div>
+
         <div class="setting-group">
           <span class="setting-title">画面から撮る</span>
           <span class="setting-note">
@@ -322,6 +365,12 @@ export function mountMainScreen(root: HTMLElement): void {
              盤から遠い右上に離し、赤くしてある。 -->
         <div class="board-head">
           <ul id="board-warnings" class="warnings is-compact" hidden></ul>
+          <!-- 視点（2026-08-13）。**表示だけの反転で、局面には一切効かない。**
+               ⚠️ **ここで盤面や先後を書き換えないこと** —— 撮った画像と盤面が
+               一致していることが訂正の前提で、学習データのラベルも画素と
+               一致していなければならない（CLAUDE.md「取り込みも訂正も反転しない」）。
+               ⚠️ **解析タブと同じ 1 つの値**（どちらで切り替えても両方が変わる）。 -->
+          <button id="edit-flip" class="ghost-btn" type="button"></button>
           <button id="edit-reset" class="danger-btn" type="button" hidden
                   title="訂正を捨てて、認識したときの盤面に戻します">認識結果に戻す</button>
         </div>
@@ -606,6 +655,14 @@ export function mountMainScreen(root: HTMLElement): void {
 
                  ⚠️ **考える秒数が「無制限」だと使えない**（1 手目で止まったまま
                  次へ進めない）。理由は押せない側に出す。 -->
+            <!-- 視点（2026-08-13）。**表示だけの反転。局面には効かない。**
+                 ⚠️ **盤の上下に行を積まないこと**（そのぶん盤が小さくなる）ので、
+                 解析タブ側の置き場所は**右の列**。訂正タブのものと**同じ 1 つの値**で、
+                 どちらで切り替えても両方の盤が変わる。 -->
+            <div class="study-view-head">
+              <span class="field-label">視点</span>
+              <button id="study-flip" class="ghost-btn" type="button"></button>
+            </div>
             <div class="study-move-head">
               <span class="field-label">手順</span>
               <button id="analyze-batch-run" class="ghost-btn" type="button">連続解析</button>
@@ -815,7 +872,7 @@ export function mountMainScreen(root: HTMLElement): void {
   // タブは 5 枚。**局面を扱う面が「訂正」と「解析」の 2 つに分かれている**のが要点で、
   // 持っている局面も別物（Go 側の PositionService / StudyService）。
   //
-  //   入力     … 局面を取り込む（キャプチャ・棋譜の貼り付け。今後 SFEN / 画像ファイル）
+  //   入力     … 局面を取り込む（新規対局・キャプチャ・棋譜の貼り付け。今後 SFEN / 画像ファイル）
   //   訂正     … 認識の誤りを直す。**自由編集**（合法性を問わない・未決でよい）
   //   解析     … 確定した局面。**手を選んで進める**面（合法手だけ。手順 UI はこれから）
   //   デバッグ … 認識精度を追う（認識器の状態・信頼度・撮った画像）
@@ -1805,6 +1862,14 @@ export function mountMainScreen(root: HTMLElement): void {
   // 訂正タブ側の一行。訂正の操作が通らなかった理由と、確定できない理由を出す。
   const editStatus = root.querySelector<HTMLParagraphElement>("#edit-status")!;
 
+  // 視点（手前が先手 / 手前が後手）。**表示だけの反転で、局面には効かない。**
+  // 切り替えの中身は下の「視点」の節にまとめてある（ここは値の置き場所だけ）。
+  // ⚠️ **訂正タブと解析タブで 1 つの値。** 片方だけ反転させないこと。
+  let flipped = false;
+  // 解析タブの駒台に最後に描いた中身。**視点を切り替えたときに並べ直すため**に持つ
+  // （局面の写しではない —— 駒台の並び順だけがここに依存している）。
+  let studyHands: Stock[] = [];
+
   // showStudy は解析タブの表示一式（盤・駒台・SFEN・警告・手順）を描く。
   //
   // ⚠️ **手順とグリッドの描き直しを落とさないこと。** 盤だけ更新すると、
@@ -1867,14 +1932,19 @@ export function mountMainScreen(root: HTMLElement): void {
   // ⚠️ **訂正タブの駒台は今までどおり枚数ぶん並べる** —— あちらは 1 枚ずつ掴んで
   // 動かす面なので、駒の数と操作の対象が一致しているほうがよい。
   const showStudyHand = (inv: Stock[]) => {
+    // ⚠️ **視点を切り替えたときに並べ直すため、最後に描いた中身を覚えておく。**
+    // 覚えないと、反転しても駒台だけが前の向きの並びのまま残る。
+    studyHands = inv;
     for (const zone of studyHandZones) {
       const black = zone.dataset.black === "true";
       const chips = zone.querySelector<HTMLDivElement>(".hand-chips")!;
       chips.replaceChildren();
       let total = 0;
       // 並びは Go 側の Inventory の順（歩香桂銀金角飛王）。
-      // **後手は逆順**（駒が 180 度回っているので、そちら側から読んで同じ並びになる）。
-      for (const s of black ? inv : [...inv].reverse()) {
+      // **駒が 180 度回っている側は逆順**（そちら側から読んで同じ並びになる）。
+      // ⚠️ **回っているのは「後手」ではなく「奥の側」**なので、視点を反転すると
+      // 逆順にする相手も入れ替わる（`black === flipped`）。
+      for (const s of black === flipped ? [...inv].reverse() : inv) {
         const n = black ? s.handBlack : s.handWhite;
         if (n <= 0) {
           continue;
@@ -2054,6 +2124,80 @@ export function mountMainScreen(root: HTMLElement): void {
       editStatus.classList.add("is-error");
     },
   });
+
+  // ---- 視点（手前が先手 / 手前が後手）--------------------------------------
+  //
+  // **表示だけの反転で、局面には一切効かない。** 反転するのは
+  // `<shogi-board>` の絵（`flip` 属性）・駒台の置き場所と向き・盤に重ねる
+  // グリッドの読み替えだけで、**Go 側は視点を知らない**。
+  //
+  // ⚠️ **モデルは反転しない。** SFEN も先後も手番も指す手（USI）もそのままで、
+  // エンジンに渡すものも変わらない。CLAUDE.md の「取り込みでも訂正でも盤を
+  // 反転しない」（＝撮った画像と盤面が一致していること。学習データのラベルは
+  // 画素と一致していなければならない）は**そのまま生きている**。
+  //
+  // ⚠️ **そのぶん見え方とモデルが反対になる。** 読み替えは
+  // `editor.ts` / `study.ts` の `applyFlip`（見た目の位置 → 局面のマス）と、
+  // ここの CSS クラス（駒台の置き場所と駒の向き）の 2 か所だけに閉じてある。
+  // **他の場所で「反転しているなら…」と分岐を足さないこと。**
+  //
+  // ⚠️ **反転すると座標の表示も変わる**（筋が左から 1・2・…、段が下から
+  // 一・二・… になるので **左下が 1一**）。盤の絵の座標は core/web が、
+  // マスのツールチップは局面座標から作る側が、それぞれ勝手に付いてくる。
+  //
+  // **その場かぎりの値**（config.json には持たない）。起動のたびに
+  // 「手前が先手」で始まる —— 中継の原則がそちらで、切り替えは
+  // 連続モードのチェックと同じくその場の操作だから。
+  //
+  // ⚠️ **訂正タブと解析タブで 1 つの値。** 片方だけ反転していると、
+  // 採った局面が上下逆に出てきて何が起きたのか分からなくなる
+  // （値そのものは `showStudyHand` より前で宣言してある）。
+  const boardWithHands = root.querySelector<HTMLElement>("#board-with-hands")!;
+  const studyBoardWithHands = root.querySelector<HTMLElement>("#study-board-with-hands")!;
+  const flipButtons = [
+    root.querySelector<HTMLButtonElement>("#edit-flip")!,
+    root.querySelector<HTMLButtonElement>("#study-flip")!,
+  ];
+
+  const applyViewpoint = () => {
+    for (const [el, box] of [
+      [board, boardWithHands],
+      [studyBoard, studyBoardWithHands],
+    ] as const) {
+      el.toggleAttribute("flip", flipped);
+      box.classList.toggle("is-flipped", flipped);
+    }
+    editor.setFlip(flipped);
+    studyBoardUI.setFlip(flipped);
+    // 駒台は「逆順に並べる側」が入れ替わるので並べ直す（訂正タブ側は
+    // `editor.setFlip` が自分で並べ直している）。
+    showStudyHand(studyHands);
+    for (const b of flipButtons) {
+      b.textContent = flipped ? "手前: 後手" : "手前: 先手";
+      b.title = flipped
+        ? "手前が後手（先手が奥）。押すと手前が先手に戻ります。盤の向きが変わるだけで、局面は変わりません"
+        : "手前が先手（後手が奥）。押すと手前が後手になります。盤の向きが変わるだけで、局面は変わりません";
+      b.setAttribute("aria-pressed", String(flipped));
+    }
+  };
+
+  // setViewpoint は視点を決める。**「自分がどちら側か」を渡す**
+  // （新規対局の「あなたの手番」がそのまま入る）。
+  const setViewpoint = (black: boolean) => {
+    if (flipped === !black) {
+      return;
+    }
+    flipped = !black;
+    applyViewpoint();
+  };
+
+  for (const b of flipButtons) {
+    // 反転中なら「手前が先手」に戻し、そうでなければ「手前が後手」にする。
+    b.addEventListener("click", () => setViewpoint(flipped));
+  }
+  // ⚠️ **一度は通すこと。** ボタンの文字（「手前: 先手」）はここで入れているので、
+  // 通さないとラベルが空のボタンが出る。
+  applyViewpoint();
 
   // 盤面タブの駒台。**訂正中の局面の値**で、先後の割り振りと**未決のぶん**まで出す
   // (「認識詳細情報」側は認識した時点の推定枚数のまま)。
@@ -2445,6 +2589,57 @@ export function mountMainScreen(root: HTMLElement): void {
         status.classList.add("is-error");
       } finally {
         inputFit.disabled = false;
+      }
+    })();
+  });
+
+  // 新しく対局を始める（2026-08-13）。**3 つめの入力の口で、行き先は解析タブ。**
+  //
+  // ⚠️ **初期局面をフロントで作らない**（Go 側の `position.NewGame` →
+  // `core/kifu.StartSFEN`）。手合割 → 盤面は将棋の**仕様**なので、
+  // ここに SFEN を書き写すと棋譜から読んだ平手と食い違いうる。
+  //
+  // ⚠️ **「あなたの手番」が決めているのは視点だけ。** Go 側には渡さない
+  // （平手の初期局面はどちらを持っても同じで、局面には効かない）。
+  // 対局モードを入れる段になったら、この選択がそのまま「自分の側」になる。
+  const newgameHandicap = root.querySelector<HTMLSelectElement>("#newgame-handicap")!;
+  const newgameStart = root.querySelector<HTMLButtonElement>("#newgame-start")!;
+  const newgameStatus = root.querySelector<HTMLParagraphElement>("#newgame-status")!;
+  const newgameSides = Array.from(
+    root.querySelectorAll<HTMLButtonElement>("#panel-input .turn-group .turn-btn"),
+  );
+  // 既定は先手（中継の原則と同じ「手前が先手」）。
+  let newgameBlack = true;
+  for (const b of newgameSides) {
+    b.addEventListener("click", () => {
+      newgameBlack = b.dataset.side === "black";
+      for (const x of newgameSides) {
+        x.classList.toggle("is-active", x === b);
+      }
+    });
+  }
+  newgameStart.addEventListener("click", () => {
+    void (async () => {
+      newgameStart.disabled = true;
+      newgameStatus.hidden = false;
+      newgameStatus.classList.remove("is-error");
+      newgameStatus.textContent = "対局を作っています…";
+      try {
+        const got = await StudyService.NewGame(newgameHandicap.value);
+        // ⚠️ **視点は局面を描く前に決める。** 後から反転すると、盤とグリッドを
+        // 二度組み直すことになる（そのぶん 1 マスずれる隙ができる）。
+        setViewpoint(newgameBlack);
+        // ⚠️ **タブを先に開いてから描く**（棋譜の読み込みと同じ理由。
+        // `display: none` の中ではグリッドを測れないし scrollIntoView も効かない）。
+        selectTab(studyTab);
+        showStudy(got.state);
+        newgameStatus.textContent = got.summary;
+      } catch (err) {
+        newgameStatus.textContent =
+          `対局を始められませんでした: ${String(err instanceof Error ? err.message : err)}`;
+        newgameStatus.classList.add("is-error");
+      } finally {
+        newgameStart.disabled = false;
       }
     })();
   });

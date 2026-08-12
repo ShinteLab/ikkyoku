@@ -44,6 +44,13 @@ export interface StudyBoardHandle {
   // **`display: none` の中では CTM が取れない**。訂正タブで何度も踏んだのと
   // 同じ落とし穴で、測り直さないと**1 マスずれたところを指す**。
   relayout(): void;
+  // setFlip は視点（手前が先手 / 手前が後手）を切り替える。
+  //
+  // ⚠️ **表示だけの反転。局面には一切効かない。** `StudyService` を呼ばないこと ——
+  // 盤を裏から見ているだけなので、SFEN も手番も指す手（USI）も変わらない。
+  // ⚠️ **見え方とモデルが反対になる**ので、重ねるグリッドは
+  // 「見た目の位置 → 局面のマス」を読み替える。
+  setFlip(flip: boolean): void;
   // undo は 1 手戻す（**手順からも消す**。「指し間違えた」の取り消し）。
   // 戻って見るだけなら手順のチップを押す（そちらは手順を消さない）。
   undo(): void;
@@ -90,6 +97,23 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
     }
   }
   stage.appendChild(grid);
+
+  // 視点（表示だけの反転）。**局面には効かない。**
+  //
+  // ⚠️ グリッドの DOM は**見た目の順**に並んでいるので、`dataset` に入れる
+  // rank/file のほうを局面の座標へ読み替える（`editor.ts` と同じ考え方）。
+  // こうしておくと、掴む・光らせる・指すの処理は視点を一切知らずに済む
+  // （合法手 `legal.Move` の座標は当然モデル側なので、そのまま突き合わせられる）。
+  let flipped = false;
+  const applyFlip = () => {
+    for (let i = 0; i < cells.length; i++) {
+      const vr = Math.floor(i / 9);
+      const vf = i % 9;
+      cells[i].dataset.rank = String(flipped ? 8 - vr : vr);
+      cells[i].dataset.file = String(flipped ? 8 - vf : vf);
+    }
+  };
+
   if (getComputedStyle(stage).position === "static") {
     stage.style.position = "relative";
   }
@@ -476,6 +500,18 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
       paint();
     },
     relayout() {
+      layoutGrid();
+      paint();
+    },
+    setFlip(next: boolean) {
+      if (next === flipped) {
+        return;
+      }
+      flipped = next;
+      // ⚠️ **掴んでいる駒は捨てる。** 光っていた「動かせる位置」は反転前の
+      // 見た目に付いていたので、そのまま残すと**押した場所と指す手が食い違う**。
+      pick = null;
+      applyFlip();
       layoutGrid();
       paint();
     },

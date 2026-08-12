@@ -74,6 +74,15 @@ export interface EditorHandle {
   // 中では null が返る）。タブで隠している以上、開いたときに測り直さないと
   // グリッドが出ないか、前回の大きさのまま残って**1 マスずれたところを編集する**。
   relayout(): void;
+  // setFlip は視点（手前が先手 / 手前が後手）を切り替える。
+  //
+  // ⚠️ **表示だけの反転。局面には一切効かない。** ここで `PositionService` を
+  // 呼ばないこと —— 盤の絵を裏から見ているだけなので、SFEN も先後も手番も変わらない
+  // （変えると、撮った画像と局面がねじれて学習データに嘘が入る）。
+  //
+  // ⚠️ **見え方とモデルが反対になる**ので、重ねるグリッドは
+  // 「見た目の位置 → 局面のマス」を読み替える（`applyFlip`）。
+  setFlip(flip: boolean): void;
 }
 
 export interface EditorOptions {
@@ -129,6 +138,32 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     }
   }
   stage.appendChild(grid);
+
+  // ---- 視点（表示だけの反転） ---------------------------------------------
+  //
+  // ⚠️ **局面には一切効かない。** 反転するのは `<shogi-board>` の絵（`flip` 属性）と
+  // 駒台の置き場所だけで、`PositionService` が持つ盤・先後・手番・SFEN は動かない。
+  // **取り込みで反転しないという約束**（撮った画像と盤面が一致していること。
+  // 学習データのラベルは画素と一致していなければならない）と両立するのはこのため。
+  //
+  // ⚠️ **そのぶん「見た目の位置」と「局面のマス」が反対になる。** グリッドの DOM は
+  // **見た目の順**（左上から右下）に並んでいるので、`dataset` に入れる rank/file の
+  // ほうを局面の座標に読み替える。こうしておくと、掴む・置く・回すの処理は
+  // 視点を一切知らずに済む（読み替えが 1 か所に閉じる）。
+  //
+  // ⚠️ **反転すると座標の表示も変わる**（筋が左から 1・2・…、段が下から一・二・…
+  // なので **左下が 1一**）。ツールチップ（`cellLabel`）は dataset の局面座標から
+  // 作っているので、読み替えさえ正しければ自動で付いてくる。
+  let flipped = false;
+  const applyFlip = () => {
+    for (let i = 0; i < cells.length; i++) {
+      const vr = Math.floor(i / 9);
+      const vf = i % 9;
+      cells[i].dataset.rank = String(flipped ? 8 - vr : vr);
+      cells[i].dataset.file = String(flipped ? 8 - vf : vf);
+    }
+  };
+
   // グリッドの位置の基準は「箱」であることを、CSS 任せにせずここでも保証する。
   // **CSS が効いていないと基準がページ全体になり、グリッドが丸ごとずれる**
   // （コメントの閉じ忘れで .board-stage のルールが丸ごと捨てられていて、実際に踏んだ）。
@@ -297,17 +332,7 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     syncLoaded();
     resetBtn.hidden = !next.dirty;
 
-    for (let i = 0; i < cells.length; i++) {
-      const c: EditCell | undefined = next.cells?.[i];
-      const el = cells[i];
-      const rank = Number(el.dataset.rank);
-      const file = Number(el.dataset.file);
-      const empty = c?.empty ?? true;
-      el.classList.toggle("is-empty", empty);
-      el.draggable = !empty;
-      el.dataset.mark = c?.mark ?? "";
-      el.title = `${cellLabel(rank, file)} ${c?.name ?? "空"}`;
-    }
+    paintCells(next);
 
     for (const b of turnBtns) {
       b.classList.toggle("is-active", Number(b.dataset.turn) === next.turn);
@@ -322,6 +347,24 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     // グリッドの位置合わせはそのあと。
     onState(next);
     layoutGrid();
+  }
+
+  // paintCells は 9x9 のマスに中身（駒・掴めるか・ツールチップ）を入れる。
+  //
+  // ⚠️ **`cells` の並びは見た目の順、`EditState.cells` の並びは局面の順**なので、
+  // **配列の添字で突き合わせないこと**（反転すると 1 マスどころか盤ごと裏返る）。
+  // 突き合わせるのは `dataset` に入れた局面座標のほう（`applyFlip` が入れる）。
+  function paintCells(next: EditState) {
+    for (const el of cells) {
+      const rank = Number(el.dataset.rank);
+      const file = Number(el.dataset.file);
+      const c: EditCell | undefined = next.cells?.[rank * 9 + file];
+      const empty = c?.empty ?? true;
+      el.classList.toggle("is-empty", empty);
+      el.draggable = !empty;
+      el.dataset.mark = c?.mark ?? "";
+      el.title = `${cellLabel(rank, file)} ${c?.name ?? "空"}`;
+    }
   }
 
   // ---- 足りない駒と駒台 ---------------------------------------------------
@@ -377,9 +420,13 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
       chips.replaceChildren();
       let total = 0;
       // 並びは駒台に置く順（歩香桂銀金角飛王。Go 側の Inventory がその順で返す）。
-      // **後手は逆順に並べる。** 駒が 180 度回っているので、そちら側から読んだときに
-      // 同じ並びに見えるのはこの向き。
-      for (const s of black ? inv : [...inv].reverse()) {
+      // **駒が 180 度回っている側は逆順に並べる。** そちら側から読んだときに
+      // 同じ並びに見えるのがこの向きだから。
+      //
+      // ⚠️ **回っているのは「後手」ではなく「奥の側」。** 視点を反転すると
+      // 手前が後手になるので、**逆順にする相手も入れ替わる**（`black === flipped`）。
+      // 片方だけ直すと、反転したときに駒台の並びだけ上下逆に読むことになる。
+      for (const s of black === flipped ? [...inv].reverse() : inv) {
         const n = black ? s.handBlack : s.handWhite;
         for (let i = 0; i < n; i++) {
           total++;
@@ -664,5 +711,22 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
       onState(null);
     },
     relayout: layoutGrid,
+    setFlip(next: boolean) {
+      if (next === flipped) {
+        return;
+      }
+      flipped = next;
+      // 「見た目の位置 → 局面のマス」の読み替えを入れ替える。**先に**やること
+      // （このあとの描き直しが dataset を見て突き合わせる）。
+      applyFlip();
+      if (state?.loaded) {
+        paintCells(state);
+        // 駒台は逆順にする側が入れ替わるので、両方とも並べ直す。
+        renderHands(state.inventory ?? []);
+      }
+      // 盤の絵（`flip` 属性）と駒台の置き場所は呼び出し側が切り替える。
+      // その結果として箱の大きさが動きうるので、測り直す。
+      layoutGrid();
+    },
   };
 }

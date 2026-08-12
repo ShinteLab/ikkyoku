@@ -221,6 +221,42 @@ func (s *StudyService) LoadKifuURL(rawURL string) (KifuLoad, error) {
 	return load, nil
 }
 
+// NewGame は何もないところから対局を始める（入力タブの「新しく対局を始める」）。
+//
+// ⚠️ **訂正タブを経由しない 3 つめの入口**（画像 → 訂正タブ、棋譜 → ここ、新規 → ここ）。
+// 棋譜と同じ扱いなのは、**初期局面が手合割で一意に決まる**から（直すものが無い）。
+// **`PositionService` は触らない** —— 撮った局面を消してしまうと、
+// 新しく始めたのが誤操作だったときに戻る先が無くなる。
+//
+// ⚠️ **戻り値の型を棋譜の読み込みと共有しているのは、フロントの描き方が同じだから**
+// （根を入れ替えて解析タブを開き、1 行の説明を出す）。**別の経路を作らないこと。**
+//
+// ⚠️ **「自分がどちら側か」はここでは受けない。** 今それが決めているのは
+// **画面の向き（視点）だけ**で、局面には一切効かない（平手の初期局面は
+// どちらを持っても同じ）。対局モード（人が片側を持ち、エンジンがもう片側を指す）を
+// 入れる段になったら、その時点でここに載せる。**先回りして未使用の欄を作らない。**
+func (s *StudyService) NewGame(handicap string) (KifuLoad, error) {
+	study, err := position.NewGame(handicap)
+	if err != nil {
+		return KifuLoad{State: s.State()}, err
+	}
+
+	s.mu.Lock()
+	// **根ごと入れ替える**（Adopt / LoadKifu と同じ）。前の手順と解析結果は
+	// 別の局面の話になる。
+	s.study = study
+	s.evals.reset()
+	st := s.state()
+	s.mu.Unlock()
+
+	name := strings.TrimSpace(handicap)
+	if name == "" {
+		name = position.Hirate
+	}
+	s.logger.Info("新しい対局を作りました", "handicap", name, "sfen", st.SFEN)
+	return KifuLoad{State: st, Summary: fmt.Sprintf("%sで対局を始めました", name)}, nil
+}
+
 // kifuSummary は「何手読み込んだか」の 1 行を組み立てる。
 func kifuSummary(load position.KIFLoad) string {
 	head := fmt.Sprintf("%d手を読み込みました", load.Loaded)

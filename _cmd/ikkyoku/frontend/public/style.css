@@ -1652,6 +1652,75 @@ html.is-main #app {
   margin-bottom: var(--board-margin);
 }
 
+/* ---- 視点（手前が後手）--------------------------------------------------
+   **表示だけの反転**（2026-08-13）。局面には一切効かない —— 盤の絵は
+   <shogi-board> の `flip` 属性が、重ねるグリッドの読み替えは editor.ts /
+   study.ts の applyFlip が持ち、ここが持つのは**駒台の置き場所と駒の向き**だけ。
+
+   ⚠️ **入れ替わるのは「先手/後手」ではなく「奥/手前」。** 駒台は
+   「遠い側が左上・近い側が右下」という置き方（＝実際の将棋盤）を保ったまま、
+   **中身の先後だけが入れ替わる**。「足りない駒」(#missing-slot) は近い側の上に
+   居るという関係が変わらないので、そのまま動かさない。
+
+   ⚠️ **`--board-margin` の付け替えを落とさないこと。** 盤の絵は箱いっぱいでは
+   ないので、寄せる向き（上端/下端）も一緒に入れ替わる。 */
+#board-with-hands.is-flipped > #hand-white-slot {
+  grid-column: 3;
+  grid-row: 2;
+  justify-self: auto;
+  margin-top: 0;
+  margin-bottom: var(--board-margin);
+}
+
+#board-with-hands.is-flipped > #hand-black-slot {
+  grid-column: 1;
+  grid-row: 1;
+  justify-self: end;
+  margin-top: var(--board-margin);
+  margin-bottom: 0;
+}
+
+#study-board-with-hands.is-flipped > #study-hand-white-slot {
+  grid-column: 3;
+  grid-row: 3;
+  justify-self: auto;
+  align-self: end;
+  margin-top: 0;
+  margin-bottom: var(--board-margin);
+}
+
+#study-board-with-hands.is-flipped > #study-hand-black-slot {
+  grid-column: 1;
+  grid-row: 2;
+  justify-self: end;
+  align-self: start;
+  margin-top: var(--board-margin);
+  margin-bottom: 0;
+}
+
+/* 駒台の駒の向き。**回っているのは「後手」ではなく「奥の側」**なので、
+   反転すると回る側も入れ替わる（盤の駒も core/web が同じように打ち消している）。
+   ⚠️ **枚数バッジは常に読める向きに戻すこと**（駒と逆に回す）。 */
+.board-with-hands.is-flipped .stock-chip {
+  transform: rotate(180deg);
+}
+
+.board-with-hands.is-flipped .stock-chip.is-white {
+  transform: none;
+}
+
+.board-with-hands.is-flipped .stock-chip .stock-count {
+  transform: rotate(180deg);
+}
+
+.board-with-hands.is-flipped .stock-chip.is-white .stock-count {
+  transform: none;
+}
+
+/* ⚠️ **勝率バーは反転しない**（左が後手・右が先手のまま）。あれは盤ではなく
+   横棒なので、上下の視点とは対応が無い。反転させると「エンジンが間違えている」
+   としか読めない壊れ方になる（画面からは区別が付かない）。 */
+
 /* 先手側のスロットには「足りない駒」と駒台が縦に積まれる(足りない駒が上)。
    駒台が残りの高さを取る。 */
 .hand-slot {
@@ -2018,6 +2087,20 @@ html.is-main #app {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+/* 視点の行（2026-08-13）。**盤の上下ではなく右の列に置く** —— 盤の上下に行を
+   積むとそのぶん盤が小さくなる（--board-size の式）。ここなら盤の大きさに効かず、
+   減るのは手順リストの取り分だけ。 */
+.study-view-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.study-view-head > .field-label {
+  margin-right: auto;
 }
 
 /* 見出しのすぐ後ろを空けて、ボタンを右へ寄せる。 */
@@ -2435,6 +2518,15 @@ html.is-main #app {
   min-width: 0;
   height: 100%;
   overflow-y: auto;
+}
+
+/* 視点のボタン（訂正タブ）。**警告の件数で位置が動かないよう右へ寄せる**
+   （警告は出たり消えたりするので、左に置くと押す場所が毎回変わる）。
+   ⚠️ **`margin-left: auto` は「認識結果に戻す」と 2 つ並ぶ**が、余白を先に
+   取るのはこちらなので、結果として 2 つが右端に並ぶ。 */
+.board-head > #edit-flip {
+  flex: 0 0 auto;
+  margin-left: auto;
 }
 
 /* 訂正した内容を捨てるボタン。**押し間違えると作業が消える**ので、盤の近くの

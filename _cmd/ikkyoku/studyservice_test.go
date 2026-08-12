@@ -291,3 +291,58 @@ func TestStudyServiceLoadKifuURLKeepsPositionOnError(t *testing.T) {
 		t.Errorf("失敗したのに前の局面が消えています: %+v", load.State)
 	}
 }
+
+// 何もないところから対局を始められること（入力タブの「新しく対局を始める」）。
+//
+// ⚠️ **採ったときと同じ形（確定した局面 + 空の手順 + 合法手）**で返ること。
+// ここが揃っていないと、始めた直後に駒を押しても何も光らない。
+func TestStudyServiceNewGame(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	s := NewStudyService(logger, NewPositionService(logger))
+
+	got, err := s.NewGame("平手")
+	if err != nil {
+		t.Fatalf("NewGame: %v", err)
+	}
+	if got.Note != "" {
+		t.Errorf("Note = %q（新規作成で読み落とすものは無いはず）", got.Note)
+	}
+	if !strings.Contains(got.Summary, "平手") {
+		t.Errorf("Summary = %q（手合割が出ていない）", got.Summary)
+	}
+	st := got.State
+	if !st.Loaded || st.Ply != 0 || len(st.Moves) != 0 {
+		t.Fatalf("始めた直後の状態が変です: %+v", st)
+	}
+	if want := hirateBoard; st.BoardSFEN != want {
+		t.Errorf("BoardSFEN = %q, want %q", st.BoardSFEN, want)
+	}
+	if st.Turn != 1 {
+		t.Errorf("Turn = %d, want 1(先手番)", st.Turn)
+	}
+	if len(st.Legal) != 30 {
+		t.Errorf("合法手 = %d, want 30", len(st.Legal))
+	}
+	// **解析にそのまま渡せる形**（根 + 空の手順）であること。
+	tg, err := s.analyzeTarget()
+	if err != nil {
+		t.Fatalf("analyzeTarget: %v", err)
+	}
+	if tg.Root != st.SFEN || len(tg.Moves) != 0 {
+		t.Errorf("解析対象が根になっていません: %+v", tg)
+	}
+}
+
+// ⚠️ **始め損ねても、それまでの局面を壊さないこと**（知らない手合割を打ったとき）。
+// 壊すと、押し間違えただけで検討が消える（棋譜の貼り間違いと同じ話）。
+func TestStudyServiceNewGameKeepsPositionOnError(t *testing.T) {
+	s := adopted(t)
+	before := s.State()
+
+	if _, err := s.NewGame("そんな手合割は無い"); err == nil {
+		t.Fatal("知らない手合割がエラーになりません")
+	}
+	if after := s.State(); after.SFEN != before.SFEN {
+		t.Errorf("失敗したのに局面が変わりました: %q -> %q", before.SFEN, after.SFEN)
+	}
+}
