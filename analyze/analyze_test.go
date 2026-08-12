@@ -172,7 +172,7 @@ func TestScoreIsBlackOriented(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			in := coreusi.Info{ScoreCP: tt.cp, HasScore: true}
-			if got := newScore(in, tt.black); got.CP != tt.want {
+			if got := newScore(in, tt.black, 0); got.CP != tt.want {
 				t.Errorf("newScore(cp=%d, black=%v).CP = %d, want %d", tt.cp, tt.black, got.CP, tt.want)
 			}
 		})
@@ -217,17 +217,17 @@ func TestAnalyzeScoreSideOnRealPositions(t *testing.T) {
 // 両方を見る（engine/TODO.md の 2 が直るまで後者の推定が要る）。
 func TestScoreMate(t *testing.T) {
 	t.Run("score mate を返すエンジン", func(t *testing.T) {
-		if s := newScore(coreusi.Info{ScoreMate: 5, HasMate: true}, true); s.Mate != 5 {
+		if s := newScore(coreusi.Info{ScoreMate: 5, HasMate: true}, true, 0); s.Mate != 5 {
 			t.Errorf("Mate = %d, want 5", s.Mate)
 		}
 		// 後手番で「手番側が詰ます」= 先手が詰まされる。
-		if s := newScore(coreusi.Info{ScoreMate: 5, HasMate: true}, false); s.Mate != -5 {
+		if s := newScore(coreusi.Info{ScoreMate: 5, HasMate: true}, false, 0); s.Mate != -5 {
 			t.Errorf("Mate = %d, want -5", s.Mate)
 		}
 	})
 	t.Run("score cp に詰みスコアを詰めるエンジン", func(t *testing.T) {
 		in := coreusi.Info{ScoreCP: engineMateScore - 5, HasScore: true}
-		s := newScore(in, true)
+		s := newScore(in, true, 0)
 		if s.Mate != 5 {
 			t.Errorf("Mate = %d, want 5", s.Mate)
 		}

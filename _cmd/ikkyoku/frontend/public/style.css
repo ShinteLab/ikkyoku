@@ -24,6 +24,16 @@
      カスタムプロパティは下へしか継承しないので、グラフの箱の中で定義すると
      盤の大きさの式から読めない（引き忘れると盤が縦にはみ出す）。 */
   --eval-graph-h: 116px;
+
+  /* 勝率バー（解析タブ。盤の上）。**エンジン 1 本ぶんの高さ × 本数。**
+     ⚠️ **--eval-graph-h と同じ理由で :root に置くこと**（#panel-study の
+     --board-size がこれを引く。バーの箱の中で定義すると盤の式から読めない）。
+     ⚠️ **--winrate-rows は JS が入れる**（mainscreen.ts の reserveWinrate）。
+     エンジンの本数で変わるのはここだけで、**解析のたびには変わらない**
+     （中身の有無で伸び縮みさせないこと。盤の**上**の行なので、動くと盤ごと下がる）。 */
+  --winrate-row-h: 22px;
+  --winrate-rows: 1;
+  --winrate-h: calc(var(--winrate-row-h) * var(--winrate-rows) + 4px * (var(--winrate-rows) - 1) + 6px);
 }
 
 html,
@@ -470,7 +480,10 @@ html.is-main body {
    変えないと**盤が縦にはみ出す**（`.board-area` は縮まないので、盤が画面の外へ出る）。
    ここで上書きしておけば、訂正タブ側の盤の大きさは変わらない。 */
 #panel-study {
-  --board-size: min(calc(100vh - 260px - var(--eval-graph-h) - 24px), var(--board-max));
+  --board-size: min(
+    calc(100vh - 260px - var(--eval-graph-h) - var(--winrate-h) - 24px),
+    var(--board-max)
+  );
 }
 
 /* 設定タブ。項目は上から順に積むだけ(1 つしか無いうちは列にしない)。 */
@@ -637,6 +650,101 @@ html.is-main body {
 
 .engine-note.is-error {
   color: #ff8d8d;
+}
+
+/* 勝率バー（解析タブ。2026-08-12）。**盤の上**に置く。
+
+   **左が後手（青）・右が先手（赤）。** 評価値は Go 側が先手視点に揃えているので、
+   ⚠️ **ここで向きを入れ替えないこと**（バーが逆に伸びると、画面を見ても
+   「エンジンが間違えている」としか読めない壊れ方になる）。
+
+   ⚠️ **エンジンごとに 1 本**（合成しない。平均も多数決も取らない）。
+   ⚠️ **高さは固定**（--winrate-h）。連続モードでは 1 手ごとに消えて出るので、
+   中身で伸び縮みすると盤ごと画面が跳ねる。**盤の上の行なので特に効く。** */
+.winrate-row {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  height: var(--winrate-h);
+  /* 盤より広がっても意味が無い（形勢は盤の上にあるほうが読みやすい）。 */
+  width: 100%;
+  max-width: var(--board-max);
+  padding-bottom: 6px;
+}
+
+.winrate-row[hidden] {
+  display: none;
+}
+
+.winrate-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--winrate-row-h);
+}
+
+/* どのエンジンの勝率か。**幅を固定する** —— 名前の長さで帯の左端が動くと、
+   複数のエンジンを縦に並べたときに見比べられない。 */
+.winrate-name {
+  flex: 0 0 auto;
+  width: 92px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 百分率。**幅を固定**（桁が変わっても帯の端が動かないように）。 */
+.winrate-value {
+  flex: 0 0 auto;
+  width: 38px;
+  font-size: 12.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.winrate-value.is-white {
+  text-align: right;
+  color: #6ad3ff;
+}
+
+.winrate-value.is-black {
+  text-align: left;
+  color: #ff7d7d;
+}
+
+/* 帯。**下地が先手（赤）で、左から後手（青）を被せる。**
+   ⚠️ **幅を持つ要素は片側だけにすること** —— 両方を % で置くと、丸めで
+   真ん中に 1px の隙間が出る。 */
+.winrate-track {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  background: #d2453f;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.winrate-white {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 50%;
+  background: #3d7fd2;
+}
+
+/* まだ結果が届いていないとき。**50% と書かない** ——「互角」と「まだ分からない」は
+   別物なので、色を落として数字は "-" のままにする。 */
+.winrate-bar.is-empty .winrate-track {
+  background: #3a3d47;
+}
+
+.winrate-bar.is-empty .winrate-white {
+  background: #454956;
+}
+
+.winrate-bar.is-empty .winrate-value {
+  color: #6e7686;
 }
 
 /* エンジンごとの解析結果（解析タブ。2026-08-11）。

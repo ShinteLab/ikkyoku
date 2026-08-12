@@ -38,6 +38,16 @@ type Config struct {
 	// Training は訂正した局面を suteme の学習用サーバへ送る設定。
 	Training TrainingConfig `json:"training"`
 
+	// PonanzaConstant は評価値を勝率に直すときの定数（解析タブの勝率バー）。
+	//
+	//	勝率(先手) = 1 / (1 + exp(-評価値 / この値))
+	//
+	// **0 なら既定の 1500**（既定値の解決は `analyze.PonanzaConstantOr` の 1 か所。
+	// **ここに既定値を書かないこと**）。設定できるようにしてあるのは、
+	// **エンジンによって評価値の尺度が違う**から（⚠️ 特に自作 `engine` の PST は
+	// 手作り・未調整なので、そのままでは勝率が振り切れやすい）。
+	PonanzaConstant float64 `json:"ponanzaConstant,omitempty"`
+
 	// Engines は登録した USI エンジンの一覧。
 	//
 	// **1 つに絞らない**（2026-08-11）。検討ツールとして実用になるかは繋ぐエンジンの

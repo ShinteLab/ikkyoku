@@ -38,6 +38,36 @@ func TestConfigRoundTrip(t *testing.T) {
 	}
 }
 
+// 勝率バーのポナンザ定数が往復すること。
+//
+// ⚠️ **既定値（1500）をここに書き残さないこと。** 0 は「未設定」で、既定への
+// 解決は `analyze.PonanzaConstantOr` の 1 か所（設定ファイルに 1500 を焼くと、
+// 既定を変えたときにその設定ファイルだけ追従しない）。
+func TestConfigPonanzaConstantRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := SaveConfig(path, Config{PonanzaConstant: 600}); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+	got, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	if got.PonanzaConstant != 600 {
+		t.Errorf("PonanzaConstant = %v, want 600", got.PonanzaConstant)
+	}
+
+	// 未設定は 0 のまま（既定への倒しはここではしない）。
+	bare := filepath.Join(t.TempDir(), "config.json")
+	if err := SaveConfig(bare, Config{}); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+	if got, err := LoadConfig(bare); err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	} else if got.PonanzaConstant != 0 {
+		t.Errorf("PonanzaConstant = %v, want 0（未設定）", got.PonanzaConstant)
+	}
+}
+
 func TestLoadConfigMissingFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "does-not-exist.json")

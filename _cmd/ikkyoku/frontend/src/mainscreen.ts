@@ -94,7 +94,12 @@ interface AnalyzeLine {
   // ⚠️ **候補ごとに違うことがある。** MultiPV では順位ごとに別々の info が来て、
   // 進み方も揃わない（見出しの「深さ」は一番深いところ）。
   depth: number;
-  score: { cp: number; mate: number; label: string };
+  // winRate は**先手の勝率**（0.0〜1.0）。勝率バーが読む値。
+  //
+  // ⚠️ **cp から計算し直さないこと。** 式（1/(1+exp(-cp/定数))）も定数も
+  // Go 側が持っている（`analyze.WinRate` / 設定タブのポナンザ定数）ので、
+  // ここで計算すると**定数を変えたときに片方だけ古い値で描く**。
+  score: { cp: number; mate: number; label: string; winRate: number };
   // moves は USI 表記（"8h2b+"）。**手を辿るのに使うのはこちら。**
   moves: string[];
   // text は日本語表記（"▲２二角成"）。**画面に出すのはこちら。**
@@ -429,6 +434,20 @@ export function mountMainScreen(root: HTMLElement): void {
           <button id="study-back" class="ghost-btn" type="button" hidden
                   title="訂正タブへ戻ります。解析の結果は捨てられます">訂正に戻る</button>
         </div>
+        <!-- 勝率バー（2026-08-12）。**盤の上**に置く —— 評価値を読むより先に
+             「どちらがどれくらい良いか」が目に入るほうが速い（数字は下の候補手の
+             行にある）。**左が後手（青）・右が先手（赤）**で、盤の向き
+             （後手が上）とは別に、横棒として一般的な並びに合わせてある。
+
+             勝率 = 1 / (1 + exp(-評価値 / ポナンザ定数))。定数は設定タブ（既定 1500）。
+             ⚠️ **計算はフロントでしない**（Go 側の analyze.WinRate。式を 2 か所に
+             持つと、定数を変えたときに片方だけ古い値で描く）。
+
+             ⚠️ **エンジンごとに 1 本**（合成しない。平均も多数決も取らない）。
+             評価値を先手視点に固定してあるので、エンジンをまたいでも向きは同じ。
+             ⚠️ **高さは CSS で固定**（--winrate-h）。連続モードでは 1 手ごとに
+             消えて出るので、中身で伸び縮みすると盤ごと画面が跳ねる。 -->
+        <div id="winrate-row" class="winrate-row" hidden></div>
         <div class="board-area">
           <!-- 盤と駒台の配置。**後手の駒台は盤の左上、先手の駒台は右下**
                (訂正タブと同じ並び＝実際の将棋盤と同じ)。
@@ -638,6 +657,27 @@ export function mountMainScreen(root: HTMLElement): void {
                     title="同梱のエンジンを登録します">同梱エンジンを追加</button>
           </div>
           <p id="engine-status" class="status" role="status" aria-live="polite"></p>
+        </div>
+
+        <!-- 勝率バーの変換に使う定数（解析タブ。2026-08-12）。
+             **評価値の尺度はエンジンによって違う**ので、ここで合わせられるように
+             してある（⚠️ 自作エンジンの評価値の絶対値は当てにならない）。
+             ⚠️ **既定値（1500）は Go 側が解決して返す。フロントに書かないこと。** -->
+        <div class="setting-group">
+          <span class="setting-title">勝率の表示</span>
+          <span class="setting-note">
+            解析タブの盤の上に出る勝率バーの計算に使います。
+            <code>勝率(先手) = 1 / (1 + exp(-評価値 / ポナンザ定数))</code>。
+            <strong>小さくするほど、同じ評価値でも勝率が振り切れます。</strong>
+            空欄にすると既定に戻ります。
+          </span>
+          <div class="setting-fields">
+            <label class="field">
+              <span class="field-label">ポナンザ定数</span>
+              <input id="ponanza-constant" class="port" type="number" min="1" max="100000"
+                     step="10" title="評価値を勝率に直すときの定数（既定 1500）" />
+            </label>
+          </div>
         </div>
 
         <!-- 訂正結果を suteme の学習データに戻す設定。**自動送信のスイッチではない**
@@ -1024,8 +1064,23 @@ export function mountMainScreen(root: HTMLElement): void {
     meta: HTMLElement;
     lines: HTMLOListElement;
     error: HTMLElement;
+    // 勝率バー（盤の上）。**エンジンごとに 1 本**（合成しない）。
+    // ⚠️ **候補手の一覧とは離れた場所にあるが、更新は同じ 1 か所から行う**
+    // （`showAnalyzeProgress`）—— 別々に更新すると、バーと数字が食い違う。
+    bar: WinRateBar;
+  }
+  // 勝率バー 1 本ぶんの要素。
+  interface WinRateBar {
+    root: HTMLElement;
+    // white は後手側（左・青）の帯。**先手側は下地なので要素を持たない**
+    // （幅を 2 つ持つと、丸めで 1px の隙間が出る）。
+    white: HTMLElement;
+    blackLabel: HTMLElement;
+    whiteLabel: HTMLElement;
+    name: HTMLElement;
   }
   const engineCards = new Map<string, EngineCard>();
+  const winrateRow = root.querySelector<HTMLDivElement>("#winrate-row")!;
 
   // 解析できない理由。**空なら解析できる。**
   //
@@ -1068,6 +1123,10 @@ export function mountMainScreen(root: HTMLElement): void {
     analyzedSfen = "";
     engineCards.clear();
     analyzeEnginesBox.replaceChildren();
+    // ⚠️ **勝率バーも一緒に消すこと。** 別の局面の勝率が盤の上に残っていると、
+    // **今の盤の形勢として読まれる**（評価値の一覧を消すのと同じ理由で、
+    // むしろこちらのほうが目に入る位置にある）。
+    winrateRow.replaceChildren();
     analyzeMeta.textContent = "";
     analyzeStatus.hidden = true;
     analyzeStatus.textContent = "";
@@ -1089,6 +1148,79 @@ export function mountMainScreen(root: HTMLElement): void {
   analyzeMultiPV.addEventListener("change", reserveLines);
   reserveLines();
 
+  // ---- 勝率バー（盤の上）---------------------------------------------------
+  //
+  // **左が後手（青）・右が先手（赤）。** 評価値は Go 側が先手視点に揃えてあるので、
+  // ⚠️ **ここで符号も向きもいじらないこと**（エンジンをまたいでも同じ向きで読める、
+  // という前提がここで効いている）。
+  //
+  // ⚠️ **勝率そのものも Go 側の値**（`score.winRate`）。式と定数（ポナンザ定数）を
+  // フロントに持つと、設定で定数を変えたときに**片方だけ古い値で描く**。
+
+  // reserveWinrate は勝率バーに確保する高さを決める（エンジンの本数ぶん）。
+  //
+  // ⚠️ **:root に置くこと。** `#panel-study` の `--board-size` がこれを引いており、
+  // カスタムプロパティは下へしか継承しないので、バーの箱の中で定義すると
+  // **盤の大きさの式から読めず、盤が縦にはみ出す**（--eval-graph-h と同じ話）。
+  const reserveWinrate = (count: number) => {
+    const rows = Math.max(count, 1);
+    document.documentElement.style.setProperty("--winrate-rows", String(rows));
+  };
+
+  // buildWinRateBar はエンジン 1 つぶんのバーを作って盤の上に足す。
+  //
+  // **結果が届く前から出す**（起動を待つあいだも枠がある）。まだ値が無いあいだは
+  // 中立の見た目にして、**50% と書かない** —— 互角と「まだ分からない」は別物。
+  const buildWinRateBar = (label: string): WinRateBar => {
+    const el = document.createElement("div");
+    el.className = "winrate-bar is-empty";
+    el.innerHTML = `
+      <span class="winrate-name note"></span>
+      <span class="winrate-value is-white">-</span>
+      <div class="winrate-track"><div class="winrate-white"></div></div>
+      <span class="winrate-value is-black">-</span>
+    `;
+    const bar: WinRateBar = {
+      root: el,
+      white: el.querySelector<HTMLElement>(".winrate-white")!,
+      whiteLabel: el.querySelector<HTMLElement>(".winrate-value.is-white")!,
+      blackLabel: el.querySelector<HTMLElement>(".winrate-value.is-black")!,
+      name: el.querySelector<HTMLElement>(".winrate-name")!,
+    };
+    // **どのエンジンの勝率かは出す**（複数走るので、出所を伏せると比べようがない）。
+    bar.name.textContent = label;
+    bar.name.title = label;
+    winrateRow.appendChild(el);
+    return bar;
+  };
+
+  // showWinRate は届いた勝率をバーに反映する。
+  //
+  // ⚠️ **候補手の一覧と同じ 1 か所から呼ぶこと**（`showAnalyzeProgress`）。
+  // 別々に更新すると、バーと評価値の数字が食い違う。
+  const showWinRate = (bar: WinRateBar, line: AnalyzeLine | undefined) => {
+    if (!line) {
+      bar.root.classList.add("is-empty");
+      bar.white.style.width = "50%";
+      bar.whiteLabel.textContent = "-";
+      bar.blackLabel.textContent = "-";
+      bar.root.title = "";
+      return;
+    }
+    // ⚠️ **勝率は Go 側の値。cp から計算し直さないこと**（上の ⚠️）。
+    const black = Math.min(Math.max(line.score.winRate, 0), 1);
+    const white = 1 - black;
+    bar.root.classList.remove("is-empty");
+    bar.white.style.width = `${(white * 100).toFixed(1)}%`;
+    // **整数の % で出す。** 小数まで出しても読み分けられないうえ、1 手ごとに
+    // 細かく揺れて、数字が動いているだけの行になる。
+    bar.whiteLabel.textContent = `${Math.round(white * 100)}%`;
+    bar.blackLabel.textContent = `${Math.round(black * 100)}%`;
+    // 評価値そのものは下の候補手の行にあるが、**バーだけ見ているときに
+    // 元の値を確かめられるように**添えておく（label は Go 側が組み立てた文字列）。
+    bar.root.title = `後手 ${Math.round(white * 100)}% ／ 先手 ${Math.round(black * 100)}%（評価値 ${line.score.label}）`;
+  };
+
   // 解析に参加するエンジンぶんの枠を先に作る。
   //
   // **起動を待っているあいだも見出しを出す**（エンジンによっては評価関数の読み込みで
@@ -1096,6 +1228,8 @@ export function mountMainScreen(root: HTMLElement): void {
   const buildEngineCards = (engines: { id: string; label: string; name: string }[]) => {
     engineCards.clear();
     analyzeEnginesBox.replaceChildren();
+    winrateRow.replaceChildren();
+    reserveWinrate(engines.length);
     for (const e of engines) {
       const card = document.createElement("section");
       card.className = "analyze-engine";
@@ -1117,6 +1251,7 @@ export function mountMainScreen(root: HTMLElement): void {
         meta: card.querySelector<HTMLElement>(".analyze-engine-meta")!,
         lines: card.querySelector<HTMLOListElement>(".analyze-lines")!,
         error: card.querySelector<HTMLElement>(".analyze-engine-error")!,
+        bar: buildWinRateBar(e.label),
       };
       // 見出しは**設定タブで付けた名前**。エンジンが名乗る名前（`id name`）は
       // 繋いで初めて分かるので、届いたら括弧で足す（下の showEngineName）。
@@ -1136,6 +1271,9 @@ export function mountMainScreen(root: HTMLElement): void {
 
   const showAnalyzeProgress = (card: EngineCard, p: AnalyzeProgress["progress"]) => {
     const lines = p.lines ?? [];
+    // 盤の上の勝率バーは**最善手（順位 1）の評価値**で描く（評価値グラフに
+    // 残すのと同じ値）。⚠️ **候補手の一覧と同じ 1 か所で更新すること。**
+    showWinRate(card.bar, lines[0]);
     card.lines.replaceChildren();
     for (const [i, l] of lines.entries()) {
       const li = document.createElement("li");
@@ -1384,6 +1522,7 @@ export function mountMainScreen(root: HTMLElement): void {
     analyzeStatus.textContent = "";
     engineCards.clear();
     analyzeEnginesBox.replaceChildren();
+    winrateRow.replaceChildren();
     analyzeMeta.textContent = "エンジンを起動しています…";
     reserveLines();
     try {
@@ -1469,6 +1608,9 @@ export function mountMainScreen(root: HTMLElement): void {
     // ⚠️ **局面があるあいだは枠を出しっぱなしにする**（中身が空でも）。
     // 解析のたびに畳むと、連続モードでは**1 手ごとに盤が上下に跳ねる**。
     analyzeEnginesBox.hidden = !studyLoaded;
+    // 勝率バーも同じ（**まだ結果が無くても枠だけ出す**）。出たり消えたりすると
+    // 盤が上下に動くうえ、盤の**上**の行なので動くと盤ごと押し下げる。
+    winrateRow.hidden = !studyLoaded;
     // 評価値グラフも同じ（**まだ 1 点も無くても軸だけ出す**）。出たり消えたりすると
     // 盤が上下に動くうえ、「解析すると点が並ぶ場所」が見えているほうが分かりやすい。
     evalGraphRow.hidden = !studyLoaded;
@@ -2361,6 +2503,8 @@ export function mountMainScreen(root: HTMLElement): void {
   const trainHost = root.querySelector<HTMLInputElement>("#train-host")!;
   const trainPort = root.querySelector<HTMLInputElement>("#train-port")!;
   const trainToken = root.querySelector<HTMLInputElement>("#train-token")!;
+  // 勝率バーの変換に使う定数（解析タブ）。**空欄なら既定に戻す。**
+  const ponanzaConstant = root.querySelector<HTMLInputElement>("#ponanza-constant")!;
   const trainCheck = root.querySelector<HTMLButtonElement>("#train-check")!;
   const trainCheckStatus = root.querySelector<HTMLParagraphElement>("#train-check-status")!;
 
@@ -2376,8 +2520,12 @@ export function mountMainScreen(root: HTMLElement): void {
     path: string;
     training: { enabled: boolean; host: string; port: number; token: string; target: string };
     engines: EngineSettings[] | null;
+    ponanzaConstant: number;
   }) => {
     fitOnStartup.checked = s.fitOnStartup;
+    // ⚠️ **既定値の解決は Go 側**（`analyze.PonanzaConstantOr`）。返ってきた値を
+    // そのまま入れるだけにすること（フロントに既定を書くと 2 か所に散る）。
+    ponanzaConstant.value = String(s.ponanzaConstant);
     settingsPath.textContent = s.path || "(保存先を決められませんでした)";
     showEngineList(s.engines ?? []);
     // 既定値の解決は Go 側(training パッケージ)が済ませて返す。**フロントに
@@ -2429,6 +2577,35 @@ export function mountMainScreen(root: HTMLElement): void {
       void saveTraining();
     });
   }
+
+  // 勝率の定数の保存。**空欄なら既定に戻す**（0 を渡すと Go 側が既定に倒す）。
+  //
+  // ⚠️ **次に解析したときから効く。** 走っている解析の途中経過は、そのときの
+  // 定数で計算された値なので変わらない（`AnalyzeService.Start` が設定を読む）。
+  ponanzaConstant.addEventListener("change", () => {
+    void (async () => {
+      const raw = ponanzaConstant.value.trim();
+      const v = raw === "" ? 0 : Number(raw);
+      if (!Number.isFinite(v) || v < 0) {
+        settingsStatus.textContent = "ポナンザ定数は正の数で指定してください。";
+        settingsStatus.classList.add("is-error");
+        return;
+      }
+      settingsStatus.textContent = "";
+      settingsStatus.classList.remove("is-error");
+      try {
+        showSettings(await SettingsService.SetPonanzaConstant(v));
+      } catch (err) {
+        settingsStatus.textContent = `設定を保存できませんでした: ${String(err)}`;
+        settingsStatus.classList.add("is-error");
+        try {
+          showSettings(await SettingsService.Settings());
+        } catch {
+          /* 読み直せないなら画面はそのまま。理由は上に出ている。 */
+        }
+      }
+    })();
+  });
 
   // ---- 解析エンジンの一覧 --------------------------------------------------
   //

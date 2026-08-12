@@ -88,6 +88,15 @@ export interface AppSettings {
     "engines": EngineSettings[] | null;
 
     /**
+     * PonanzaConstant は評価値 → 勝率の変換に使う定数（解析タブの勝率バー）。
+     * 
+     * **既定値（1500）は解決済みで返る**（`analyze.PonanzaConstantOr`）。
+     * ⚠️ **フロントに既定値を書かないこと** —— training の Host/Port と同じで、
+     * 2 か所に持つと既定を変えたときに食い違う。
+     */
+    "ponanzaConstant": number;
+
+    /**
      * Path は設定ファイルの場所。**表示のためだけ。** 手で編集したくなったときに
      * 探さずに済むよう出しておく(学習データの置き場所もこのファイルにある)。
      */

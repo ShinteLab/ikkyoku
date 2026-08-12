@@ -419,7 +419,13 @@ func (s *AnalyzeService) Start(seconds, multiPV int) (AnalyzeState, error) {
 
 	// ⚠️ **seconds が 0 以下なら「止めるまで考え続ける」。**
 	// これが「ずっと解析していたい」の表し方で、そのあいだプロセスも生きている。
-	opt := analyze.Options{Moves: target.Moves, MultiPV: multiPV}
+	// ⚠️ **勝率の定数もここで読む。** 設定は解析を始めるたびに読まれるので、
+	// 変えた結果が次の解析にそのまま効く（`setoption` と違って繋ぎ直しは要らない ——
+	// **エンジンに渡す値ではなく、評価値の見せ方だから**）。
+	opt := analyze.Options{
+		Moves: target.Moves, MultiPV: multiPV,
+		PonanzaConstant: s.settings.ponanzaConstant(),
+	}
 	if seconds > 0 {
 		opt.Movetime = time.Duration(seconds) * time.Second
 	}

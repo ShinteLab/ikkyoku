@@ -12,6 +12,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 
 	"github.com/ShinteLab/ikkyoku"
+	"github.com/ShinteLab/ikkyoku/analyze"
 	"github.com/ShinteLab/ikkyoku/training"
 )
 
@@ -30,6 +31,12 @@ type AppSettings struct {
 	// ⚠️ **1 つに絞らない**（2026-08-11）。「解析に使う」を付けたものが
 	// **同時に走って結果が並ぶ**ので、ここは常に一覧で扱う。
 	Engines []EngineSettings `json:"engines"`
+	// PonanzaConstant は評価値 → 勝率の変換に使う定数（解析タブの勝率バー）。
+	//
+	// **既定値（1500）は解決済みで返る**（`analyze.PonanzaConstantOr`）。
+	// ⚠️ **フロントに既定値を書かないこと** —— training の Host/Port と同じで、
+	// 2 か所に持つと既定を変えたときに食い違う。
+	PonanzaConstant float64 `json:"ponanzaConstant"`
 	// Path は設定ファイルの場所。**表示のためだけ。** 手で編集したくなったときに
 	// 探さずに済むよう出しておく(学習データの置き場所もこのファイルにある)。
 	Path string `json:"path"`
@@ -148,10 +155,11 @@ func (s *SettingsService) settings() AppSettings {
 		engines = append(engines, engineSettings(e))
 	}
 	return AppSettings{
-		FitOnStartup: s.cfg.FitOnStartup,
-		Training:     trainingSettings(s.cfg.Training),
-		Engines:      engines,
-		Path:         s.path,
+		FitOnStartup:    s.cfg.FitOnStartup,
+		Training:        trainingSettings(s.cfg.Training),
+		Engines:         engines,
+		PonanzaConstant: analyze.PonanzaConstantOr(s.cfg.PonanzaConstant),
+		Path:            s.path,
 	}
 }
 
@@ -430,6 +438,34 @@ func (s *SettingsService) SetTraining(enabled bool, host string, port int, token
 	}
 
 	return s.save(func(cfg *ikkyoku.Config) { cfg.Training = next })
+}
+
+// ponanzaConstant は評価値 → 勝率の変換に使う定数を返す（AnalyzeService が使う）。
+//
+// **設定ファイルの生の値をそのまま返す**（0 = 未設定）。既定値の解決は
+// `analyze.PonanzaConstantOr` の 1 か所で行うので、ここでは倒さない。
+func (s *SettingsService) ponanzaConstant() float64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cfg.PonanzaConstant
+}
+
+// SetPonanzaConstant は勝率の変換に使う定数を保存する（解析タブの勝率バー）。
+//
+// **0 以下なら既定に戻す**（設定ファイルからも消える）。欄を空にしたときの
+// 素直な意味が「既定でよい」なので、そこでエラーにしない。
+func (s *SettingsService) SetPonanzaConstant(v float64) (AppSettings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if v < 0 {
+		return s.settings(), fmt.Errorf("ポナンザ定数は正の数で指定してください: %v", v)
+	}
+	// **既定値そのものは書き残さない**（既定が変わったときに追従できるように。
+	// training の Host/Port と同じ扱い）。
+	if v == analyze.DefaultPonanzaConstant {
+		v = 0
+	}
+	return s.save(func(cfg *ikkyoku.Config) { cfg.PonanzaConstant = v })
 }
 
 // SetFitOnStartup は「起動時に盤面を探す」を切り替えて保存する。

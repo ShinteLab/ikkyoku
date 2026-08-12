@@ -93,6 +93,16 @@ export function SetFitOnStartup(v: boolean): $CancellablePromise<$models.AppSett
 }
 
 /**
+ * SetPonanzaConstant は勝率の変換に使う定数を保存する（解析タブの勝率バー）。
+ * 
+ * **0 以下なら既定に戻す**（設定ファイルからも消える）。欄を空にしたときの
+ * 素直な意味が「既定でよい」なので、そこでエラーにしない。
+ */
+export function SetPonanzaConstant(v: number): $CancellablePromise<$models.AppSettings> {
+    return $Call.ByID(4145834603, v);
+}
+
+/**
  * SetTraining は「訂正盤面を suteme に登録する」の設定を保存する。
  * 
  * **接続の確認はしない。** 設定を保存する操作と、相手が受け付けているかを見る操作

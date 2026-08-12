@@ -66,6 +66,12 @@ type Options struct {
 	// 解析は成立していて（Moves が空でよい）、ここに入るのは**ユーザーが自分で
 	// 伸ばした手順**であって、中継を最初から観ていないと得られない情報ではない。
 	Moves []string
+	// PonanzaConstant は評価値 → 勝率の変換に使う定数。**0 なら既定（1500）。**
+	//
+	// **勝率は評価値の見せ方であって、エンジンに渡すものではない**（`setoption` には
+	// 出ていかない）。ここに置いてあるのは、**書式と同じで Go 側が 1 か所で
+	// 組み立てるため**（`Score.WinRate`）。⚠️ **フロントで計算し直さないこと。**
+	PonanzaConstant float64
 }
 
 // Score は評価値。**先手視点に直してある。**
@@ -82,6 +88,13 @@ type Score struct {
 	//
 	// **書式を 1 か所にまとめるためにここに入れてある。** フロントで組み立て直さないこと。
 	Label string `json:"label"`
+	// WinRate は**先手の勝率**（0.0〜1.0）。`WinRate(s, k)` の結果を写したもの。
+	//
+	// **評価値と同じで先手視点。** 解析タブの勝率バーがこれを読む
+	// （左が後手・右が先手）。⚠️ **フロントで計算し直さないこと** ——
+	// ポナンザ定数は設定で変えられるので、式を 2 か所に持つと片方だけ古い定数で
+	// 描くことになる（**画面では気づけない**）。
+	WinRate float64 `json:"winRate"`
 }
 
 // Line は候補手 1 本ぶん（MultiPV の 1 行）。
@@ -360,7 +373,10 @@ func (s *Session) Analyze(ctx context.Context, positionSFEN string, opt Options,
 	}
 
 	started := time.Now()
-	acc := &accumulator{black: black, started: started, sfen: root, played: opt.Moves}
+	acc := &accumulator{
+		black: black, started: started, sfen: root, played: opt.Moves,
+		ponanza: opt.PonanzaConstant,
+	}
 	res, err := eng.Analyze(ctx, cmd,
 		client.GoOptions{Movetime: opt.Movetime, MultiPV: opt.MultiPV},
 		func(in coreusi.Info) {
@@ -487,6 +503,8 @@ type accumulator struct {
 	// いきなり読み筋を流すと**別の盤の上で名付ける**ことになり、駒種も「同」も
 	// 全部おかしくなる（しかも USI のほうは正しいままなので画面では気づけない）。
 	played []string
+	// ponanza は評価値 → 勝率の変換に使う定数（0 なら既定。`PonanzaConstantOr`）。
+	ponanza float64
 
 	mu    sync.Mutex
 	depth int
@@ -571,7 +589,7 @@ func (a *accumulator) add(in coreusi.Info) (Progress, bool) {
 	a.lines[rank] = Line{
 		Rank:  rank,
 		Depth: depth,
-		Score: newScore(in, a.black),
+		Score: newScore(in, a.black, a.ponanza),
 		Moves: moves,
 		Text:  text,
 	}
@@ -640,14 +658,21 @@ func (a *accumulator) progressLocked() Progress {
 }
 
 // newScore は USI の（手番側視点の）評価値を先手視点の Score にする。
-func newScore(in coreusi.Info, black bool) Score {
+//
+// ponanza は勝率に直すときの定数（0 なら既定）。⚠️ **勝率もここで入れておくこと** ——
+// 評価値・表示文字列・勝率が同じ 1 か所で決まっていれば、食い違いようがない。
+func newScore(in coreusi.Info, black bool, ponanza float64) Score {
 	sign := 1
 	if !black {
 		sign = -1
 	}
+	withRate := func(s Score) Score {
+		s.WinRate = WinRate(s, ponanza)
+		return s
+	}
 	if in.HasMate {
 		plies := in.ScoreMate * sign
-		return Score{Mate: plies, Label: mateLabel(plies)}
+		return withRate(Score{Mate: plies, Label: mateLabel(plies)})
 	}
 	// ⚠️ `score mate` を返さないエンジン向けの推定（自作 engine が今それ）。
 	if abs(in.ScoreCP) > engineMateScore-mateMargin {
@@ -659,10 +684,10 @@ func newScore(in coreusi.Info, black bool) Score {
 			plies = -plies
 		}
 		plies *= sign
-		return Score{Mate: plies, Label: mateLabel(plies)}
+		return withRate(Score{Mate: plies, Label: mateLabel(plies)})
 	}
 	v := in.ScoreCP * sign
-	return Score{CP: v, Label: cpLabel(v)}
+	return withRate(Score{CP: v, Label: cpLabel(v)})
 }
 
 func cpLabel(v int) string {
