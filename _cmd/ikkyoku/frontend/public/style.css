@@ -744,6 +744,22 @@ html.is-main #app {
   transition: height 0.3s ease;
 }
 
+/* ⚠️ **スプリットバーは畳む/開くで `position` が切り替わる**（流れ ⇄ 右端）ので、
+   位置だけは一瞬で飛ぶ。**フェードで隠す** —— 消えて出るぶんには、
+   どこから来たのかを目が追わない。0.3s は他と同じ長さ。 */
+#panel-study.is-animating #study-split {
+  animation: split-fade 0.3s ease;
+}
+
+@keyframes split-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 /* ⚠️ **解析タブに盤の上段（.board-head）は無い**（2026-08-12 に外した）。
    置いてあったのは警告と「訂正に戻る」で、**ボタンは上のタブと同じことしかしておらず**、
    警告はめったに出ない。**そのために盤の高さを常に 48px 削っていた。**
@@ -1388,15 +1404,28 @@ html.is-main #app {
   pointer-events: none;
 }
 
-/* ⚠️ **盤の左の余白で中央に寄せる**（2026-08-13）。畳んでも
-   **スプリットバーは流れに残す** —— 流れから外すと `position` が変わって
-   **アニメーションできない**（トグルのボタンが瞬間移動して見える）。
+/* ⚠️ **畳んだらスプリットバーは窓の右端へ逃がす**（2026-08-13）。流れに残すと
+   **盤のすぐ右（画面の真ん中あたり）に線とトグルが残って目障り**だった。
 
-   ⚠️ **32px は「盤の後ろに残るもの」の合計**（gap 12 + バー 8 + gap 12）。
-   畳んだ側（`.study-side`）は幅 0 でも**flex の gap は残る**ので、そのぶんを
-   盤の左に足すと左右が釣り合う。**gap かバーの太さを変えたら計算し直すこと。** */
+   ⚠️ **`position` は補間できないので、切り替えは一瞬で起きる。** そのままだと
+   バーが瞬間移動して見えるので、**畳む/開くのあいだだけフェードで隠す**
+   （下の `split-fade`）。**フェードを外すと飛んで見える。** */
+#panel-study.is-side-collapsed .board-area {
+  position: relative;
+}
+
+#panel-study.is-side-collapsed #study-split {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+}
+
+/* ⚠️ **盤の左の余白で中央に寄せる。** 12px は**盤の後ろに残る flex の gap**
+   （バーは流れから外れているが、幅 0 の `.study-side` との gap は残る）。
+   **`.board-area` の gap を変えたら計算し直すこと。** */
 #panel-study.is-side-collapsed #study-board-with-hands {
-  margin-left: 32px;
+  margin-left: 12px;
 }
 
 /* 縦のスプリットバー（2026-08-13）。**盤と、右の解析の列の境目。**
