@@ -434,7 +434,9 @@ html.is-main #app {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding-left: 10px;
+  /* タイトルバーと中身の境目。**線 1 本だけ**にしてあるのは、ここに厚みを持たせると
+     そのぶん盤が縮むため（--board-size の 82px はこの 1px を含む誤差の内）。 */
+  border-bottom: 1px solid #222;
   /* ⚠️ **ウィンドウの移動ハンドル。** これが無いと Frameless の窓を動かせない。
      押せるもの(.tabs / .win-controls)は no-drag に戻すこと —— 戻し忘れると
      ドラッグ扱いになってクリックが効かなくなる(枠の .frame-actions と同じ話)。
@@ -502,7 +504,9 @@ html.is-main #app {
   color: #9aa6c0;
   background: transparent;
   border: none;
-  border-radius: 5px;
+  /* 下は角を落とさない。タイトルバーの境界線（.main-toolbar の border-bottom）に
+     タブが乗っている見え方にするため。 */
+  border-radius: 5px 5px 0 0;
   cursor: pointer;
 }
 
