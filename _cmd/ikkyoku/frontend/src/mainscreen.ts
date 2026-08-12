@@ -1855,7 +1855,13 @@ export function mountMainScreen(root: HTMLElement): void {
     zone.className = "hand-zone is-readonly";
     zone.dataset.black = String(black);
     zone.setAttribute("aria-label", `${black ? "先手" : "後手"}の駒台`);
-    zone.innerHTML = `<div class="hand-chips"></div>`;
+    // 手番のマーク（2026-08-13）。**駒台の外側の角に絶対配置**なので高さを食わない
+    // （盤の大きさは `--board-size` の式で決まるので、行を積むと盤が小さくなる）。
+    // ⚠️ **常に両側に置いて手番側だけ光らせる**（出たり消えたりさせない）。
+    // ⚠️ **解析タブでは手番がここにしか出ていない** —— SFEN 行の値は
+    // ツールチップなので、ホバーしないと読めない。
+    zone.innerHTML = `<span class="turn-mark">${black ? "▲" : "△"}</span>` +
+      `<div class="hand-chips"></div>`;
     (black ? studyHandSlots.black : studyHandSlots.white).appendChild(zone);
     return zone;
   });
@@ -1906,6 +1912,11 @@ export function mountMainScreen(root: HTMLElement): void {
       studySfenOut.textContent = "-";
       showStudyHand([]);
     }
+    // ⚠️ **手番のマークは局面と一緒に更新する。** 1 手ごとに入れ替わるので、
+    // 落とすと**前の手番のまま光り続ける**（連続モードでは毎手ずれる）。
+    // ⚠️ **解析タブに「不明」は来ない**（確定した局面しか根にならない）が、
+    // 局面が無いときは両方消す。
+    showStudyTurn(st.loaded ? st.turn : 0);
     // ⚠️ **合法手が出せなくても局面は生きている**（設計原則3）。玉の欠けた局面などでは
     // 手を進められないだけで、盤も解析もそのまま使える。**理由は出すこと** ——
     // 何も出さないと「駒を押しても光らない」の理由が分からない。
@@ -1920,6 +1931,21 @@ export function mountMainScreen(root: HTMLElement): void {
     syncAnalyze();
     // 局面が変わったら点を取り直す（**戻った位置の縦線も動く**）。
     refreshEvalGraph();
+  };
+
+  // 解析タブの駒台の角のマークを手番に合わせる（1=先手番 / 2=後手番 / 0=局面なし）。
+  //
+  // ⚠️ **`showStudyHand` と分けてあるのは、視点の切り替えで駒台だけを並べ直す
+  // 経路があるから**（あちらは手番を知らない）。手番はここ 1 本で更新する。
+  const showStudyTurn = (turn: number) => {
+    for (const zone of studyHandZones) {
+      const black = zone.dataset.black === "true";
+      const mark = zone.querySelector<HTMLElement>(".turn-mark")!;
+      const mine = turn === (black ? 1 : 2);
+      const name = black ? "先手" : "後手";
+      mark.classList.toggle("is-active", mine);
+      mark.title = mine ? `${name}番です` : `${name}の駒台`;
+    }
   };
 
   // 解析タブの駒台。**未決は残っていない**（確定した局面なので）。

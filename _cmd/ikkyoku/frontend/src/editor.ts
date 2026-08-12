@@ -255,7 +255,12 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     const zone = document.createElement("div");
     zone.className = "hand-zone";
     zone.dataset.black = String(black);
+    // 手番のマーク（2026-08-13）。**駒台の外側の角に絶対配置**なので、
+    // 高さを 1px も食わない（盤が小さくならない）。
+    // ⚠️ **常に両側に置いて、手番側だけ光らせる。** 手番側にだけ出すと、
+    // 切り替えるたびに駒台の中身が動く（出たり消えたりするものを作らない）。
     zone.innerHTML =
+      `<span class="turn-mark">${black ? "▲" : "△"}</span>` +
       `<span class="hand-zone-label">${black ? "先手" : "後手"}の駒台</span>` +
       `<div class="hand-chips"></div>`;
     (black ? handSlots.black : handSlots.white).appendChild(zone);
@@ -337,6 +342,10 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     for (const b of turnBtns) {
       b.classList.toggle("is-active", Number(b.dataset.turn) === next.turn);
     }
+    // ⚠️ **手番の値は 1 つ（`EditState.turn`）。** ボタンとマークは同じ値を
+    // 2 か所に描くだけで、**更新経路もここ 1 本**にする（片方だけ更新する道を
+    // 作ると、どちらが本当の手番か分からなくなる）。
+    showTurnMarks(next.turn);
     if (document.activeElement !== moveNum) {
       moveNum.value = String(next.moveNumber ?? 0);
     }
@@ -364,6 +373,27 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
       el.draggable = !empty;
       el.dataset.mark = c?.mark ?? "";
       el.title = `${cellLabel(rank, file)} ${c?.name ?? "空"}`;
+    }
+  }
+
+  // showTurnMarks は駒台の角のマークを手番に合わせる。
+  //
+  // ⚠️ **訂正タブには「不明」がある**（手番は盤面からは決まらない。設計原則5）。
+  // そのときは**どちらも光らせない** —— 先手に倒すと、決めていない手番が
+  // 決まったように見える。**理由はツールチップに出す**（光っていない駒台が
+  // 2 つ並んでいるだけでは、未決なのか壊れているのか分からない）。
+  function showTurnMarks(turn: number) {
+    for (const zone of handZones) {
+      const black = zone.dataset.black === "true";
+      const mark = zone.querySelector<HTMLElement>(".turn-mark")!;
+      const mine = turn === (black ? TURN_BLACK : TURN_WHITE);
+      const name = black ? "先手" : "後手";
+      mark.classList.toggle("is-active", mine);
+      mark.title = mine
+        ? `${name}番です`
+        : turn === TURN_UNKNOWN
+          ? `${name}の駒台（手番はまだ決まっていません）`
+          : `${name}の駒台（今は${black ? "後手" : "先手"}番）`;
     }
   }
 

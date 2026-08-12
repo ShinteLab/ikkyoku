@@ -1721,6 +1721,73 @@ html.is-main #app {
    横棒なので、上下の視点とは対応が無い。反転させると「エンジンが間違えている」
    としか読めない壊れ方になる（画面からは区別が付かない）。 */
 
+/* ---- 手番のマーク（2026-08-13）------------------------------------------
+   ▲=先手 / △=後手。**駒台の外側の縁に絶対配置**する。
+
+   ⚠️ **絶対配置なのが要点。** 流れの中に置くと、解析タブでは駒台
+   （盤の 0.2 倍・4:5）の駒が見える行が減り、訂正タブでは盤の高さに効く。
+   **高さを 1px も食わない**ので、盤の大きさの式（--board-size）にも無関係。
+
+   ⚠️ **常に両側にあり、手番側だけが光る。** 手番側にだけ出すと、1 手ごとに
+   出たり消えたりして駒台の中身が動く（連続モードでは毎手そうなる）。
+
+   ⚠️ **どちらも光っていない＝手番が未決**（訂正タブだけで起きる。設計原則5）。
+   先手に倒さないこと。理由はツールチップに出す。
+
+   ⚠️ **回さないこと。** 駒（.stock-chip）は視点で 180 度回るが、これは
+   記号なので回すと読めなくなる。 */
+.turn-mark {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1;
+  min-width: 22px;
+  height: 18px;
+  padding: 0 5px;
+  font-size: 13px;
+  line-height: 17px;
+  text-align: center;
+  color: #6b7284;
+  background: #23262e;
+  border: 1px solid #3a3d47;
+  border-radius: 9px;
+}
+
+/* 今の手番。**盤の駒と同じ系統の色**にして、光っている側が手前か奥かに
+   関わらず「そちらが指す番」と読めるようにする。 */
+.turn-mark.is-active {
+  color: #1a1a1a;
+  background: #ffd479;
+  border-color: #b8862b;
+  box-shadow: 0 0 8px rgba(255, 212, 121, 0.55);
+}
+
+/* 置く縁は**駒台が盤のどちら側にあるか**で決まる（先後ではない）。
+   奥の駒台なら上、手前の駒台なら下 —— どちらも盤の外側なので、
+   盤にも駒にも重ならない（--board-margin ぶんの空きに収まる）。
+   ⚠️ **視点を反転すると奥/手前が入れ替わるので、縁も入れ替える。** */
+#hand-white-slot .turn-mark,
+#study-hand-white-slot .turn-mark {
+  top: -20px;
+}
+
+#hand-black-slot .turn-mark,
+#study-hand-black-slot .turn-mark {
+  bottom: -20px;
+}
+
+.is-flipped #hand-white-slot .turn-mark,
+.is-flipped #study-hand-white-slot .turn-mark {
+  top: auto;
+  bottom: -20px;
+}
+
+.is-flipped #hand-black-slot .turn-mark,
+.is-flipped #study-hand-black-slot .turn-mark {
+  bottom: auto;
+  top: -20px;
+}
+
 /* 先手側のスロットには「足りない駒」と駒台が縦に積まれる(足りない駒が上)。
    駒台が残りの高さを取る。 */
 .hand-slot {
@@ -2354,6 +2421,8 @@ html.is-main #app {
    **外すのと持ち主を決めるのが 1 操作**になるのがこのゾーンの意味。
    盤の脇(後手=左上 / 先手=右下)に置くので縦積み。 */
 .hand-zone {
+  /* 手番のマーク(.turn-mark)を外側の角に置くための基準。 */
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
