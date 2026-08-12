@@ -105,17 +105,16 @@ body {
   border-top: 1px solid #31353f;
 }
 
-/* つまみ。**角を丸めない**（平べったく）。透明のふちを付けてレールを左右に
-   覗かせる ——**同じ幅で塗ると、動かせる範囲との境目が消える**。 */
+/* つまみ。**角を丸めず、レールいっぱいに塗る**（平べったく）。
+   ⚠️ **ふちを空けないぶん、レールとの差は色だけで付ける** ——
+   レール #262a33 に対してつまみは十分明るくしておくこと（近づけると、
+   どこが掴めるのか分からない状態に戻る）。 */
 *::-webkit-scrollbar-thumb {
   background: #5b6172;
-  border: 3px solid transparent;
-  background-clip: padding-box;
 }
 
 *::-webkit-scrollbar-thumb:hover {
   background: #767d8f;
-  background-clip: padding-box;
 }
 
 /* 縦と横が交わる角。**レールと同じ色**（透明にすると、そこだけ面の色が抜ける）。 */
