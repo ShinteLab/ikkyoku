@@ -106,18 +106,18 @@ func TestEvalGraphKeepsSameLine(t *testing.T) {
 	}
 }
 
-// Undo は手順から手を消すので、評価値も消すこと（GoTo との違い）。
-func TestEvalGraphUndoDropsPoint(t *testing.T) {
+// DropFrom は手順から手を消すので、評価値も消すこと（GoTo との違い）。
+func TestEvalGraphDropFromDropsPoint(t *testing.T) {
 	s := adopted(t)
 	if _, err := s.Play("7g7f"); err != nil {
 		t.Fatalf("Play: %v", err)
 	}
 	record(t, s, "a", score(30))
-	if _, err := s.Undo(); err != nil {
-		t.Fatalf("Undo: %v", err)
+	if _, err := s.DropFrom(1); err != nil {
+		t.Fatalf("DropFrom: %v", err)
 	}
 	if len(s.Evals().Series) != 0 {
-		t.Errorf("Undo したのに評価値が残っています: %+v", s.Evals().Series)
+		t.Errorf("消した手の評価値が残っています: %+v", s.Evals().Series)
 	}
 }
 
@@ -132,8 +132,8 @@ func TestEvalGraphIgnoresStaleEpoch(t *testing.T) {
 	if _, err := s.Play("7g7f"); err != nil {
 		t.Fatalf("Play: %v", err)
 	}
-	if _, err := s.Undo(); err != nil { // 手順を切る（epoch が進む）
-		t.Fatalf("Undo: %v", err)
+	if _, err := s.DropFrom(1); err != nil { // 手順を切る（epoch が進む）
+		t.Fatalf("DropFrom: %v", err)
 	}
 	s.recordEval(target.Epoch, target.Ply, "a", "a", score(30), 12)
 	if len(s.Evals().Series) != 0 {

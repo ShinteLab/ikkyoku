@@ -2420,7 +2420,10 @@ html.is-main #app {
    「OK / キャンセル」でしか聞けない（「キャンセル＝不成」は読み取れない）。
 
    ⚠️ **position: fixed で body に置く**（盤の箱に入れると、はみ出したぶんが切られる）。 */
-.promote-ask {
+/* ⚠️ **手順を消すダイアログ（.drop-ask）も同じ形**（2026-08-13）。押した場所に
+   小さく出して聞く、という作りが同じなので見た目も揃える。**別々に書かないこと。** */
+.promote-ask,
+.drop-ask {
   position: fixed;
   z-index: 50;
   display: flex;
@@ -2445,6 +2448,14 @@ html.is-main #app {
 
 .promote-btn:hover {
   border-color: #5ea0ff;
+}
+
+/* 消す側のボタン。⚠️ **赤にすること**（元に戻せない操作で、消えるのは 1 手とは
+   限らない）。⚠️ **初期フォーカスは当てない** —— 既定は「やめる」のほう。 */
+.promote-btn.is-danger {
+  color: #0f1115;
+  background: #ff7a7a;
+  border-color: #ff7a7a;
 }
 
 /* 成るほうが圧倒的に多いので、そちらを既定の見た目にして初期フォーカスも当てる。 */
@@ -2582,6 +2593,21 @@ html.is-main #app {
 
 .move-chip.is-current .move-num {
   color: #0f1115;
+}
+
+/* 右クリックで消そうとしている範囲（2026-08-13）。**押した手とその先の全部**が
+   消えるので、聞いているあいだ**消える側を赤く見せる**。⚠️ 「その手以下が
+   消える」は文字で言うより見せたほうが早い（消す量は 1 手とは限らない）。
+   ⚠️ **`is-current` より後に書くこと** —— 今見ている手が消える範囲に入って
+   いることは普通にあり、そのとき青いままだと消えないように見える。 */
+.move-chip.is-doomed {
+  color: #ff9b9b;
+  background: rgba(255, 90, 90, 0.14);
+  border-color: #ff5a5a;
+}
+
+.move-chip.is-doomed .move-num {
+  color: #ff9b9b;
 }
 
 .editor {

@@ -51,9 +51,10 @@ export interface StudyBoardHandle {
   // ⚠️ **見え方とモデルが反対になる**ので、重ねるグリッドは
   // 「見た目の位置 → 局面のマス」を読み替える。
   setFlip(flip: boolean): void;
-  // undo は 1 手戻す（**手順からも消す**。「指し間違えた」の取り消し）。
-  // 戻って見るだけなら手順のチップを押す（そちらは手順を消さない）。
-  undo(): void;
+  // ⚠️ **「1手戻す」は無くなった**（2026-08-13。分岐を入れる前段）。手順を短く
+  // するのは**手順リストの右クリック**だけで、消える範囲は「押した手とその先」。
+  // `Undo` は「今どこを見ているか」に依存していて、戻って見ている最中に押すと
+  // **何が消えるのか画面から読めなかった。**
   // ⚠️ **USI の手を直接指す入口は持たない**（2026-08-12 に外した）。
   // 解析結果の候補手を押して指せるようにしていたが、あれは**エンジンが読んだ枝**で
   // あって本譜ではないので、押しただけで手順が伸びる場所にしない
@@ -237,7 +238,11 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
   // 手順（棋譜）。**盤の右に縦のリストで積む。クリックでその局面へ戻れる。**
   //
   // ⚠️ **戻っても手順は消さない**（進め直せる）。消えるのは、戻った先で
-  // 別の手を指したときだけ（Go 側の Study.Play が捨てる）。
+  // 別の手を指したときと、**右クリックで消したとき**（下記）。
+  //
+  // ⚠️ **左クリック＝戻る / 右クリック＝その手以下を消す**（2026-08-13）。
+  // 左を消す操作にしない —— **戻って見る**のは手順リストの主な用途なので、
+  // それを潰すと評価値グラフからしか戻れなくなる。
   const renderMoves = () => {
     movesPanel.replaceChildren();
     if (!state?.loaded) {
@@ -259,6 +264,8 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
       t.textContent = label;
       b.append(i, t);
       b.classList.toggle("is-current", n === ply);
+      // ⚠️ **消す範囲を出すのに要る**（`.is-doomed` を付ける相手を選ぶ鍵）。
+      b.dataset.n = String(n);
       b.addEventListener("click", () => void run(() => StudyService.GoTo(n)));
       return b;
     };
@@ -269,7 +276,7 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
         // （`GoTo` の引数）で、画面に出すのは棋譜の手数（＝根の手数を足したもの）。
         // 撮った 41 手目の局面を根にすると、この 2 つは 40 ずれる。
         chip(String((state.first ?? 0) + m.number), m.text || m.usi, m.number,
-          `${m.usi} までの局面に戻ります`),
+          `${m.usi} までの局面に戻ります（右クリックでこの手から下を消します）`),
       );
     }
     // 今見ている手が画面の外にあると、進めても手順が動いていないように見える。
@@ -373,6 +380,109 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
       },
     };
   };
+
+  // ---- 手順を消す（手順リストの右クリック）--------------------------------
+  //
+  // ⚠️ **「1手戻す」の代わり**（2026-08-13。分岐を入れる前段）。消えるのは
+  // **押した手とその先**で、`Undo` と違って「今どこを見ているか」に依存しない。
+  //
+  // ⚠️ **聞いてから消すこと。** 右クリックは誤爆しやすいうえ、消えるのは
+  // **1 手ではなく、そこから下の全部**（解析結果も一緒に消える）。
+  // ⚠️ **聞いているあいだ、消える範囲を赤く光らせる**（`.is-doomed`）——
+  // 「その手以下が消える」は文字で言うより見せたほうが早い。
+
+  // markDoomed は from 手目から下を「消える」見た目にする（0 で全部消す）。
+  const markDoomed = (from: number) => {
+    for (const el of movesPanel.querySelectorAll<HTMLElement>(".move-chip")) {
+      const n = Number(el.dataset.n ?? "0");
+      el.classList.toggle("is-doomed", from > 0 && n >= from);
+    }
+  };
+
+  // askDrop は押した場所で「ここから消す」を聞く。
+  // ⚠️ **`window.confirm` は使わない**（成る/成らずと同じ理由。あちらの節を読むこと）。
+  const askDrop = (x: number, y: number, n: number, label: string, count: number) => {
+    closeAsk();
+    markDoomed(n);
+
+    const box = document.createElement("div");
+    box.className = "drop-ask";
+    box.setAttribute("role", "dialog");
+    box.setAttribute("aria-label", "手順を消す");
+
+    const yes = document.createElement("button");
+    yes.type = "button";
+    yes.className = "promote-btn is-danger";
+    // **何が何手消えるかを文言に出す**（押す前に読めること）。
+    yes.textContent = count > 1 ? `${label} から下を消す（${count}手）` : `${label} を消す`;
+    yes.addEventListener("click", () => {
+      closeAsk();
+      void run(() => StudyService.DropFrom(n));
+    });
+
+    const no = document.createElement("button");
+    no.type = "button";
+    no.className = "promote-btn";
+    no.textContent = "やめる";
+    no.addEventListener("click", () => closeAsk());
+
+    box.append(yes, no);
+    // ⚠️ **`position: fixed` で body に置く**（手順の列に入れると、
+    // `overflow-y: auto` に切られるうえスクロールで一緒に動く）。
+    document.body.appendChild(box);
+    const r = box.getBoundingClientRect();
+    const m = 8;
+    box.style.left = `${Math.min(Math.max(x + 12, m), window.innerWidth - r.width - m)}px`;
+    box.style.top = `${Math.min(Math.max(y + 12, m), window.innerHeight - r.height - m)}px`;
+    // ⚠️ **初期フォーカスは「やめる」**（成る/成らずと逆）。こちらは消す操作なので、
+    // Enter の連打で消えてしまわないほうを既定にする。
+    no.focus();
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        closeAsk();
+      }
+    };
+    const onOutside = (e: Event) => {
+      if (!box.contains(e.target as Node | null)) {
+        closeAsk();
+      }
+    };
+    // ⚠️ **今のイベントが終わってから外側の監視を始める**（成る/成らずと同じ）。
+    const timer = window.setTimeout(() => {
+      document.addEventListener("pointerdown", onOutside, true);
+    }, 0);
+    document.addEventListener("keydown", onKey, true);
+
+    ask = {
+      close: () => {
+        window.clearTimeout(timer);
+        document.removeEventListener("pointerdown", onOutside, true);
+        document.removeEventListener("keydown", onKey, true);
+        box.remove();
+        // **消える範囲の色も一緒に落とす**（残ると、消していないのに消えた顔をする）。
+        markDoomed(0);
+      },
+    };
+  };
+
+  // 手順リストの右クリック。**チップの上でだけ受ける**（列の余白では既定のまま）。
+  movesPanel.addEventListener("contextmenu", (e) => {
+    const chip = (e.target as HTMLElement | null)?.closest<HTMLElement>(".move-chip");
+    if (!chip) {
+      return;
+    }
+    // ⚠️ **webview の既定メニューを止める**（訂正タブの盤と同じ）。
+    e.preventDefault();
+    const n = Number(chip.dataset.n ?? "0");
+    // 「開始局面」は手ではないので消せない（消したいなら 1 手目を押す）。
+    if (n < 1 || !state?.loaded) {
+      return;
+    }
+    const total = (state.moves ?? []).length;
+    const label = chip.querySelector<HTMLElement>(".move-text")?.textContent ?? `${n}手目`;
+    askDrop(e.clientX, e.clientY, n, label, total - n + 1);
+  });
 
   // play は移動先が決まったときに 1 手指す。
   //
@@ -514,10 +624,6 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
       applyFlip();
       layoutGrid();
       paint();
-    },
-    undo() {
-      // **判定は Go 側**（根から更に戻せないなら向こうがエラーを返す）。
-      void run(() => StudyService.Undo());
     },
   };
 }

@@ -61,6 +61,23 @@ export function Clear(): $CancellablePromise<$models.StudyState> {
 }
 
 /**
+ * DropFrom は n 手目とその先を手順から消す（**手順リストの右クリック**）。
+ * 
+ * ⚠️ **「1手戻す」は無くなった**（2026-08-13）。分岐を入れていく前段として、
+ * **消す量を手そのもので指す**形に変えてある —— `Undo` は「今どこを見ているか」に
+ * 依存していたので、戻って見ている最中に押すと何が消えるのか分かりにくかった。
+ * 今は**押した手から下が消える**で、画面の見た目とそのまま一致する。
+ * 
+ * **見るだけなら GoTo。混同しないこと**（あちらは手順を消さない）。
+ * 
+ * ⚠️ **分岐ツリーが入ったら、ここは「消す」ではなく「枝として切り離す」になる**
+ * （`TODO.md` の「本譜のロック」）。**入口はこの 1 か所**にしてある。
+ */
+export function DropFrom(n: number): $CancellablePromise<$models.StudyState> {
+    return $Call.ByID(2906104777, n);
+}
+
+/**
  * Evals は評価値グラフの中身を返す（解析タブ）。
  * 
  * **フロントはこれを描くだけ。** 点の並びも横軸の範囲を決める材料もここが返すので、
@@ -174,13 +191,4 @@ export function ReloadKifu(): $CancellablePromise<$models.KifuLoad> {
  */
 export function State(): $CancellablePromise<$models.StudyState> {
     return $Call.ByID(15823641);
-}
-
-/**
- * Undo は 1 手戻す（**手順からも消す**。「指し間違えた」の取り消し）。
- * 
- * 戻って見るだけなら GoTo。**混同しないこと。**
- */
-export function Undo(): $CancellablePromise<$models.StudyState> {
-    return $Call.ByID(675958962);
 }

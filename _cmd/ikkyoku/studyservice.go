@@ -474,21 +474,30 @@ func (s *StudyService) Play(move string) (StudyState, error) {
 	return s.state(), nil
 }
 
-// Undo は 1 手戻す（**手順からも消す**。「指し間違えた」の取り消し）。
+// DropFrom は n 手目とその先を手順から消す（**手順リストの右クリック**）。
 //
-// 戻って見るだけなら GoTo。**混同しないこと。**
-func (s *StudyService) Undo() (StudyState, error) {
+// ⚠️ **「1手戻す」は無くなった**（2026-08-13）。分岐を入れていく前段として、
+// **消す量を手そのもので指す**形に変えてある —— `Undo` は「今どこを見ているか」に
+// 依存していたので、戻って見ている最中に押すと何が消えるのか分かりにくかった。
+// 今は**押した手から下が消える**で、画面の見た目とそのまま一致する。
+//
+// **見るだけなら GoTo。混同しないこと**（あちらは手順を消さない）。
+//
+// ⚠️ **分岐ツリーが入ったら、ここは「消す」ではなく「枝として切り離す」になる**
+// （`TODO.md` の「本譜のロック」）。**入口はこの 1 か所**にしてある。
+func (s *StudyService) DropFrom(n int) (StudyState, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.study == nil {
 		return s.state(), fmt.Errorf("まだ局面がありません")
 	}
-	if err := s.study.Undo(); err != nil {
+	if err := s.study.DropFrom(n); err != nil {
 		return s.state(), err
 	}
 	// **手順から消えた手の評価値も消す**（`GoTo` との違いがここにも出る。
 	// あちらは手順を消さないので、評価値もそのまま残す）。
-	s.evals.dropAfter(s.study.Ply())
+	// ⚠️ **残るのは n-1 手なので、そこから先を捨てる。**
+	s.evals.dropAfter(n - 1)
 	return s.state(), nil
 }
 

@@ -138,15 +138,27 @@ func (s *Study) Play(move string) error {
 	return nil
 }
 
-// Undo は 1 手戻す（**手順からも消す**）。
+// DropFrom は n 手目**とその先**を手順から消す（n は棋譜の数え方で 1 が初手）。
 //
-// 戻って見るだけなら GoTo を使うこと。こちらは「指し間違えた」を取り消す操作。
-func (s *Study) Undo() error {
-	if s.ply == 0 {
-		return fmt.Errorf("ikkyoku/position: これ以上戻せません")
+// ⚠️ **「1 手戻す」の代わり**（2026-08-13）。消す量を**手そのもので指す**ので、
+// 「どこから消えるか」が呼ぶ側でも画面でも一意に決まる（`Undo` は「今どこを
+// 見ているか」に依存していて、**戻って見ている最中に押すと何が消えるか
+// 分かりにくかった**）。`DropFrom(len(moves))` が以前の `Undo` と同じ。
+//
+// **見るだけなら GoTo。** こちらは手順そのものを短くする操作。
+//
+// ⚠️ **分岐ツリーが入ったら、ここは「消す」ではなく「枝として切り離す」になる。**
+// 消す範囲の決め方（n 手目以下）は変わらないので、**直すのはこの中だけ**。
+func (s *Study) DropFrom(n int) error {
+	if n < 1 || n > len(s.moves) {
+		return fmt.Errorf("ikkyoku/position: %d手目はありません", n)
 	}
-	s.moves = s.moves[:s.ply-1]
-	return s.GoTo(s.ply - 1)
+	s.moves = s.moves[:n-1]
+	// 消した先を見ていたなら、残った最後まで戻す（手前を見ていたならそのまま）。
+	if s.ply > n-1 {
+		return s.GoTo(n - 1)
+	}
+	return nil
 }
 
 // GoTo は手順の n 手目まで進めた局面を見る（0 なら根）。

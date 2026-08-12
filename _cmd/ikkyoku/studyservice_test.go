@@ -124,8 +124,8 @@ func TestStudyServiceAnalyzeTarget(t *testing.T) {
 	}
 }
 
-// 戻る操作の使い分け。**GoTo は手順を消さない / Undo は消す。**
-func TestStudyServiceGoToAndUndo(t *testing.T) {
+// 戻る操作の使い分け。**GoTo は手順を消さない / DropFrom は消す。**
+func TestStudyServiceGoToAndDropFrom(t *testing.T) {
 	s := adopted(t)
 	for _, m := range []string{"7g7f", "3c3d"} {
 		if _, err := s.Play(m); err != nil {
@@ -143,12 +143,16 @@ func TestStudyServiceGoToAndUndo(t *testing.T) {
 		t.Errorf("Played = %v（先の手を渡さないこと）", st.Played)
 	}
 
-	st, err = s.Undo()
+	// **1 手目から下を消す。** 戻って見ている最中でも、消える範囲は押した手で決まる。
+	st, err = s.DropFrom(1)
 	if err != nil {
-		t.Fatalf("Undo: %v", err)
+		t.Fatalf("DropFrom: %v", err)
 	}
 	if st.Ply != 0 || len(st.Moves) != 0 {
-		t.Errorf("Undo で消えていません: ply=%d moves=%d", st.Ply, len(st.Moves))
+		t.Errorf("DropFrom で消えていません: ply=%d moves=%d", st.Ply, len(st.Moves))
+	}
+	if _, err := s.DropFrom(1); err == nil {
+		t.Error("無い手を消せました")
 	}
 }
 

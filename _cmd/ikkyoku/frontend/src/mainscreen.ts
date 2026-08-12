@@ -716,9 +716,12 @@ export function mountMainScreen(root: HTMLElement): void {
               <span class="field-label">手順</span>
               <button id="study-reload" class="ghost-btn" type="button" hidden>再読み込み</button>
               <button id="analyze-batch-run" class="ghost-btn" type="button">連続解析</button>
-              <button id="study-undo" class="ghost-btn" type="button"
-                      title="最後の 1 手を取り消します（手順からも消えます）">1手戻す</button>
             </div>
+            <!-- ⚠️ **「1手戻す」は無くなった**（2026-08-13。分岐を入れる前段）。
+                 手順を短くするのは**リストの手を右クリック**するだけで、
+                 消えるのは**その手とその先**。ボタンは「今どこを見ているか」に
+                 依存していて、戻って見ている最中に押すと何が消えるのか
+                 画面から読めなかった。**ボタンを戻さないこと。** -->
             <div id="study-moves" class="study-moves"></div>
             <p id="study-move-status" class="note is-caution" hidden></p>
             <!-- 今見ている局面の SFEN。**盤の下ではなくここに置く**（2026-08-12）。
@@ -1938,7 +1941,6 @@ export function mountMainScreen(root: HTMLElement): void {
   // ⚠️ **中身は局面があるときだけ出す**（無いときは盤の代わりに案内を出す）。
   const studySide = root.querySelector<HTMLDivElement>("#study-side")!;
   const studyMoves = root.querySelector<HTMLDivElement>("#study-moves")!;
-  const studyUndo = root.querySelector<HTMLButtonElement>("#study-undo")!;
   const studyReload = root.querySelector<HTMLButtonElement>("#study-reload")!;
   const studyMoveStatus = root.querySelector<HTMLParagraphElement>("#study-move-status")!;
   // 中身は訂正タブと同じ .hand-zone だが、**見出しは出さない**（`is-readonly`）。
@@ -2002,7 +2004,6 @@ export function mountMainScreen(root: HTMLElement): void {
     // ⚠️ **縦のスプリットバーも局面があるときだけ出す。** 局面が無いときは
     // 分ける相手（解析の列）が出ていないので、バーだけが宙に浮く。
     studySplit.hidden = !studyLoaded;
-    studyUndo.disabled = (st.ply ?? 0) === 0;
     // ⚠️ **取り直せるかは Go 側が持っている**（URL から読んだときだけ埋まる）。
     // 入力タブの URL 欄を見ないこと —— あちらは打ち換えられる。
     const src = st.sourceUrl ?? "";
@@ -2152,7 +2153,6 @@ export function mountMainScreen(root: HTMLElement): void {
       studyMoveStatus.hidden = message === "";
     },
   });
-  studyUndo.addEventListener("click", () => studyBoardUI.undo());
 
   // 再読み込み（2026-08-13）。**URL の側を正**にして手順を最新にする。
   //

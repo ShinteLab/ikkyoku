@@ -174,20 +174,40 @@ func TestStudyGoToAndBranch(t *testing.T) {
 	}
 }
 
-// Undo は「指し間違えた」の取り消しなので、**手順からも消す**。
-func TestStudyUndo(t *testing.T) {
+// DropFrom は指した手を**その手以下まとめて**消す（「1手戻す」の代わり）。
+//
+// ⚠️ **消す量は「今どこを見ているか」に依存しないこと。** 手そのもので指すので、
+// 戻って見ている最中でも、消える範囲は同じ（n 手目以下）。
+func TestStudyDropFrom(t *testing.T) {
 	s := position.NewStudy(hirate(t))
-	if err := s.Play("7g7f"); err != nil {
-		t.Fatalf("Play: %v", err)
+	for _, mv := range []string{"7g7f", "3c3d", "2g2f"} {
+		if err := s.Play(mv); err != nil {
+			t.Fatalf("Play %s: %v", mv, err)
+		}
 	}
-	if err := s.Undo(); err != nil {
-		t.Fatalf("Undo: %v", err)
+	// 1 手目まで戻って見ている状態で、2 手目以下を消す。
+	if err := s.GoTo(1); err != nil {
+		t.Fatalf("GoTo: %v", err)
+	}
+	if err := s.DropFrom(2); err != nil {
+		t.Fatalf("DropFrom: %v", err)
+	}
+	if len(s.Moves()) != 1 || s.Moves()[0].USI != "7g7f" {
+		t.Errorf("2手目以下が消えていません: %+v", s.Moves())
+	}
+	// **見ていた位置は消えていないのでそのまま**（勝手に動かさない）。
+	if s.Ply() != 1 {
+		t.Errorf("消していない手まで戻りました: ply=%d", s.Ply())
+	}
+	// 最後の 1 手を消すと根に戻る（＝以前の「1手戻す」と同じ）。
+	if err := s.DropFrom(1); err != nil {
+		t.Fatalf("DropFrom: %v", err)
 	}
 	if s.Ply() != 0 || len(s.Moves()) != 0 {
-		t.Errorf("Undo で消えていません: ply=%d moves=%+v", s.Ply(), s.Moves())
+		t.Errorf("手順が残っています: ply=%d moves=%+v", s.Ply(), s.Moves())
 	}
-	if err := s.Undo(); err == nil {
-		t.Error("根から更に戻せました")
+	if err := s.DropFrom(1); err == nil {
+		t.Error("無い手を消せました")
 	}
 }
 
