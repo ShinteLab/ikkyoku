@@ -50,7 +50,10 @@
      --board-size がこれを引く。バーの箱の中で定義すると盤の式から読めない）。
      ⚠️ **中身の有無で伸び縮みさせないこと** —— 盤の**真上**なので、動くと盤ごと下がる。 */
   --winrate-row-h: 22px;
-  --winrate-h: calc(var(--winrate-row-h) + 6px);
+  /* ⚠️ **上下 6px ずつの余白を含む**（2026-08-13。`.winrate-row` の padding）。
+     盤の大きさの式（`#panel-study` の `--board-size`）がこれを引いているので、
+     **余白を変えたら両方直すこと**（引き忘れると盤が縦にはみ出す）。 */
+  --winrate-h: calc(var(--winrate-row-h) + 12px);
 }
 
 html,
@@ -966,8 +969,45 @@ html.is-main #app {
   height: var(--winrate-h);
   /* ⚠️ **左右は盤の余白ぶん詰めること。** <shogi-board> の SVG には筋・段を書く
      余白（core/web の MARGIN=28、size=560 なので左右 5% ずつ）が含まれるので、
-     箱の幅いっぱいに引くと**盤の格子より広い帯**になる。盤が大きいほど目立つ。 */
-  padding: 0 5% 6px;
+     箱の幅いっぱいに引くと**盤の格子より広い帯**になる。盤が大きいほど目立つ。
+     ⚠️ **上下の余白は 6px ずつ**（2026-08-13。盤とタブの行に帯が貼り付くと窮屈）。
+     **`--winrate-h` に入っているので、変えたらあちらも直すこと**（引き忘れると
+     盤が縦にはみ出す）。 */
+  padding: 6px 5%;
+  /* 対局者 ｜ バー ｜ 対局者 の 3 つを 1 行に並べる（2026-08-13）。 */
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 対局者（2026-08-13）。**バーの左右の空きに出す。**
+   左が後手・右が先手で、**バーの色（左=青=後手 / 右=赤=先手）と同じ並び**。
+   ⚠️ **視点を反転しても入れ替えないこと** —— バーそのものが反転しないので、
+   名前だけ動くと対応が壊れる。
+
+   ⚠️ **幅を中身に依存させすぎないこと。** 長い名前で帯が押し潰されると、
+   形勢を一目で読むという帯の役目が消える。**箱の 18% で頭打ち**にして、
+   溢れたら省略（全文は title で読ませる）。 */
+.winrate-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 18%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  line-height: var(--winrate-row-h);
+}
+
+/* 帯と同じ色で先後を示す（文字だけ見ても、どちら側の名前か分かる）。 */
+.winrate-name.is-white {
+  color: #7fb2ff;
+  text-align: right;
+}
+
+.winrate-name.is-black {
+  color: #ff9c96;
+  text-align: left;
 }
 
 .winrate-row[hidden] {
@@ -979,7 +1019,9 @@ html.is-main #app {
    小さくなる）。値はカーソルを当てたときに title で出す。 */
 .winrate-bar {
   display: block;
-  width: 100%;
+  /* ⚠️ **残りの幅を全部もらう**（対局者の名前は中身ぶんだけ取る）。 */
+  flex: 1 1 auto;
+  min-width: 0;
   height: var(--winrate-row-h);
   padding: 0;
   border: 0;

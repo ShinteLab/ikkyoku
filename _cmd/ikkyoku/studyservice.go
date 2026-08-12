@@ -53,6 +53,15 @@ type StudyService struct {
 	// ⚠️ **局面を単体で持たない。** 「今の局面」は根 + 手順から組み立てるもので、
 	// 別に持つと手順とずれる（どちらが本当か分からなくなる）。
 	study *position.Study
+	// game は対局の素性（対局者・棋戦・日時）。**棋譜を読んだときだけ埋まる。**
+	//
+	// ⚠️ **ikkyoku で対局者フィールドを定義し直さないこと**（`position.Game` は
+	// `core/kifu.Document` のエイリアス）。今使っているのは対局者名だけだが、
+	// 棋戦名や日時が要るようになってもここから足せる。
+	//
+	// ⚠️ **根を入れ替えたら捨てること。** 撮った局面にも新規対局にも対局者は
+	// 居ないので、前の棋譜の名前が残っていると**別の対局の名前を今の盤に出す**。
+	game position.Game
 	// evals は手順の 1 手ごとの評価値（評価値グラフ。2026-08-12）。
 	//
 	// ⚠️ **置き場所がここなのは、記録が手順に紐づくから。** 手順を切る操作
@@ -90,6 +99,13 @@ type StudyState struct {
 	// （詰将棋のような「論理的におかしくても正しい」局面があるため。設計原則3）。
 	// 解析タブでも出しておくのは、変な評価値が出たときの手掛かりになるから。
 	Warnings []string `json:"warnings"`
+	// Black / White は対局者名（**棋譜を読んだときだけ埋まる。無ければ空**）。
+	//
+	// 勝率バーの左右に出す。⚠️ **空のときに「先手」「後手」で埋めないこと** ——
+	// 名前が分かっているのか、既定を出しているだけなのかが区別できなくなる。
+	// **既定の文言は表示側が持つ。**
+	Black string `json:"black"`
+	White string `json:"white"`
 
 	// RootSFEN は根の局面（採ったときの局面）。**エンジンに渡すのはこれ + Played。**
 	RootSFEN string `json:"rootSfen"`
@@ -140,6 +156,8 @@ func (s *StudyService) Adopt() (StudyState, error) {
 	// **根ごと入れ替える。** 前の手順と（呼び出し側が消す）解析結果は捨てる ——
 	// 別の局面の話になるので、残すと「どちらの局面の手順か」が分からなくなる。
 	s.study = position.NewStudy(p)
+	// **対局者も捨てる**（撮った局面に対局者は付いていない）。
+	s.game = position.Game{}
 	// **評価値グラフも捨てる。** 別の局面から始まる別の手順なので、前の折れ線を
 	// 残すと**違う対局の評価値が同じ横軸に並ぶ。**
 	s.evals.reset()
@@ -182,6 +200,8 @@ func (s *StudyService) LoadKifu(text string) (KifuLoad, error) {
 	s.mu.Lock()
 	// **根ごと入れ替える**（Adopt と同じ）。前の手順と解析結果は別の局面の話になる。
 	s.study = study
+	// **対局者はここでだけ埋まる**（勝率バーの左右に出す）。
+	s.game = load.Game
 	s.evals.reset()
 	st := s.state()
 	s.mu.Unlock()
@@ -245,6 +265,8 @@ func (s *StudyService) NewGame(handicap string) (KifuLoad, error) {
 	// **根ごと入れ替える**（Adopt / LoadKifu と同じ）。前の手順と解析結果は
 	// 別の局面の話になる。
 	s.study = study
+	// **新規対局に対局者は居ない**（名前を入れる口はまだ無い）。
+	s.game = position.Game{}
 	s.evals.reset()
 	st := s.state()
 	s.mu.Unlock()
@@ -353,6 +375,7 @@ func (s *StudyService) Clear() StudyState {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.study = nil
+	s.game = position.Game{}
 	s.evals.reset()
 	return s.state()
 }
@@ -522,5 +545,7 @@ func (s *StudyService) state() StudyState {
 		Played:     s.study.Played(),
 		Legal:      moves,
 		LegalError: legalErr,
+		Black:      s.game.Black,
+		White:      s.game.White,
 	}
 }

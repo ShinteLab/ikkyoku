@@ -537,6 +537,15 @@ export function mountMainScreen(root: HTMLElement): void {
                  ⚠️ **数字とエンジン名は出さない**（盤の上に文字を積むと、そのぶん
                  盤が小さくなる）。値はカーソルを当てたときに出す。 -->
             <div id="winrate-row" class="winrate-row" hidden>
+              <!-- 対局者（2026-08-13）。**バーの左右の空きに出す。**
+                   左が後手・右が先手で、**バーの色（左=青=後手 / 右=赤=先手）と
+                   同じ並び**にしてある。⚠️ **視点を反転しても入れ替えないこと** ——
+                   バーそのものが反転しないので、名前だけ動くと対応が壊れる。
+
+                   ⚠️ **名前が無いときの「後手」「先手」は表示側の既定。**
+                   Go 側は空を返す（名前が分かっているのか、既定を出しているだけ
+                   なのかを区別できるようにするため）。 -->
+              <span id="winrate-name-white" class="winrate-name is-white"></span>
               <button id="winrate-bar" class="winrate-bar is-empty" type="button">
                 <span class="winrate-track">
                   <span id="winrate-white" class="winrate-white"></span>
@@ -545,6 +554,7 @@ export function mountMainScreen(root: HTMLElement): void {
                   <span class="winrate-mid" aria-hidden="true"></span>
                 </span>
               </button>
+              <span id="winrate-name-black" class="winrate-name is-black"></span>
             </div>
             <div id="study-hand-white-slot" class="hand-slot" hidden></div>
             <div id="study-stage" class="board-stage">
@@ -1252,6 +1262,24 @@ export function mountMainScreen(root: HTMLElement): void {
   }
   const engineCards = new Map<string, EngineCard>();
   const winrateRow = root.querySelector<HTMLDivElement>("#winrate-row")!;
+  const winrateNames = {
+    black: root.querySelector<HTMLElement>("#winrate-name-black")!,
+    white: root.querySelector<HTMLElement>("#winrate-name-white")!,
+  };
+  // showPlayers は勝率バーの左右に対局者を出す。
+  //
+  // ⚠️ **名前が無いときの既定はここが持つ**（Go 側は空を返す）。空を「先手」で
+  // 埋めて返す作りにすると、**名前が分かっているのか既定なのかが区別できない**。
+  // ⚠️ **▲△ は常に付ける** —— 名前が入ると、どちらがどちらか分からなくなる。
+  const showPlayers = (black: string, white: string) => {
+    for (const [el, mark, name, side] of [
+      [winrateNames.white, "△", white, "後手"],
+      [winrateNames.black, "▲", black, "先手"],
+    ] as const) {
+      el.textContent = `${mark}${name || side}`;
+      el.title = name ? `${side} ${name}` : `${side}（棋譜を読み込むと名前が出ます）`;
+    }
+  };
   const winrateBar = root.querySelector<HTMLButtonElement>("#winrate-bar")!;
   const winrateWhite = root.querySelector<HTMLElement>("#winrate-white")!;
   // 今バーに出しているエンジン（登録 ID）。**押すと次のエンジンに変わる。**
@@ -1963,6 +1991,9 @@ export function mountMainScreen(root: HTMLElement): void {
     // ⚠️ **解析タブに「不明」は来ない**（確定した局面しか根にならない）が、
     // 局面が無いときは両方消す。
     showStudyTurn(st.loaded ? st.turn : 0);
+    // ⚠️ **局面と一緒に更新する。** 根を入れ替えると対局者も変わる
+    // （撮った局面と新規対局には対局者が居ないので空に戻る）。
+    showPlayers(st.black ?? "", st.white ?? "");
     // ⚠️ **合法手が出せなくても局面は生きている**（設計原則3）。玉の欠けた局面などでは
     // 手を進められないだけで、盤も解析もそのまま使える。**理由は出すこと** ——
     // 何も出さないと「駒を押しても光らない」の理由が分からない。

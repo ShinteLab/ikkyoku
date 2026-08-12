@@ -573,6 +573,16 @@ export interface StudyState {
     "warnings": string[] | null;
 
     /**
+     * Black / White は対局者名（**棋譜を読んだときだけ埋まる。無ければ空**）。
+     * 
+     * 勝率バーの左右に出す。⚠️ **空のときに「先手」「後手」で埋めないこと** ——
+     * 名前が分かっているのか、既定を出しているだけなのかが区別できなくなる。
+     * **既定の文言は表示側が持つ。**
+     */
+    "black": string;
+    "white": string;
+
+    /**
      * RootSFEN は根の局面（採ったときの局面）。**エンジンに渡すのはこれ + Played。**
      */
     "rootSfen": string;
