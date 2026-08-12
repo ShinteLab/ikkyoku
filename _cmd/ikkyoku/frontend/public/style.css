@@ -65,6 +65,58 @@ body {
   height: 100%;
 }
 
+/* ---- スクロールバー -------------------------------------------------------
+   **暗くて平べったいものに置き換える。** OS 既定のバーは明るい灰色で、矢印ボタンと
+   立体的な溝が付いてくるので、この画面（#1b1d23 の暗い面）ではそこだけ浮く。
+
+   ⚠️ **全体に当てる**（要素を選ばない）。今出るのはほぼ手順のリストだけだが、
+   出る場所は増える（警告・エンジンの結果・駒台・設定・低い窓では列ごと）ので、
+   **そのたびに書き足す形にしない**。
+
+   ⚠️ **幅を細くしすぎないこと。** 手順のリストは押して局面を戻る面なので、
+   バーを掴む操作も普通に起きる。10px は「掴めるが邪魔にならない」ところ。
+
+   ⚠️ **矢印ボタンは出さない**（`::-webkit-scrollbar-button` を 0 にする）。
+   平べったい見た目にする以上、押せるものが端に付いていると浮く。
+
+   ⚠️ **`scrollbar-width` / `scrollbar-color`（標準のほう）を併記しないこと。**
+   Chromium は**どちらかでも指定されていると `::-webkit-scrollbar` を無視する**ので、
+   保険のつもりで足すと**こちらの指定が丸ごと効かなくなる**（幅もホバーの色も
+   標準側では決められない）。WebView2 は Chromium なので、こちらだけで足りる。 */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+/* 溝は塗らない。**面の色をそのまま透かす**ので、置いた場所を選ばずに馴染む。 */
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* つまみ。**角を丸めない**（平べったく）。上下に少し余白を取って、
+   溝いっぱいの帯にならないようにする。 */
+*::-webkit-scrollbar-thumb {
+  background: #3a3d47;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: #4d525f;
+  background-clip: padding-box;
+}
+
+/* 縦と横が交わる角。既定では明るい四角が残る。 */
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* 端の矢印ボタン。 */
+*::-webkit-scrollbar-button {
+  width: 0;
+  height: 0;
+}
+
 /* ---- ガイド枠ウィンドウ(?window=frame) -----------------------------------
    Frameless。上部にツールバー、その下が透過するキャプチャ領域。
    ツールバーより下には一切要素を置かない(置いた要素はそのまま写り込む)。
