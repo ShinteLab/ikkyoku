@@ -74,7 +74,12 @@ body {
    **そのたびに書き足す形にしない**。
 
    ⚠️ **幅を細くしすぎないこと。** 手順のリストは押して局面を戻る面なので、
-   バーを掴む操作も普通に起きる。10px は「掴めるが邪魔にならない」ところ。
+   バーを掴む操作も普通に起きる。**10px では見つけにくかった**（2026-08-12 に
+   14px へ広げた）。細さは「洗練」ではなく「見えない」になりやすい。
+
+   ⚠️ **レール（溝）にも色を置くこと。** 透明にすると面の色と同化して、
+   **どこまで動かせるのかが分からない**（最初はそうしていて、実際に分からなかった）。
+   面（#1b1d23 / #23262e）より少し明るくして、つまみはさらに明るくする。
 
    ⚠️ **矢印ボタンは出さない**（`::-webkit-scrollbar-button` を 0 にする）。
    平べったい見た目にする以上、押せるものが端に付いていると浮く。
@@ -84,31 +89,38 @@ body {
    保険のつもりで足すと**こちらの指定が丸ごと効かなくなる**（幅もホバーの色も
    標準側では決められない）。WebView2 は Chromium なので、こちらだけで足りる。 */
 *::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 14px;
+  height: 14px;
 }
 
-/* 溝は塗らない。**面の色をそのまま透かす**ので、置いた場所を選ばずに馴染む。 */
+/* レール。**面より一段明るくして、動かせる範囲が見えるようにする。**
+   左右（横バーなら上下）に細い境目を置いて、面との切れ目も出す。 */
 *::-webkit-scrollbar-track {
-  background: transparent;
+  background: #262a33;
+  border-left: 1px solid #31353f;
 }
 
-/* つまみ。**角を丸めない**（平べったく）。上下に少し余白を取って、
-   溝いっぱいの帯にならないようにする。 */
+*::-webkit-scrollbar-track:horizontal {
+  border-left: none;
+  border-top: 1px solid #31353f;
+}
+
+/* つまみ。**角を丸めない**（平べったく）。透明のふちを付けてレールを左右に
+   覗かせる ——**同じ幅で塗ると、動かせる範囲との境目が消える**。 */
 *::-webkit-scrollbar-thumb {
-  background: #3a3d47;
-  border: 2px solid transparent;
+  background: #5b6172;
+  border: 3px solid transparent;
   background-clip: padding-box;
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background: #4d525f;
+  background: #767d8f;
   background-clip: padding-box;
 }
 
-/* 縦と横が交わる角。既定では明るい四角が残る。 */
+/* 縦と横が交わる角。**レールと同じ色**（透明にすると、そこだけ面の色が抜ける）。 */
 *::-webkit-scrollbar-corner {
-  background: transparent;
+  background: #262a33;
 }
 
 /* 端の矢印ボタン。 */
