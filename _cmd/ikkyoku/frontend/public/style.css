@@ -25,12 +25,6 @@
      盤の大きさの式から読めない（引き忘れると盤が縦にはみ出す）。 */
   --eval-graph-h: 116px;
 
-  /* 勝率バー（解析タブ。盤の上）。**エンジン 1 本ぶんの高さ × 本数。**
-     ⚠️ **--eval-graph-h と同じ理由で :root に置くこと**（#panel-study の
-     --board-size がこれを引く。バーの箱の中で定義すると盤の式から読めない）。
-     ⚠️ **--winrate-rows は JS が入れる**（mainscreen.ts の reserveWinrate）。
-     エンジンの本数で変わるのはここだけで、**解析のたびには変わらない**
-     （中身の有無で伸び縮みさせないこと。盤の**上**の行なので、動くと盤ごと下がる）。 */
   /* 候補手の一覧の高さ。**max ではなく固定**（.analyze-lines）。
      ⚠️ **実際の値は JS が入れる**（mainscreen.ts の reserveLines。候補の本数の
      指定に合わせて、4 本ぶんで頭打ち）。ここにあるのは、まだ入っていないときの既定。
@@ -50,9 +44,13 @@
   /* エンジンごとの結果の枠の高さ（頭打ち）。**エンジン 2 つはそのまま見える**。 */
   --analyze-engines-h: min(calc(var(--analyze-card-h) * 2 + 8px), 300px);
 
+  /* 勝率バー（解析タブ。盤の真上・盤と同じ幅）。**常に 1 本** —— 複数のエンジンが
+     走っていても出すのは選ばれた 1 つで、押すと切り替わる（並べない）。
+     ⚠️ **--eval-graph-h と同じ理由で :root に置くこと**（#panel-study の
+     --board-size がこれを引く。バーの箱の中で定義すると盤の式から読めない）。
+     ⚠️ **中身の有無で伸び縮みさせないこと** —— 盤の**真上**なので、動くと盤ごと下がる。 */
   --winrate-row-h: 22px;
-  --winrate-rows: 1;
-  --winrate-h: calc(var(--winrate-row-h) * var(--winrate-rows) + 4px * (var(--winrate-rows) - 1) + 6px);
+  --winrate-h: calc(var(--winrate-row-h) + 6px);
 }
 
 html,
@@ -686,15 +684,13 @@ html.is-main body {
    ⚠️ **エンジンごとに 1 本**（合成しない。平均も多数決も取らない）。
    ⚠️ **高さは固定**（--winrate-h）。連続モードでは 1 手ごとに消えて出るので、
    中身で伸び縮みすると盤ごと画面が跳ねる。**盤の上の行なので特に効く。** */
+/* ⚠️ **盤と同じグリッドの列に置く**（`.board-with-hands` の中）。`.board-area` の
+   直下に置くと、右の手順リストのぶん盤が左に寄っているので**盤と左右がずれる**。 */
 .winrate-row {
-  flex: 0 0 auto;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  height: var(--winrate-h);
-  /* 盤より広がっても意味が無い（形勢は盤の上にあるほうが読みやすい）。 */
+  grid-column: 2;
+  grid-row: 1;
   width: 100%;
-  max-width: var(--board-max);
+  height: var(--winrate-h);
   padding-bottom: 6px;
 }
 
@@ -702,40 +698,26 @@ html.is-main body {
   display: none;
 }
 
+/* 帯そのもの。**押すと別のエンジンの勝率に切り替わる**ので button。
+   ⚠️ **数字もエンジン名も出さない**（盤の上に文字を積むと、そのぶん盤が
+   小さくなる）。値はカーソルを当てたときに title で出す。 */
 .winrate-bar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  display: block;
+  width: 100%;
   height: var(--winrate-row-h);
+  padding: 0;
+  border: 0;
+  background: none;
 }
 
-/* どのエンジンの勝率か。**幅を固定する** —— 名前の長さで帯の左端が動くと、
-   複数のエンジンを縦に並べたときに見比べられない。 */
-.winrate-name {
-  flex: 0 0 auto;
-  width: 92px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* 切り替えられるのは 2 つ以上あるときだけ（1 つのときは押しても何も起きない）。 */
+.winrate-bar.is-switchable {
+  cursor: pointer;
 }
 
-/* 百分率。**幅を固定**（桁が変わっても帯の端が動かないように）。 */
-.winrate-value {
-  flex: 0 0 auto;
-  width: 38px;
-  font-size: 12.5px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-
-.winrate-value.is-white {
-  text-align: right;
-  color: #6ad3ff;
-}
-
-.winrate-value.is-black {
-  text-align: left;
-  color: #ff7d7d;
+.winrate-bar:disabled {
+  /* **薄くしない。** 押せないだけで、出している値は同じように読むもの。 */
+  cursor: default;
 }
 
 /* 帯。**下地が先手（赤）で、左から後手（青）を被せる。**
@@ -743,8 +725,8 @@ html.is-main body {
    真ん中に 1px の隙間が出る。 */
 .winrate-track {
   position: relative;
-  flex: 1 1 auto;
-  min-width: 0;
+  display: block;
+  width: 100%;
   height: 100%;
   background: #d2453f;
   border-radius: 4px;
@@ -758,8 +740,19 @@ html.is-main body {
   background: #3d7fd2;
 }
 
+/* 真ん中（互角）の目印。**これが無いと、どちらへ傾いているのかを帯の端との
+   比較でしか読めない。** 点線にしてあるのは、境目そのものと見間違えないため。 */
+.winrate-mid {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  border-left: 2px dotted rgba(255, 255, 255, 0.75);
+  transform: translateX(-1px);
+}
+
 /* まだ結果が届いていないとき。**50% と書かない** ——「互角」と「まだ分からない」は
-   別物なので、色を落として数字は "-" のままにする。 */
+   別物なので、色を落とすだけにする。 */
 .winrate-bar.is-empty .winrate-track {
   background: #3a3d47;
 }
@@ -768,8 +761,8 @@ html.is-main body {
   background: #454956;
 }
 
-.winrate-bar.is-empty .winrate-value {
-  color: #6e7686;
+.winrate-bar.is-empty .winrate-mid {
+  border-left-color: rgba(255, 255, 255, 0.35);
 }
 
 /* エンジンごとの解析結果（解析タブ。2026-08-11）。
@@ -1412,9 +1405,23 @@ html.is-main body {
 }
 
 /* 解析タブの駒台は正方形で高さを使い切らないので、**盤の外側の角に寄せる**
-   (後手は盤の上端、先手は盤の下端)。伸ばすと正方形でなくなる。 */
+   (後手は盤の上端、先手は盤の下端)。伸ばすと正方形でなくなる。
+   ⚠️ **行が 1 つずれているのは、解析タブだけ盤の上に勝率バーが載るから**
+   (1 行目がバー、2〜3 行目が盤)。 */
 #study-hand-white-slot {
+  grid-row: 2;
   align-self: start;
+}
+
+/* 解析タブは**盤の真上に勝率バー**が入るので 3 行になる（1 行目がバー）。
+   ⚠️ **バーを盤と同じ列に入れるのが要点** —— 盤の外に置くと、右の手順リストの
+   ぶん盤が左に寄っているので**盤と左右がずれる**。 */
+#study-board-with-hands {
+  grid-template-rows: auto auto auto;
+}
+
+#study-board-with-hands > .board-stage {
+  grid-row: 2 / span 2;
 }
 
 /* 足りない駒は先手の駒台の**上**（後手の駒台と左右対称）。縦 1 列に 8 種を
@@ -1435,7 +1442,7 @@ html.is-main body {
    先手の駒台は右列の下段だけを使い、**盤の下端に寄せる**。 */
 #study-hand-black-slot {
   grid-column: 3;
-  grid-row: 2;
+  grid-row: 3;
   align-self: end;
 }
 

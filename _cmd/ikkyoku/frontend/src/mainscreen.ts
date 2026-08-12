@@ -434,20 +434,6 @@ export function mountMainScreen(root: HTMLElement): void {
           <button id="study-back" class="ghost-btn" type="button" hidden
                   title="訂正タブへ戻ります。解析の結果は捨てられます">訂正に戻る</button>
         </div>
-        <!-- 勝率バー（2026-08-12）。**盤の上**に置く —— 評価値を読むより先に
-             「どちらがどれくらい良いか」が目に入るほうが速い（数字は下の候補手の
-             行にある）。**左が後手（青）・右が先手（赤）**で、盤の向き
-             （後手が上）とは別に、横棒として一般的な並びに合わせてある。
-
-             勝率 = 1 / (1 + exp(-評価値 / ポナンザ定数))。定数は設定タブ（既定 1500）。
-             ⚠️ **計算はフロントでしない**（Go 側の analyze.WinRate。式を 2 か所に
-             持つと、定数を変えたときに片方だけ古い値で描く）。
-
-             ⚠️ **エンジンごとに 1 本**（合成しない。平均も多数決も取らない）。
-             評価値を先手視点に固定してあるので、エンジンをまたいでも向きは同じ。
-             ⚠️ **高さは CSS で固定**（--winrate-h）。連続モードでは 1 手ごとに
-             消えて出るので、中身で伸び縮みすると盤ごと画面が跳ねる。 -->
-        <div id="winrate-row" class="winrate-row" hidden></div>
         <div class="board-area">
           <!-- 盤と駒台の配置。**後手の駒台は盤の左上、先手の駒台は右下**
                (訂正タブと同じ並び＝実際の将棋盤と同じ)。
@@ -455,6 +441,33 @@ export function mountMainScreen(root: HTMLElement): void {
                「足りない駒」はここには無い —— 未決が残った局面はそもそも
                このタブに来ない（StudyService.Adopt が断る）。 -->
           <div id="study-board-with-hands" class="board-with-hands">
+            <!-- 勝率バー（2026-08-12）。**盤の真上・盤と同じ幅。**
+                 評価値を読むより先に「どちらがどれくらい良いか」が目に入るほうが速い
+                 （数字は下の候補手の行にある）。**左が後手（青）・右が先手（赤）**で、
+                 盤の向き（後手が上）とは別に、横棒として一般的な並びに合わせてある。
+
+                 ⚠️ **盤と同じグリッドの列に入れてあるのが要点**（board-area の
+                 直下に置くと、右の手順リストのぶん盤が左に寄っているので**盤と
+                 左右がずれる**）。列の幅＝盤の幅なので、width: 100% で揃う。
+
+                 勝率 = 1 / (1 + exp(-評価値 / ポナンザ定数))。定数は設定タブ（既定 1500）。
+                 ⚠️ **計算はフロントでしない**（Go 側の analyze.WinRate。式を 2 か所に
+                 持つと、定数を変えたときに片方だけ古い値で描く）。
+
+                 ⚠️ **出すのは 1 つのエンジンだけ**（押すと切り替わる）。
+                 **合成ではない** —— 複数走っていても、今見ているのはどれか 1 つ。
+                 ⚠️ **数字とエンジン名は出さない**（盤の上に文字を積むと、そのぶん
+                 盤が小さくなる）。値はカーソルを当てたときに出す。 -->
+            <div id="winrate-row" class="winrate-row" hidden>
+              <button id="winrate-bar" class="winrate-bar is-empty" type="button">
+                <span class="winrate-track">
+                  <span id="winrate-white" class="winrate-white"></span>
+                  <!-- 真ん中（互角）の目印。**これが無いと、どちらへ傾いているのかが
+                       バーの端との比較でしか読めない。** -->
+                  <span class="winrate-mid" aria-hidden="true"></span>
+                </span>
+              </button>
+            </div>
             <div id="study-hand-white-slot" class="hand-slot" hidden></div>
             <div id="study-stage" class="board-stage">
               <shogi-board id="study-board" hidden></shogi-board>
@@ -1064,23 +1077,22 @@ export function mountMainScreen(root: HTMLElement): void {
     meta: HTMLElement;
     lines: HTMLOListElement;
     error: HTMLElement;
-    // 勝率バー（盤の上）。**エンジンごとに 1 本**（合成しない）。
-    // ⚠️ **候補手の一覧とは離れた場所にあるが、更新は同じ 1 か所から行う**
-    // （`showAnalyzeProgress`）—— 別々に更新すると、バーと数字が食い違う。
-    bar: WinRateBar;
-  }
-  // 勝率バー 1 本ぶんの要素。
-  interface WinRateBar {
-    root: HTMLElement;
-    // white は後手側（左・青）の帯。**先手側は下地なので要素を持たない**
-    // （幅を 2 つ持つと、丸めで 1px の隙間が出る）。
-    white: HTMLElement;
-    blackLabel: HTMLElement;
-    whiteLabel: HTMLElement;
-    name: HTMLElement;
+    // best は最後に届いた**順位 1 の候補**（勝率バーが読む）。まだ無ければ null。
+    //
+    // ⚠️ **バーは 1 本しか出ないが、値はエンジンごとに覚えておくこと。**
+    // 押して切り替えた瞬間に、そのエンジンの今の値が出るのが期待どおり
+    // （切り替えたら次の更新まで空になる、では比べられない）。
+    best: AnalyzeLine | null;
   }
   const engineCards = new Map<string, EngineCard>();
   const winrateRow = root.querySelector<HTMLDivElement>("#winrate-row")!;
+  const winrateBar = root.querySelector<HTMLButtonElement>("#winrate-bar")!;
+  const winrateWhite = root.querySelector<HTMLElement>("#winrate-white")!;
+  // 今バーに出しているエンジン（登録 ID）。**押すと次のエンジンに変わる。**
+  //
+  // ⚠️ **選んだエンジンは解析をまたいで覚えること** —— 1 手ごとに解析し直す
+  // （連続モード）ので、そのたびに 1 つ目へ戻ると切り替えた意味が無い。
+  let winrateEngineId = "";
 
   // 解析できない理由。**空なら解析できる。**
   //
@@ -1123,10 +1135,12 @@ export function mountMainScreen(root: HTMLElement): void {
     analyzedSfen = "";
     engineCards.clear();
     analyzeEnginesBox.replaceChildren();
-    // ⚠️ **勝率バーも一緒に消すこと。** 別の局面の勝率が盤の上に残っていると、
+    // ⚠️ **勝率バーも一緒に空に戻すこと。** 別の局面の勝率が盤の上に残っていると、
     // **今の盤の形勢として読まれる**（評価値の一覧を消すのと同じ理由で、
     // むしろこちらのほうが目に入る位置にある）。
-    winrateRow.replaceChildren();
+    // ⚠️ **枠は消さない**（`renderWinRate` が中立の見た目に戻すだけ）——
+    // 盤の真上なので、出たり消えたりすると盤ごと動く。
+    renderWinRate();
     analyzeMeta.textContent = "";
     analyzeStatus.hidden = true;
     analyzeStatus.textContent = "";
@@ -1163,69 +1177,66 @@ export function mountMainScreen(root: HTMLElement): void {
   // ⚠️ **勝率そのものも Go 側の値**（`score.winRate`）。式と定数（ポナンザ定数）を
   // フロントに持つと、設定で定数を変えたときに**片方だけ古い値で描く**。
 
-  // reserveWinrate は勝率バーに確保する高さを決める（エンジンの本数ぶん）。
-  //
-  // ⚠️ **:root に置くこと。** `#panel-study` の `--board-size` がこれを引いており、
-  // カスタムプロパティは下へしか継承しないので、バーの箱の中で定義すると
-  // **盤の大きさの式から読めず、盤が縦にはみ出す**（--eval-graph-h と同じ話）。
-  const reserveWinrate = (count: number) => {
-    const rows = Math.max(count, 1);
-    document.documentElement.style.setProperty("--winrate-rows", String(rows));
-  };
+  // ⚠️ **出すのは 1 つのエンジンだけ**（押すと切り替わる）。全部を並べると盤の上に
+  // 段が積まれてそのぶん盤が小さくなるうえ、**形勢を一目で見るための帯**なので
+  // 複数あると読む対象が増える。食い違いを読むのは下の一覧（そちらは全部出る）。
+  // **合成ではない** —— どれか 1 つの値をそのまま出している。
 
-  // buildWinRateBar はエンジン 1 つぶんのバーを作って盤の上に足す。
-  //
-  // **結果が届く前から出す**（起動を待つあいだも枠がある）。まだ値が無いあいだは
-  // 中立の見た目にして、**50% と書かない** —— 互角と「まだ分からない」は別物。
-  const buildWinRateBar = (label: string): WinRateBar => {
-    const el = document.createElement("div");
-    el.className = "winrate-bar is-empty";
-    el.innerHTML = `
-      <span class="winrate-name note"></span>
-      <span class="winrate-value is-white">-</span>
-      <div class="winrate-track"><div class="winrate-white"></div></div>
-      <span class="winrate-value is-black">-</span>
-    `;
-    const bar: WinRateBar = {
-      root: el,
-      white: el.querySelector<HTMLElement>(".winrate-white")!,
-      whiteLabel: el.querySelector<HTMLElement>(".winrate-value.is-white")!,
-      blackLabel: el.querySelector<HTMLElement>(".winrate-value.is-black")!,
-      name: el.querySelector<HTMLElement>(".winrate-name")!,
-    };
-    // **どのエンジンの勝率かは出す**（複数走るので、出所を伏せると比べようがない）。
-    bar.name.textContent = label;
-    bar.name.title = label;
-    winrateRow.appendChild(el);
-    return bar;
-  };
+  // winrateSource は今バーに出すエンジンを返す（選ばれていなければ最初の 1 つ）。
+  const winrateSource = (): EngineCard | undefined =>
+    engineCards.get(winrateEngineId) ?? [...engineCards.values()][0];
 
-  // showWinRate は届いた勝率をバーに反映する。
+  // renderWinRate は選ばれているエンジンの勝率をバーに描く。
   //
-  // ⚠️ **候補手の一覧と同じ 1 か所から呼ぶこと**（`showAnalyzeProgress`）。
+  // ⚠️ **候補手の一覧を更新するのと同じ 1 か所から呼ぶこと**（`showAnalyzeProgress`）。
   // 別々に更新すると、バーと評価値の数字が食い違う。
-  const showWinRate = (bar: WinRateBar, line: AnalyzeLine | undefined) => {
+  const renderWinRate = () => {
+    const card = winrateSource();
+    const line = card?.best ?? null;
+    // **押して切り替えられるのは 2 つ以上あるときだけ**（1 つのときに押せる
+    // 見た目にすると、押しても何も起きない操作を作ることになる）。
+    const many = engineCards.size > 1;
+    winrateBar.classList.toggle("is-switchable", many);
+    winrateBar.disabled = !many;
+
     if (!line) {
-      bar.root.classList.add("is-empty");
-      bar.white.style.width = "50%";
-      bar.whiteLabel.textContent = "-";
-      bar.blackLabel.textContent = "-";
-      bar.root.title = "";
+      // **まだ値が無いあいだは中立の見た目にして、50% と書かない**
+      // ——「互角」と「まだ分からない」は別物。
+      winrateBar.classList.add("is-empty");
+      winrateWhite.style.width = "50%";
+      winrateBar.title = card
+        ? `${card.label}: 解析するとここに形勢が出ます`
+        : "解析するとここに形勢が出ます";
       return;
     }
     // ⚠️ **勝率は Go 側の値。cp から計算し直さないこと**（上の ⚠️）。
     const black = Math.min(Math.max(line.score.winRate, 0), 1);
     const white = 1 - black;
-    bar.root.classList.remove("is-empty");
-    bar.white.style.width = `${(white * 100).toFixed(1)}%`;
-    // **整数の % で出す。** 小数まで出しても読み分けられないうえ、1 手ごとに
-    // 細かく揺れて、数字が動いているだけの行になる。
-    bar.whiteLabel.textContent = `${Math.round(white * 100)}%`;
-    bar.blackLabel.textContent = `${Math.round(black * 100)}%`;
-    // 評価値そのものは下の候補手の行にあるが、**バーだけ見ているときに
-    // 元の値を確かめられるように**添えておく（label は Go 側が組み立てた文字列）。
-    bar.root.title = `後手 ${Math.round(white * 100)}% ／ 先手 ${Math.round(black * 100)}%（評価値 ${line.score.label}）`;
+    winrateBar.classList.remove("is-empty");
+    winrateWhite.style.width = `${(white * 100).toFixed(1)}%`;
+    // ⚠️ **数字は画面に出さず、カーソルを当てたときだけ出す**（盤の上に文字を
+    // 積むと、そのぶん盤が小さくなる）。**整数の % で十分** —— 小数まで出しても
+    // 読み分けられないうえ、1 手ごとに細かく揺れる。
+    // 評価値も添える（label は Go 側が組み立てた文字列）。
+    const head = `後手 ${Math.round(white * 100)}% ／ 先手 ${Math.round(black * 100)}%`;
+    winrateBar.title =
+      `${head}（評価値 ${line.score.label}）／ ${card?.label ?? ""}` +
+      (many ? "　押すと別のエンジンに切り替わります" : "");
   };
+
+  // 押すと次のエンジンに切り替える（登録順で回る）。
+  //
+  // ⚠️ **並べるのではなく切り替えるのが要点。** 盤の上に置ける段は 1 つで、
+  // それでも「別のエンジンならどう見えるか」は確かめたい。
+  winrateBar.addEventListener("click", () => {
+    const ids = [...engineCards.keys()];
+    if (ids.length < 2) {
+      return;
+    }
+    const at = ids.indexOf(winrateEngineId);
+    winrateEngineId = ids[(at + 1) % ids.length];
+    renderWinRate();
+  });
 
   // 解析に参加するエンジンぶんの枠を先に作る。
   //
@@ -1234,8 +1245,12 @@ export function mountMainScreen(root: HTMLElement): void {
   const buildEngineCards = (engines: { id: string; label: string; name: string }[]) => {
     engineCards.clear();
     analyzeEnginesBox.replaceChildren();
-    winrateRow.replaceChildren();
-    reserveWinrate(engines.length);
+    // ⚠️ **選んでいたエンジンが今回も走っているなら、その選択を残すこと。**
+    // 連続モードでは 1 手ごとにここを通るので、毎回 1 つ目に戻ると
+    // 切り替えた意味が無い。居なくなっていたら先頭に戻す。
+    if (!engines.some((e) => e.id === winrateEngineId)) {
+      winrateEngineId = engines[0]?.id ?? "";
+    }
     for (const e of engines) {
       const card = document.createElement("section");
       card.className = "analyze-engine";
@@ -1257,7 +1272,7 @@ export function mountMainScreen(root: HTMLElement): void {
         meta: card.querySelector<HTMLElement>(".analyze-engine-meta")!,
         lines: card.querySelector<HTMLOListElement>(".analyze-lines")!,
         error: card.querySelector<HTMLElement>(".analyze-engine-error")!,
-        bar: buildWinRateBar(e.label),
+        best: null,
       };
       // 見出しは**設定タブで付けた名前**。エンジンが名乗る名前（`id name`）は
       // 繋いで初めて分かるので、届いたら括弧で足す（下の showEngineName）。
@@ -1266,6 +1281,8 @@ export function mountMainScreen(root: HTMLElement): void {
       engineCards.set(e.id, entry);
       analyzeEnginesBox.appendChild(card);
     }
+    // 起動を待つあいだの見た目（中立）に戻す。**押せるかどうかもここで決まる。**
+    renderWinRate();
   };
 
   // エンジンが名乗った名前を見出しに足す。**設定の名前は消さない**
@@ -1279,7 +1296,9 @@ export function mountMainScreen(root: HTMLElement): void {
     const lines = p.lines ?? [];
     // 盤の上の勝率バーは**最善手（順位 1）の評価値**で描く（評価値グラフに
     // 残すのと同じ値）。⚠️ **候補手の一覧と同じ 1 か所で更新すること。**
-    showWinRate(card.bar, lines[0]);
+    // **値はエンジンごとに覚え、描くのは今選ばれている 1 つだけ**（押すと変わる）。
+    card.best = lines[0] ?? null;
+    renderWinRate();
     card.lines.replaceChildren();
     for (const [i, l] of lines.entries()) {
       const li = document.createElement("li");
@@ -1528,7 +1547,7 @@ export function mountMainScreen(root: HTMLElement): void {
     analyzeStatus.textContent = "";
     engineCards.clear();
     analyzeEnginesBox.replaceChildren();
-    winrateRow.replaceChildren();
+    renderWinRate();
     analyzeMeta.textContent = "エンジンを起動しています…";
     reserveLines();
     try {
