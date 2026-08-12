@@ -84,7 +84,7 @@ type Score struct {
 	CP int `json:"cp"`
 	// Mate は詰みまでの手数。0 なら詰みなし。**正なら先手が詰ます**、負なら後手。
 	Mate int `json:"mate"`
-	// Label は表示用の文字列（"+230" / "先手の詰み 5手"）。
+	// Label は表示用の文字列（"+230" / "▲詰 5手"）。
 	//
 	// **書式を 1 か所にまとめるためにここに入れてある。** フロントで組み立て直さないこと。
 	Label string `json:"label"`
@@ -697,11 +697,17 @@ func cpLabel(v int) string {
 	return fmt.Sprintf("%d", v)
 }
 
+// mateLabel は詰みの表示（"▲詰 14手"）。
+//
+// ⚠️ **短く保つこと**（2026-08-12 に「先手の詰み 14手」から詰めた）。候補手の行の
+// 評価値の欄は**幅を px で固定してある**（`--analyze-score-w`。桁が変わっても
+// 一の位が揃うように）ので、**溢れると隣の「次の 1 手」まで押し出す**。
+// 先後は▲△で足りる —— 読み筋の表記でも同じ記号を使っている。
 func mateLabel(plies int) string {
 	if plies > 0 {
-		return fmt.Sprintf("先手の詰み %d手", plies)
+		return fmt.Sprintf("▲詰 %d手", plies)
 	}
-	return fmt.Sprintf("後手の詰み %d手", -plies)
+	return fmt.Sprintf("△詰 %d手", -plies)
 }
 
 func abs(v int) int {

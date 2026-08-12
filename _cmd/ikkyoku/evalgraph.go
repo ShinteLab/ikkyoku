@@ -34,7 +34,7 @@ type EvalPoint struct {
 	CP int `json:"cp"`
 	// Mate は詰みまでの手数（0 なら詰みなし。正なら先手が詰ます）。
 	Mate int `json:"mate"`
-	// Label は表示用の文字列（"+230" / "先手の詰み 5手"）。
+	// Label は表示用の文字列（"+230" / "▲詰 5手"）。
 	//
 	// **書式は `analyze` が組み立てたものをそのまま持つ。** フロントで作り直さない。
 	Label string `json:"label"`
