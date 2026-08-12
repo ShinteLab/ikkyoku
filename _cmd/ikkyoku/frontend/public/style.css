@@ -510,8 +510,12 @@ html.is-main #app {
   cursor: pointer;
 }
 
+/* 背景も少しだけ動かす。⚠️ **選択中（.is-active の #3a3d47）より暗くすること** ——
+   同じ明るさまで持ち上げると、指しているだけのタブが選択中に見える。
+   選択中のタブは後のルールが勝つので、ホバーしても色は変わらない。 */
 .tab:hover {
   color: #f2f3f5;
+  background: #2e313a;
 }
 
 .tab.is-active {
