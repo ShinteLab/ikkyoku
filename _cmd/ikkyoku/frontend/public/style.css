@@ -744,6 +744,42 @@ html.is-main #app {
   opacity: 0.55;
 }
 
+/* 並べ替えの ▲▼。**行の高さを増やさない**ように 2 つを縦に積んで、
+   1 つぶんの高さに収める（一覧は縦に伸びやすいので、1 行の背は低く保つ）。 */
+.engine-order {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.engine-move {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 12px;
+  padding: 0;
+  font-size: 11px;
+  color: #9aa6c0;
+  background: #2b2f38;
+  border: 1px solid #3a3d47;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.engine-move:hover:not(:disabled) {
+  color: #f2f3f5;
+  background: #3a3d47;
+}
+
+/* 端の行。⚠️ **押しても何も起きないボタンを出さない**ための無効化なので、
+   無効なことが見て分かる程度には落とす。 */
+.engine-move:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
 .engine-use {
   display: flex;
   align-items: center;

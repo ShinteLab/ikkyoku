@@ -363,6 +363,40 @@ func (s *SettingsService) SetEngineEnabled(id string, enabled bool) (AppSettings
 	})
 }
 
+// MoveEngine は一覧の中で登録の位置を 1 つ動かす（delta は -1 で上、+1 で下）。
+//
+// **並び順は表示の順序そのもの。** 解析タブのエンジンごとの結果も、評価値グラフの
+// 折れ線も、勝率バーが最初に出すエンジンも、この一覧の順で決まる。**同時に走らせて
+// 比べる**のが複数登録の目的なので、**よく見るものを上に置けること**は要る。
+//
+// ⚠️ **並び順は「優先度」ではない。** 上のエンジンが正しいという意味も、
+// 先に走るという意味も無い（**解析は全部同時に走る**）。
+//
+// ⚠️ **「解析に使う」を外した登録も含めた一覧の中で動かす。** 走るものだけを
+// 詰めて数えると、**チェックを外した瞬間に見えている順番と食い違う**。
+//
+// 端から先へは動かさない（**回り込ませない**）。押しても何も起きないのは、
+// 一番上のものが一番下へ飛ぶより分かりやすい。
+func (s *SettingsService) MoveEngine(id string, delta int) (AppSettings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.editEngines(func(list []ikkyoku.EngineEntry) []ikkyoku.EngineEntry {
+		from := -1
+		for i, e := range list {
+			if e.ID == id {
+				from = i
+				break
+			}
+		}
+		to := from + delta
+		if from < 0 || to < 0 || to >= len(list) {
+			return list
+		}
+		list[from], list[to] = list[to], list[from]
+		return list
+	})
+}
+
 // RemoveEngine は登録を消す。
 //
 // **全部消すと同梱エンジン 1 つに戻る**（`ikkyoku.Config.EngineList`）。

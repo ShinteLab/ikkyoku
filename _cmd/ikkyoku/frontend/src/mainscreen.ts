@@ -44,7 +44,15 @@
 // ——ただし**枠に重なる位置に動かすと写り込む**(画面の合成結果を撮るため)。初回だけ
 // Go 側が枠の外へ逃がす(captureservice.go の placeMainBesideFrame)。
 import { Clipboard, Events, Window } from "@wailsio/runtime";
-import { FiCopy, FiImage, FiMinus, FiSquare, FiX } from "react-icons/fi";
+import {
+  FiChevronDown,
+  FiChevronUp,
+  FiCopy,
+  FiImage,
+  FiMinus,
+  FiSquare,
+  FiX,
+} from "react-icons/fi";
 import {
   AnalyzeService,
   CaptureService,
@@ -2751,11 +2759,20 @@ export function mountMainScreen(root: HTMLElement): void {
     const keepClass = active?.className ?? "";
 
     engineList.replaceChildren();
-    for (const e of engines) {
+    for (const [index, e] of engines.entries()) {
       const row = document.createElement("li");
       row.className = "engine-row";
       row.dataset.id = e.id;
       row.innerHTML = `
+        <!-- 並べ替え。**押した位置に答えが出る**ように行の先頭に置く。
+             ⚠️ ドラッグにしていないのは、行の中に入力欄が 2 つあって掴む場所が
+             残らないため（掴み手を別に作るくらいなら、押せば動くほうが速い）。 -->
+        <div class="engine-order">
+          <button class="engine-up engine-move" type="button"
+                  aria-label="上へ" title="1 つ上へ">${iconMarkup(FiChevronUp)}</button>
+          <button class="engine-down engine-move" type="button"
+                  aria-label="下へ" title="1 つ下へ">${iconMarkup(FiChevronDown)}</button>
+        </div>
         <label class="engine-use" title="解析のときにこのエンジンを使います（複数選べます）">
           <input class="engine-enabled" type="checkbox" />
           <span>解析に使う</span>
@@ -2786,6 +2803,19 @@ export function mountMainScreen(root: HTMLElement): void {
       engineRowNote(row).textContent = (e.builtin ? "同梱のエンジン" : "") + opts;
       row.classList.toggle("is-off", !e.enabled);
 
+      // 並べ替え。⚠️ **端では押せなくする**（押しても何も起きないボタンは、
+      // 壊れているのか端なのかが区別できない）。回り込ませもしない。
+      const up = row.querySelector<HTMLButtonElement>(".engine-up")!;
+      const down = row.querySelector<HTMLButtonElement>(".engine-down")!;
+      up.disabled = index === 0;
+      down.disabled = index === engines.length - 1;
+      up.addEventListener("click", () => {
+        void applyEngineChange(() => SettingsService.MoveEngine(e.id, -1));
+      });
+      down.addEventListener("click", () => {
+        void applyEngineChange(() => SettingsService.MoveEngine(e.id, 1));
+      });
+
       enabled.addEventListener("change", () => {
         void applyEngineChange(() => SettingsService.SetEngineEnabled(e.id, enabled.checked));
       });
@@ -2811,13 +2841,20 @@ export function mountMainScreen(root: HTMLElement): void {
     }
 
     // 打っている最中だった欄にフォーカスと文字を戻す。
+    //
+    // ⚠️ **ボタンにも戻すこと**（並べ替えの ▲▼）。行ごと描き直すので、戻さないと
+    // **1 つ動かすたびにフォーカスが飛んで、続けて押せない**（3 つ上げたいときに
+    // 毎回カーソルで押しにいくことになる）。ボタンは**最初のクラス名で引く**ので、
+    // `.engine-up` / `.engine-down` の順で書いてある（`.engine-move` を先頭にすると
+    // 下ボタンを押したのに上ボタンへ戻る）。
     if (keep) {
       const row = engineList.querySelector<HTMLElement>(`.engine-row[data-id="${keep}"]`);
-      const el = row?.querySelector<HTMLInputElement>(`.${keepClass.split(" ")[0]}`);
-      if (el) {
-        if (el.type === "text") {
-          el.value = keepValue;
-        }
+      const el = row?.querySelector<HTMLElement>(`.${keepClass.split(" ")[0]}`);
+      if (el instanceof HTMLInputElement && el.type === "text") {
+        el.value = keepValue;
+      }
+      // 端まで動かしたら押せなくなっているので、そのときは行だけ見えていればよい。
+      if (el && !(el instanceof HTMLButtonElement && el.disabled)) {
         el.focus();
       }
     }
