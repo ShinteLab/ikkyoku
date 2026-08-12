@@ -583,6 +583,15 @@ export interface StudyState {
     "white": string;
 
     /**
+     * SourceURL は棋譜の取得元（**URL から読んだときだけ埋まる**。2026-08-13）。
+     * 
+     * **空でなければ「再読み込み」を出す**（`ReloadKifu`）。⚠️ **フロントで
+     * URL 欄の中身から判断しないこと** —— 入力タブの欄はいつでも書き換えられるので、
+     * **今の手順がどこから来たか**とは別物になる。
+     */
+    "sourceUrl": string;
+
+    /**
      * RootSFEN は根の局面（採ったときの局面）。**エンジンに渡すのはこれ + Played。**
      */
     "rootSfen": string;

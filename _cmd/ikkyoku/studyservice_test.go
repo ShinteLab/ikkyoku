@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ShinteLab/ikkyoku/analyze"
 	"golang.org/x/text/encoding/japanese"
 	"golang.org/x/text/transform"
 )
@@ -344,5 +345,146 @@ func TestStudyServiceNewGameKeepsPositionOnError(t *testing.T) {
 	}
 	if after := s.State(); after.SFEN != before.SFEN {
 		t.Errorf("失敗したのに局面が変わりました: %q -> %q", before.SFEN, after.SFEN)
+	}
+}
+
+// kifuServer は中身を差し替えられる .kif の配信元（再読み込みのテスト用）。
+//
+// **同じ URL の中身が変わる**のが中継の .kif そのものなので、そこを再現する。
+func kifuServer(t *testing.T, body *string) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, *body)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+const kifuHead = "先手：先手太郎\n後手：後手花子\n手数----指手---------消費時間--\n"
+
+// 再読み込みで手順が伸び、**それまでの解析結果（評価値）が残る**こと。
+//
+// ⚠️ **ここが崩れると、1 手進むたびに折れ線が消える**（中継を追う使い方が壊れる）。
+func TestStudyServiceReloadKifuKeepsEvals(t *testing.T) {
+	body := kifuHead + "   1 ７六歩(77)\n   2 ３四歩(33)\n"
+	srv := kifuServer(t, &body)
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	s := NewStudyService(logger, NewPositionService(logger))
+	if _, err := s.LoadKifuURL(srv.URL + "/live.kif"); err != nil {
+		t.Fatalf("LoadKifuURL: %v", err)
+	}
+	if s.State().SourceURL == "" {
+		t.Fatal("取得元が記録されていません（再読み込みのボタンが出ない）")
+	}
+	// 2 手目まで解析した、という状態を作る。
+	target, err := s.analyzeTarget()
+	if err != nil {
+		t.Fatalf("analyzeTarget: %v", err)
+	}
+	for ply := 0; ply <= 2; ply++ {
+		s.recordEval(target.Epoch, ply, "e1", "エンジン", analyze.Score{CP: 10 * ply}, 12)
+	}
+
+	// 中継が進んだ（頭は同じで、後ろに 2 手足された）。
+	body = kifuHead + "   1 ７六歩(77)\n   2 ３四歩(33)\n   3 ２六歩(27)\n   4 ８四歩(83)\n"
+	load, err := s.ReloadKifu()
+	if err != nil {
+		t.Fatalf("ReloadKifu: %v", err)
+	}
+	if load.Note != "" {
+		t.Errorf("食い違っていないのに差し替えの断りが出ています: %s", load.Note)
+	}
+	if load.State.Ply != 4 || len(load.State.Moves) != 4 {
+		t.Fatalf("最新の手順まで進んでいません: %+v", load.State)
+	}
+	// **解析結果はそのまま**（3 点とも残っていること）。
+	g := s.Evals()
+	if len(g.Series) != 1 || len(g.Series[0].Points) != 3 {
+		t.Fatalf("評価値が残っていません: %+v", g.Series)
+	}
+	if s.State().SourceURL == "" {
+		t.Error("取り直したあとに取得元が消えています")
+	}
+}
+
+// 食い違ったら**その先だけ**捨てて URL の手順を正にすること。
+//
+// 一致している範囲の評価値は残す（**捨てるのは別の手順に付いた値だけ**）。
+func TestStudyServiceReloadKifuReplacesDivergedMoves(t *testing.T) {
+	body := kifuHead + "   1 ７六歩(77)\n   2 ３四歩(33)\n"
+	srv := kifuServer(t, &body)
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	s := NewStudyService(logger, NewPositionService(logger))
+	if _, err := s.LoadKifuURL(srv.URL + "/live.kif"); err != nil {
+		t.Fatalf("LoadKifuURL: %v", err)
+	}
+	target, err := s.analyzeTarget()
+	if err != nil {
+		t.Fatalf("analyzeTarget: %v", err)
+	}
+	for ply := 0; ply <= 2; ply++ {
+		s.recordEval(target.Epoch, ply, "e1", "エンジン", analyze.Score{CP: 10 * ply}, 12)
+	}
+
+	// 2 手目が別の手だった（＝こちらが持っていた手順が誤り）。
+	body = kifuHead + "   1 ７六歩(77)\n   2 ８四歩(83)\n"
+	load, err := s.ReloadKifu()
+	if err != nil {
+		t.Fatalf("ReloadKifu: %v", err)
+	}
+	if load.Note == "" {
+		t.Error("差し替えたことが出ていません（黙って手順が変わる）")
+	}
+	st := load.State
+	if len(st.Moves) != 2 || st.Moves[1].USI != "8c8d" {
+		t.Fatalf("URL の手順になっていません: %+v", st.Moves)
+	}
+	// 一致していた 1 手目までは残り、その先は消えること。
+	g := s.Evals()
+	if len(g.Series) != 1 {
+		t.Fatalf("折れ線が消えました: %+v", g.Series)
+	}
+	if n := len(g.Series[0].Points); n != 2 {
+		t.Fatalf("残す/捨てるの線引きがずれています: %d点 %+v", n, g.Series[0].Points)
+	}
+}
+
+// URL から読んでいない局面では取り直せないこと（理由を返して局面は壊さない）。
+func TestStudyServiceReloadKifuWithoutSource(t *testing.T) {
+	s := adopted(t)
+	load, err := s.ReloadKifu()
+	if err == nil {
+		t.Fatal("取得元が無いのにエラーになりませんでした")
+	}
+	if !load.State.Loaded {
+		t.Errorf("失敗したのに局面が消えています: %+v", load.State)
+	}
+	if load.State.SourceURL != "" {
+		t.Errorf("撮った局面に取得元が付いています: %q", load.State.SourceURL)
+	}
+}
+
+// 取れなかったときは今の手順を壊さないこと（**中継が落ちても検討は続けられる**）。
+func TestStudyServiceReloadKifuKeepsMovesOnError(t *testing.T) {
+	body := kifuHead + "   1 ７六歩(77)\n   2 ３四歩(33)\n"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, body)
+	}))
+	defer srv.Close()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	s := NewStudyService(logger, NewPositionService(logger))
+	if _, err := s.LoadKifuURL(srv.URL + "/live.kif"); err != nil {
+		t.Fatalf("LoadKifuURL: %v", err)
+	}
+	body = "これは棋譜ではありません"
+	load, err := s.ReloadKifu()
+	if err == nil {
+		t.Fatal("棋譜でない中身でエラーになりませんでした")
+	}
+	if load.State.Ply != 2 || len(load.State.Moves) != 2 {
+		t.Errorf("失敗したのに手順が壊れています: %+v", load.State)
 	}
 }

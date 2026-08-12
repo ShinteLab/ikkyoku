@@ -700,8 +700,21 @@ export function mountMainScreen(root: HTMLElement): void {
 
                  ⚠️ **考える秒数が「無制限」だと使えない**（1 手目で止まったまま
                  次へ進めない）。理由は押せない側に出す。 -->
+            <!-- 再読み込み（2026-08-13）。**URL から読み込んだときだけ出す。**
+                 中継の .kif は 1 手進むたびに書き換わるので、同じ URL を
+                 読み直して**手順を最新にする**のがこのボタン。
+
+                 ⚠️ **入力タブから読み直させないこと** —— あちらを通ると
+                 根ごと入れ替わるので**評価値が全部消える**。こちらは
+                 食い違ったところから先だけを差し替える（判断は Go 側の
+                 StudyService.ReloadKifu。**フロントで手順を突き合わせない**）。
+
+                 ⚠️ **出す条件は StudyState.sourceUrl。** 入力タブの URL 欄の
+                 中身で判断しないこと（欄はいつでも書き換えられるので、
+                 **今の手順がどこから来たか**とは別物になる）。 -->
             <div class="study-move-head">
               <span class="field-label">手順</span>
+              <button id="study-reload" class="ghost-btn" type="button" hidden>再読み込み</button>
               <button id="analyze-batch-run" class="ghost-btn" type="button">連続解析</button>
               <button id="study-undo" class="ghost-btn" type="button"
                       title="最後の 1 手を取り消します（手順からも消えます）">1手戻す</button>
@@ -1926,6 +1939,7 @@ export function mountMainScreen(root: HTMLElement): void {
   const studySide = root.querySelector<HTMLDivElement>("#study-side")!;
   const studyMoves = root.querySelector<HTMLDivElement>("#study-moves")!;
   const studyUndo = root.querySelector<HTMLButtonElement>("#study-undo")!;
+  const studyReload = root.querySelector<HTMLButtonElement>("#study-reload")!;
   const studyMoveStatus = root.querySelector<HTMLParagraphElement>("#study-move-status")!;
   // 中身は訂正タブと同じ .hand-zone だが、**見出しは出さない**（`is-readonly`）。
   // 盤との位置関係そのものが「どちらの駒台か」の説明になっているので、
@@ -1989,6 +2003,14 @@ export function mountMainScreen(root: HTMLElement): void {
     // 分ける相手（解析の列）が出ていないので、バーだけが宙に浮く。
     studySplit.hidden = !studyLoaded;
     studyUndo.disabled = (st.ply ?? 0) === 0;
+    // ⚠️ **取り直せるかは Go 側が持っている**（URL から読んだときだけ埋まる）。
+    // 入力タブの URL 欄を見ないこと —— あちらは打ち換えられる。
+    const src = st.sourceUrl ?? "";
+    studyReload.hidden = !studyLoaded || src === "";
+    studyReload.title = src
+      ? `${src} から棋譜を取り直します（食い違ったところから先だけ差し替え、` +
+        `それより前の解析結果はそのまま残ります）`
+      : "";
     if (studyLoaded) {
       studyBoard.setAttribute("sfen", st.boardSfen);
       // 手番と手数は SFEN に入っているが、読むのに要るのは文字のほう。
@@ -2131,6 +2153,40 @@ export function mountMainScreen(root: HTMLElement): void {
     },
   });
   studyUndo.addEventListener("click", () => studyBoardUI.undo());
+
+  // 再読み込み（2026-08-13）。**URL の側を正**にして手順を最新にする。
+  //
+  // ⚠️ **残す/捨てるの判断は Go 側**（`StudyService.ReloadKifu`）。手順の
+  // 突き合わせをこちらでやると、評価値を捨てる側（Go）と 2 か所に散る。
+  //
+  // ⚠️ **結果は必ず出すこと。** 手順が伸びていなければ画面はほとんど変わらないので、
+  // 何も出さないと**押しても効いていないように見える**。差し替えが起きたときは
+  // 自分で指した手が消えているので、なおさら黙って済ませない。
+  studyReload.addEventListener("click", () => {
+    void (async () => {
+      studyReload.disabled = true;
+      studyMoveStatus.textContent = "棋譜を取り直しています…";
+      studyMoveStatus.hidden = false;
+      studyMoveStatus.classList.remove("is-error");
+      try {
+        const got = await StudyService.ReloadKifu();
+        showStudy(got.state);
+        // ⚠️ **note が空でないことをエラー扱いしないこと**（貼り付けと同じ）。
+        // 途中で止まってもそこまでの手順は正しく、その局面は解析できる。
+        studyMoveStatus.textContent = got.note ? `${got.summary}（${got.note}）` : got.summary;
+        studyMoveStatus.hidden = false;
+      } catch (err) {
+        // **今の手順は壊れていない**（Go 側が組み立てが通ってから入れ替える）ので、
+        // 理由だけ出して検討を続けられるようにする。
+        studyMoveStatus.textContent =
+          `棋譜を取り直せませんでした: ${String(err instanceof Error ? err.message : err)}`;
+        studyMoveStatus.hidden = false;
+        studyMoveStatus.classList.add("is-error");
+      } finally {
+        studyReload.disabled = false;
+      }
+    })();
+  });
 
   // 評価値グラフ（2026-08-12）。**手順の 1 手ごとの最善手の評価値**を折れ線にする。
   //

@@ -62,6 +62,13 @@ type StudyService struct {
 	// ⚠️ **根を入れ替えたら捨てること。** 撮った局面にも新規対局にも対局者は
 	// 居ないので、前の棋譜の名前が残っていると**別の対局の名前を今の盤に出す**。
 	game position.Game
+	// sourceURL は棋譜の取得元（**URL から読んだときだけ埋まる**。2026-08-13）。
+	//
+	// **再取得できることが分かるのはここだけ**なので、`StudyState` に載せて
+	// 手順の見出しに「再読み込み」を出す鍵にする。⚠️ **根を入れ替えたら捨てること**
+	// —— 撮った局面にも貼り付けた棋譜にも新規対局にも取得元は無いので、
+	// 残っていると**別の対局の URL で今の手順を上書きできてしまう**。
+	sourceURL string
 	// evals は手順の 1 手ごとの評価値（評価値グラフ。2026-08-12）。
 	//
 	// ⚠️ **置き場所がここなのは、記録が手順に紐づくから。** 手順を切る操作
@@ -106,6 +113,12 @@ type StudyState struct {
 	// **既定の文言は表示側が持つ。**
 	Black string `json:"black"`
 	White string `json:"white"`
+	// SourceURL は棋譜の取得元（**URL から読んだときだけ埋まる**。2026-08-13）。
+	//
+	// **空でなければ「再読み込み」を出す**（`ReloadKifu`）。⚠️ **フロントで
+	// URL 欄の中身から判断しないこと** —— 入力タブの欄はいつでも書き換えられるので、
+	// **今の手順がどこから来たか**とは別物になる。
+	SourceURL string `json:"sourceUrl"`
 
 	// RootSFEN は根の局面（採ったときの局面）。**エンジンに渡すのはこれ + Played。**
 	RootSFEN string `json:"rootSfen"`
@@ -158,6 +171,8 @@ func (s *StudyService) Adopt() (StudyState, error) {
 	s.study = position.NewStudy(p)
 	// **対局者も捨てる**（撮った局面に対局者は付いていない）。
 	s.game = position.Game{}
+	// **取得元も捨てる**（撮った局面に取得元は無い）。
+	s.sourceURL = ""
 	// **評価値グラフも捨てる。** 別の局面から始まる別の手順なので、前の折れ線を
 	// 残すと**違う対局の評価値が同じ横軸に並ぶ。**
 	s.evals.reset()
@@ -202,6 +217,9 @@ func (s *StudyService) LoadKifu(text string) (KifuLoad, error) {
 	s.study = study
 	// **対局者はここでだけ埋まる**（勝率バーの左右に出す）。
 	s.game = load.Game
+	// ⚠️ **取得元は捨てる。** 貼り付けた棋譜には取り直す先が無い。
+	// URL から読んだときは `LoadKifuURL` が**このあとに**入れ直す。
+	s.sourceURL = ""
 	s.evals.reset()
 	st := s.state()
 	s.mu.Unlock()
@@ -235,10 +253,133 @@ func (s *StudyService) LoadKifuURL(rawURL string) (KifuLoad, error) {
 	if err != nil {
 		return load, err
 	}
+	// **取得元を覚える**（手順の見出しの「再読み込み」の鍵）。⚠️ **`LoadKifu` が
+	// 捨てたあとに入れ直している** —— あちらは貼り付けの口でもあるので、
+	// 取得元を知らないほうが正しい。
+	s.mu.Lock()
+	s.sourceURL = got.URL
+	st := s.state()
+	s.mu.Unlock()
+	load.State = st
 	// **何を読んだかを出す。** URL は打ち間違えても「棋譜が読めません」としか
 	// 出ないことがあるので、**取れた側の事実**（どこから・何文字コードで）を見せる。
 	load.Summary += fmt.Sprintf("（%s）", got.Encoding)
 	return load, nil
+}
+
+// ReloadKifu は取得元の URL から棋譜を取り直して、**URL の側を正**にする
+// （解析タブの手順の見出しの「再読み込み」。2026-08-13）。
+//
+// 中継の .kif は 1 手進むたびに書き換わるので、**同じ URL をもう一度読んで
+// 手順を最新にする**のがこの口。⚠️ **入力タブから読み直させないこと** ——
+// あちらを通ると `LoadKifu` が根ごと入れ替えるので、**評価値が全部消える。**
+//
+// # 何を残して何を捨てるか
+//
+// **食い違ったところから先だけを差し替える。**
+//
+//	根が違う                … 別の対局なので全部捨てる（`LoadKifu` と同じ）
+//	手順の頭が一致している    … 一致している範囲の**解析結果はそのまま残す**
+//	途中から食い違う          … **その先は捨てて URL のものにする**（URL が正）
+//
+// ⚠️ **「捨てる」で済んでいるのは分岐ツリーがまだ無いから。** 木が入ったら、
+// ここは**捨てるのではなく別の枝として残す**ことになる（`TODO.md` の「本譜のロック」。
+// 本譜は URL が更新し続け、分岐は手入力、という使い方が一番よくある）。
+// **そのときに直す場所はここ 1 か所**にしてある。
+//
+// ⚠️ **食い違いが無ければ `dropAfter` を呼ばないこと。** あれは世代（epoch）を
+// 進めるので、**走っている解析の途中経過が捨てられる**（1 手進むたびに
+// 再読み込みする使い方では、毎回それが起きる）。
+func (s *StudyService) ReloadKifu() (KifuLoad, error) {
+	s.mu.Lock()
+	url := s.sourceURL
+	s.mu.Unlock()
+	if url == "" {
+		return KifuLoad{State: s.State()},
+			fmt.Errorf("この局面は URL から読み込んだものではないので、取り直せません")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), kifuFetchTimeout)
+	defer cancel()
+	got, err := kifuweb.Fetch(ctx, url)
+	if err != nil {
+		return KifuLoad{State: s.State()}, err
+	}
+	// ⚠️ **取れなかった / 読めなかったときは今の手順を壊さないこと。**
+	// 組み立てが通ってから初めて入れ替える。
+	study, load, err := position.FromKIF(got.Text)
+	if err != nil {
+		return KifuLoad{State: s.State()}, err
+	}
+
+	s.mu.Lock()
+	kept, dropped := s.mergeReloadLocked(study)
+	s.study = study
+	s.game = load.Game
+	st := s.state()
+	s.mu.Unlock()
+
+	summary := kifuSummary(load) + fmt.Sprintf("（%s）", got.Encoding)
+	note := load.Note
+	if dropped > 0 {
+		// **黙って捨てない。** 自分で指した手が消えるので、どこからどれだけ
+		// 差し替わったかを出す。
+		msg := fmt.Sprintf("%d手目から食い違ったので、その先の%d手を棋譜のものに差し替えました",
+			kept+1, dropped)
+		if note == "" {
+			note = msg
+		} else {
+			note += "／" + msg
+		}
+	}
+	s.logger.Info("棋譜を取り直しました",
+		"url", got.URL, "moves", load.Loaded, "kept", kept, "dropped", dropped)
+	return KifuLoad{State: st, Summary: summary, Note: note}, nil
+}
+
+// mergeReloadLocked は取り直した手順と今の手順を突き合わせ、**残す評価値を決める**。
+//
+// 戻り値は（一致した手数・捨てた手数）。**ロックを取った状態で呼ぶこと。**
+// ⚠️ **`s.study` の入れ替えはここではしない**（呼び出し側でまとめて行う）。
+func (s *StudyService) mergeReloadLocked(next *position.Study) (kept, dropped int) {
+	// ⚠️ **組み上がらなかった側は「違う」に倒す**（両方空を一致と読まないこと）。
+	if s.study == nil || rootSFEN(s.study) == "" || rootSFEN(s.study) != rootSFEN(next) {
+		// **別の対局**（あるいは初回）。前の折れ線は別の局面の話になる。
+		s.evals.reset()
+		return 0, 0
+	}
+	prev := s.study.Moves()
+	cur := next.Moves()
+	for kept < len(prev) && kept < len(cur) && prev[kept].USI == cur[kept].USI {
+		kept++
+	}
+	dropped = len(prev) - kept
+	if dropped > 0 {
+		// **食い違ったところから先の評価値だけを捨てる**（epoch も進む）。
+		s.evals.dropAfter(kept)
+	}
+	// **見ている位置を保つ。** ⚠️ **最後の手を見ていたなら、伸びた先の最後まで
+	// 進める** —— 中継を追う使い方では「今の局面が見たい」が普通だから。
+	// 途中を見ていたなら、**一致している範囲までに丸めて**そこへ戻す
+	// （食い違った先は別の手順なので、同じ手数でも別の局面になる）。
+	at := s.study.Ply()
+	if at >= len(prev) {
+		at = len(cur)
+	} else if at > kept {
+		at = kept
+	}
+	// GoTo は範囲内なら失敗しない。**失敗しても最後まで進んだ状態のままでよい。**
+	_ = next.GoTo(at)
+	return kept, dropped
+}
+
+// rootSFEN は根の局面の SFEN（組み上がらなければ空）。**同じ対局かの判定用。**
+func rootSFEN(s *position.Study) string {
+	v, err := s.Root().SFEN()
+	if err != nil {
+		return ""
+	}
+	return v
 }
 
 // NewGame は何もないところから対局を始める（入力タブの「新しく対局を始める」）。
@@ -267,6 +408,8 @@ func (s *StudyService) NewGame(handicap string) (KifuLoad, error) {
 	s.study = study
 	// **新規対局に対局者は居ない**（名前を入れる口はまだ無い）。
 	s.game = position.Game{}
+	// **取り直す先も無い。**
+	s.sourceURL = ""
 	s.evals.reset()
 	st := s.state()
 	s.mu.Unlock()
@@ -376,6 +519,7 @@ func (s *StudyService) Clear() StudyState {
 	defer s.mu.Unlock()
 	s.study = nil
 	s.game = position.Game{}
+	s.sourceURL = ""
 	s.evals.reset()
 	return s.state()
 }
@@ -547,5 +691,6 @@ func (s *StudyService) state() StudyState {
 		LegalError: legalErr,
 		Black:      s.game.Black,
 		White:      s.game.White,
+		SourceURL:  s.sourceURL,
 	}
 }
