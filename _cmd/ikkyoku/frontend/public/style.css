@@ -1512,6 +1512,13 @@ html.is-main #app {
   gap: 6px;
   align-items: start;
   justify-content: center;
+  /* ⚠️ **盤の絵は箱いっぱいではない。** <shogi-board> の SVG には筋・段を書く余白
+     （core/web の MARGIN=28 / size=560 なので上下左右 5% ずつ）が含まれるので、
+     **箱の上端と、目に見える盤の上端は 5% ずれている**。駒台をこのぶん内側へ
+     寄せて、**後手の駒台の上端＝盤の上端・先手の駒台の下端＝盤の下端**にする。
+     ⚠️ **勝率バーが同じ理由で左右を 5% 詰めている**（.winrate-row）。
+     **core/web の MARGIN が変わったら両方直すこと。** */
+  --board-margin: calc(var(--board-size) * 0.05);
 }
 
 .board-with-hands > .board-stage {
@@ -1520,13 +1527,17 @@ html.is-main #app {
 }
 
 /* 駒台は**盤の高さの半分ぶん**を使う(1 行が盤の半分になる)。
-   駒を枚数ぶん並べるので、狭いとすぐ溢れる。 */
+   駒を枚数ぶん並べるので、狭いとすぐ溢れる。
+
+   ⚠️ **上端は盤の絵の上端に合わせる**（--board-margin。上の ⚠️）。
+   箱の上端に合わせると、盤の絵より 5% 高いところから始まる。 */
 #hand-white-slot,
 #study-hand-white-slot {
   grid-column: 1;
   grid-row: 1;
   justify-self: end;
   align-self: stretch;
+  margin-top: var(--board-margin);
 }
 
 /* 解析タブの駒台は正方形で高さを使い切らないので、**盤の外側の角に寄せる**
@@ -1550,25 +1561,32 @@ html.is-main #app {
 }
 
 /* 足りない駒は先手の駒台の**上**（後手の駒台と左右対称）。縦 1 列に 8 種を
-   並べるので、こちらも盤の半分の高さを使う。 */
+   並べるので、こちらも盤の半分の高さを使う。
+   ⚠️ **後手の駒台と同じく、上端は盤の絵の上端に合わせる**（左右対称なので、
+   片方だけ寄せると揃わない）。 */
 #missing-slot {
   grid-column: 3;
   grid-row: 1;
   align-self: stretch;
+  margin-top: var(--board-margin);
 }
 
+/* ⚠️ **下端は盤の絵の下端に合わせる**（--board-margin）。 */
 #hand-black-slot {
   grid-column: 3;
   grid-row: 2;
   align-self: stretch;
+  margin-bottom: var(--board-margin);
 }
 
 /* 解析タブには「足りない駒」が無い(未決が残った局面はこのタブに来ない)ので、
-   先手の駒台は右列の下段だけを使い、**盤の下端に寄せる**。 */
+   先手の駒台は右列の下段だけを使い、**盤の下端に寄せる**。
+   ⚠️ **合わせる先は箱の下端ではなく盤の絵の下端**（--board-margin。上の ⚠️）。 */
 #study-hand-black-slot {
   grid-column: 3;
   grid-row: 3;
   align-self: end;
+  margin-bottom: var(--board-margin);
 }
 
 /* 先手側のスロットには「足りない駒」と駒台が縦に積まれる(足りない駒が上)。
