@@ -554,6 +554,17 @@ export function mountMainScreen(root: HTMLElement): void {
             </div>
             <div id="study-hand-black-slot" class="hand-slot" hidden></div>
           </div>
+          <!-- 縦のスプリットバー（2026-08-13）。**盤と、右の解析の列の境目。**
+               ドラッグで盤の大きさを変える。⚠️ **変えているのは
+               --study-side-min ただ 1 つ**で、盤の大きさはその式から付いてくる。
+
+               ⚠️ **盤がこれ以上大きくならないところで止まる。** 盤は縦
+               （＝評価値グラフの高さ）でも決まるので、そこまで詰めたら、
+               それ以上右へ引いても盤は伸びない（遊びになるだけ）。
+               判定は**実際の盤の幅を測って**行う（式の定数を JS に写さない）。 -->
+          <div id="study-split" class="split-bar is-vertical" role="separator"
+               aria-orientation="vertical" aria-label="盤と解析の列の幅" tabindex="0"
+               title="ドラッグで盤と解析の列の幅を変えます（盤がこれ以上大きくならないところで止まります）。左右キーでも動きます"></div>
           <!-- 盤の右の列（2026-08-12 に作り替えた）。**解析のものは全部ここに入る**
                —— 解析の行・エンジンごとの結果・評価値グラフ・手順・SFEN。
 
@@ -942,6 +953,10 @@ export function mountMainScreen(root: HTMLElement): void {
       // **`display: none` の中では 0 になる**（測らないと出ないか、前回の
       // 大きさのまま残る）。盤のグリッドと同じ落とし穴。
       evalGraphUI.relayout();
+      // ⚠️ **縦のスプリットバーの遊びもここで消す。** 幅の判定は**実際の盤を
+      // 測って**行うので、**隠れているあいだは決められない**（測ると 0）。
+      // これが無いと、開いた直後の 1 回目のドラッグが空振りする。
+      settleStudySide();
       // **解析タブに来たら（連続モードなら）そのまま解析を始める。**
       // まだ解析していない局面のときだけ動く（止めた解析を勝手に起こし直さない）。
       autoAnalyze();
@@ -2172,6 +2187,9 @@ export function mountMainScreen(root: HTMLElement): void {
     // 描いており、**盤は式で大きさが変わる**ので重ねたグリッドがずれる。
     evalGraphUI.relayout();
     studyBoardUI.relayout();
+    // ⚠️ **盤の高さの上限が動いたので、横の遊びも取り直す。** グラフを畳むと
+    // 盤は縦に大きくなれるようになり、**そのぶん横の下限も下がる**。
+    settleStudySide();
   };
 
   evalGraphToggle.addEventListener("click", () => {
@@ -2214,10 +2232,18 @@ export function mountMainScreen(root: HTMLElement): void {
   });
 
   // 窓が低くなると上限も下がる。**はみ出したままにしないこと。**
+  // ⚠️ **横の遊びも取り直す**（窓の幅が変われば盤の上限に張り付く一点も動く）。
+  // ⚠️ **窓が狭くて盤が潰れたら、幅の指定を捨てて取り直す** —— 盤が読めない
+  // 大きさのまま残るより、まず盤を成立させる。
   window.addEventListener("resize", () => {
     if (evalGraphH > 0) {
       setEvalGraphH(evalGraphH);
     }
+    if (boardW() > 0 && boardW() < STUDY_BOARD_MIN) {
+      studySideW = STUDY_SIDE_MIN;
+      rawSide(STUDY_SIDE_MIN);
+    }
+    settleStudySide();
   });
 
   // ⚠️ **一度は通すこと**（ボタンのアイコンと `aria-*` はここで入れている）。
@@ -2225,6 +2251,137 @@ export function mountMainScreen(root: HTMLElement): void {
   evalGraphToggle.innerHTML = iconMarkup(FiChevronDown);
   evalGraphToggle.title = "評価値グラフを畳みます（そのぶん盤が大きくなります）";
   evalGraphSplit.setAttribute("aria-valuenow", String(evalGraphH));
+
+  // ---- 盤と解析の列の幅（縦のスプリットバー。2026-08-13）--------------------
+  //
+  // ⚠️ **書き換えるのは `--study-side-min` ただ 1 つ。** 盤の大きさ
+  // （`--board-size`）がこれを引いているので、詰めれば盤が大きくなる。
+  // ⚠️ **`#panel-study` の inline style に入れること** —— あの変数は
+  // `#panel-study` 自身が定義しているので、`:root` へ書いても負ける
+  // （`--eval-graph-h` などとは事情が違う）。
+  //
+  // ⚠️ **盤がこれ以上大きくならないところより下へは詰めない**（ユーザーの要求）。
+  // 盤は**縦（＝評価値グラフの高さ）でも決まる**ので、そこまで詰めたら、それ以上
+  // 右へ引いても盤は伸びず**遊びになるだけ**。
+  //
+  // ⚠️ **判定は「実際の盤の幅を測って」行う。式の定数を JS に写さないこと。**
+  // `--board-size` の式（`110px` や `1.4`）を写すと、CSS を直したときに
+  // **黙って食い違う**（画面では気づけない）。測れば式が変わっても付いてくる。
+  const panelStudy = root.querySelector<HTMLElement>("#panel-study")!;
+  const studySplit = root.querySelector<HTMLDivElement>("#study-split")!;
+  // 盤をこれより小さくしてまで解析の列を広げない。
+  const STUDY_BOARD_MIN = 240;
+  // ⚠️ **解析の列をこれより詰めない。** 盤を優先して詰め切ると、窓が狭いときに
+  // **解析の行が入らない幅まで潰れて読めなくなる**（`.study-side` の下限の話）。
+  const STUDY_SIDE_MIN = 300;
+  let studySideW = STUDY_SIDE_MIN; // style.css の --study-side-min と同じ既定
+
+  // 盤の実寸（`.board-stage` の幅 = `--board-size`）。タブが隠れていれば 0。
+  const boardW = () => studyStage.getBoundingClientRect().width;
+  const rawSide = (px: number) =>
+    panelStudy.style.setProperty("--study-side-min", `${Math.round(px)}px`);
+
+  // settleStudySide は「盤が上限に張り付いたまま取れる最大の幅」まで詰める。
+  //
+  // **見た目は 1px も動かない**（盤は上限のまま、右の列は余りをもらうので）。
+  // これをやっておかないと、**ドラッグし始めても最初のうち何も動かない**
+  // （遊びのぶんだけ空振りする）。
+  //
+  // ⚠️ **既に盤が縮んでいるときは触らないこと** —— それはユーザーが自分で
+  // 列を広げた状態なので、勝手に戻すと設定を奪う。
+  const settleStudySide = () => {
+    if (boardW() <= 0) {
+      return; // タブが隠れている（測れない）
+    }
+    // **詰め切ったとき（＝列を下限まで狭めたとき）の盤**が、この窓で取れる上限。
+    // ⚠️ **0 で測らないこと** —— 窓が狭いと盤は横で決まるので、0 まで詰めた
+    // 大きさを上限にすると**解析の列を潰し切るまで詰めてしまう**。
+    rawSide(STUDY_SIDE_MIN);
+    const cap = boardW();
+    rawSide(studySideW);
+    if (studySideW > STUDY_SIDE_MIN && boardW() < cap - 0.5) {
+      return; // 盤は既に横で決まっている＝ユーザーが自分で列を広げた側
+    }
+    // 上限に張り付いている最大の幅を二分探索で求める。
+    let lo = STUDY_SIDE_MIN;
+    let hi = Math.max(studySideW, window.innerWidth);
+    for (let i = 0; i < 20; i++) {
+      const mid = (lo + hi) / 2;
+      rawSide(mid);
+      if (boardW() >= cap - 0.5) {
+        lo = mid;
+      } else {
+        hi = mid;
+      }
+    }
+    studySideW = Math.round(lo);
+    rawSide(studySideW);
+  };
+
+  // setStudySideW は幅を変える。**効果が無い方向へは動かさない。**
+  const setStudySideW = (px: number) => {
+    if (boardW() <= 0) {
+      return;
+    }
+    const next = Math.max(Math.round(px), STUDY_SIDE_MIN);
+    if (next === studySideW) {
+      return;
+    }
+    const before = studySideW;
+    const beforeBoard = boardW();
+    rawSide(next);
+    const afterBoard = boardW();
+    // ⚠️ **詰めても盤が大きくならないなら、詰めない**（ユーザーの要求そのもの）。
+    // ⚠️ **広げすぎて盤が潰れるのも止める。**
+    if (
+      (next < before && afterBoard <= beforeBoard + 0.5) ||
+      (next > before && afterBoard < STUDY_BOARD_MIN)
+    ) {
+      rawSide(before);
+      return;
+    }
+    studySideW = next;
+    studySplit.setAttribute("aria-valuenow", String(next));
+    // 盤の大きさが変わったので、重ねたグリッドとグラフを測り直す。
+    studyBoardUI.relayout();
+    evalGraphUI.relayout();
+  };
+
+  // ⚠️ **掴む前に遊びを消しておく**（見た目は動かない）。これが無いと、
+  // 右へ引き始めても盤の右端が動かない区間ができる。
+  studySplit.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    settleStudySide();
+    studySplit.setPointerCapture(e.pointerId);
+    studySplit.classList.add("is-dragging");
+    const startX = e.clientX;
+    const startW = studySideW;
+    // **右へ引く = 盤を広げる = 右の列を詰める。**
+    const onMove = (ev: PointerEvent) => setStudySideW(startW - (ev.clientX - startX));
+    const onUp = () => {
+      studySplit.classList.remove("is-dragging");
+      studySplit.removeEventListener("pointermove", onMove);
+      studySplit.removeEventListener("pointerup", onUp);
+      studySplit.removeEventListener("pointercancel", onUp);
+    };
+    studySplit.addEventListener("pointermove", onMove);
+    studySplit.addEventListener("pointerup", onUp);
+    studySplit.addEventListener("pointercancel", onUp);
+  });
+
+  studySplit.addEventListener("keydown", (e) => {
+    const step = e.shiftKey ? 32 : 8;
+    if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      setStudySideW(studySideW + step);
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault();
+      settleStudySide();
+      setStudySideW(studySideW - step);
+    }
+  });
+
+  studySplit.setAttribute("aria-valuenow", String(studySideW));
 
   // ⚠️ **「訂正に戻る」ボタンは無くした**（2026-08-12）。**上のタブで戻れる**うえ、
   // タブを離れたときの後始末（走っている解析を止めてエンジンを手放す）は

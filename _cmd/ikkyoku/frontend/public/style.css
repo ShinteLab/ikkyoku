@@ -654,7 +654,14 @@ html.is-main #app {
 #panel-study {
   /* 右の列に**最低限残す幅**。⚠️ **これは「固定幅」ではない**（2026-08-12 に変えた）——
      盤は**取れるだけ取り**、右の列が**残りの幅を全部もらう**。ここに書いてあるのは
-     「窓が狭いときに、盤より先に譲ってもらう下限」。 */
+     「窓が狭いときに、盤より先に譲ってもらう下限」。
+
+     ⚠️ **縦のスプリットバーが書き換えるのはこの値**（2026-08-13。JS が
+     `#panel-study` の inline style に入れる）。**`:root` へ移さないこと** ——
+     ここで定義しているので、`:root` に置いても同じ要素のこの宣言に負ける。
+     ⚠️ **盤がこれ以上大きくならないところより下へは詰めない**（下げても盤は
+     高さで頭打ちなので、遊びになるだけ）。判定は JS 側が**実際の盤の幅を測って**
+     行う（式の定数を JS に写さないため）。 */
   --study-side-min: 300px;
   /* ⚠️ **盤の大きさはこの式で決まる。DOM から自動では決まらない。**
      行を減らしても、**この式から引く量を減らさない限り盤は大きくならない**
@@ -673,7 +680,7 @@ html.is-main #app {
      両方が効いて盤が縦に大きくなる。 */
   --board-size: min(
     calc(100vh - var(--winrate-h) - var(--eval-graph-h) - 92px),
-    calc((100vw - var(--study-side-min) - 90px) / 1.4)
+    calc((100vw - var(--study-side-min) - 110px) / 1.4)
   );
 }
 
@@ -1274,18 +1281,40 @@ html.is-main #app {
   touch-action: none;
 }
 
-/* 掴む場所が分かるように、真ん中に短い線を出す。**バー全体を塗らない**
-   （盤のすぐ下に濃い帯が入ると、盤の一部に見える）。 */
+/* 掴む場所が分かるように線を出す。**横いっぱいに引く**（2026-08-13。以前は
+   真ん中に 56px だけ出していた）—— 境目そのものなので、端まで引いてあるほうが
+   「ここで区切られている」ことが読み取れる。**バー全体は塗らない**
+   （盤のすぐ下に太い帯が入ると、盤の一部に見える）。 */
 .split-bar::after {
   content: "";
   position: absolute;
-  left: 50%;
+  left: 0;
+  right: 0;
   top: 50%;
-  transform: translate(-50%, -50%);
-  width: 56px;
+  transform: translateY(-50%);
   height: 3px;
   background: #3a3d47;
   border-radius: 2px;
+}
+
+/* 縦のスプリットバー（2026-08-13）。**盤と、右の解析の列の境目。**
+   ⚠️ **幅 8px と .board-area の gap 12px は #panel-study の --board-size の
+   横の定数（110px）が見込んでいる。** 変えたらあちらも直すこと。 */
+.split-bar.is-vertical {
+  align-self: stretch;
+  width: 8px;
+  height: auto;
+  cursor: col-resize;
+}
+
+.split-bar.is-vertical::after {
+  left: 50%;
+  right: auto;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  height: auto;
+  transform: translateX(-50%);
 }
 
 .split-bar:hover::after,
