@@ -31,6 +31,25 @@
      ⚠️ **--winrate-rows は JS が入れる**（mainscreen.ts の reserveWinrate）。
      エンジンの本数で変わるのはここだけで、**解析のたびには変わらない**
      （中身の有無で伸び縮みさせないこと。盤の**上**の行なので、動くと盤ごと下がる）。 */
+  /* 候補手の一覧の高さ。**max ではなく固定**（.analyze-lines）。
+     ⚠️ **実際の値は JS が入れる**（mainscreen.ts の reserveLines。候補の本数の
+     指定に合わせて、4 本ぶんで頭打ち）。ここにあるのは、まだ入っていないときの既定。
+     ⚠️ **本数ぶん全部を確保しないこと** —— MultiPV を上げると候補は何本にもなるので、
+     そのぶん盤の下が伸びる。溢れたら中でスクロールさせる。
+     ⚠️ **:root に置くこと**（2026-08-12）。下の --analyze-engines-h 経由で
+     #panel-study の --board-size がこれを引いており、**カスタムプロパティは
+     下へしか継承しない**ので、.analyze-engines の中で定義すると盤の式から読めない
+     （--eval-graph-h / --winrate-h と同じ話）。JS も documentElement に入れる。 */
+  --analyze-lines-h: 58px;
+  /* カード（エンジン 1 つ）の高さ = 一覧 + 上下の padding(4+4) + 見出し(19) + gap(2)。
+     ⚠️ **実測で合わせてある**（ハーネスで 117px。候補 3 本 = 一覧 88px）。
+     見出しの文字サイズを変えたらここも測り直すこと —— ずれると、下の
+     --analyze-engines-h がカード 2 つぶんに 2〜3px 足りず、
+     **エンジン 2 つでスクロールバーが出る**。 */
+  --analyze-card-h: calc(var(--analyze-lines-h) + 29px);
+  /* エンジンごとの結果の枠の高さ（頭打ち）。**エンジン 2 つはそのまま見える**。 */
+  --analyze-engines-h: min(calc(var(--analyze-card-h) * 2 + 8px), 300px);
+
   --winrate-row-h: 22px;
   --winrate-rows: 1;
   --winrate-h: calc(var(--winrate-row-h) * var(--winrate-rows) + 4px * (var(--winrate-rows) - 1) + 6px);
@@ -480,8 +499,14 @@ html.is-main body {
    変えないと**盤が縦にはみ出す**（`.board-area` は縮まないので、盤が画面の外へ出る）。
    ここで上書きしておけば、訂正タブ側の盤の大きさは変わらない。 */
 #panel-study {
+  /* ⚠️ **候補手の枠が伸びたぶんも引くこと**（2026-08-12）。260px の中には
+     エンジンごとの結果の枠を **220px** として見込んであったので、そこからの
+     差だけを足で引く（候補手の本数を増やすと枠は 300px まで伸びうる）。 */
   --board-size: min(
-    calc(100vh - 260px - var(--eval-graph-h) - var(--winrate-h) - 24px),
+    calc(
+      100vh - 260px - var(--eval-graph-h) - var(--winrate-h) - 24px -
+        (var(--analyze-engines-h) - 220px)
+    ),
     var(--board-max)
   );
 }
@@ -765,12 +790,6 @@ html.is-main body {
      **読み筋の始まり(2 手目)が行ごとにずれる**。 */
   --analyze-score-w: 100px;
   --analyze-first-w: 124px;
-  /* 候補手の一覧の高さ。**max ではなく固定**（下の .analyze-lines）。
-     ⚠️ **実際の値は JS が入れる**（mainscreen.ts の reserveLines。候補の本数の
-     指定に合わせて、4 本ぶんで頭打ち）。ここにあるのは、まだ入っていないときの既定。
-     ⚠️ **本数ぶん全部を確保しないこと** —— MultiPV を上げると候補は何本にもなるので、
-     そのぶん盤の下が伸びる。溢れたら中でスクロールさせる。 */
-  --analyze-lines-h: 58px;
 
   flex: 0 0 auto;
   display: flex;
@@ -779,10 +798,17 @@ html.is-main body {
   /* ⚠️ **エンジン 1 つぶんの高さは必ず確保する**（2026-08-11）。連続モードでは
      1 手指すたびに「消す → 起こす → 結果が届く」を繰り返すので、中身の有無で
      伸び縮みすると**盤ごと画面が上下に跳ねる**（駒を掴んでいる最中に動くのが
-     一番困る）。カード = 上下の padding(4+4) + 見出し(17) + gap(2) + 一覧。 */
-  min-height: calc(var(--analyze-lines-h) + 27px);
-  /* エンジンが増えても盤を押し出さない。盤はできるだけ大きく見せたい。 */
-  max-height: 220px;
+     一番困る）。 */
+  min-height: var(--analyze-card-h);
+  /* エンジンが増えても盤を押し出さない。盤はできるだけ大きく見せたい。
+     ⚠️ **固定値にしないこと**（2026-08-12 に 220px から直した）。候補手の本数で
+     カードの高さが変わるので、定数で頭打ちにすると**本数を増やしたとたんに
+     エンジン 2 つでもスクロールバーが出る**（候補 3 本 × 2 つで中身は 240px なのに
+     220px で頭打ちにしていた）。**エンジン 2 つはそのまま見える**ようにして、
+     3 つ目からスクロールさせる（カード 2 つ + あいだの gap 6px + 余裕 2px）。
+     上限があるのは、MultiPV を上げたときに盤の下が伸び続けないようにするため
+     （一覧自体が 4 本ぶんで頭打ちなので、この式の最大は 302px → 300px）。 */
+  max-height: var(--analyze-engines-h);
   overflow-y: auto;
 }
 

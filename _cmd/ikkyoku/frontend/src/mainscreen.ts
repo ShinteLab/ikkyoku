@@ -1143,7 +1143,13 @@ export function mountMainScreen(root: HTMLElement): void {
   const reserveLines = () => {
     const want = Math.min(Math.max(Number(analyzeMultiPV.value) || 1, 1), 4);
     // 1 行 28px + 行間 2px（CSS の --analyze-line-h と揃えること）。
-    analyzeEnginesBox.style.setProperty("--analyze-lines-h", `${want * 28 + (want - 1) * 2}px`);
+    //
+    // ⚠️ **:root（documentElement）に入れること**（2026-08-12）。枠の高さ
+    // （--analyze-engines-h）と `#panel-study` の --board-size がこれを引いており、
+    // **カスタムプロパティは下へしか継承しない**ので、枠の要素に入れると
+    // 盤の大きさの式から読めない（--winrate-rows と同じ）。
+    document.documentElement.style.setProperty(
+      "--analyze-lines-h", `${want * 28 + (want - 1) * 2}px`);
   };
   analyzeMultiPV.addEventListener("change", reserveLines);
   reserveLines();
