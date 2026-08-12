@@ -470,24 +470,145 @@ export function mountMainScreen(root: HTMLElement): void {
             </div>
             <div id="study-hand-white-slot" class="hand-slot" hidden></div>
             <div id="study-stage" class="board-stage">
-              <shogi-board id="study-board" hidden></shogi-board>
+              <!-- ⚠️ fluid: 置き場所の幅いっぱいに広げる（core/web の属性。2026-08-12）。
+                   これが無いと**盤は固有サイズの 560px 止まり**で、盤を主役に
+                   大きく見せられない。訂正タブの盤には付けていない（あちらは
+                   撮った画像を並べる面なので、盤だけ大きくしても仕方がない）。 -->
+              <shogi-board id="study-board" fluid hidden></shogi-board>
             </div>
             <div id="study-hand-black-slot" class="hand-slot" hidden></div>
           </div>
-          <!-- 手順（Phase 5「手を進める UI」。2026-08-11）。
-               **駒をクリック → 動かせる位置が光る → そこをクリックで指す。**
-               合法手だけを辿るので、駒台の駒も打てる位置が光る。
+          <!-- 盤の右の列（2026-08-12 に作り替えた）。**解析のものは全部ここに入る**
+               —— 解析の行・エンジンごとの結果・評価値グラフ・手順・SFEN。
 
-               **盤の右に縦のリストで並べる**（棋譜ソフトと同じ並び）。指すたびに
-               下へ積まれるので、**どこまで進めたかが縦位置でそのまま見える**。
-               ⚠️ **盤の右の余白に置くだけにすること** —— 盤は 560px より大きく
-               ならないので、ここに置いても盤は狭くならない（訂正タブの盤の左に
-               撮った画像を置いてあるのと同じ理屈）。
+               ⚠️ **盤の下に行を積まないこと。** 盤の大きさは
+               「ウィンドウの高さ − 上下に積んだ行」で決まるので、**下に積むほど
+               盤が小さくなる**（実際、エンジンの結果と評価値グラフを下に置いていた
+               ときは 560px の盤すら出せていなかった）。横に置けば、盤の高さを
+               削るのはウィンドウの高さだけになる。
 
-               ⚠️ **チップを押すと戻れるが、手順は消えない**（進め直せる）。消えるのは
-               戻った先で別の手を指したとき（Go 側の Study.Play が捨てる）。
-               「1手戻す」は指し間違えの取り消しなので、**そちらは手順からも消す**。 -->
-          <div id="study-move-row" class="study-move-row" hidden>
+               手順は「駒をクリック → 動かせる位置が光る → そこをクリックで指す」の
+               結果が縦に積まれる列（棋譜ソフトと同じ並び）。⚠️ **チップを押すと
+               戻れるが、手順は消えない**（進め直せる）。消えるのは戻った先で別の手を
+               指したとき。「1手戻す」は指し間違えの取り消しなので**手順からも消す**。 -->
+          <div id="study-side" class="study-side" hidden>
+            <!-- エンジン解析（Phase 4）。**確定した局面にだけかかる。**
+                 確定していない局面はそもそもこのタブに来ない（Go 側の
+                 StudyService.Adopt が断る）ので、ここでの「押せない理由」は
+                 「まだ何も採っていない」だけになった。
+
+                 ⚠️ **局面を採り直したら結果を消す。** 評価値は「その局面の」値なので、
+                 盤が変わったあとも残っていると、別の局面の値を今の盤の評価だと読ませる。 -->
+            <div id="analyze-row" class="analyze-row" hidden>
+              <button id="analyze-run" class="ghost-btn" type="button">解析</button>
+              <!-- 連続モード（2026-08-11）。**既定で入**。
+                   手を進めるたびに勝手に解析し直すので、押す操作が要らなくなる。
+                   手順を辿りながら評価値の変化を追うのがこのタブの目的なので、
+                   **1 手ごとにボタンを押すほうが例外的**。
+
+                   ⚠️ **エンジンの寿命は変わらない**（解析 1 回ぶん）。前の解析を止めて
+                   から起こし直すだけで、常駐にはしない。 -->
+              <label class="analyze-continuous"
+                     title="手を進めるたびに解析し直します。前の解析は止めてから起こし直すので、エンジンが常駐するわけではありません">
+                <input id="analyze-continuous" type="checkbox" checked />
+                <span>連続</span>
+              </label>
+              <label class="analyze-time">
+                <select id="analyze-seconds"
+                        title="考える時間。途中で切っても、そこまでの評価値は出ます。「無制限」は停止するまで考え続けます（そのあいだエンジンは起動したままです）">
+                  <option value="1">1秒</option>
+                  <option value="3" selected>3秒</option>
+                  <option value="10">10秒</option>
+                  <option value="30">30秒</option>
+                  <option value="0">無制限</option>
+                </select>
+              </label>
+              <!-- 候補手の本数（MultiPV。2026-08-11）。**次善手を辿るのが構想の中心**
+                   なので、最善手だけに絞らずここで増やせるようにする。
+
+                   ⚠️ **対応していないエンジンでは無視される**（自作エンジンが今それ）。
+                   1 本しか返らないことを異常扱いしないこと。 -->
+              <label class="analyze-time">
+                <select id="analyze-multipv"
+                        title="候補手を何本出させるか（MultiPV）。対応していないエンジンでは 1 本のままです">
+                  <!-- 既定は**候補 3**（2026-08-12）。「次善手を選んだらどう転ぶか」を
+                       辿るのが構想の中心なので、最善手だけが出ている状態を既定にしない。
+                       ⚠️ 対応していないエンジン（同梱のもの）では 1 本のままになる。 -->
+                  <option value="1">候補 1</option>
+                  <option value="3" selected>候補 3</option>
+                  <option value="5">候補 5</option>
+                  <option value="10">候補 10</option>
+                </select>
+              </label>
+              <!-- 全て解析（2026-08-12）。**手順の範囲をまとめて解析する。**
+                   中身は「手順リストを 1 つずつ押しては、考える秒数だけ待つ」の
+                   繰り返しで、押す操作を人がやらなくてよくなるだけ。
+                   棋譜を読み込んだ直後に一度かけると、評価値グラフが全部埋まる。
+
+                   ⚠️ **考える秒数が「無制限」だと使えない**（1 手目で止まったまま
+                   次へ進めない）。理由は押せない側に出す。 -->
+              <span class="analyze-batch">
+                <button id="analyze-batch-run" class="ghost-btn" type="button">全て解析</button>
+                <input id="analyze-batch-from" class="analyze-batch-num" type="number"
+                       min="0" max="999" step="1" title="解析を始める手数" />
+                <span class="analyze-batch-dash">-</span>
+                <input id="analyze-batch-to" class="analyze-batch-num" type="number"
+                       min="0" max="999" step="1" title="解析を終える手数" />
+              </span>
+              <span id="analyze-meta" class="note"></span>
+              <!-- 押せない理由。**ツールチップだけにしない**（ホバーしないと読めない）。 -->
+              <span id="analyze-hint" class="note is-caution" hidden></span>
+            </div>
+            <!-- エンジンごとの結果（2026-08-11）。設定で「解析に使う」を付けたエンジンが
+                 **同時に走り、ここに縦に並ぶ**。エンジンが違えば同じ局面の評価が食い違う
+                 のが普通で、**その食い違いこそ見たいもの**（どれが正しいかは局面による）。
+
+                 ⚠️ **エンジンをまたいで結果を合成しないこと**（平均も多数決も取らない）。
+                 並べて人が読む。中の候補手（MultiPV）は **1 本しか来なくても一覧の形で
+                 出す** —— 次善手を辿るのが構想の中心なので、複数本になるのが前提の作り。 -->
+            <div id="analyze-engines" class="analyze-engines" hidden></div>
+            <p id="analyze-status" class="note is-caution" hidden></p>
+            <!-- 評価値グラフ（2026-08-12）。**手順の 1 手ごとの最善手の評価値**を
+                 折れ線にする。**「次善手を選んだらどう転ぶか」を辿った結果が
+                 どう転んだか**を見せる面で、この画面の目的そのもの。
+
+                 ⚠️ **エンジンごとに別の折れ線**（合成しない。平均も多数決も取らない）。
+                 ⚠️ **高さは CSS で固定すること**（--eval-graph-h）。連続モードでは
+                 1 手ごとに点が増えるので、中身で伸び縮みすると盤ごと画面が跳ねる。 -->
+            <div id="eval-graph-row" class="eval-graph-row" hidden>
+              <div class="eval-graph-head">
+                <span class="field-label">評価値</span>
+                <!-- 横軸の範囲。**既定は「全て」＝ 指した手が全部見えている状態。**
+                     ⚠️ **1 から始まるとは限らない** —— 根は初期局面とは限らないので、
+                     撮った 40 手目の局面から始めたなら 40 手目から始まる。
+
+                     **絞るのはグラフの上をドラッグする**のが本筋で、選んだ範囲は
+                     そのまま下の欄に入る（＝見えている数字が今の範囲）。
+                     「1-150 の中のどこに居るか」で読みたいときは欄に直接書く。 -->
+                <select id="eval-graph-range" class="eval-graph-range"
+                        title="横軸の範囲。「全て」は指した手が全部見える範囲、「自由入力」は書いたとおりの手数です">
+                  <option value="all" selected>全て</option>
+                  <option value="custom">自由入力</option>
+                </select>
+                <span id="eval-graph-fields" class="eval-graph-fields" hidden>
+                  <input id="eval-graph-from" class="eval-graph-num" type="number"
+                         min="0" max="999" step="1" value="1" title="左端の手数" />
+                  <span class="eval-graph-dash">-</span>
+                  <input id="eval-graph-to" class="eval-graph-num" type="number"
+                         min="1" max="999" step="1" value="150" title="右端の手数" />
+                </span>
+                <!-- どの色がどのエンジンか。**グラフの中に重ねない**（目盛りと重なるうえ、
+                     折れ線の描ける範囲がそのぶん狭くなる）。 -->
+                <span id="eval-graph-legend" class="eval-graph-legend"></span>
+                <!-- 触った位置の中身。**ツールチップだけにしない**（点の上にぴったり
+                     乗せないと出ないので、線を目で追いながらは読めない）。 -->
+                <span id="eval-graph-readout" class="note eval-graph-readout"></span>
+              </div>
+              <div id="eval-graph" class="eval-graph"
+                   title="押すとその局面に戻ります（手順は消えません）。横にドラッグするとその範囲に絞ります"></div>
+            </div>
+            <!-- 手順（Phase 5「手を進める UI」）。**盤の右の列の下半分。**
+                 ⚠️ **高さを中身に依存させないこと**（中でスクロールさせる）。 -->
             <div class="study-move-head">
               <span class="field-label">手順</span>
               <button id="study-undo" class="ghost-btn" type="button"
@@ -509,124 +630,6 @@ export function mountMainScreen(root: HTMLElement): void {
             訂正タブで「この局面を解析する」を押すと、ここに局面が出ます。
           </p>
         </div>
-        <!-- エンジン解析（Phase 4）。**確定した局面にだけかかる。**
-             確定していない局面はそもそもこのタブに来ない（Go 側の
-             StudyService.Adopt が断る）ので、ここでの「押せない理由」は
-             「まだ何も採っていない」だけになった。
-
-             ⚠️ **局面を採り直したら結果を消す。** 評価値は「その局面の」値なので、
-             盤が変わったあとも残っていると、別の局面の値を今の盤の評価だと読ませる。 -->
-        <div id="analyze-row" class="analyze-row" hidden>
-          <button id="analyze-run" class="ghost-btn" type="button">解析</button>
-          <!-- 連続モード（2026-08-11）。**既定で入**。
-               手を進めるたびに勝手に解析し直すので、押す操作が要らなくなる。
-               手順を辿りながら評価値の変化を追うのがこのタブの目的なので、
-               **1 手ごとにボタンを押すほうが例外的**。
-
-               ⚠️ **エンジンの寿命は変わらない**（解析 1 回ぶん）。前の解析を止めて
-               から起こし直すだけで、常駐にはしない。 -->
-          <label class="analyze-continuous"
-                 title="手を進めるたびに解析し直します。前の解析は止めてから起こし直すので、エンジンが常駐するわけではありません">
-            <input id="analyze-continuous" type="checkbox" checked />
-            <span>連続</span>
-          </label>
-          <label class="analyze-time">
-            <select id="analyze-seconds"
-                    title="考える時間。途中で切っても、そこまでの評価値は出ます。「無制限」は停止するまで考え続けます（そのあいだエンジンは起動したままです）">
-              <option value="1">1秒</option>
-              <option value="3" selected>3秒</option>
-              <option value="10">10秒</option>
-              <option value="30">30秒</option>
-              <option value="0">無制限</option>
-            </select>
-          </label>
-          <!-- 候補手の本数（MultiPV。2026-08-11）。**次善手を辿るのが構想の中心**
-               なので、最善手だけに絞らずここで増やせるようにする。
-
-               ⚠️ **対応していないエンジンでは無視される**（自作エンジンが今それ）。
-               1 本しか返らないことを異常扱いしないこと。 -->
-          <label class="analyze-time">
-            <select id="analyze-multipv"
-                    title="候補手を何本出させるか（MultiPV）。対応していないエンジンでは 1 本のままです">
-              <!-- 既定は**候補 3**（2026-08-12）。「次善手を選んだらどう転ぶか」を
-                   辿るのが構想の中心なので、最善手だけが出ている状態を既定にしない。
-                   ⚠️ 対応していないエンジン（同梱のもの）では 1 本のままになる。 -->
-              <option value="1">候補 1</option>
-              <option value="3" selected>候補 3</option>
-              <option value="5">候補 5</option>
-              <option value="10">候補 10</option>
-            </select>
-          </label>
-          <!-- 全て解析（2026-08-12）。**手順の範囲をまとめて解析する。**
-               中身は「手順リストを 1 つずつ押しては、考える秒数だけ待つ」の
-               繰り返しで、押す操作を人がやらなくてよくなるだけ。
-               棋譜を読み込んだ直後に一度かけると、評価値グラフが全部埋まる。
-
-               ⚠️ **考える秒数が「無制限」だと使えない**（1 手目で止まったまま
-               次へ進めない）。理由は押せない側に出す。 -->
-          <span class="analyze-batch">
-            <button id="analyze-batch-run" class="ghost-btn" type="button">全て解析</button>
-            <input id="analyze-batch-from" class="analyze-batch-num" type="number"
-                   min="0" max="999" step="1" title="解析を始める手数" />
-            <span class="analyze-batch-dash">-</span>
-            <input id="analyze-batch-to" class="analyze-batch-num" type="number"
-                   min="0" max="999" step="1" title="解析を終える手数" />
-          </span>
-          <span id="analyze-meta" class="note"></span>
-          <!-- 押せない理由。**ツールチップだけにしない**（ホバーしないと読めない）。 -->
-          <span id="analyze-hint" class="note is-caution" hidden></span>
-        </div>
-        <!-- エンジンごとの結果（2026-08-11）。設定で「解析に使う」を付けたエンジンが
-             **同時に走り、ここに縦に並ぶ**。エンジンが違えば同じ局面の評価が食い違う
-             のが普通で、**その食い違いこそ見たいもの**（どれが正しいかは局面による）。
-
-             ⚠️ **エンジンをまたいで結果を合成しないこと**（平均も多数決も取らない）。
-             並べて人が読む。中の候補手（MultiPV）は **1 本しか来なくても一覧の形で
-             出す** —— 次善手を辿るのが構想の中心なので、複数本になるのが前提の作り。 -->
-        <div id="analyze-engines" class="analyze-engines" hidden></div>
-        <p id="analyze-status" class="note is-caution" hidden></p>
-        <!-- 評価値グラフ（2026-08-12）。**手順の 1 手ごとの最善手の評価値**を
-             折れ線にする。**「次善手を選んだらどう転ぶか」を辿った結果が
-             どう転んだか**を見せる面で、この画面の目的そのもの。
-
-             ⚠️ **エンジンごとに別の折れ線**（合成しない。平均も多数決も取らない）。
-             ⚠️ **高さは CSS で固定すること**（--eval-graph-h）。連続モードでは
-             1 手ごとに点が増えるので、中身で伸び縮みすると盤ごと画面が跳ねる。 -->
-        <div id="eval-graph-row" class="eval-graph-row" hidden>
-          <div class="eval-graph-head">
-            <span class="field-label">評価値</span>
-            <!-- 横軸の範囲。**既定は「全て」＝ 指した手が全部見えている状態。**
-                 ⚠️ **1 から始まるとは限らない** —— 根は初期局面とは限らないので、
-                 撮った 40 手目の局面から始めたなら 40 手目から始まる。
-
-                 **絞るのはグラフの上をドラッグする**のが本筋で、選んだ範囲は
-                 そのまま下の欄に入る（＝見えている数字が今の範囲）。
-                 「1-150 の中のどこに居るか」で読みたいときは欄に直接書く。 -->
-            <select id="eval-graph-range" class="eval-graph-range"
-                    title="横軸の範囲。「全て」は指した手が全部見える範囲、「自由入力」は書いたとおりの手数です">
-              <option value="all" selected>全て</option>
-              <option value="custom">自由入力</option>
-            </select>
-            <span id="eval-graph-fields" class="eval-graph-fields" hidden>
-              <input id="eval-graph-from" class="eval-graph-num" type="number"
-                     min="0" max="999" step="1" value="1" title="左端の手数" />
-              <span class="eval-graph-dash">-</span>
-              <input id="eval-graph-to" class="eval-graph-num" type="number"
-                     min="1" max="999" step="1" value="150" title="右端の手数" />
-            </span>
-            <!-- どの色がどのエンジンか。**グラフの中に重ねない**（目盛りと重なるうえ、
-                 折れ線の描ける範囲がそのぶん狭くなる）。 -->
-            <span id="eval-graph-legend" class="eval-graph-legend"></span>
-            <!-- 触った位置の中身。**ツールチップだけにしない**（点の上にぴったり
-                 乗せないと出ないので、線を目で追いながらは読めない）。 -->
-            <span id="eval-graph-readout" class="note eval-graph-readout"></span>
-          </div>
-          <div id="eval-graph" class="eval-graph"
-               title="押すとその局面に戻ります（手順は消えません）。横にドラッグするとその範囲に絞ります"></div>
-        </div>
-        <!-- ⚠️ **盤の下に SFEN と駒台の行を戻さないこと**（2026-08-12 に外した）。
-             駒台は盤の脇に駒そのものが出ているので文字の要約は要らず、SFEN は
-             手順の列の下に移した。**盤の下に積む行が増えるほど盤が小さくなる。** -->
       </div>
 
       <div id="panel-settings" class="panel" role="tabpanel" aria-labelledby="tab-settings" hidden>
@@ -1339,7 +1342,12 @@ export function mountMainScreen(root: HTMLElement): void {
       // 来て、進み方も揃わない）。見出しの「深さ」は一番深いところなので、
       // その候補がどこまで読まれた答えなのかはここで確かめられるようにする。
       const usi = l.moves?.join(" ") ?? "";
-      const hint = l.depth > 0 ? `深さ ${l.depth}　${usi}` : usi;
+      // ⚠️ **日本語の読み筋もツールチップに入れること**（2026-08-12）。解析の結果は
+      // 盤の右の細い列に入ったので、**長い読み筋は行から溢れて省略される**。
+      // 溢れたぶんを読む手段がここしか無い。
+      const hint =
+        (l.depth > 0 ? `深さ ${l.depth}　` : "") + (text.join(" ") || usi) +
+        (text.length > 0 && usi ? `\n${usi}` : "");
       first.title = hint;
       moves.title = hint;
 
@@ -1730,7 +1738,9 @@ export function mountMainScreen(root: HTMLElement): void {
     black: root.querySelector<HTMLElement>("#study-hand-black-slot")!,
     white: root.querySelector<HTMLElement>("#study-hand-white-slot")!,
   };
-  const studyMoveRow = root.querySelector<HTMLDivElement>("#study-move-row")!;
+  // 盤の右の列（解析の行・エンジンの結果・評価値グラフ・手順・SFEN）。
+  // ⚠️ **中身は局面があるときだけ出す**（無いときは盤の代わりに案内を出す）。
+  const studySide = root.querySelector<HTMLDivElement>("#study-side")!;
   const studyMoves = root.querySelector<HTMLDivElement>("#study-moves")!;
   const studyUndo = root.querySelector<HTMLButtonElement>("#study-undo")!;
   const studyMoveStatus = root.querySelector<HTMLParagraphElement>("#study-move-status")!;
@@ -1772,7 +1782,7 @@ export function mountMainScreen(root: HTMLElement): void {
     // （持ち駒が 0 枚であることも局面の情報）。
     studyHandSlots.black.hidden = !studyLoaded;
     studyHandSlots.white.hidden = !studyLoaded;
-    studyMoveRow.hidden = !studyLoaded;
+    studySide.hidden = !studyLoaded;
     studyUndo.disabled = (st.ply ?? 0) === 0;
     if (studyLoaded) {
       studyBoard.setAttribute("sfen", st.boardSfen);
