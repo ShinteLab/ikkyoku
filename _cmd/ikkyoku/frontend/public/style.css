@@ -2031,9 +2031,11 @@ html.is-main #app {
 
 /* 解析タブは**盤の真上に勝率バー**が入るので 3 行になる（1 行目がバー）。
    ⚠️ **バーを盤と同じ列に入れるのが要点** —— 盤の外に置くと、右の手順リストの
-   ぶん盤が左に寄っているので**盤と左右がずれる**。 */
+   ぶん盤が左に寄っているので**盤と左右がずれる**。
+   ⚠️ **4 行目は SFEN**（2026-08-14。盤の下）。**盤は小さくしていない** ——
+   評価値グラフの箱を詰めたぶんの空きに収まる高さ（1 行）に抑えてある。 */
 #study-board-with-hands {
-  grid-template-rows: auto auto auto;
+  grid-template-rows: auto auto auto auto;
   /* ⚠️ **解析タブはパネルの余白を外してある**（#panel-study の padding: 0）ので、
      盤だけがここで窓の左端から離れる。**この 8px は --board-size の横の定数
      （86px）に入っている。** */
@@ -2304,27 +2306,49 @@ html.is-main #app {
   color: #c7cbd4;
 }
 
-/* 解析タブの SFEN。**手順の列の下**に置く（2026-08-12 に盤の下から移した）。
-   盤の下に積む行はそのぶん盤を小さくするうえ、SFEN は「今どの局面を見ているか」の
-   値なので手順と同じ列にあるほうが素直。
+/* 解析タブの SFEN。**盤の下**（2026-08-14。手順の列から戻した）。
+   「今どの局面を見ているか」の値なので、盤のすぐ下にあるほうが結び付く。
 
-   ⚠️ **高さを中身に依存させないこと。** 長さで列の取り分が動くと、上の手順リストが
-   伸び縮みする。折り返したうえで頭打ちにし、溢れたら中でスクロールさせる。 */
+   ⚠️ **盤は小さくしない。** 収める先は**評価値グラフの箱を 38px 詰めたぶんの
+   空き**で、`.board-area` は `align-items: center` なのでそこは元から遊んでいる。
+   ⚠️ **そのため 1 行に収めること**（この行 + グリッドの gap 6px で 23px ほど）。
+   折り返させたり `border` や `padding` を足したりすると、**空きを食い潰した
+   ぶんだけ盤が押し出される**。溢れたぶんは省略して `title` に出す
+   （`mainscreen.ts` が SFEN そのものを `title` に入れている）。
+
+   ⚠️ **盤と同じグリッドの列（2 列目・4 行目）に入れること** —— `.board-area` の
+   直下に置くと、右の列のぶん盤が左に寄っているので**盤と左右がずれる**
+   （勝率バーと同じ話）。 */
 .study-sfen-row {
-  flex: 0 0 auto;
+  grid-column: 2;
+  grid-row: 4;
   display: flex;
   align-items: baseline;
   gap: 6px;
-  padding-top: 6px;
-  border-top: 1px solid #2a2d36;
+  /* 盤の絵は箱いっぱいではないので、左右を 5% 詰めて盤の格子と揃える
+     （勝率バーと同じ。core/web の MARGIN が変わったら両方直すこと）。 */
+  padding: 0 5%;
+  /* ⚠️ **幅を盤に固定すること**（`.board-stage` と同じ値）。grid の `auto` の
+     列なので、**指定しないと SFEN の長さで列が広がって盤ごと押し出される**
+     （1 行に切っている＝折り返さないので、max-content が数百 px になる）。 */
+  width: var(--board-size);
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+.study-sfen-row[hidden] {
+  display: none;
 }
 
 .study-sfen-row .sfen {
   flex: 1 1 auto;
   min-width: 0;
-  max-height: 4.5em;
-  overflow: auto;
-  line-height: 1.5;
+  /* ⚠️ **1 行に収める。** 折り返すと盤が下へ押し出される。 */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.45;
+  /* 切れていても、選んでコピーすれば全部入る。 */
   user-select: text;
 }
 

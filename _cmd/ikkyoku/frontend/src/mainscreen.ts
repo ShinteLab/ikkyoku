@@ -580,6 +580,21 @@ export function mountMainScreen(root: HTMLElement): void {
               <shogi-board id="study-board" fluid hidden></shogi-board>
             </div>
             <div id="study-hand-black-slot" class="hand-slot" hidden></div>
+            <!-- 今見ている局面の SFEN（2026-08-14 に手順の列から**盤の下**へ戻した）。
+                 ⚠️ **盤の下に行を積んでも盤は小さくしない** —— 評価値グラフの箱を
+                 38px 詰めたぶんの空きに収める（.board-area は align-items: center
+                 なので、そこは元から遊んでいる）。**そのため 1 行に収めること**
+                 （4 行目 + gap 6px で 23px ほど。⚠️ **折り返させると盤が押し出される**）。
+
+                 ⚠️ **盤と同じグリッドの列に入れる**（勝率バーと同じ理由）。
+                 .board-area の直下に置くと、**右の列のぶん盤が左に寄っている**ので
+                 盤と左右がずれる。
+
+                 溢れたぶんは省略して title に出す（**選んでコピーはできる**）。 -->
+            <div id="study-sfen-row" class="study-sfen-row" hidden>
+              <span class="field-label">SFEN</span>
+              <code id="study-sfen" class="sfen" title="今見ている局面">-</code>
+            </div>
           </div>
           <!-- 縦のスプリットバー（2026-08-13）。**盤と、右の解析の列の境目。**
                ドラッグで盤の大きさを変える。⚠️ **変えているのは
@@ -601,7 +616,8 @@ export function mountMainScreen(root: HTMLElement): void {
                     aria-expanded="true"></button>
           </div>
           <!-- 盤の右の列（2026-08-12 に作り替えた）。**解析のものは全部ここに入る**
-               —— 解析の行・エンジンごとの結果・評価値グラフ・手順・SFEN。
+               —— 解析の行・エンジンごとの結果・手順。⚠️ **SFEN は盤の下**
+               （2026-08-14 に戻した）、**評価値グラフは盤の下・横いっぱい**。
 
                ⚠️ **盤の下に行を積まないこと。** 盤の大きさは
                「ウィンドウの高さ − 上下に積んだ行」で決まるので、**下に積むほど
@@ -725,15 +741,6 @@ export function mountMainScreen(root: HTMLElement): void {
                  画面から読めなかった。**ボタンを戻さないこと。** -->
             <div id="study-moves" class="study-moves"></div>
             <p id="study-move-status" class="note is-caution" hidden></p>
-            <!-- 今見ている局面の SFEN。**盤の下ではなくここに置く**（2026-08-12）。
-                 盤の下に積む行はそのぶん盤を小さくするうえ、SFEN は
-                 「今どの局面を見ているか」の値なので手順の列にあるほうが素直。
-                 ⚠️ **高さを中身に依存させないこと** —— 長さで列が伸びると、
-                 上の手順リストの取り分が動く。折り返して 3 行で頭打ちにする。 -->
-            <div class="study-sfen-row">
-              <span class="field-label">SFEN</span>
-              <code id="study-sfen" class="sfen" title="今見ている局面">-</code>
-            </div>
           </div>
           <p id="study-placeholder" class="board-placeholder">
             訂正タブで「この局面を解析する」を押すと、ここに局面が出ます。
@@ -2047,6 +2054,7 @@ export function mountMainScreen(root: HTMLElement): void {
   const studyBoard = root.querySelector<HTMLElement>("#study-board")!;
   const studyPlaceholder = root.querySelector<HTMLParagraphElement>("#study-placeholder")!;
   const studySfenOut = root.querySelector<HTMLElement>("#study-sfen")!;
+  const studySfenRow = root.querySelector<HTMLElement>("#study-sfen-row")!;
   const studyWarnings = root.querySelector<HTMLUListElement>("#study-warnings")!;
   // 盤の脇の駒台（読み取り専用）。**訂正タブの駒台とは別物**で、
   // ドラッグの入口も「足りない駒」も持たない。
@@ -2054,7 +2062,7 @@ export function mountMainScreen(root: HTMLElement): void {
     black: root.querySelector<HTMLElement>("#study-hand-black-slot")!,
     white: root.querySelector<HTMLElement>("#study-hand-white-slot")!,
   };
-  // 盤の右の列（解析の行・エンジンの結果・評価値グラフ・手順・SFEN）。
+  // 盤の右の列（解析の行・エンジンの結果・手順）。SFEN と評価値グラフは盤の下。
   // ⚠️ **中身は局面があるときだけ出す**（無いときは盤の代わりに案内を出す）。
   const studySide = root.querySelector<HTMLDivElement>("#study-side")!;
   const studyMoves = root.querySelector<HTMLDivElement>("#study-moves")!;
@@ -2120,6 +2128,8 @@ export function mountMainScreen(root: HTMLElement): void {
     // （持ち駒が 0 枚であることも局面の情報）。
     studyHandSlots.black.hidden = !studyLoaded;
     studyHandSlots.white.hidden = !studyLoaded;
+    // SFEN も盤と一緒（盤の下の行なので、局面が無いのに枠だけ残さない）。
+    studySfenRow.hidden = !studyLoaded;
     studySide.hidden = !studyLoaded;
     // ⚠️ **縦のスプリットバーも局面があるときだけ出す。** 局面が無いときは
     // 分ける相手（解析の列）が出ていないので、バーだけが宙に浮く。
@@ -2137,7 +2147,9 @@ export function mountMainScreen(root: HTMLElement): void {
       // 手番と手数は SFEN に入っているが、読むのに要るのは文字のほう。
       const n = st.moveNumber > 0 ? ` / ${st.moveNumber}手目` : "";
       studySfenOut.textContent = `${st.sfen}`;
-      studySfenOut.title = `${st.turnLabel}${n}`;
+      // ⚠️ **SFEN そのものも title に入れること**（2026-08-14）。盤の下は 1 行
+      // しか無いので、長い局面は**画面では末尾が切れる**。
+      studySfenOut.title = `${st.sfen}\n${st.turnLabel}${n}`;
       showStudyHand(st.hands ?? []);
     } else {
       studySfenOut.textContent = "-";
