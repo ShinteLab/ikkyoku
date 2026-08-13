@@ -1218,6 +1218,35 @@ html.is-main #app {
   gap: 10px;
 }
 
+/* 折れ線の色（2026-08-14）。**押すと変えられる色見本。**
+   ⚠️ **入口が解析タブにあるのが要点** —— 色を変えたくなるのは評価値グラフと
+   候補手を見比べている最中なので、設定タブまで行かせない。
+
+   ⚠️ **色そのものは JS が入れる**（エンジンの登録に紐づく設定で、既定色の解決も
+   Go 側）。**ここに色を書かないこと。**
+   ⚠️ **高さを増やさないこと** —— この行はエンジンごとの枠の見出しで、
+   高さは `--analyze-card-h`（実測値）に見込んである。 */
+.analyze-engine-color {
+  flex: 0 0 auto;
+  align-self: center;
+  width: 11px;
+  height: 11px;
+  padding: 0;
+  border: 1px solid #3a3d47;
+  border-radius: 50%;
+  background: #b8c0d0;
+  cursor: pointer;
+}
+
+.analyze-engine-color:hover {
+  border-color: #7c8496;
+}
+
+.analyze-engine-color:focus-visible {
+  outline: 2px solid #f2f3f5;
+  outline-offset: 1px;
+}
+
 /* エンジン名。**評価値の出所**なので、候補手より先に目に入る位置に置く。 */
 .analyze-engine-name {
   font-size: 12.5px;
@@ -2538,6 +2567,9 @@ html.is-main #app {
 }
 
 .popup-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 5px 12px;
   font-size: 13px;
   color: #f2f3f5;
@@ -2570,6 +2602,17 @@ html.is-main #app {
 .popup-btn:focus-visible {
   outline: 2px solid #f2f3f5;
   outline-offset: 1px;
+}
+
+/* 色を選ばせるときの丸（折れ線の色）。⚠️ **色だけの行にしないこと** ——
+   名前が無いと、読み上げでも「今どれか」でも区別が付かない（popup.ts の注記）。
+   ⚠️ **色は JS が入れる**（Go 側が持つ一覧をそのまま出すので、ここに書かない）。 */
+.popup-swatch {
+  flex: 0 0 auto;
+  width: 11px;
+  height: 11px;
+  border: 1px solid #3a3d47;
+  border-radius: 50%;
 }
 
 /* 盤の右の列（2026-08-12 に作り替えた）。**解析のものは全部ここに入る** ——

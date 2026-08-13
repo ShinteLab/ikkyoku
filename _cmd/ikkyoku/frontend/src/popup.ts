@@ -14,6 +14,11 @@ export interface PopupItem {
   label: string;
   // kind は見た目。**danger は元に戻せない操作**（消す）に使う。
   kind?: "primary" | "danger";
+  // swatch は行の頭に出す色の丸（`#rrggbb`）。**色を選ばせるときだけ。**
+  //
+  // ⚠️ **色だけの行にしないこと**（label は必ず出す）。色の名前が無いと、
+  // 読み上げでも「今どれを選んでいるのか」でも区別が付かない。
+  swatch?: string;
   onPick(): void;
 }
 
@@ -47,7 +52,13 @@ export function openPopup(x: number, y: number, opts: PopupOptions): PopupHandle
     const b = document.createElement("button");
     b.type = "button";
     b.className = "popup-btn" + (item.kind ? ` is-${item.kind}` : "");
-    b.textContent = item.label;
+    if (item.swatch) {
+      const dot = document.createElement("span");
+      dot.className = "popup-swatch";
+      dot.style.background = item.swatch;
+      b.appendChild(dot);
+    }
+    b.appendChild(document.createTextNode(item.label));
     b.addEventListener("click", () => {
       handle.close();
       item.onPick();

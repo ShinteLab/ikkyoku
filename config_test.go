@@ -198,3 +198,21 @@ func TestDefaultConfigPath(t *testing.T) {
 		t.Errorf("DefaultConfigPath() = %q, want basename %q", path, "config.json")
 	}
 }
+
+// TestEngineDisplayColor は**折れ線の色の既定の解決**を固定する（2026-08-14）。
+//
+// ⚠️ **「空なら登録順の既定色」を呼び出し側に書かせない**（DisplayName と同じ）。
+// 2 か所に持つと、画面から選べる色と既定で付く色が食い違う。
+func TestEngineDisplayColor(t *testing.T) {
+	if got := (EngineEntry{Color: "#123456"}).DisplayColor(3); got != "#123456" {
+		t.Errorf("指定した色 = %q, want #123456", got)
+	}
+	if got := (EngineEntry{}).DisplayColor(1); got != EngineColors[1].Value {
+		t.Errorf("既定色 = %q, want %q", got, EngineColors[1].Value)
+	}
+	// 一覧を超えたら回す（登録の数に上限は無い）。
+	n := len(EngineColors)
+	if got := (EngineEntry{}).DisplayColor(n); got != EngineColors[0].Value {
+		t.Errorf("%d 番目の既定色 = %q, want %q", n, got, EngineColors[0].Value)
+	}
+}

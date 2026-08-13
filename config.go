@@ -107,6 +107,17 @@ type EngineEntry struct {
 	//
 	// omitempty を付けないのは、**外してあること自体を設定ファイルに残す**ため。
 	Enabled bool `json:"enabled"`
+
+	// Color は評価値グラフの折れ線の色（`#rrggbb`）。
+	//
+	// **エンジンが色を持つ**（2026-08-14。以前は「一覧の何番目か」で決まっていた）。
+	// 複数のエンジンを並べて読むのがこの一覧の目的なので、**どの線がどのエンジンか**は
+	// 見た目で覚えるもの。並べ替えたり 1 つ外したりするたびに色が入れ替わると、
+	// **前に見ていた線と同じ色が別のエンジンを指す**ことになる。
+	//
+	// **空なら登録順の既定色**（`DefaultEngineColor`）。⚠️ **既定の解決を
+	// 呼び出し側に書かないこと**（`DisplayName` と同じ）。
+	Color string `json:"color,omitempty"`
 }
 
 // EngineConfig は**旧形式**の単一エンジン設定（`Config.Engine`）。
@@ -119,6 +130,51 @@ type EngineConfig struct {
 
 // BuiltinEngineName は同梱エンジンの表示名（パスが空のエントリ）。
 const BuiltinEngineName = "同梱エンジン"
+
+// EngineColorOption は選べる折れ線の色 1 つ（画面の色見本）。
+type EngineColorOption struct {
+	// Value は `#rrggbb`（設定ファイルにもこの形で入る）。
+	Value string `json:"value"`
+	// Label は色の名前（画面に出す）。
+	Label string `json:"label"`
+}
+
+// EngineColors は選べる色の一覧。**暗い地（#1b1d23）の上で読めるものだけ。**
+//
+// ⚠️ **評価値の色（青＝先手 `#6ad3ff` / 橙＝後手 `#ffc46b`）を先頭に置かないこと。**
+// 折れ線の色は「どのエンジンか」であって形勢ではないので、形勢の色と紛れる並びにしない。
+//
+// ⚠️ **設定ファイルはこの一覧の外の色も受け付ける**（手で編集する前提。`#rrggbb` なら通る）。
+// ここにあるのは**画面から選べるもの**で、色そのものの制限ではない。
+var EngineColors = []EngineColorOption{
+	{Value: "#7ddc8a", Label: "緑"},
+	{Value: "#e0a3ff", Label: "紫"},
+	{Value: "#ffd166", Label: "黄"},
+	{Value: "#8ecae6", Label: "青"},
+	{Value: "#ff8fa3", Label: "桃"},
+	{Value: "#f2a25c", Label: "橙"},
+	{Value: "#6fd3c7", Label: "青緑"},
+	{Value: "#b8c0d0", Label: "灰"},
+}
+
+// DefaultEngineColor は登録順 i のエンジンの既定色を返す（一覧を超えたら回す）。
+func DefaultEngineColor(i int) string {
+	if i < 0 {
+		i = 0
+	}
+	return EngineColors[i%len(EngineColors)].Value
+}
+
+// DisplayColor は画面に出す色を返す（Color が空なら登録順の既定色）。
+//
+// i は**一覧の中での位置**。⚠️ **「解析に使う」を外した登録も数に入れること** ——
+// 詰めて数えると、チェックを外した瞬間に他のエンジンの既定色が入れ替わる。
+func (e EngineEntry) DisplayColor(i int) string {
+	if e.Color != "" {
+		return e.Color
+	}
+	return DefaultEngineColor(i)
+}
 
 // DisplayName は画面に出す名前を返す（Name が空ならパスのファイル名）。
 func (e EngineEntry) DisplayName() string {

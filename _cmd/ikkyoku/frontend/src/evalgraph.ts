@@ -24,8 +24,7 @@ const NS = "http://www.w3.org/2000/svg";
 //
 // ⚠️ **2000 まで詰めないこと**（2026-08-12 に 2000 → 3000）。**2000〜3000 は
 // まだ「どれくらい優勢か」に意味がある帯**で、そこで頭打ちにすると
-// 優勢がどこまで広がったのかが読めなくなる。目盛りは CAP の半分ごとなので、
-// 3000 だと ±1500 の線が入る。
+// 優勢がどこまで広がったのかが読めなくなる。
 const CAP = 3000;
 
 // 横線の刻み（2026-08-14。以前は `CAP / 2` ＝ 1500 だった）。**評価値は 1000 単位で
@@ -46,11 +45,6 @@ const ticks = (cap: number, step: number): number[] => {
   out.push(-cap);
   return out;
 };
-
-// 折れ線の色（登場順）。**エンジンの数だけ回す。**
-// 評価値の色（青＝先手 / 橙＝後手）とは別の役割なので、そちらと同じ色を先頭に
-// 置かない —— 「線の色 = どのエンジンか」であって、形勢の色ではない。
-const COLORS = ["#7ddc8a", "#e0a3ff", "#ffd166", "#8ecae6", "#ff8fa3"];
 
 const PAD = { top: 8, right: 10, bottom: 15, left: 36 };
 
@@ -90,6 +84,13 @@ export interface EvalGraphOptions {
   legend: HTMLElement;
   // readout は指した位置の読み上げ（手数・手・各エンジンの評価値）。
   readout: HTMLElement;
+  // colorOf は折れ線の色を引く（**エンジンごと**）。
+  //
+  // ⚠️ **色をここで決めないこと**（2026-08-14 に「登場順の色」をやめた）。
+  // 色は**エンジンの登録に紐づく設定**で、解決するのは Go 側。ここで
+  // 並び順から決めると、**エンジンを 1 つ外しただけで残りの線の色が入れ替わり**、
+  // 前に見ていた線と同じ色が別のエンジンを指す。
+  colorOf(engineId: string): string;
   // onSeek はグラフを押したときの行き先（根からの手数）。
   //
   // **手順のリストと同じ「戻って見る」操作**（手順は消さない）。
@@ -98,7 +99,7 @@ export interface EvalGraphOptions {
 }
 
 export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
-  const { host, range, from, to, fields, legend, readout, onSeek } = opts;
+  const { host, range, from, to, fields, legend, readout, colorOf, onSeek } = opts;
 
   const svg = document.createElementNS(NS, "svg");
   svg.setAttribute("class", "eval-graph-svg");
@@ -233,10 +234,8 @@ export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
     // ⚠️ **点は打たない**（ホバーの相手も作らない）。今の経路の点と重なると、
     // どちらの手順の値を読んでいるのか分からなくなる。
     const refs = (graph?.ref ?? []).filter((s) => (s.points ?? []).length > 0);
-    const engineIndex = new Map<string, number>();
-    (graph?.series ?? []).forEach((s, i) => engineIndex.set(s.engineId, i));
     for (const s of refs) {
-      const color = COLORS[(engineIndex.get(s.engineId) ?? 0) % COLORS.length];
+      const color = colorOf(s.engineId);
       const pts = (s.points ?? []).filter((p) => p.number >= x0 && p.number <= x1);
       if (pts.length < 2) {
         continue;
@@ -270,8 +269,8 @@ export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
     }
 
     // ---- 折れ線 ------------------------------------------------------------
-    series.forEach((s, i) => {
-      const color = COLORS[i % COLORS.length];
+    series.forEach((s) => {
+      const color = colorOf(s.engineId);
       const pts = (s.points ?? []).filter((p) => p.number >= x0 && p.number <= x1);
       if (pts.length === 0) {
         return;
@@ -324,10 +323,10 @@ export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
     // **どの線がどのエンジンか**が分からないと、食い違いを読む意味が無い。
     // ⚠️ **見出しの行に出す**（グラフの中に重ねない。上の EvalGraphOptions）。
     legend.replaceChildren();
-    series.forEach((s, i) => {
+    series.forEach((s) => {
       const chip = document.createElement("span");
       chip.className = "eval-legend";
-      chip.style.color = COLORS[i % COLORS.length];
+      chip.style.color = colorOf(s.engineId);
       chip.textContent = s.label || s.engineId;
       legend.appendChild(chip);
     });

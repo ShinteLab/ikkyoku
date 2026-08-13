@@ -68,6 +68,7 @@ import { mountEvalGraph } from "./evalgraph";
 import { mountStudyBoard } from "./study";
 import { openPopup } from "./popup";
 import type { AppSettings, EngineSettings, KifuLoad, StudyState } from "../bindings/ikkyoku-app/models";
+import type { EngineColorOption } from "../bindings/github.com/ShinteLab/ikkyoku/models";
 import type { Stock } from "../bindings/github.com/ShinteLab/ikkyoku/position/models";
 // 認識の観測情報。**型を手で書き写さない**(Go 側は suteme の型をそのまま通しており、
 // ここで別に定義すると矩形の意味がずれても気づけない)。
@@ -1299,6 +1300,69 @@ export function mountMainScreen(root: HTMLElement): void {
   }
   const engineCards = new Map<string, EngineCard>();
 
+  // エンジンの色（評価値グラフの折れ線・見出しの色見本）。**2026-08-14。**
+  //
+  // ⚠️ **色はエンジンの登録に紐づく**（以前は「グラフに登場した順」で決めていた）。
+  // 複数のエンジンを並べて読むのがこの画面の目的なので、**どの線がどのエンジンか**は
+  // 見た目で覚えるもの。並べ替えたり 1 つ外したりするたびに色が入れ替わると、
+  // **前に見ていた線と同じ色が別のエンジンを指す**ことになる。
+  //
+  // ⚠️ **決めるのは Go 側**（`SettingsService`。既定色の解決も向こう）。ここは
+  // 受け取った写しで、**フロントに色の表を持たないこと**（2 か所に持つと、
+  // 選べる色と既定で付く色が食い違う）。
+  const engineColors = new Map<string, string>();
+  let engineColorOptions: EngineColorOption[] = [];
+  // 設定に無いエンジンの色。**普通は通らない**（一覧に無いものは解析にも出ない）。
+  const UNKNOWN_ENGINE_COLOR = "#b8c0d0";
+  const colorOf = (engineId: string) => engineColors.get(engineId) ?? UNKNOWN_ENGINE_COLOR;
+
+  // 見出しの色見本を今の色に塗り直す。**枠を作り直さない**
+  // （色を変えただけで候補手の一覧が消えると、何が起きたのか分からない）。
+  const paintEngineColors = () => {
+    for (const el of analyzeEnginesBox.querySelectorAll<HTMLElement>(".analyze-engine")) {
+      const dot = el.querySelector<HTMLElement>(".analyze-engine-color");
+      if (dot) {
+        dot.style.background = colorOf(el.dataset.id ?? "");
+      }
+    }
+  };
+
+  // 色を選ばせる（見出しの色見本を押したとき）。**押した場所に出す**
+  // （`window.confirm` を使わないのと同じ理由。popup.ts に寄せてある）。
+  //
+  // ⚠️ **入口をここに置いてあるのが要点。** 色を変えたくなるのは
+  // **折れ線と候補手を見比べている最中**なので、設定タブまで行かせない。
+  const askEngineColor = (id: string, x: number, y: number) => {
+    const now = colorOf(id);
+    openPopup(x, y, {
+      label: "折れ線の色",
+      items: [
+        ...engineColorOptions.map((c) => ({
+          label: c.label + (c.value === now ? "（今の色）" : ""),
+          swatch: c.value,
+          onPick: () => void setEngineColor(id, c.value),
+        })),
+        // ⚠️ **既定に戻す口を残すこと。** 既定色は登録順で決まるので、
+        // 「元は何色だったか」をユーザーが覚えている必要が無いようにする。
+        { label: "既定の色に戻す", onPick: () => void setEngineColor(id, "") },
+      ],
+    });
+  };
+
+  const setEngineColor = async (id: string, color: string) => {
+    try {
+      showSettings(await SettingsService.SetEngineColor(id, color));
+      // ⚠️ **グラフも塗り直すこと**（描き直さないと前の色のまま）。
+      // 点を取り直す必要は無いので、今持っているものをそのまま描き直す。
+      evalGraphUI.relayout();
+    } catch (err) {
+      // ⚠️ **理由は解析タブに出すこと**（設定タブの行ではなく）。押したのは
+      // こちらの画面なので、あちらに出しても読まれない。
+      analyzeStatus.textContent = String(err instanceof Error ? err.message : err);
+      analyzeStatus.hidden = false;
+    }
+  };
+
   // 選んでいる候補手（**枝にする相手**。2026-08-13）。
   //
   // ⚠️ **エンジンと順位で指す**（要素を覚えない）。候補の行は `analyze:info` が
@@ -1504,6 +1568,14 @@ export function mountMainScreen(root: HTMLElement): void {
       card.dataset.id = e.id;
       card.innerHTML = `
         <div class="analyze-engine-head">
+          <!-- 折れ線の色（2026-08-14）。**押すと変えられる。**
+               ⚠️ **入口をここに置いてあるのが要点** —— 色を変えたくなるのは
+               評価値グラフと候補手を見比べている最中なので、設定タブまで
+               行かせない。色そのものは**エンジンの登録に紐づく**（並べ替えても
+               入れ替わらない）。 -->
+          <button class="analyze-engine-color" type="button"
+                  title="評価値グラフの折れ線の色を変えます"
+                  aria-label="折れ線の色を変える"></button>
           <span class="analyze-engine-name"></span>
           <span class="analyze-engine-meta note"></span>
         </div>
@@ -1527,9 +1599,13 @@ export function mountMainScreen(root: HTMLElement): void {
       // 繋いで初めて分かるので、届いたら括弧で足す（下の showEngineName）。
       showEngineName(entry, e.name ?? "");
       entry.meta.textContent = "エンジンを起動しています…";
+      const dot = card.querySelector<HTMLButtonElement>(".analyze-engine-color")!;
+      dot.addEventListener("click", (ev) => askEngineColor(e.id, ev.clientX, ev.clientY));
       engineCards.set(e.id, entry);
       analyzeEnginesBox.appendChild(card);
     }
+    // ⚠️ **作り直したら塗り直すこと**（連続モードでは 1 手ごとにここを通る）。
+    paintEngineColors();
     // 起動を待つあいだの見た目（中立）に戻す。**押せるかどうかもここで決まる。**
     renderWinRate();
   };
@@ -2361,6 +2437,9 @@ export function mountMainScreen(root: HTMLElement): void {
     fields: root.querySelector<HTMLElement>("#eval-graph-fields")!,
     legend: root.querySelector<HTMLElement>("#eval-graph-legend")!,
     readout: root.querySelector<HTMLElement>("#eval-graph-readout")!,
+    // 折れ線の色は**エンジンごと**（登場順ではない）。⚠️ **設定を直に読ませない** ——
+    // 既定色の解決は Go 側で済んでおり、ここは受け取った写しを引くだけ。
+    colorOf,
     // **押したらその局面へ戻る**（手順のチップと同じ「戻って見る」操作。手順は消さない）。
     // ⚠️ **渡ってくるのは節点の id**（手数ではない。枝があると同じ手数が何個もある）。
     onSeek: (id) => {
@@ -3504,6 +3583,7 @@ export function mountMainScreen(root: HTMLElement): void {
     path: string;
     training: { enabled: boolean; host: string; port: number; token: string; target: string };
     engines: EngineSettings[] | null;
+    engineColors: EngineColorOption[] | null;
     ponanzaConstant: number;
   }) => {
     fitOnStartup.checked = s.fitOnStartup;
@@ -3511,6 +3591,14 @@ export function mountMainScreen(root: HTMLElement): void {
     // そのまま入れるだけにすること（フロントに既定を書くと 2 か所に散る）。
     ponanzaConstant.value = String(s.ponanzaConstant);
     settingsPath.textContent = s.path || "(保存先を決められませんでした)";
+    // エンジンの色（評価値グラフ・見出しの色見本）。**設定が唯一の出所**で、
+    // 既定色の解決も Go 側が済ませてある（`EngineSettings.Color` は常に入っている）。
+    engineColors.clear();
+    for (const e of s.engines ?? []) {
+      engineColors.set(e.id, e.color);
+    }
+    engineColorOptions = s.engineColors ?? [];
+    paintEngineColors();
     showEngineList(s.engines ?? []);
     // 既定値の解決は Go 側(training パッケージ)が済ませて返す。**フロントに
     // 既定値を書かないこと**(2 か所に持つと、既定を変えたときに食い違う)。

@@ -126,3 +126,86 @@ func equalStrings(a, b []string) bool {
 	}
 	return true
 }
+
+// TestSetEngineColor は**エンジンの色**を固定する（2026-08-14）。
+//
+// 色は**エンジンの登録に紐づく**（並び順ではない）。複数のエンジンを並べて読むのが
+// この一覧の目的なので、**どの線がどのエンジンか**は見た目で覚えるもの。
+// ⚠️ **並べ替えたり 1 つ外したりして色が入れ替わると、前に見ていた線と同じ色が
+// 別のエンジンを指す**ことになるので、そこを見ている。
+func TestSetEngineColor(t *testing.T) {
+	list := []ikkyoku.EngineEntry{
+		{ID: "a", Enabled: true},
+		{ID: "b", Enabled: true},
+	}
+
+	t.Run("色が保存され、返る設定にも入る", func(t *testing.T) {
+		s := newTestSettings(t, append([]ikkyoku.EngineEntry(nil), list...))
+		got, err := s.SetEngineColor("b", "#FF8FA3") // 大文字でも受ける
+		if err != nil {
+			t.Fatalf("SetEngineColor: %v", err)
+		}
+		if got.Engines[1].Color != "#ff8fa3" {
+			t.Errorf("色 = %q, want #ff8fa3", got.Engines[1].Color)
+		}
+		cfg, err := ikkyoku.LoadConfig(s.path)
+		if err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		if cfg.Engines[1].Color != "#ff8fa3" {
+			t.Errorf("保存された色 = %q", cfg.Engines[1].Color)
+		}
+	})
+
+	// ⚠️ **未設定なら登録順の既定色**（解決するのは Go 側。フロントに書かない）。
+	t.Run("未設定は登録順の既定色", func(t *testing.T) {
+		s := newTestSettings(t, append([]ikkyoku.EngineEntry(nil), list...))
+		got := s.Settings()
+		for i, e := range got.Engines {
+			if want := ikkyoku.DefaultEngineColor(i); e.Color != want {
+				t.Errorf("engines[%d].Color = %q, want %q", i, e.Color, want)
+			}
+		}
+	})
+
+	// ⚠️ **並べ替えても、色を付けたエンジンの色は動かない。**
+	t.Run("並べ替えても色は付いてくる", func(t *testing.T) {
+		s := newTestSettings(t, append([]ikkyoku.EngineEntry(nil), list...))
+		if _, err := s.SetEngineColor("a", "#6fd3c7"); err != nil {
+			t.Fatalf("SetEngineColor: %v", err)
+		}
+		got, err := s.MoveEngine("a", 1)
+		if err != nil {
+			t.Fatalf("MoveEngine: %v", err)
+		}
+		if got.Engines[1].ID != "a" || got.Engines[1].Color != "#6fd3c7" {
+			t.Errorf("並べ替え後 = %+v", got.Engines[1])
+		}
+	})
+
+	t.Run("空にすると既定へ戻る", func(t *testing.T) {
+		s := newTestSettings(t, append([]ikkyoku.EngineEntry(nil), list...))
+		if _, err := s.SetEngineColor("a", "#6fd3c7"); err != nil {
+			t.Fatalf("SetEngineColor: %v", err)
+		}
+		got, err := s.SetEngineColor("a", "")
+		if err != nil {
+			t.Fatalf("SetEngineColor(空): %v", err)
+		}
+		if want := ikkyoku.DefaultEngineColor(0); got.Engines[0].Color != want {
+			t.Errorf("色 = %q, want %q（既定）", got.Engines[0].Color, want)
+		}
+	})
+
+	// 壊れた値は断る。**そのとき今の設定は変えない**（画面が食い違ったままにならない）。
+	t.Run("色の形が違えば断る", func(t *testing.T) {
+		s := newTestSettings(t, append([]ikkyoku.EngineEntry(nil), list...))
+		got, err := s.SetEngineColor("a", "赤")
+		if err == nil {
+			t.Fatal("エラーになるべき")
+		}
+		if want := ikkyoku.DefaultEngineColor(0); got.Engines[0].Color != want {
+			t.Errorf("断ったのに色が変わった: %q", got.Engines[0].Color)
+		}
+	})
+}

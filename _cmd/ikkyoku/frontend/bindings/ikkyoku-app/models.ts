@@ -3,6 +3,9 @@
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
+import * as ikkyoku$0 from "../github.com/ShinteLab/ikkyoku/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
 import * as legal$0 from "../github.com/ShinteLab/ikkyoku/legal/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
@@ -114,6 +117,14 @@ export interface AppSettings {
      * **同時に走って結果が並ぶ**ので、ここは常に一覧で扱う。
      */
     "engines": EngineSettings[] | null;
+
+    /**
+     * EngineColors は折れ線の色として**画面から選べる**色の一覧。
+     * 
+     * ⚠️ **フロントに色の表を書かないこと**（既定色の解決も Go 側なので、
+     * 2 つ持つと「選べる色」と「既定で付く色」が食い違う）。
+     */
+    "engineColors": ikkyoku$0.EngineColorOption[] | null;
 
     /**
      * PonanzaConstant は評価値 → 勝率の変換に使う定数（解析タブの勝率バー）。
@@ -391,6 +402,15 @@ export interface EngineSettings {
      * Enabled は解析に使うか。**外した登録も残る。**
      */
     "enabled": boolean;
+
+    /**
+     * Color は評価値グラフの折れ線の色（`#rrggbb`）。
+     * 
+     * **常に解決済みで返る**（未設定なら登録順の既定色）。⚠️ **フロントで
+     * 「空なら既定」を書かないこと** —— Name / Host / Port と同じで、
+     * 既定を 2 か所に持つと変えたときに食い違う。
+     */
+    "color": string;
 }
 
 /**

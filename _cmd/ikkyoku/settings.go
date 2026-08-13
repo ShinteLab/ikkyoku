@@ -31,6 +31,11 @@ type AppSettings struct {
 	// ⚠️ **1 つに絞らない**（2026-08-11）。「解析に使う」を付けたものが
 	// **同時に走って結果が並ぶ**ので、ここは常に一覧で扱う。
 	Engines []EngineSettings `json:"engines"`
+	// EngineColors は折れ線の色として**画面から選べる**色の一覧。
+	//
+	// ⚠️ **フロントに色の表を書かないこと**（既定色の解決も Go 側なので、
+	// 2 つ持つと「選べる色」と「既定で付く色」が食い違う）。
+	EngineColors []ikkyoku.EngineColorOption `json:"engineColors"`
 	// PonanzaConstant は評価値 → 勝率の変換に使う定数（解析タブの勝率バー）。
 	//
 	// **既定値（1500）は解決済みで返る**（`analyze.PonanzaConstantOr`）。
@@ -84,10 +89,18 @@ type EngineSettings struct {
 	OptionCount int `json:"optionCount"`
 	// Enabled は解析に使うか。**外した登録も残る。**
 	Enabled bool `json:"enabled"`
+	// Color は評価値グラフの折れ線の色（`#rrggbb`）。
+	//
+	// **常に解決済みで返る**（未設定なら登録順の既定色）。⚠️ **フロントで
+	// 「空なら既定」を書かないこと** —— Name / Host / Port と同じで、
+	// 既定を 2 か所に持つと変えたときに食い違う。
+	Color string `json:"color"`
 }
 
 // engineSettings は設定ファイルのエントリを画面に出す形にする。
-func engineSettings(e ikkyoku.EngineEntry) EngineSettings {
+//
+// i は**一覧の中での位置**（未設定の色を登録順で決めるのに要る）。
+func engineSettings(e ikkyoku.EngineEntry, i int) EngineSettings {
 	return EngineSettings{
 		ID:          e.ID,
 		Name:        e.DisplayName(),
@@ -96,6 +109,7 @@ func engineSettings(e ikkyoku.EngineEntry) EngineSettings {
 		Builtin:     e.Path == "",
 		OptionCount: len(e.Options),
 		Enabled:     e.Enabled,
+		Color:       e.DisplayColor(i),
 	}
 }
 
@@ -151,13 +165,14 @@ func (s *SettingsService) Settings() AppSettings {
 func (s *SettingsService) settings() AppSettings {
 	list := s.cfg.EngineList()
 	engines := make([]EngineSettings, 0, len(list))
-	for _, e := range list {
-		engines = append(engines, engineSettings(e))
+	for i, e := range list {
+		engines = append(engines, engineSettings(e, i))
 	}
 	return AppSettings{
 		FitOnStartup:    s.cfg.FitOnStartup,
 		Training:        trainingSettings(s.cfg.Training),
 		Engines:         engines,
+		EngineColors:    ikkyoku.EngineColors,
 		PonanzaConstant: analyze.PonanzaConstantOr(s.cfg.PonanzaConstant),
 		Path:            s.path,
 	}
@@ -344,6 +359,49 @@ func (s *SettingsService) SetEngineName(id, name string) (AppSettings, error) {
 		}
 		return list
 	})
+}
+
+// SetEngineColor は評価値グラフの折れ線の色を決める（空にすると既定色に戻る）。
+//
+// **入口は解析タブのエンジンの見出し**（候補手を出しているところ）。設定タブでは
+// なくそこに置いてあるのは、**色を変えたくなるのは折れ線と結果を見比べている
+// 最中**だから。
+//
+// ⚠️ **色は登録に紐づく**（一覧の何番目か、ではない）。並べ替えたり 1 つ
+// 外したりしても色が動かないので、**前に見ていた線と同じ色が別のエンジンを
+// 指すことがない**。
+func (s *SettingsService) SetEngineColor(id, color string) (AppSettings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c := strings.ToLower(strings.TrimSpace(color))
+	if c != "" && !isHexColor(c) {
+		return s.settings(), fmt.Errorf("色は #rrggbb で指定してください: %s", color)
+	}
+	return s.editEngines(func(list []ikkyoku.EngineEntry) []ikkyoku.EngineEntry {
+		for i := range list {
+			if list[i].ID == id {
+				list[i].Color = c
+			}
+		}
+		return list
+	})
+}
+
+// isHexColor は `#rrggbb` かどうか。
+//
+// ⚠️ **選べる色の一覧（`ikkyoku.EngineColors`）に限定しないこと** —— 設定ファイルは
+// 手で編集する前提で、一覧の外の色を書くのは正当。画面から選べる範囲と、
+// 受け付ける範囲は別物。
+func isHexColor(s string) bool {
+	if len(s) != 7 || s[0] != '#' {
+		return false
+	}
+	for _, r := range s[1:] {
+		if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // SetEngineEnabled は「解析に使う」を切り替える。

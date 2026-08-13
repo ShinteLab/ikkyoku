@@ -77,6 +77,21 @@ export function RemoveEngine(id: string): $CancellablePromise<$models.AppSetting
 }
 
 /**
+ * SetEngineColor は評価値グラフの折れ線の色を決める（空にすると既定色に戻る）。
+ * 
+ * **入口は解析タブのエンジンの見出し**（候補手を出しているところ）。設定タブでは
+ * なくそこに置いてあるのは、**色を変えたくなるのは折れ線と結果を見比べている
+ * 最中**だから。
+ * 
+ * ⚠️ **色は登録に紐づく**（一覧の何番目か、ではない）。並べ替えたり 1 つ
+ * 外したりしても色が動かないので、**前に見ていた線と同じ色が別のエンジンを
+ * 指すことがない**。
+ */
+export function SetEngineColor(id: string, color: string): $CancellablePromise<$models.AppSettings> {
+    return $Call.ByID(1091215457, id, color);
+}
+
+/**
  * SetEngineEnabled は「解析に使う」を切り替える。
  * 
  * **外しても登録は消えない。** エンジンを入れ替えて比べる作業では、外したものを
