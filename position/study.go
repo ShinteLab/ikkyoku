@@ -67,6 +67,17 @@ type Node struct {
 	Text string `json:"text"`
 	// Depth は枝の深さ（**本譜だけを辿ってきたら 0**）。ツリービューの字下げ。
 	Depth int `json:"depth"`
+	// Sources は**この手を挙げたエンジン**の登録 ID（解析の候補手から足した枝）。
+	//
+	// **誰が言った手なのかを画面に出すため**（2026-08-14。手の後ろに色の丸）。
+	// 枝は「エンジンがそう読んだ」だけの手なので、**本譜と同じ見た目のまま
+	// 並ぶと、どれが誰の読み筋か分からなくなる**。
+	//
+	// ⚠️ **人が指した手には付かない**（`Play` / `Graft` は空で足す）。
+	// ⚠️ **複数入りうる**（同じ手を 2 つのエンジンが挙げるのは普通にある）。
+	// **後勝ちで上書きしないこと** —— 消すと「両方が同じ手を指した」という、
+	// **一番読みたい一致**が見えなくなる。
+	Sources []string `json:"sources,omitempty"`
 	// Main は**本譜か**（根から `kids[0]` だけを辿って届く手）。
 	//
 	// ⚠️ **「親の最初の子」ではない**（2026-08-13 に意味を変えた）。枝の中の
@@ -82,6 +93,8 @@ type treeNode struct {
 	usi    string
 	text   string
 	parent *treeNode
+	// sources はこの手を挙げたエンジンの登録 ID（`Node.Sources`）。
+	sources []string
 	// kids は子。**kids[0] が本譜側**（`Graft` はここへ据え直す）。
 	kids []*treeNode
 }
@@ -245,6 +258,7 @@ func (n *treeNode) node(depth int, main bool) Node {
 	return Node{
 		ID: n.id, Parent: parent, Number: n.number,
 		USI: n.usi, Text: n.text, Depth: depth, Main: main,
+		Sources: append([]string(nil), n.sources...),
 	}
 }
 
@@ -338,7 +352,7 @@ func (s *Study) Legal() ([]legal.Move, error) {
 // ⚠️ **同じ手が既にあるならそれを辿る**（枝を増やさない）。別の手なら**枝が生える**
 // ——**前の手順は消えない**（2026-08-13。それまでは捨てていた）。
 func (s *Study) Play(move string) error {
-	next, err := s.grow(s.cur, s.curPos, move)
+	next, err := s.grow(s.cur, s.curPos, move, "")
 	if err != nil {
 		return err
 	}
@@ -356,14 +370,19 @@ func (s *Study) Play(move string) error {
 // 本譜を辿ってから枝になる**（`Play` と同じ規則）。
 //
 // ⚠️ **途中で指せない手が出たら、そこで止めて足せたぶんは残す**（設計原則3）。
+//
+// source は**その読み筋を出したエンジン**の登録 ID（`Node.Sources`）。
+// ⚠️ **既にある手にも足す** —— 同じ手を 2 つのエンジンが挙げたことは
+// **一番読みたい一致**なので、辿るだけで済ませずに記録する。
+//
 // 戻り値は（最初に生えた節点の id・足した手数・止まった理由）。
 // **1 手も足せなかった**（全部が既にある）ときは id が 0 になる。
-func (s *Study) AddLine(moves []string) (int, int, string) {
+func (s *Study) AddLine(moves []string, source string) (int, int, string) {
 	at, pos := s.cur, s.curPos.Clone()
 	first, added := 0, 0
 	for i, mv := range moves {
 		before := len(at.kids)
-		next, err := s.grow(at, pos, mv)
+		next, err := s.grow(at, pos, mv, source)
 		if err != nil {
 			return first, added, fmt.Sprintf("%d手目「%s」で止まりました: %v", i+1, mv, err)
 		}
@@ -391,7 +410,7 @@ func (s *Study) Graft(moves []string) GraftResult {
 	at, pos := s.top, s.root.Clone()
 	for i, mv := range moves {
 		before := len(at.kids)
-		next, err := s.grow(at, pos, mv)
+		next, err := s.grow(at, pos, mv, "")
 		if err != nil {
 			r.Note = fmt.Sprintf("%d手目で止まりました: %v", i+1, err)
 			return r
@@ -448,9 +467,13 @@ func promote(parent, kid *treeNode) {
 // grow は at の子として move を生やす（**既にあるならそれを返す**）。
 //
 // pos は at の局面（合法手の判定に要る）。⚠️ **合法手でなければ足さない。**
-func (s *Study) grow(at *treeNode, pos *Position, move string) (*treeNode, error) {
+// source は**この手を挙げたエンジン**の登録 ID（人が指したなら空）。
+// ⚠️ **既にある手にも足す**（同じ手を 2 つのエンジンが挙げるのは普通にあり、
+// **その一致こそ読みたい**）。
+func (s *Study) grow(at *treeNode, pos *Position, move, source string) (*treeNode, error) {
 	for _, k := range at.kids {
 		if k.usi == move {
+			k.addSource(source)
 			return k, nil
 		}
 	}
@@ -464,6 +487,7 @@ func (s *Study) grow(at *treeNode, pos *Position, move string) (*treeNode, error
 		text:   move,
 		parent: at,
 	}
+	n.addSource(source)
 	s.nextID++
 	s.index[n.id] = n
 	at.kids = append(at.kids, n)
@@ -475,6 +499,21 @@ func (s *Study) grow(at *treeNode, pos *Position, move string) (*treeNode, error
 		}
 	}
 	return n, nil
+}
+
+// addSource はこの手を挙げたエンジンを覚える（空なら何もしない＝人が指した手）。
+//
+// ⚠️ **同じエンジンを重ねないこと**（連続解析では同じ読み筋を何度も足しうる）。
+func (n *treeNode) addSource(id string) {
+	if id == "" {
+		return
+	}
+	for _, s := range n.sources {
+		if s == id {
+			return
+		}
+	}
+	n.sources = append(n.sources, id)
 }
 
 // checkLegal は pos でその手が指せるかを見る。

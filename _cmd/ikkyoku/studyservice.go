@@ -507,7 +507,11 @@ func (s *StudyService) Play(move string) (StudyState, error) {
 //
 // ⚠️ **候補の頭が本譜と同じなら枝を増やさず、食い違うところで枝にする**
 // （判断は `position.Study.AddLine`。**フロントで突き合わせないこと**）。
-func (s *StudyService) AddLine(moves []string) (AddLine, error) {
+//
+// engineID は**その読み筋を出したエンジン**の登録 ID。手順リストで
+// **誰が言った手なのか**を色で出すのに使う（`Node.Sources`）。
+// ⚠️ **空でも足せること** —— 出所が分からない読み筋でも、手順に足す価値は変わらない。
+func (s *StudyService) AddLine(engineID string, moves []string) (AddLine, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.study == nil {
@@ -516,7 +520,7 @@ func (s *StudyService) AddLine(moves []string) (AddLine, error) {
 	if len(moves) == 0 {
 		return AddLine{State: s.state()}, fmt.Errorf("読み筋がありません")
 	}
-	first, added, note := s.study.AddLine(moves)
+	first, added, note := s.study.AddLine(moves, engineID)
 	return AddLine{State: s.state(), FirstID: first, Added: added, Note: note}, nil
 }
 

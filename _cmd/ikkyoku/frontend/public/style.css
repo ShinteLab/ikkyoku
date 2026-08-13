@@ -2777,11 +2777,30 @@ html.is-main #app {
   color: #6f7787;
 }
 
+/* ⚠️ **伸ばさないこと**（2026-08-14 に `1 1 auto` から変えた）。伸ばすと、
+   後ろに付く「誰が言った手か」の丸（`.move-source`）が**行の右端まで飛ぶ**。
+   手のすぐ後ろに無いと、どの手に付いた印なのかが読み取れない。
+   縮みはする（長い表記は今までどおり省略される）。 */
 .move-text {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* 誰が言った手か（2026-08-14）。**解析の候補手から足した枝**に付く色の丸で、
+   色は**評価値グラフの折れ線と同じ**（`mainscreen.ts` の `colorOf`）。
+
+   ⚠️ **複数並びうる** —— 同じ手を 2 つのエンジンが挙げるのは普通で、
+   **その一致が一番読みたいもの**。1 つに丸めないこと。
+   ⚠️ **色は JS が入れる**（エンジンの登録に紐づく設定）。ここに書かない。
+   ⚠️ **行の高さを増やさないこと**（手順は縦に何十行も並ぶ）。 */
+.move-source {
+  flex: 0 0 auto;
+  align-self: center;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
 }
 
 .move-chip:hover {

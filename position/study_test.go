@@ -256,7 +256,7 @@ func TestStudyAddLine(t *testing.T) {
 	}
 	at := s.CurrentID()
 
-	first, added, note := s.AddLine([]string{"3c3d", "2g2f", "8c8d"})
+	first, added, note := s.AddLine([]string{"3c3d", "2g2f", "8c8d"}, "e1")
 	if note != "" {
 		t.Fatalf("止まりました: %s", note)
 	}
@@ -287,7 +287,7 @@ func TestStudyAddLineFollowsExisting(t *testing.T) {
 		t.Fatalf("GoTo: %v", err)
 	}
 	// 頭 2 手は同じで、3 手目から食い違う読み筋。
-	_, added, note := s.AddLine([]string{"7g7f", "3c3d", "6g6f"})
+	_, added, note := s.AddLine([]string{"7g7f", "3c3d", "6g6f"}, "e1")
 	if note != "" {
 		t.Fatalf("止まりました: %s", note)
 	}
@@ -312,7 +312,7 @@ func TestStudyAddLineFollowsExisting(t *testing.T) {
 // ⚠️ **指せない手が出ても、足せたぶんは残すこと**（設計原則3）。
 func TestStudyAddLineStopsAtIllegal(t *testing.T) {
 	s := position.NewStudy(hirate(t))
-	_, added, note := s.AddLine([]string{"7g7f", "9i9h"})
+	_, added, note := s.AddLine([]string{"7g7f", "9i9h"}, "e1")
 	if added != 1 {
 		t.Errorf("足せたぶんが残っていません: added=%d", added)
 	}
@@ -332,7 +332,7 @@ func TestStudyGraft(t *testing.T) {
 		}
 	}
 	// 自分で足した検討（2 手目の下の枝）。
-	if _, added, note := s.AddLine([]string{"2g2f"}); added != 1 || note != "" {
+	if _, added, note := s.AddLine([]string{"2g2f"}, "e1"); added != 1 || note != "" {
 		t.Fatalf("AddLine: added=%d note=%s", added, note)
 	}
 
@@ -375,7 +375,7 @@ func TestStudyDropFromReturnsGone(t *testing.T) {
 			t.Fatalf("Play %s: %v", mv, err)
 		}
 	}
-	if _, added, _ := s.AddLine([]string{"2g2f"}); added != 1 {
+	if _, added, _ := s.AddLine([]string{"2g2f"}, "e1"); added != 1 {
 		t.Fatal("AddLine")
 	}
 	gone, err := s.DropFrom(1)
@@ -425,10 +425,10 @@ func TestStudyNodesIndentsBranchSiblingsEqually(t *testing.T) {
 		t.Fatalf("GoTo: %v", err)
 	}
 	// 枝（△８四歩）に、続きの違う読み筋を 2 本足す。
-	if _, added, note := s.AddLine([]string{"8c8d", "2g2f"}); added != 2 || note != "" {
+	if _, added, note := s.AddLine([]string{"8c8d", "2g2f"}, "e1"); added != 2 || note != "" {
 		t.Fatalf("AddLine: added=%d note=%s", added, note)
 	}
-	if _, added, note := s.AddLine([]string{"8c8d", "6g6f"}); added != 1 || note != "" {
+	if _, added, note := s.AddLine([]string{"8c8d", "6g6f"}, "e1"); added != 1 || note != "" {
 		t.Fatalf("AddLine: added=%d note=%s", added, note)
 	}
 
@@ -467,7 +467,7 @@ func TestStudyNodesShapeIsStableWhenSiblingAdded(t *testing.T) {
 		t.Fatalf("Play: %v", err)
 	}
 	// 1 本目（本譜から分かれる変化）。
-	if _, added, note := s.AddLine([]string{"8c8d", "2g2f"}); added != 2 || note != "" {
+	if _, added, note := s.AddLine([]string{"8c8d", "2g2f"}, "e1"); added != 2 || note != "" {
 		t.Fatalf("AddLine: added=%d note=%s", added, note)
 	}
 	before := map[string]int{}
@@ -475,7 +475,7 @@ func TestStudyNodesShapeIsStableWhenSiblingAdded(t *testing.T) {
 		before[n.USI] = n.Depth
 	}
 	// 2 本目（頭は同じ、その先だけ違う）。
-	if _, added, note := s.AddLine([]string{"8c8d", "6g6f"}); added != 1 || note != "" {
+	if _, added, note := s.AddLine([]string{"8c8d", "6g6f"}, "e1"); added != 1 || note != "" {
 		t.Fatalf("AddLine: added=%d note=%s", added, note)
 	}
 	for _, n := range s.Nodes() {
@@ -501,8 +501,8 @@ func TestStudyNodesForkChildrenAreHeads(t *testing.T) {
 		t.Fatalf("GoTo: %v", err)
 	}
 	// 頭（△８四歩 ▲２六歩）まで同じで、その次から食い違う 2 本。
-	s.AddLine([]string{"8c8d", "2g2f", "8d8e", "2f2e"})
-	s.AddLine([]string{"8c8d", "2g2f", "4a3b", "6i7h"})
+	s.AddLine([]string{"8c8d", "2g2f", "8d8e", "2f2e"}, "e1")
+	s.AddLine([]string{"8c8d", "2g2f", "4a3b", "6i7h"}, "e1")
 
 	at := map[string]position.Node{}
 	for _, n := range s.Nodes() {
@@ -536,8 +536,8 @@ func TestStudyNodesForkRightUnderHead(t *testing.T) {
 		t.Fatalf("GoTo: %v", err)
 	}
 	// 頭（△８四歩）は同じで、その次の手から違う 2 本。
-	s.AddLine([]string{"8c8d", "2g2f", "8d8e"})
-	s.AddLine([]string{"8c8d", "6g6f", "4a3b"})
+	s.AddLine([]string{"8c8d", "2g2f", "8d8e"}, "e1")
+	s.AddLine([]string{"8c8d", "6g6f", "4a3b"}, "e1")
 
 	at := map[string]position.Node{}
 	for _, n := range s.Nodes() {
@@ -554,4 +554,84 @@ func TestStudyNodesForkRightUnderHead(t *testing.T) {
 	if at["4a3b"].Depth != at["6g6f"].Depth+1 {
 		t.Errorf("分かれた手の続きが下がっていません: %+v", at["4a3b"])
 	}
+}
+
+// TestStudyAddLineSources は**その手を挙げたエンジン**の記録を固定する（2026-08-14）。
+//
+// 手順リストで**誰が言った手なのか**を色で出すためのもの。枝は「エンジンが
+// そう読んだ」だけの手なので、**本譜と同じ見た目で並ぶと誰の読み筋か分からない。**
+func TestStudyAddLineSources(t *testing.T) {
+	sourcesOf := func(s *position.Study, id int) []string {
+		for _, n := range s.Nodes() {
+			if n.ID == id {
+				return n.Sources
+			}
+		}
+		return nil
+	}
+
+	t.Run("足した手にエンジンが付く", func(t *testing.T) {
+		s := position.NewStudy(hirate(t))
+		first, _, note := s.AddLine([]string{"7g7f", "3c3d"}, "e1")
+		if note != "" {
+			t.Fatalf("止まりました: %s", note)
+		}
+		if got := sourcesOf(s, first); len(got) != 1 || got[0] != "e1" {
+			t.Errorf("Sources = %v, want [e1]", got)
+		}
+	})
+
+	// ⚠️ **同じ手を 2 つのエンジンが挙げたら両方残す。** 後勝ちで上書きすると、
+	// **一番読みたい一致**（2 つが同じ手を推している）が見えなくなる。
+	t.Run("同じ手を挙げたエンジンは並ぶ", func(t *testing.T) {
+		s := position.NewStudy(hirate(t))
+		first, _, _ := s.AddLine([]string{"7g7f"}, "e1")
+		if _, _, note := s.AddLine([]string{"7g7f"}, "e2"); note != "" {
+			t.Fatalf("止まりました: %s", note)
+		}
+		got := sourcesOf(s, first)
+		if len(got) != 2 || got[0] != "e1" || got[1] != "e2" {
+			t.Errorf("Sources = %v, want [e1 e2]", got)
+		}
+	})
+
+	// 連続解析では同じ読み筋を何度も足しうる。**同じエンジンを重ねないこと。**
+	t.Run("同じエンジンは重ならない", func(t *testing.T) {
+		s := position.NewStudy(hirate(t))
+		first, _, _ := s.AddLine([]string{"7g7f"}, "e1")
+		s.AddLine([]string{"7g7f"}, "e1")
+		if got := sourcesOf(s, first); len(got) != 1 {
+			t.Errorf("Sources = %v, want 1 件", got)
+		}
+	})
+
+	// ⚠️ **人が指した手には付かない**（盤で動かした手・棋譜の手）。
+	t.Run("人が指した手には付かない", func(t *testing.T) {
+		s := position.NewStudy(hirate(t))
+		if err := s.Play("7g7f"); err != nil {
+			t.Fatalf("Play: %v", err)
+		}
+		if got := sourcesOf(s, s.CurrentID()); len(got) != 0 {
+			t.Errorf("Sources = %v, want 空", got)
+		}
+	})
+
+	// ⚠️ **既にある手にも付ける。** 人が指した手をエンジンも推していたなら、
+	// それは**その手が誰の読みと一致したか**という読みたい情報そのもの。
+	t.Run("既にある手にも足す", func(t *testing.T) {
+		s := position.NewStudy(hirate(t))
+		if err := s.Play("7g7f"); err != nil {
+			t.Fatalf("Play: %v", err)
+		}
+		at := s.CurrentID()
+		if err := s.GoTo(0); err != nil {
+			t.Fatalf("GoTo: %v", err)
+		}
+		if _, added, _ := s.AddLine([]string{"7g7f"}, "e1"); added != 0 {
+			t.Fatalf("枝が増えました: added=%d", added)
+		}
+		if got := sourcesOf(s, at); len(got) != 1 || got[0] != "e1" {
+			t.Errorf("Sources = %v, want [e1]", got)
+		}
+	})
 }

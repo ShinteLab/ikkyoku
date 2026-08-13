@@ -48,9 +48,13 @@ import * as $models from "./models.js";
  * 
  * ⚠️ **候補の頭が本譜と同じなら枝を増やさず、食い違うところで枝にする**
  * （判断は `position.Study.AddLine`。**フロントで突き合わせないこと**）。
+ * 
+ * engineID は**その読み筋を出したエンジン**の登録 ID。手順リストで
+ * **誰が言った手なのか**を色で出すのに使う（`Node.Sources`）。
+ * ⚠️ **空でも足せること** —— 出所が分からない読み筋でも、手順に足す価値は変わらない。
  */
-export function AddLine(moves: string[] | null): $CancellablePromise<$models.AddLine> {
-    return $Call.ByID(4171557245, moves);
+export function AddLine(engineID: string, moves: string[] | null): $CancellablePromise<$models.AddLine> {
+    return $Call.ByID(4171557245, engineID, moves);
 }
 
 /**

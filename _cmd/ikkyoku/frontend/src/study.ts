@@ -83,10 +83,19 @@ export interface StudyBoardOptions {
   onState(state: StudyState): void;
   // onError は手が通らなかったときの理由。
   onError(message: string): void;
+  // engineOf は**その手を挙げたエンジン**の見た目（`Node.Sources` の 1 件）。
+  //
+  // **誰が言った手なのかを手の後ろに色の丸で出す**（2026-08-14）。枝は
+  // 「エンジンがそう読んだ」だけの手なので、**本譜と同じ見た目で並ぶと
+  // どれが誰の読み筋か分からない。**
+  //
+  // ⚠️ **色をここで決めないこと**（評価値グラフの折れ線と**同じ色**でなければ
+  // 意味が無い）。解決は `mainscreen.ts` の 1 か所。
+  engineOf(id: string): { color: string; label: string };
 }
 
 export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
-  const { stage, handSlots, movesPanel, onState, onError } = opts;
+  const { stage, handSlots, movesPanel, onState, onError, engineOf } = opts;
 
   // ---- 盤に重ねるグリッド -------------------------------------------------
   //
@@ -327,7 +336,10 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
     // 何手目を見ているのかが読み取りにくい）。
     const chip = (
       num: string, label: string, id: number, title: string,
-      o?: { depth?: number; main?: boolean; parent?: number; fork?: boolean },
+      o?: {
+        depth?: number; main?: boolean; parent?: number; fork?: boolean;
+        sources?: string[];
+      },
     ) => {
       // ⚠️ **行は chip とトグルの 2 つ**（ボタンの中にボタンは置けない）。
       // 字下げは**行のほう**に付ける（chip に付けると、トグルだけ左に残る）。
@@ -372,6 +384,19 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
       t.className = "move-text";
       t.textContent = label;
       b.append(i, t);
+      // ⚠️ **手の後ろに出す**（前に置くと、手数と手のあいだに割り込んで
+      // **縦に並んだ手の頭が揃わなくなる**）。
+      // ⚠️ **複数出しうる** —— 同じ手を 2 つのエンジンが挙げるのは普通で、
+      // **その一致が一番読みたいもの**。1 つに丸めないこと。
+      for (const src of o?.sources ?? []) {
+        const e = engineOf(src);
+        const dot = document.createElement("span");
+        dot.className = "move-source";
+        dot.style.background = e.color;
+        // ⚠️ **色だけにしないこと**（色が読めなくても誰の手かは分かるように）。
+        dot.title = `${e.label} が挙げた手`;
+        b.appendChild(dot);
+      }
       b.classList.toggle("is-current", id === at);
       // ⚠️ **枝は見た目で分かるようにする**（字下げ + 色）。同じ手数の手が
       // 何行も並ぶので、**どれが本譜か**が分からないと読めない。
@@ -397,7 +422,10 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
         chip(String((state.first ?? 0) + m.number), m.text || m.usi, m.id,
           `${m.usi} までの局面に戻ります` +
             (m.main ? "" : "（枝）") + "（右クリックでこの手から下を消します）",
-          { depth: m.depth, main: m.main, parent: m.parent, fork: isFork(m) }),
+          {
+            depth: m.depth, main: m.main, parent: m.parent, fork: isFork(m),
+            sources: m.sources ?? [],
+          }),
       );
     }
     // 今見ている手が画面の外にあると、進めても手順が動いていないように見える。

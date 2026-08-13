@@ -532,7 +532,7 @@ func TestStudyServiceAddLine(t *testing.T) {
 	}
 	at := s.State().CurrentID
 
-	got, err := s.AddLine([]string{"3c3d", "2g2f"})
+	got, err := s.AddLine("e1", []string{"3c3d", "2g2f"})
 	if err != nil {
 		t.Fatalf("AddLine: %v", err)
 	}
@@ -561,7 +561,7 @@ func TestStudyServiceAddLineFollowsMainLine(t *testing.T) {
 	if _, err := s.GoTo(0); err != nil {
 		t.Fatalf("GoTo: %v", err)
 	}
-	got, err := s.AddLine([]string{"7g7f", "3c3d"})
+	got, err := s.AddLine("e1", []string{"7g7f", "3c3d"})
 	if err != nil {
 		t.Fatalf("AddLine: %v", err)
 	}
@@ -579,12 +579,12 @@ func TestStudyServiceDropFromKeepsSiblings(t *testing.T) {
 	if _, err := s.Play("7g7f"); err != nil {
 		t.Fatalf("Play: %v", err)
 	}
-	got, err := s.AddLine([]string{"3c3d"})
+	got, err := s.AddLine("e1", []string{"3c3d"})
 	if err != nil {
 		t.Fatalf("AddLine: %v", err)
 	}
 	branch := got.FirstID
-	other, err := s.AddLine([]string{"8c8d"})
+	other, err := s.AddLine("e1", []string{"8c8d"})
 	if err != nil {
 		t.Fatalf("AddLine: %v", err)
 	}
@@ -603,5 +603,28 @@ func TestStudyServiceDropFromKeepsSiblings(t *testing.T) {
 	}
 	if _, err := s.GoTo(other.FirstID); err != nil {
 		t.Errorf("兄弟の枝まで消えました: %v", err)
+	}
+}
+
+// TestStudyServiceAddLineSource は**誰が言った手か**が手順に残ることを固定する
+//（2026-08-14）。枝は「エンジンがそう読んだ」だけの手なので、**本譜と同じ
+// 見た目で並ぶとどれが誰の読み筋か分からない**（手順リストで色の丸になる）。
+func TestStudyServiceAddLineSource(t *testing.T) {
+	s := adopted(t)
+	got, err := s.AddLine("engine-1", []string{"7g7f", "3c3d"})
+	if err != nil {
+		t.Fatalf("AddLine: %v", err)
+	}
+	found := false
+	for _, n := range got.State.Nodes {
+		if n.ID == got.FirstID {
+			found = true
+			if len(n.Sources) != 1 || n.Sources[0] != "engine-1" {
+				t.Errorf("Sources = %v, want [engine-1]", n.Sources)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("足した節点が見つかりません: %+v", got)
 	}
 }

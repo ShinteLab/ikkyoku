@@ -1311,10 +1311,22 @@ export function mountMainScreen(root: HTMLElement): void {
   // 受け取った写しで、**フロントに色の表を持たないこと**（2 か所に持つと、
   // 選べる色と既定で付く色が食い違う）。
   const engineColors = new Map<string, string>();
+  // 設定タブで付けた名前（**色の丸のツールチップ**に出す。色だけでは読めない人が居る）。
+  const engineNames = new Map<string, string>();
   let engineColorOptions: EngineColorOption[] = [];
   // 設定に無いエンジンの色。**普通は通らない**（一覧に無いものは解析にも出ない）。
   const UNKNOWN_ENGINE_COLOR = "#b8c0d0";
   const colorOf = (engineId: string) => engineColors.get(engineId) ?? UNKNOWN_ENGINE_COLOR;
+  // engineOf は手順リストの「誰が言った手か」の見た目（`study.ts` に渡す）。
+  //
+  // ⚠️ **色は折れ線と同じ 1 か所から引くこと**（違う色になったら、丸と線を
+  // 結び付けられないので出す意味が無い）。
+  const engineOf = (engineId: string) => ({
+    color: colorOf(engineId),
+    // 一覧から消えたエンジンでも丸は残る（手順のほうが長生きする）。**id を出す**
+    // —— 空にすると「誰かが言った手」とだけ分かって誰かが分からない。
+    label: engineNames.get(engineId) || engineId,
+  });
 
   // 見出しの色見本を今の色に塗り直す。**枠を作り直さない**
   // （色を変えただけで候補手の一覧が消えると、何が起きたのか分からない）。
@@ -1756,7 +1768,7 @@ export function mountMainScreen(root: HTMLElement): void {
           items: [{
             label: `手順を追加（${usis.length}手）`,
             kind: "primary",
-            onPick: () => void addLineToStudy(usis),
+            onPick: () => void addLineToStudy(card.id, usis),
           }],
         });
       });
@@ -2360,6 +2372,8 @@ export function mountMainScreen(root: HTMLElement): void {
       studyMoveStatus.textContent = message;
       studyMoveStatus.hidden = message === "";
     },
+    // 手順に出す「誰が言った手か」の色と名前。**折れ線と同じ色を引く**。
+    engineOf,
   });
 
   // 再読み込み（2026-08-13）。**URL の側を正**にして手順を最新にする。
@@ -2400,9 +2414,10 @@ export function mountMainScreen(root: HTMLElement): void {
   //
   // ⚠️ **足しても今見ている局面は動かない**（指すのではない）。走っている解析も
   // そのままなので、**候補を続けて足せる**。
-  const addLineToStudy = async (moves: string[]) => {
+  // engineId は**その読み筋を出したエンジン**（手順リストで色の丸になる）。
+  const addLineToStudy = async (engineId: string, moves: string[]) => {
     try {
-      const got = await StudyService.AddLine(moves);
+      const got = await StudyService.AddLine(engineId, moves);
       showStudy(got.state);
       // ⚠️ **分かれ道になったら、分かれた手をまとめて畳む**（2026-08-13）。
       // 読み筋は 15 手ぶら下がることがあるので、畳まないと**もう 1 本の候補が
@@ -3594,8 +3609,10 @@ export function mountMainScreen(root: HTMLElement): void {
     // エンジンの色（評価値グラフ・見出しの色見本）。**設定が唯一の出所**で、
     // 既定色の解決も Go 側が済ませてある（`EngineSettings.Color` は常に入っている）。
     engineColors.clear();
+    engineNames.clear();
     for (const e of s.engines ?? []) {
       engineColors.set(e.id, e.color);
+      engineNames.set(e.id, e.name);
     }
     engineColorOptions = s.engineColors ?? [];
     paintEngineColors();
