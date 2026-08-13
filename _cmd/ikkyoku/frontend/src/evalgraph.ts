@@ -46,7 +46,10 @@ const ticks = (cap: number, step: number): number[] => {
   return out;
 };
 
-const PAD = { top: 8, right: 10, bottom: 15, left: 36 };
+// 描画の余白。⚠️ **下は狭い**（2026-08-14）—— 手数の目盛りを**真ん中の 0 の線の上**へ
+// 移したので、下に文字を置く場所を取らなくてよくなった（そのぶん折れ線が縦に広がる）。
+// 目盛りを下に戻すなら、ここも 15px 前後に戻すこと（戻さないと文字が切れる）。
+const PAD = { top: 8, right: 10, bottom: 6, left: 36 };
 
 export interface EvalGraphHandle {
   // render は Go から返ってきたグラフを描く（null なら空にする）。
@@ -217,12 +220,14 @@ export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
       }
     }
     // 縦の目盛り。**間隔は範囲に合わせる**（150 手で 5 手刻みにすると読めない）。
+    //
+    // ⚠️ **手数の文字はここで描かない**（2026-08-14）。**真ん中の 0 の線の上**に
+    // 出すので、**折れ線より後**に描かないと線に隠れる（下の「手数の目盛り」）。
     const step = span <= 30 ? 5 : span <= 80 ? 10 : span <= 200 ? 20 : 50;
+    const xticks: number[] = [];
     for (let n = Math.ceil(x0 / step) * step; n <= x1; n += step) {
       svg.appendChild(el("line", { x1: px(n), x2: px(n), y1: top, y2: bottom, class: "eval-grid" }));
-      svg.appendChild(
-        el("text", { x: px(n), y: h - 4, class: "eval-tick", "text-anchor": "middle" }),
-      ).textContent = String(n);
+      xticks.push(n);
     }
 
     // ---- 分かれなかったほうの線（枝に居るとき）------------------------------
@@ -316,6 +321,23 @@ export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
       svg.appendChild(el("rect", {
         x: a, y: top, width: Math.max(b - a, 1), height: bottom - top, class: "eval-select",
       }));
+    }
+
+    // ---- 手数の目盛り ------------------------------------------------------
+    //
+    // ⚠️ **真ん中（0 の線）に出す**（2026-08-14。以前は箱の下端）。評価値の
+    // 折れ線は互角のあたりを行き来することが多いので、**手数が一番読みたいのは
+    // その近く**。下端に置くと、線を目で追いながら手数を読むのに視線が往復する。
+    //
+    // ⚠️ **折れ線より後に描くこと**（線に隠れる）。⚠️ **文字の後ろは地の色で
+    // 縁取る**（`paint-order: stroke`）—— 0 の線と折れ線がそのまま文字を横切るので、
+    // 縁取りが無いと読めない。
+    for (const n of xticks) {
+      svg.appendChild(
+        el("text", {
+          x: px(n), y: mid + 3, class: "eval-tick is-axis", "text-anchor": "middle",
+        }),
+      ).textContent = String(n);
     }
 
     // ---- 凡例 --------------------------------------------------------------
