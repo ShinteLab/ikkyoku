@@ -2316,6 +2316,11 @@ export function mountMainScreen(root: HTMLElement): void {
     try {
       const got = await StudyService.AddLine(moves);
       showStudy(got.state);
+      // ⚠️ **分かれ道になったら、分かれた手をまとめて畳む**（2026-08-13）。
+      // 読み筋は 15 手ぶら下がることがあるので、畳まないと**もう 1 本の候補が
+      // 画面の外**に出て、**その手で何を指したのかを見比べられない**。
+      // （分かれていないときは何もしない —— 足したものは見せる）
+      studyBoardUI.foldForkAt(got.firstId);
       // ⚠️ **1 手も増えないことがある**（候補が本譜と同じ手順のとき）。
       // **それは失敗ではない**ので、そう分かる文言にする。
       studyMoveStatus.textContent = got.added > 0

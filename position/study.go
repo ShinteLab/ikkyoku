@@ -208,11 +208,20 @@ func (s *Study) Nodes() []Node {
 			}
 			out = append(out, n.kids[0].node(depth, true))
 			walk(n.kids[0], depth, main)
-		case mode == head || len(n.kids) > 1:
-			// ⚠️ **頭の子は 1 本でも下げる／分かれ道は全部そろえて下げる**（上記）。
+		case mode == head:
+			// ⚠️ **頭の子は 1 本でも下げる**（上記）。
 			for _, k := range n.kids {
 				out = append(out, k.node(depth+1, false))
 				walk(k, depth+1, cont)
+			}
+		case len(n.kids) > 1:
+			// ⚠️ **分かれ道の子は「そこから始まる変化」なので、頭と同じ扱い**
+			// （2026-08-13）。**続きを 1 段下げる＝その手が畳める節点になる**ので、
+			// **分かれた手どうしを隣り合わせて見比べられる**（読み筋は 15 手ぶら
+			// 下がることがあり、下げないと**次の候補が画面の外**になる）。
+			for _, k := range n.kids {
+				out = append(out, k.node(depth+1, false))
+				walk(k, depth+1, head)
 			}
 		default:
 			// 1 本道の続き。下げる意味が無い。

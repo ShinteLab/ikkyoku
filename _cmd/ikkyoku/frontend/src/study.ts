@@ -52,6 +52,15 @@ export interface StudyBoardHandle {
   // ⚠️ **見え方とモデルが反対になる**ので、重ねるグリッドは
   // 「見た目の位置 → 局面のマス」を読み替える。
   setFlip(flip: boolean): void;
+  // foldForkAt は「その手が分かれ道の 1 本なら、分かれた手をまとめて畳む」。
+  //
+  // **読み筋を足した直後に呼ぶ**（`AddLine` が返した最初の節点）。⚠️ 読み筋は
+  // 15 手ぶら下がることがあるので、畳まないと**もう 1 本の候補が画面の外**に出て、
+  // **その手で何を指したのかを見比べられない**（分岐を見る意味が薄れる）。
+  //
+  // ⚠️ **分かれていない（1 本しかない）ときは畳まないこと** —— 足したばかりの
+  // 読み筋がいきなり消えると、何が起きたのか分からない。
+  foldForkAt(id: number): void;
   // ⚠️ **「1手戻す」は無くなった**（2026-08-13。分岐を入れる前段）。手順を短く
   // するのは**手順リストの右クリック**だけで、消える範囲は「押した手とその先」。
   // `Undo` は「今どこを見ているか」に依存していて、戻って見ている最中に押すと
@@ -659,6 +668,29 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
     relayout() {
       layoutGrid();
       paint();
+    },
+    foldForkAt(id: number) {
+      if (!state?.loaded || id <= 0) {
+        return;
+      }
+      const rows = state.nodes ?? [];
+      const me = rows.find((n) => n.id === id);
+      if (!me) {
+        return;
+      }
+      const upDepth = me.parent === 0 ? 0 : rows.find((n) => n.id === me.parent)?.depth ?? 0;
+      // 兄弟＝同じ親から**下がって**出ている手（本譜の続きは同じ深さなので入らない）。
+      const sibs = rows.filter((n) => n.parent === me.parent && n.depth > upDepth);
+      if (sibs.length < 2) {
+        return;
+      }
+      for (const sib of sibs) {
+        // 続きを持つものだけ畳む（1 手だけの枝は畳んでも何も変わらない）。
+        if (rows.some((n) => n.parent === sib.id)) {
+          collapsed.add(sib.id);
+        }
+      }
+      renderMoves();
     },
     setFlip(next: boolean) {
       if (next === flipped) {

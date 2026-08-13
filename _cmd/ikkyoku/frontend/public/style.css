@@ -2570,7 +2570,7 @@ html.is-main #app {
   display: flex;
   align-items: center;
   gap: 2px;
-  margin-left: calc(min(var(--move-depth, 0), 4) * 12px);
+  margin-left: calc(min(var(--move-depth, 0), 6) * 12px);
 }
 
 /* 変化の始まり。⚠️ **同じ深さの変化が続けて並ぶ**（同じ手の続きを 2 本足すと

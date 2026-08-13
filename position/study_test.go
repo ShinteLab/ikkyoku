@@ -484,3 +484,39 @@ func TestStudyNodesShapeIsStableWhenSiblingAdded(t *testing.T) {
 		}
 	}
 }
+
+// ⚠️ **分かれ道の子は「変化の頭」と同じ扱いにすること**（2026-08-13）。
+//
+// 続きを 1 段下げる＝**その手が畳める節点になる**ので、分かれた手どうしを
+// 隣り合わせて見比べられる。読み筋は 15 手ぶら下がることがあるので、
+// 下げないと**次の候補が画面の外**に出て、分岐を見る意味が薄れる。
+func TestStudyNodesForkChildrenAreHeads(t *testing.T) {
+	s := position.NewStudy(hirate(t))
+	for _, mv := range []string{"7g7f", "3c3d", "2g2f", "8c8d"} {
+		if err := s.Play(mv); err != nil {
+			t.Fatalf("Play %s: %v", mv, err)
+		}
+	}
+	if err := s.GoTo(1); err != nil {
+		t.Fatalf("GoTo: %v", err)
+	}
+	// 頭（△８四歩 ▲２六歩）まで同じで、その次から食い違う 2 本。
+	s.AddLine([]string{"8c8d", "2g2f", "8d8e", "2f2e"})
+	s.AddLine([]string{"8c8d", "2g2f", "4a3b", "6i7h"})
+
+	at := map[string]position.Node{}
+	for _, n := range s.Nodes() {
+		at[n.USI] = n
+	}
+	// 分かれた 2 手は同じ深さ。
+	if at["8d8e"].Depth != at["4a3b"].Depth {
+		t.Errorf("分かれた手の深さが違います: %+v / %+v", at["8d8e"], at["4a3b"])
+	}
+	// ⚠️ **その続きは 1 段下がっていること**（＝分かれた手が畳める節点になる）。
+	if at["2f2e"].Depth != at["8d8e"].Depth+1 {
+		t.Errorf("分かれた手の続きが下がっていません: %+v", at["2f2e"])
+	}
+	if at["6i7h"].Depth != at["4a3b"].Depth+1 {
+		t.Errorf("分かれた手の続きが下がっていません: %+v", at["6i7h"])
+	}
+}
