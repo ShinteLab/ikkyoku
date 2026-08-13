@@ -573,3 +573,54 @@ func TestAccumulatorNamesPVAfterMoves(t *testing.T) {
 		}
 	}
 }
+
+// ⚠️ **`lowerbound` / `upperbound` の速報で読み筋を潰さないこと**（2026-08-13）。
+//
+// あれは探索の途中で「この手はこれ以上（以下）」と分かっただけの報告で、
+// **評価値は確定値ではなく、読み筋も 1 手しか付かないのが普通**。取り込むと
+// **画面の読み筋がその 1 手に化ける**（実際に「最善手の読み筋だけが消える」
+// という形で出た。USI のやり取りには正しい読み筋が流れているのでログでは分からない）。
+//
+// ⚠️ **`lastPV`（読み筋の無い更新で消さない仕掛け）では救えない** ——
+// 1 手だけの読み筋は「有る」ので通ってしまう。
+func TestAccumulatorIgnoresBoundReports(t *testing.T) {
+	a := &accumulator{black: true, started: time.Now(), sfen: startpos}
+	a.add(coreusi.Info{
+		Depth: 12, MultiPV: 1, ScoreCP: 100, HasScore: true,
+		PV: []string{"7g7f", "3c3d", "2g2f"},
+	})
+	// 次の深さの速報（読み筋は 1 手だけ・評価値は確定値ではない）。
+	if _, ok := a.add(coreusi.Info{
+		Depth: 13, MultiPV: 1, ScoreCP: 237, HasScore: true, LowerBound: true,
+		PV: []string{"9i9h"},
+	}); ok {
+		t.Error("速報を表示の更新として通しました")
+	}
+	if _, ok := a.add(coreusi.Info{
+		Depth: 13, MultiPV: 1, ScoreCP: -80, HasScore: true, UpperBound: true,
+		PV: []string{"9i9h"},
+	}); ok {
+		t.Error("速報を表示の更新として通しました")
+	}
+
+	p := a.snapshot()
+	if len(p.Lines) != 1 {
+		t.Fatalf("候補が消えています: %+v", p.Lines)
+	}
+	if len(p.Lines[0].Moves) != 3 {
+		t.Fatalf("読み筋が速報で潰れました: %+v", p.Lines[0].Moves)
+	}
+	if got := p.Lines[0].Score.CP; got != 100 {
+		t.Errorf("評価値 = %d, want 100（確定値だけを採ること）", got)
+	}
+
+	// 確定値が来たら、そちらは採ること。
+	a.add(coreusi.Info{
+		Depth: 13, MultiPV: 1, ScoreCP: 180, HasScore: true,
+		PV: []string{"9i9h", "3c3d", "2g2f", "8c8d"},
+	})
+	p = a.snapshot()
+	if p.Lines[0].Score.CP != 180 || len(p.Lines[0].Moves) != 4 {
+		t.Errorf("確定値が採れていません: %+v", p.Lines[0])
+	}
+}
