@@ -489,10 +489,18 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
   // ⚠️ **「1手戻す」の代わり**（2026-08-13。分岐を入れる前段）。消えるのは
   // **押した手とその先**で、`Undo` と違って「今どこを見ているか」に依存しない。
   //
-  // ⚠️ **聞いてから消すこと。** 右クリックは誤爆しやすいうえ、消えるのは
-  // **1 手ではなく、そこから下の全部**（解析結果も一緒に消える）。
+  // ⚠️ **右クリックでいきなり消す UI を出さないこと**（2026-08-14）。
+  // まず**メニュー**（「以降の手を削除」）を出し、**押してから**「本当に消すか」を
+  // 聞く。右クリックは誤爆しやすいのに、いきなり赤いボタンが指の下に出ると
+  // **その勢いで押せてしまう**。候補手の右クリック（「手順を追加」）とも形が揃う。
+  //
+  // ⚠️ **聞くほうを省かないこと。** 消えるのは**1 手ではなく、そこから下の全部**
+  // （解析結果も一緒に消える）。**メニューは「何をするか」、確認は「何が消えるか」**で
+  // 役割が違う。
   // ⚠️ **聞いているあいだ、消える範囲を赤く光らせる**（`.is-doomed`）——
   // 「その手以下が消える」は文字で言うより見せたほうが早い。
+  // ⚠️ **光らせるのは確認のときだけ**（メニューの段では光らせない）。
+  // 赤は「これから消える」の合図なので、まだ選んでいない段で出すと意味が薄れる。
 
   // markDoomed はその手とその子孫を「消える」見た目にする（0 で全部戻す）。
   //
@@ -542,6 +550,22 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
     });
   };
 
+  // askDropMenu は右クリックで最初に出すメニュー。
+  //
+  // ⚠️ **ここでは消さない**（押すと確認が出る）。⚠️ **`danger` にしないこと** ——
+  // 赤くするのは「押したら消える」ボタンだけで、メニューの段で赤いと
+  // **確認が出ることに気づかず身構える**。
+  const askDropMenu = (x: number, y: number, id: number, label: string, count: number) => {
+    closeAsk();
+    ask = openPopup(x, y, {
+      label: "手順",
+      items: [{
+        label: "以降の手を削除",
+        onPick: () => askDrop(x, y, id, label, count),
+      }],
+    });
+  };
+
   // 手順リストの右クリック。**チップの上でだけ受ける**（列の余白では既定のまま）。
   movesPanel.addEventListener("contextmenu", (e) => {
     const chip = (e.target as HTMLElement | null)?.closest<HTMLElement>(".move-chip");
@@ -570,7 +594,7 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
       return false;
     }).length;
     const label = chip.querySelector<HTMLElement>(".move-text")?.textContent ?? "この手";
-    askDrop(e.clientX, e.clientY, id, label, count);
+    askDropMenu(e.clientX, e.clientY, id, label, count);
   });
 
   // play は移動先が決まったときに 1 手指す。
