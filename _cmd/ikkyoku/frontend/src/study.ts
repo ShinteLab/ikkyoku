@@ -161,6 +161,12 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
 
   let state: StudyState | null = null;
   let pick: Pick | null = null;
+  // 畳んである手（**画面だけの状態**。局面も手順も変わらないので Go には持たせない）。
+  //
+  // ⚠️ **根が入れ替わったら捨てること。** 節点の id は木ごとに 1 から振り直すので、
+  // 前の対局の畳み方が**関係の無い手を隠す**。
+  const collapsed = new Set<number>();
+  let lastRoot = "";
 
   const legalMoves = (): LegalMove[] => state?.legal ?? [];
 
@@ -253,12 +259,89 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
       return;
     }
     const at = state.currentId ?? 0;
+    const rows = state.nodes ?? [];
+
+    // ---- 折り畳み（2026-08-13）-------------------------------------------
+    //
+    // ⚠️ **畳むのは「その手にぶら下がった枝」だけ。** 続き（同じ深さで伸びる
+    // 手順）は畳まない —— あれはその手の枝ではなく**同じ 1 本の続き**なので、
+    // 畳むと本譜が丸ごと消える。
+    //
+    // 判定は**深さ**で行う: 親より深い子＝枝の入口。
+    const depthOf = new Map<number, number>([[0, 0]]);
+    const parentOf = new Map<number, number>([[0, -1]]);
+    for (const n of rows) {
+      depthOf.set(n.id, n.depth);
+      parentOf.set(n.id, n.parent);
+    }
+    // ⚠️ **今見ている手は必ず見えていること。** 畳んだ中に入る手を選んだら
+    // （評価値グラフから飛ぶなど）、その道筋だけ開く。
+    for (let n = at; n > 0; n = parentOf.get(n) ?? -1) {
+      const up = parentOf.get(n) ?? -1;
+      if (up >= 0 && (depthOf.get(n) ?? 0) > (depthOf.get(up) ?? 0)) {
+        collapsed.delete(up);
+      }
+    }
+    const hidden = (id: number): boolean => {
+      for (let n = id; n > 0; ) {
+        const up = parentOf.get(n) ?? -1;
+        if (up < 0) {
+          return false;
+        }
+        // 畳んである手の「枝の入口」を通ったなら隠れている。
+        if (collapsed.has(up) && (depthOf.get(n) ?? 0) > (depthOf.get(up) ?? 0)) {
+          return true;
+        }
+        n = up;
+      }
+      return false;
+    };
+    // 枝を持つ手にだけ +/- を出す（続きしか無い手には出さない）。
+    const hasBranch = (id: number) =>
+      rows.some((n) => n.parent === id && n.depth > (depthOf.get(id) ?? 0));
+    // ⚠️ **変化の始まりには区切りを出す。** 同じ深さの変化が続けて並ぶと
+    // （９七角の続きが 2 本、など）、**どこで次の変化に変わったのか**が
+    // 手数の戻り方でしか分からない。**本譜側には出さない**（線が増えるだけ）。
+    const isFork = (n: { parent: number; main: boolean }) =>
+      !n.main && rows.filter((x) => x.parent === n.parent).length > 1;
     // 手数と手を別の要素にして、**手数の桁を揃える**（縦に並ぶので、揃っていないと
     // 何手目を見ているのかが読み取りにくい）。
     const chip = (
       num: string, label: string, id: number, title: string,
-      o?: { depth?: number; main?: boolean; parent?: number },
+      o?: { depth?: number; main?: boolean; parent?: number; fork?: boolean },
     ) => {
+      // ⚠️ **行は chip とトグルの 2 つ**（ボタンの中にボタンは置けない）。
+      // 字下げは**行のほう**に付ける（chip に付けると、トグルだけ左に残る）。
+      const row = document.createElement("div");
+      row.className = o?.fork ? "move-row is-fork" : "move-row";
+      row.style.setProperty("--move-depth", String(o?.depth ?? 0));
+
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "move-toggle";
+      if (hasBranch(id)) {
+        const shut = collapsed.has(id);
+        toggle.textContent = shut ? "+" : "−";
+        toggle.title = shut ? "枝を開く" : "枝を畳む";
+        toggle.setAttribute("aria-expanded", String(!shut));
+        toggle.addEventListener("click", () => {
+          if (collapsed.has(id)) {
+            collapsed.delete(id);
+          } else {
+            collapsed.add(id);
+          }
+          // ⚠️ **Go は呼ばない**（畳むのは見た目だけ。局面も手順も変わらない）。
+          renderMoves();
+        });
+      } else {
+        // ⚠️ **枝が無くても場所は空けておくこと。** 出したり消したりすると、
+        // 手の頭が行ごとに左右へずれて読みにくい。
+        toggle.classList.add("is-empty");
+        toggle.tabIndex = -1;
+        toggle.setAttribute("aria-hidden", "true");
+      }
+      row.appendChild(toggle);
+
       const b = document.createElement("button");
       b.type = "button";
       b.className = "move-chip";
@@ -274,17 +357,20 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
       // ⚠️ **枝は見た目で分かるようにする**（字下げ + 色）。同じ手数の手が
       // 何行も並ぶので、**どれが本譜か**が分からないと読めない。
       b.classList.toggle("is-branch", o?.main === false);
-      // 字下げは CSS 変数で（深い枝ほど右へ。**上限は CSS 側で頭打ちにする**）。
-      b.style.setProperty("--move-depth", String(o?.depth ?? 0));
       // ⚠️ **id と親は消す範囲を出すのに要る**（`.is-doomed` を付ける相手を辿る鍵）。
       // ⚠️ **GoTo に渡すのも id**（手数ではない。枝があると同じ手数が何個もある）。
       b.dataset.id = String(id);
       b.dataset.parent = String(o?.parent ?? -1);
       b.addEventListener("click", () => void run(() => StudyService.GoTo(id)));
-      return b;
+      row.appendChild(b);
+      return row;
     };
     movesPanel.appendChild(chip("", "開始局面", 0, "採ったときの局面に戻ります"));
-    for (const m of state.nodes ?? []) {
+    for (const m of rows) {
+      // 畳んである枝の中は出さない（**畳むのは見た目だけ**なので、手順は生きている）。
+      if (hidden(m.id)) {
+        continue;
+      }
       movesPanel.appendChild(
         // ⚠️ **出す数字と GoTo に渡す値は別物。** m.number は根からの手数で、
         // 画面に出すのは棋譜の手数（＝根の手数を足したもの）。撮った 41 手目の
@@ -292,7 +378,7 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
         chip(String((state.first ?? 0) + m.number), m.text || m.usi, m.id,
           `${m.usi} までの局面に戻ります` +
             (m.main ? "" : "（枝）") + "（右クリックでこの手から下を消します）",
-          { depth: m.depth, main: m.main, parent: m.parent }),
+          { depth: m.depth, main: m.main, parent: m.parent, fork: isFork(m) }),
       );
     }
     // 今見ている手が画面の外にあると、進めても手順が動いていないように見える。
@@ -558,6 +644,11 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
         movesPanel.replaceChildren();
         paint();
         return;
+      }
+      // ⚠️ **根が変わったら畳み方を捨てる**（id が振り直されるため）。
+      if ((next.rootSfen ?? "") !== lastRoot) {
+        lastRoot = next.rootSfen ?? "";
+        collapsed.clear();
       }
       state = next;
       pick = null;

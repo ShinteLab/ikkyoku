@@ -24,8 +24,10 @@ package position
 //	└─ 71 ３二飛打 …      ← 本譜（＝最初の子）
 //
 // - ⚠️ **枝と本譜を別の型で持たない。** ソフトの上ではどちらもただの指し手で、
-//   違いは「親の何番目の子か」だけ（`kids[0]` が本譜側）。**片方だけ消せる/
-//   消せないといった区別も付けない**（本譜は URL から取り直せる）
+//   違いは「親の何番目の子か」だけ（**根から `kids[0]` だけを辿った 1 本が本譜**）。
+//   **片方だけ消せる/消せないといった区別も付けない**（本譜は URL から取り直せる）
+// - ⚠️ **枝の中の `kids[0]` は「先に足した」以上の意味を持たない。** 本筋のように
+//   見せないこと（`Nodes` の字下げの規則を読むこと）
 // - ⚠️ **同じ手を指したら枝を増やさない**（既にある子を辿る）。これが
 //   「候補手が本譜と同じなら、食い違うところまで辿ってからそこで枝にする」
 //   の実体で、`Play` と `AddLine` と `Graft` の 3 つが同じ規則を共有する
@@ -65,7 +67,11 @@ type Node struct {
 	Text string `json:"text"`
 	// Depth は枝の深さ（**本譜だけを辿ってきたら 0**）。ツリービューの字下げ。
 	Depth int `json:"depth"`
-	// Main は親の最初の子か（＝その分岐での本筋）。
+	// Main は**本譜か**（根から `kids[0]` だけを辿って届く手）。
+	//
+	// ⚠️ **「親の最初の子」ではない**（2026-08-13 に意味を変えた）。枝の中の
+	// 最初の子は「先に足した」以上の意味を持たないので、そこまで本筋扱いすると
+	// **同じ手に続きを 2 つ足したときに、先に足したほうが上位に見える。**
 	Main bool `json:"main"`
 }
 
@@ -144,25 +150,54 @@ func pathUSI(n *treeNode) []string {
 
 // Nodes は木を**表示順**に並べて返す（根は含まない）。
 //
-// 並びは「その節点 → **枝**（字下げ）→ 本譜の続き」。⚠️ **枝を後ろへ回さないこと**
+// 並びは「その節点 → **枝**（字下げ）→ 続き」。⚠️ **枝を後ろへ回さないこと**
 // —— 足した枝が 100 手先の最後尾に出ると、どこから分かれたのか分からない。
 // この順なら**ある節点の子孫は必ずその直後に固まる**ので、消す範囲も見た目で分かる。
+//
+// # 字下げの規則（**2026-08-13 に直した**）
+//
+// ⚠️ **「最初の子だから」で特別扱いするのは本譜の上だけ。**
+//
+//	本譜の上（Main）      … 続き（kids[0]）は同じ深さのまま。変化だけ 1 段下げる
+//	枝の中で子が 1 つ      … そのまま同じ深さで続く（1 本道なので下げる意味が無い）
+//	枝の中で子が 2 つ以上  … ⚠️ **全部そろえて 1 段下げる**
+//
+// 最後の規則が肝。**枝の中の `kids[0]` は「先に足した」以上の意味を持たない**ので、
+// そこを本筋のように見せると、**同じ手の続きを 2 つ足したときに、先に足したほうが
+// 上位に見える**（実際に「先に選んだ９七角と後に選んだ９七角が同等に見えない」
+// という形で出た）。並びで先後は分かるので、**深さでは差を付けない。**
+//
+// ⚠️ **本譜まで下げないこと。** 分岐のたびに本譜が右へ流れると、
+// 150 手の棋譜では字下げが頭打ちに達して**深さが何も意味しなくなる。**
 func (s *Study) Nodes() []Node {
 	out := []Node{}
-	var walk func(n *treeNode, depth int)
-	walk = func(n *treeNode, depth int) {
-		// **枝が先、本譜があと**（枝は 1 段下げる）。
-		for _, k := range n.kids[min(1, len(n.kids)):] {
-			out = append(out, k.node(depth+1, false))
-			walk(k, depth+1)
+	var walk func(n *treeNode, depth int, main bool)
+	walk = func(n *treeNode, depth int, main bool) {
+		if len(n.kids) == 0 {
+			return
 		}
-		if len(n.kids) > 0 {
-			k := n.kids[0]
-			out = append(out, k.node(depth, true))
-			walk(k, depth)
+		if main {
+			// **枝が先、本譜があと**（枝は 1 段下げる）。
+			for _, k := range n.kids[1:] {
+				out = append(out, k.node(depth+1, false))
+				walk(k, depth+1, false)
+			}
+			out = append(out, n.kids[0].node(depth, true))
+			walk(n.kids[0], depth, true)
+			return
+		}
+		if len(n.kids) == 1 {
+			out = append(out, n.kids[0].node(depth, false))
+			walk(n.kids[0], depth, false)
+			return
+		}
+		// ⚠️ **枝の中の分かれ道は、全部そろえて下げる**（上記）。
+		for _, k := range n.kids {
+			out = append(out, k.node(depth+1, false))
+			walk(k, depth+1, false)
 		}
 	}
-	walk(s.top, 0)
+	walk(s.top, 0, true)
 	return out
 }
 

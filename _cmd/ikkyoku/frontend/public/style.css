@@ -2561,12 +2561,55 @@ html.is-main #app {
   padding-right: 2px;
 }
 
-/* 手順の 1 手。**ツリービュー**なので、枝は深さぶん字下げする（2026-08-13）。
+/* 手順の 1 行 ＝ **[+/-] + 手**（2026-08-13）。
+   ⚠️ **字下げは行に付けること。** chip に付けると、トグルだけ左に取り残される。
    ⚠️ **字下げの上限を付けること**（min）。深い枝で右へ流れ続けると、
    細い列では手が読めなくなる。 */
-.move-chip {
+.move-row {
   flex: 0 0 auto;
-  margin-left: calc(min(var(--move-depth, 0), 4) * 10px);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: calc(min(var(--move-depth, 0), 4) * 12px);
+}
+
+/* 変化の始まり。⚠️ **同じ深さの変化が続けて並ぶ**（同じ手の続きを 2 本足すと
+   そうなる）ので、区切りが無いと**どこで次の変化に変わったのか**が手数の
+   戻り方でしか分からない。**本譜側には出さない**（線が増えるだけ）。 */
+.move-row.is-fork {
+  margin-top: 3px;
+  padding-top: 3px;
+  border-top: 1px dashed #3a4353;
+}
+
+/* 枝の開閉。⚠️ **枝が無い行でも場所は空けておく**（`is-empty`）——
+   出たり消えたりすると、手の頭が行ごとに左右へずれて読みにくい。 */
+.move-toggle {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  font-size: 11px;
+  line-height: 1;
+  color: #c8cdd8;
+  background: #2c303a;
+  border: 1px solid #3a3d47;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.move-toggle:hover {
+  border-color: #5ea0ff;
+}
+
+.move-toggle.is-empty {
+  visibility: hidden;
+  cursor: default;
+}
+
+.move-chip {
+  flex: 1 1 auto;
+  min-width: 0;
   display: flex;
   align-items: baseline;
   gap: 6px;

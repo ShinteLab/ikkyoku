@@ -406,3 +406,49 @@ func TestStudyGraftAppendIsNotMove(t *testing.T) {
 		t.Errorf("突き合わせがおかしい: %+v", r)
 	}
 }
+
+// ⚠️ **枝の中の分かれ道は、全部そろえて字下げすること**（2026-08-13）。
+//
+// 2 つのエンジンが同じ手（例: ９七角）を挙げ、その先だけが違うとき、
+// **先に足したほうが本筋のように見えてはいけない**（実際にそう見えて直した）。
+// 本譜だけは字下げしない —— 分岐のたびに右へ流れると深さが意味を失う。
+func TestStudyNodesIndentsBranchSiblingsEqually(t *testing.T) {
+	s := position.NewStudy(hirate(t))
+	if err := s.Play("7g7f"); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	// 本譜は 1 手目のあと △３四歩。
+	if err := s.Play("3c3d"); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	if err := s.GoTo(1); err != nil {
+		t.Fatalf("GoTo: %v", err)
+	}
+	// 枝（△８四歩）に、続きの違う読み筋を 2 本足す。
+	if _, added, note := s.AddLine([]string{"8c8d", "2g2f"}); added != 2 || note != "" {
+		t.Fatalf("AddLine: added=%d note=%s", added, note)
+	}
+	if _, added, note := s.AddLine([]string{"8c8d", "6g6f"}); added != 1 || note != "" {
+		t.Fatalf("AddLine: added=%d note=%s", added, note)
+	}
+
+	at := map[string]position.Node{}
+	for _, n := range s.Nodes() {
+		at[n.USI] = n
+	}
+	// **同じ △８四歩 の続き 2 つが同じ深さ**であること。
+	if at["2g2f"].Depth != at["6g6f"].Depth {
+		t.Errorf("先に足したほうが上位に見えます: %+v / %+v", at["2g2f"], at["6g6f"])
+	}
+	if at["2g2f"].Depth != at["8c8d"].Depth+1 {
+		t.Errorf("枝の中の分かれ道が下がっていません: %+v", at["2g2f"])
+	}
+	// **本譜は下がらない**（1 手目と同じ深さのまま）。
+	if at["3c3d"].Depth != 0 || !at["3c3d"].Main {
+		t.Errorf("本譜が字下げされました: %+v", at["3c3d"])
+	}
+	// 枝は本譜ではない（色分けの鍵）。
+	if at["8c8d"].Main || at["2g2f"].Main {
+		t.Errorf("枝が本譜になっています: %+v / %+v", at["8c8d"], at["2g2f"])
+	}
+}
