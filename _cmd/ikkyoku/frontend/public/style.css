@@ -3226,6 +3226,14 @@ html.is-main #app {
   display: none;
 }
 
+/* 「認識詳細情報」の中では画像を**中央に**置く（見出しの行は左寄せのまま）。
+   画像は縦横比も大きさもキャプチャごとに違うので、左端に貼り付けると
+   折りたたみの中で位置が毎回変わって見える。
+   ⚠️ 重ね表示は .shot の中の絶対配置なので、寄せ方を変えてもずれない。 */
+.debug-shot > .shot {
+  align-self: center;
+}
+
 .overlay {
   position: absolute;
   inset: 0;
