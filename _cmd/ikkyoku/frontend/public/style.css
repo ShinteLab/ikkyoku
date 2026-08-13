@@ -676,6 +676,9 @@ html.is-main #app {
      （60px → 72px）。横は 110px → 86px（左右 16 を外して margin-left の 8 を
      足し戻したぶん）。**片方だけ直すと盤がはみ出す。** */
   padding: 12px 0 0;
+  /* 連続解析の幕（`.veil`）の基準。⚠️ **パネルに置くこと** —— 盤だけに被せると、
+     手順リストも評価値グラフも触れてしまう（触らせないのが目的）。 */
+  position: relative;
   /* ⚠️ **`.panel` の gap（10px）も 0**（2026-08-13）。**縦のスプリットバーの
      下端と、横のスプリットバーを繋げるため** —— あいだが空いていると、
      2 本が別々の飾りに見えて「ここで区切られている」の線が途切れる。
@@ -3457,4 +3460,66 @@ html.is-main #app {
 .kifu-url-row input {
   flex: 1 1 auto;
   min-width: 0;
+}
+
+/* ---- 連続解析の幕（2026-08-14）--------------------------------------------
+   **連続解析のあいだ、解析タブを触れなくする。** 連続解析は 1 手ずつ局面を
+   動かしながら走るので、その最中に盤や手順を触ると**自分の操作と連続解析が
+   同じ局面を取り合う**（押した手からまた解析が進んでいくように見える）。
+
+   ⚠️ **薄くすること。** 下で盤と評価値グラフが 1 手ずつ進むのが見えていないと、
+   待っているあいだ何が起きているのか分からない（**止めるかどうかの判断材料**）。
+   ⚠️ **止める口をこの中に置くこと** —— 幕は下を全部塞ぐので、側の列の「停止」も
+   押せなくなる。**出口の無い幕にしない。** */
+.veil {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 17, 21, 0.55);
+}
+
+/* ⚠️ **`display: flex` を上書きすること**（`[hidden]` だけでは消えない）。 */
+.veil[hidden] {
+  display: none;
+}
+
+.veil-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 22px;
+  background: #23262e;
+  border: 1px solid #3a3d47;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+/* どこまで進んだか。**これが無いと、止めるかどうかを決められない。** */
+.veil-note {
+  margin: 0;
+  font-size: 13px;
+  color: #c8cdd8;
+}
+
+.veil-btn {
+  padding: 7px 18px;
+  font-size: 13px;
+  color: #f2f3f5;
+  background: #2c303a;
+  border: 1px solid #5ea0ff;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.veil-btn:hover {
+  background: #343a47;
+}
+
+.veil-btn:focus-visible {
+  outline: 2px solid #f2f3f5;
+  outline-offset: 1px;
 }

@@ -804,6 +804,21 @@ export function mountMainScreen(root: HTMLElement): void {
           <div id="eval-graph" class="eval-graph"
                title="押すとその局面に戻ります（手順は消えません）。横にドラッグするとその範囲に絞ります"></div>
         </div>
+        <!-- 連続解析のあいだ被せる幕（2026-08-14）。**触れなくするのが目的。**
+             連続解析は 1 手ずつ局面を動かしながら走るので、その最中に盤や
+             手順を触ると**自分の操作と連続解析が同じ局面を取り合う**
+             （押した手からまた解析が進んでいくように見える）。
+
+             ⚠️ **止める口をこの中に置くこと。** 幕は下を全部塞ぐので、
+             側の列の「停止」も押せなくなる。**出口が無い幕にしない。**
+             ⚠️ **薄くすること** —— 下で盤と評価値グラフが 1 手ずつ進むのが
+             見えていないと、待っているあいだ何が起きているのか分からない。 -->
+        <div id="batch-veil" class="veil" hidden>
+          <div class="veil-box">
+            <p id="batch-veil-note" class="veil-note">連続解析中…</p>
+            <button id="batch-veil-cancel" class="veil-btn" type="button">解析をキャンセル</button>
+          </div>
+        </div>
       </div>
 
       <div id="panel-settings" class="panel" role="tabpanel" aria-labelledby="tab-settings" hidden>
@@ -1251,6 +1266,10 @@ export function mountMainScreen(root: HTMLElement): void {
   const analyzeStatus = root.querySelector<HTMLParagraphElement>("#analyze-status")!;
   const evalGraphRow = root.querySelector<HTMLDivElement>("#eval-graph-row")!;
   const batchRun = root.querySelector<HTMLButtonElement>("#analyze-batch-run")!;
+  // 連続解析のあいだ被せる幕（2026-08-14）。**触れなくするのが目的。**
+  const batchVeil = root.querySelector<HTMLElement>("#batch-veil")!;
+  const batchVeilNote = root.querySelector<HTMLElement>("#batch-veil-note")!;
+  const batchVeilCancel = root.querySelector<HTMLButtonElement>("#batch-veil-cancel")!;
 
   // 今の解析の世代。**打ち切った解析の途中経過は後から届く**ので、これで捨てる。
   let analyzeSeq = -1;
@@ -1864,6 +1883,16 @@ export function mountMainScreen(root: HTMLElement): void {
 
   const syncBatchButton = () => {
     const blocked = batchBlockedReason();
+    // ⚠️ **幕の出し入れはここ 1 か所**（走っているかの判定が 2 か所に散ると、
+    // 幕だけ残って何も触れなくなる）。
+    const veiled = !batchVeil.hidden;
+    batchVeil.hidden = !batchActive();
+    if (batchActive() && !veiled) {
+      // 出した瞬間はまだ手数が分からない（`batchStep` が入れる）。
+      batchVeilNote.textContent = "連続解析中…";
+      // **キーボードでも止められるように**、出したらフォーカスを移す。
+      batchVeilCancel.focus();
+    }
     batchRun.textContent = batchActive() ? "停止" : "連続解析";
     batchRun.classList.toggle("is-active", batchActive());
     // 走っている最中は止められる。走っていないときは、解析できる局面かつ
@@ -1928,6 +1957,9 @@ export function mountMainScreen(root: HTMLElement): void {
       // **連続モードが切ってあると 1 手目で止まる。**
       await startAnalyze();
       analyzeMeta.textContent = `連続解析: ${n}〜${batchLast}手目のうち ${n}手目`;
+      // ⚠️ **幕にも出すこと。** 下の行は幕越しで読みにくいので、
+      // **どこまで進んだか**が分からないと、止めるかどうかを判断できない。
+      batchVeilNote.textContent = `連続解析中… ${n} / ${batchLast}手目`;
       if (!analyzeRunning) {
         // 起動そのものに失敗した（エンジンが選ばれていない等）。
         // **ここで止めないと、残りの手でも同じ失敗を繰り返す。**
@@ -1940,12 +1972,31 @@ export function mountMainScreen(root: HTMLElement): void {
     }
   };
 
+  // cancelBatch は連続解析をやめる（**幕のボタンと「停止」の共通の口**）。
+  //
+  // ⚠️ **走っている解析も止めること。** 順番を止めるだけだと、今の 1 手の解析が
+  // 秒数いっぱい走り続ける（止めたのに止まっていないように見える）。
+  const cancelBatch = () => {
+    stopBatch("連続解析を止めました");
+    if (analyzeRunning) {
+      void AnalyzeService.Stop();
+    }
+  };
+
+  batchVeilCancel.addEventListener("click", cancelBatch);
+  // ⚠️ **Esc でも止められること。** 幕が出ているあいだ他に押せるものは無いので、
+  // 取り違えようが無い（普段の Esc はダイアログを閉じる操作で、そちらは
+  // 幕が出ているあいだ開かない）。
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && batchActive()) {
+      e.preventDefault();
+      cancelBatch();
+    }
+  });
+
   batchRun.addEventListener("click", () => {
     if (batchActive()) {
-      stopBatch("連続解析を止めました");
-      if (analyzeRunning) {
-        void AnalyzeService.Stop();
-      }
+      cancelBatch();
       return;
     }
     // ⚠️ **始点は「今どこを見ているか」**（カーソル位置）。範囲を打ち込ませない
