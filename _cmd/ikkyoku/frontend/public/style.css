@@ -712,9 +712,15 @@ html.is-main #app {
      ⚠️ **メイン画面を Frameless にしたぶんは 100vh 側で返ってくる**（2026-08-12）。
      OS のタイトルバーが無くなったので `100vh` がそのぶん増え、**引く量も
      92px → 82px に減った**（タブの行がタイトルバーを兼ねるようになったため）。
-     両方が効いて盤が縦に大きくなる。 */
+     両方が効いて盤が縦に大きくなる。
+
+     ⚠️ **縦の取り分は変数に切り出してある**（2026-08-14。`--board-area-h`）。
+     **右の列（`.study-side`）の頭打ちがこれを使う** —— 盤の実寸で頭打ちにすると、
+     **盤が横で決まっているとき（＝解析の列を広げたとき）に手順まで一緒に縮む**
+     （縦は空いているのに）。**式を書き写さないこと。** */
+  --board-area-h: calc(100vh - var(--winrate-h) - var(--eval-graph-h) - 72px);
   --board-size: min(
-    calc(100vh - var(--winrate-h) - var(--eval-graph-h) - 72px),
+    var(--board-area-h),
     calc((100vw - var(--study-side-min) - 86px) / 1.4)
   );
 }
@@ -2577,10 +2583,18 @@ html.is-main #app {
    表記の長さが変わるたびに幅が動くと、**盤が横へずれてグリッドだけ取り残される**
    （そのとき layoutGrid は呼ばれない）。縮むのはこちらだけ（盤は flex: 0 0 auto）。
 
-   ⚠️ **高さも中身に依存させないこと**（`--board-size` で頭打ちにする）。
-   `.board-area` は縮まない（`flex: 1 0 auto`）ので、**この列が盤より高くなると
+   ⚠️ **高さも中身に依存させないこと**（頭打ちにする）。
+   `.board-area` は縮まない（`flex: 1 0 auto`）ので、**この列が背より高くなると
    行ごと伸び、`align-items: center` の盤が画面の外へ出る**。溢れたぶんは
-   中の箱（`.analyze-engines` / `.study-moves`）でスクロールさせる。 */
+   中の箱（`.analyze-engines` / `.study-moves`）でスクロールさせる。
+
+   ⚠️ **頭打ちは `--board-area-h`（縦の取り分）であって、盤の実寸ではない**
+   （2026-08-14 に `--board-size` から変えた）。盤は**縦と横の小さいほう**で
+   決まるので、盤の実寸で頭打ちにすると**盤が横で決まっているとき**——
+   つまり**縦のスプリットバーでこの列を広げたとき**や窓が横に狭いとき——
+   **縦は空いているのに手順まで一緒に縮む**。**手順（`.study-moves`）は
+   余った高さをもらう箱**なので、そのぶんそのまま短くなっていた。
+   ⚠️ **`--board-area-h` は `#panel-study` が持っている。式を書き写さないこと。** */
 .study-side {
   flex: 0 1 auto;
   /* ⚠️ **残りの幅を全部もらう**（2026-08-12）。盤が先に「取れるだけ」取り、
@@ -2593,7 +2607,7 @@ html.is-main #app {
   min-width: 0;
   align-self: stretch;
   min-height: 0;
-  max-height: var(--board-size);
+  max-height: var(--board-area-h);
   display: flex;
   flex-direction: column;
   gap: 6px;
