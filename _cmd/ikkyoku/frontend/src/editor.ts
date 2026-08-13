@@ -48,7 +48,7 @@ const TURN_UNKNOWN = 0;
 const TURN_BLACK = 1;
 const TURN_WHITE = 2;
 
-// ドラッグの中身。dataTransfer に JSON で載せる。
+// 掴んでいるものの中身。**JS の変数に持つだけ**（dataTransfer は使わない。下記）。
 type Drag =
   // 盤のマスから
   | { from: "cell"; rank: number; file: number }
@@ -56,8 +56,6 @@ type Drag =
   | { from: "stock"; piece: number; black: boolean }
   // 駒台から（その側が持っている駒）
   | { from: "hand"; piece: number; black: boolean };
-
-const DRAG_TYPE = "application/x-ikkyoku-piece";
 
 const RANK_KANJI = ["一", "二", "三", "四", "五", "六", "七", "八", "九"];
 const cellLabel = (rank: number, file: number) => `${9 - file}${RANK_KANJI[rank] ?? "?"}`;
@@ -370,7 +368,6 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
       const c: EditCell | undefined = next.cells?.[rank * 9 + file];
       const empty = c?.empty ?? true;
       el.classList.toggle("is-empty", empty);
-      el.draggable = !empty;
       el.dataset.mark = c?.mark ?? "";
       el.title = `${cellLabel(rank, file)} ${c?.name ?? "空"}`;
     }
@@ -418,7 +415,6 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
       chip.className = "stock-chip is-missing";
       // **足りていても掴める。** 上限で止めると「余計な駒を外す前に正しい駒を
       // 置けない」という詰みが起きる（設計原則3・4）。見た目だけ非活性にする。
-      chip.draggable = true;
       chip.dataset.piece = String(s.piece);
       chip.textContent = s.letter;
       chip.classList.toggle("is-spare", s.unassigned <= 0);
@@ -462,7 +458,6 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
           total++;
           const chip = document.createElement("div");
           chip.className = black ? "stock-chip" : "stock-chip is-white";
-          chip.draggable = true;
           chip.dataset.piece = String(s.piece);
           chip.dataset.hand = "true";
           chip.textContent = black ? s.letter : s.letter.toLowerCase();
@@ -474,91 +469,172 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     }
   }
 
-  // ---- ドラッグ＆ドロップ -------------------------------------------------
+  // ---- ドラッグ（**pointer events で自前に持つ**） -------------------------
+  //
+  // ⚠️ **HTML5 のネイティブ DnD（`draggable` + `dragstart`/`drop`）を使わないこと。**
+  // 2026-08-08 と 2026-08-13 の「メイン画面が真っ黒になって触れなくなる」は、
+  // **どちらもこの訂正タブでドラッグしている最中に始まっている**
+  // （掴めない/ドロップできない → 禁止カーソル → そのまま黒くなる）。
+  //
+  // Windows の Chromium はネイティブ DnD を OLE の `DoDragDrop` で動かしており、
+  // **ブラウザプロセスの UI スレッドでモーダルなループが回る**。そこが抜けられなく
+  // なると、**同じ WebView2 環境にぶら下がっている 2 枚とも**巻き添えで固まる
+  // （実際に main と frame の心拍が同じ秒に止まり、Go 側の `Eval`/`Focus` も
+  // そのスレッドへ行くので以後ずっと失敗した）。**こちらから直せる場所が無い。**
+  // 経緯は CLAUDE.md の「メイン画面が真っ黒になって触れなくなる」。
+  //
+  // pointer events は**レンダラの中で完結する**ので、そのループに入らない。
+  // 引き換えに、掴んだ駒の追従描画と落とし先の判定は自前になる（下記）。
+  //
+  // ⚠️ **落とし先は `elementFromPoint` で引く。** ネイティブ DnD と違って
+  // `dragover` が飛んでこないので、**ゴーストは必ず `pointer-events: none`**
+  // にしておくこと（自分自身を掴んでしまい、どこにも落とせなくなる）。
 
-  // ドラッグ中のゴースト。透明なマスをそのまま掴むと何も見えないので、
-  // 駒文字を描いた要素を一時的に作って setDragImage に渡す。
+  // 掴んだ駒の絵。透明なマスをそのまま掴むと何も見えないので、駒文字を描いた
+  // 要素を作ってカーソルに追従させる。**位置は `left`/`top` に直接入れる。**
   let ghost: HTMLElement | null = null;
+  const GHOST_GRAB = 20; // ゴーストの中で掴んでいる点（40px の中心）
+
   const makeGhost = (mark: string, black: boolean) => {
     const g = document.createElement("div");
     g.className = black ? "drag-ghost" : "drag-ghost is-white";
     g.textContent = mark;
     document.body.appendChild(g);
     ghost = g;
-    return g;
   };
   const dropGhost = () => {
     ghost?.remove();
     ghost = null;
   };
-
-  const setDrag = (e: DragEvent, data: Drag) => {
-    e.dataTransfer?.setData(DRAG_TYPE, JSON.stringify(data));
-    e.dataTransfer!.effectAllowed = "move";
-  };
-  const readDrag = (e: DragEvent): Drag | null => {
-    const raw = e.dataTransfer?.getData(DRAG_TYPE);
-    if (!raw) {
-      return null;
-    }
-    try {
-      return JSON.parse(raw) as Drag;
-    } catch {
-      return null;
+  const moveGhost = (x: number, y: number) => {
+    if (ghost) {
+      ghost.style.left = `${x - GHOST_GRAB}px`;
+      ghost.style.top = `${y - GHOST_GRAB}px`;
     }
   };
 
-  grid.addEventListener("dragstart", (e) => {
-    const el = (e.target as HTMLElement)?.closest<HTMLElement>(".edit-cell");
-    if (!editable || !el || el.classList.contains("is-empty")) {
-      e.preventDefault();
-      return;
-    }
-    const rank = Number(el.dataset.rank);
-    const file = Number(el.dataset.file);
-    const mark = el.dataset.mark ?? "";
-    setDrag(e, { from: "cell", rank, file });
-    e.dataTransfer?.setDragImage(makeGhost(mark, mark === mark.toUpperCase()), 20, 20);
-    el.classList.add("is-dragging");
-  });
+  // 落とし先（盤のマス以外）。`makeDropZone` が積む。
+  type Zone = { el: HTMLElement; handler: (data: Drag) => Promise<EditState> | null };
+  const zones: Zone[] = [];
 
-  grid.addEventListener("dragend", (e) => {
-    (e.target as HTMLElement)?.classList.remove("is-dragging");
-    dropGhost();
-  });
+  // 掴んでいるもの。null なら掴んでいない。
+  //
+  // ⚠️ **`pointerId` を必ず見ること。** 途中で別のポインタ（2 本目の指・
+  // ペンとマウス）が上がっても、掴んでいるものを取り違えないため。
+  let drag: { data: Drag; src: HTMLElement; pointerId: number } | null = null;
 
-  grid.addEventListener("dragover", (e) => {
-    if (!editable || !e.dataTransfer?.types.includes(DRAG_TYPE)) {
-      return;
-    }
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-    const el = (e.target as HTMLElement)?.closest<HTMLElement>(".edit-cell");
-    for (const c of cells) {
-      c.classList.toggle("is-over", c === el);
-    }
-  });
-
-  grid.addEventListener("dragleave", (e) => {
-    (e.target as HTMLElement)?.closest<HTMLElement>(".edit-cell")?.classList.remove("is-over");
-  });
-
-  grid.addEventListener("drop", (e) => {
-    if (!editable) {
-      return;
-    }
-    e.preventDefault();
+  const clearOver = () => {
     for (const c of cells) {
       c.classList.remove("is-over");
     }
-    const el = (e.target as HTMLElement)?.closest<HTMLElement>(".edit-cell");
-    const data = readDrag(e);
-    if (!el || !data) {
+    for (const z of zones) {
+      z.el.classList.remove("is-over");
+    }
+  };
+
+  // targetAt はその画面座標にある落とし先を返す。**盤のマスが優先。**
+  function targetAt(x: number, y: number): { cell?: HTMLElement; zone?: Zone } {
+    const el = document.elementFromPoint(x, y) as HTMLElement | null;
+    if (!el) {
+      return {};
+    }
+    const cell = el.closest<HTMLElement>(".edit-cell");
+    if (cell) {
+      return { cell };
+    }
+    for (const z of zones) {
+      if (z.el.contains(el)) {
+        return { zone: z };
+      }
+    }
+    return {};
+  }
+
+  // beginDrag は掴む。**左ボタンだけ**（右クリックはマスを回す操作なので、
+  // ここで拾うと `contextmenu` が来なくなる）。
+  function beginDrag(e: PointerEvent, src: HTMLElement, data: Drag, mark: string, black: boolean) {
+    if (!editable || e.button !== 0 || drag) {
+      return;
+    }
+    // 既定のテキスト選択・画像ドラッグを止める（**ネイティブ DnD の入口を塞ぐ**）。
+    e.preventDefault();
+    drag = { data, src, pointerId: e.pointerId };
+    src.classList.add("is-dragging");
+    makeGhost(mark, black);
+    moveGhost(e.clientX, e.clientY);
+    // ⚠️ **捕まえておくこと。** 盤の外・ウィンドウの外まで引くのが普通の操作なので、
+    // 取らないと途中で追従が切れる（**離した瞬間を取りこぼすと掴んだまま残る**）。
+    try {
+      src.setPointerCapture(e.pointerId);
+    } catch {
+      // 捕まえられなくても window で拾えるので続ける。
+    }
+  }
+
+  // endDrag は掴んでいる状態を畳む。**落としたときも、やめたときも通る。**
+  function endDrag() {
+    drag?.src.classList.remove("is-dragging");
+    drag = null;
+    dropGhost();
+    clearOver();
+  }
+
+  // 捕まえた（`setPointerCapture`）あとも window までは上がってくるので、
+  // 移動と離しは 1 か所で受ける。**掴む側の要素ごとに書かないこと。**
+  window.addEventListener("pointermove", (e) => {
+    if (!drag || e.pointerId !== drag.pointerId) {
+      return;
+    }
+    moveGhost(e.clientX, e.clientY);
+    const t = targetAt(e.clientX, e.clientY);
+    clearOver();
+    (t.cell ?? t.zone?.el)?.classList.add("is-over");
+  });
+
+  window.addEventListener("pointerup", (e) => {
+    if (!drag || e.pointerId !== drag.pointerId) {
+      return;
+    }
+    const data = drag.data;
+    // ⚠️ **先に畳んでから落とす。** 落とし先の判定に `elementFromPoint` を使うので、
+    // ゴーストが残っていると自分を拾う。
+    endDrag();
+    const t = targetAt(e.clientX, e.clientY);
+    if (t.cell) {
+      dropOnCell(t.cell, data);
+      return;
+    }
+    const p = t.zone?.handler(data);
+    if (p) {
+      void apply(() => p);
+    }
+  });
+
+  // 掴んだまま取り消せること。**盤の外で離す = 何もしない**は `targetAt` が
+  // 空を返すので自然にそうなるが、Esc とポインタの中断も同じ入口へ寄せる。
+  window.addEventListener("pointercancel", (e) => {
+    if (drag && e.pointerId === drag.pointerId) {
+      endDrag();
+    }
+  });
+  window.addEventListener("keydown", (e) => {
+    if (drag && e.key === "Escape") {
+      endDrag();
+    }
+  });
+
+  // dropOnCell は盤のマスへ落としたときの振り分け。
+  function dropOnCell(el: HTMLElement, data: Drag) {
+    if (!editable) {
       return;
     }
     const rank = Number(el.dataset.rank);
     const file = Number(el.dataset.file);
     if (data.from === "cell") {
+      // 同じマスへ戻しただけなら何もしない（掴み直しの取り消し）。
+      if (data.rank === rank && data.file === file) {
+        return;
+      }
       void apply(() => PositionService.Move(data.rank, data.file, rank, file));
     } else if (data.from === "hand") {
       // 駒台から打つ。**その側の駒台に無ければ Go 側で弾かれる。**
@@ -567,6 +643,21 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
       // 足りない駒からは常に不成で置く（成/不成はクリックで切り替える）。
       void apply(() => PositionService.Place(rank, file, data.piece, data.black, false));
     }
+  }
+
+  grid.addEventListener("pointerdown", (e) => {
+    const el = (e.target as HTMLElement)?.closest<HTMLElement>(".edit-cell");
+    if (!el || el.classList.contains("is-empty")) {
+      return;
+    }
+    const mark = el.dataset.mark ?? "";
+    beginDrag(
+      e,
+      el,
+      { from: "cell", rank: Number(el.dataset.rank), file: Number(el.dataset.file) },
+      mark,
+      mark === mark.toUpperCase(),
+    );
   });
 
   // 右クリックで 1 マスを回す（先手不成 → 先手成 → 後手不成 → 後手成 → …）。
@@ -587,19 +678,18 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
 
   // 足りない駒。**先後未決の駒のドラッグ元**であり、
   // **盤から先後を決めずに外すドロップ先**でもある。
-  missing.addEventListener("dragstart", (e) => {
+  missing.addEventListener("pointerdown", (e) => {
     const chip = (e.target as HTMLElement)?.closest<HTMLElement>(".stock-chip");
-    if (!editable || !chip) {
-      e.preventDefault();
+    if (!chip) {
       return;
     }
     // 持ち主が決まっていないので、置き先の駒台が先後を決める。
     // 盤に落とされたときは先手の駒として置く（右クリックで後手に直せる）。
-    setDrag(e, { from: "stock", piece: Number(chip.dataset.piece), black: true });
-    e.dataTransfer?.setDragImage(makeGhost(chip.textContent ?? "", true), 20, 20);
+    // ⚠️ **視点で既定を変えないこと**（表示だけの反転が局面の中身に効いてしまう）。
+    beginDrag(e, chip, { from: "stock", piece: Number(chip.dataset.piece), black: true },
+      chip.textContent ?? "", true);
   });
 
-  missing.addEventListener("dragend", dropGhost);
   makeDropZone(missing, (data) => {
     // 盤から: 先後を決めずに外す。駒台から: 持ち主を未決に戻す。
     if (data.from === "cell") {
@@ -615,16 +705,14 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   for (const zone of handZones) {
     const black = zone.dataset.black === "true";
 
-    zone.addEventListener("dragstart", (e) => {
+    zone.addEventListener("pointerdown", (e) => {
       const chip = (e.target as HTMLElement)?.closest<HTMLElement>(".stock-chip");
-      if (!editable || !chip) {
-        e.preventDefault();
+      if (!chip) {
         return;
       }
-      setDrag(e, { from: "hand", piece: Number(chip.dataset.piece), black });
-      e.dataTransfer?.setDragImage(makeGhost(chip.textContent ?? "", black), 20, 20);
+      beginDrag(e, chip, { from: "hand", piece: Number(chip.dataset.piece), black },
+        chip.textContent ?? "", black);
     });
-    zone.addEventListener("dragend", dropGhost);
 
     makeDropZone(zone, (data) => {
       if (data.from === "cell") {
@@ -642,38 +730,14 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     });
   }
 
-  // makeDropZone はドロップ先の共通処理（ハイライトと dragover の許可）。
+  // makeDropZone は盤のマス以外の落とし先を登録する。
   // handler が null を返したら何もしない。
+  //
+  // ⚠️ **登録するだけ**（listener は付けない）。落とし先の判定は
+  // `pointerup` の `targetAt` が 1 か所でやる —— ネイティブ DnD と違って
+  // `dragover`/`drop` が飛んでこないので、**受け取る側では決められない**。
   function makeDropZone(el: HTMLElement, handler: (data: Drag) => Promise<EditState> | null) {
-    el.addEventListener("dragover", (e) => {
-      if (!editable || !e.dataTransfer?.types.includes(DRAG_TYPE)) {
-        return;
-      }
-      e.preventDefault();
-      e.dataTransfer.dropEffect = "move";
-      el.classList.add("is-over");
-    });
-    el.addEventListener("dragleave", (e) => {
-      // 中の要素へ移っただけの dragleave では消さない。
-      if (!el.contains(e.relatedTarget as Node | null)) {
-        el.classList.remove("is-over");
-      }
-    });
-    el.addEventListener("drop", (e) => {
-      if (!editable) {
-        return;
-      }
-      e.preventDefault();
-      el.classList.remove("is-over");
-      const data = readDrag(e);
-      if (!data) {
-        return;
-      }
-      const p = handler(data);
-      if (p) {
-        void apply(() => p);
-      }
-    });
+    zones.push({ el, handler });
   }
 
   // 駒台の枚数を 1 増減する。**枚数は状態から読み直す**（フロントで数えない）。

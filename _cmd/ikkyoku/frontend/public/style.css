@@ -2351,6 +2351,10 @@ html.is-main #app {
 .edit-cell {
   border: 1px solid transparent;
   border-radius: 2px;
+  /* ドラッグは pointer events で自前に持っている（editor.ts）。盤はスクロール
+     しないので、掴んでいる最中にブラウザのジェスチャへ持っていかれないよう塞ぐ。
+     ⚠️ **駒台（.stock-chip）には付けないこと** —— あちらは中がスクロールする。 */
+  touch-action: none;
 }
 
 .edit-grid.is-active .edit-cell:not(.is-empty) {
@@ -2371,12 +2375,18 @@ html.is-main #app {
   opacity: 0.4;
 }
 
-/* ドラッグ中のゴースト。透明なマスをそのまま掴むと何も見えないので、
-   駒文字を描いた要素を一時的に作って setDragImage に渡している。 */
+/* 掴んだ駒の絵。透明なマスをそのまま掴むと何も見えないので、駒文字を描いた
+   要素を作ってカーソルに追従させる（位置は editor.ts が left/top に入れる）。
+
+   ⚠️ **pointer-events: none を外さないこと。** 落とし先は elementFromPoint で
+   引いており、これが無いと**自分自身を拾ってどこにも落とせなくなる**。
+   ⚠️ 初期位置を画面外にしてあるのは、掴んだ瞬間に左上へ一瞬出ないため。 */
 .drag-ghost {
   position: fixed;
   top: -1000px;
   left: -1000px;
+  z-index: 60;
+  pointer-events: none;
   width: 40px;
   height: 40px;
   display: flex;
