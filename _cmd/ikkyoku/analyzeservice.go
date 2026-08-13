@@ -490,7 +490,11 @@ func (s *AnalyzeService) runOne(
 	}
 	record(res.Progress)
 	s.rememberEngine(entry.ID, res.Engine)
-	s.logger.Info("解析しました",
+	// ⚠️ **debug で出す**（2026-08-14。以前は Info）。**連続モードでは 1 手ごとに、
+	// 連続解析では手数ぶん**出るので、151 手の棋譜を通すとこの行だけでログが埋まる
+	// （エンジンを 2 つ有効にすればその倍）。**消したのではなく黙らせただけ**なので、
+	// 追うときはハンドラの Level を debug にすること。
+	s.logger.Debug("解析しました",
 		"engine", res.Engine, "id", entry.ID, "sfen", target.Root, "depth", res.Depth,
 		"best", res.Bestmove, "nodes", res.Nodes,
 		"elapsedMs", res.ElapsedMS, "startupMs", res.StartupMS, "reused", res.Reused,
