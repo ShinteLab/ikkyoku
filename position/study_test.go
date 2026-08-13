@@ -605,8 +605,9 @@ func TestStudyAddLineSources(t *testing.T) {
 		}
 	})
 
-	// ⚠️ **人が指した手には付かない**（盤で動かした手・棋譜の手）。
-	t.Run("人が指した手には付かない", func(t *testing.T) {
+	// ⚠️ **人が指した手にエンジンは付かない。** 代わりに `Hand` が立つ
+	// （手順リストでは黒い丸）。
+	t.Run("人が指した手にはエンジンが付かない", func(t *testing.T) {
 		s := position.NewStudy(hirate(t))
 		if err := s.Play("7g7f"); err != nil {
 			t.Fatalf("Play: %v", err)
@@ -632,6 +633,77 @@ func TestStudyAddLineSources(t *testing.T) {
 		}
 		if got := sourcesOf(s, at); len(got) != 1 || got[0] != "e1" {
 			t.Errorf("Sources = %v, want [e1]", got)
+		}
+	})
+}
+
+// TestStudyHandMark は**人が盤で指した手**の印を固定する（2026-08-14）。
+//
+// ⚠️ **棋譜（KIF / URL）の手には付かない。** あちらは**実際に現れた指し手**で、
+// 「自分で試しに指した手」とは別物。⚠️ **`Play` は `FromKIF` も通る**ので、
+// **`Play` に印を付ける実装にすると棋譜の手まで自分の手になる。**
+func TestStudyHandMark(t *testing.T) {
+	handOf := func(s *position.Study, id int) bool {
+		for _, n := range s.Nodes() {
+			if n.ID == id {
+				return n.Hand
+			}
+		}
+		return false
+	}
+	sourcesOf := func(s *position.Study, id int) []string {
+		for _, n := range s.Nodes() {
+			if n.ID == id {
+				return n.Sources
+			}
+		}
+		return nil
+	}
+
+	t.Run("盤で指した手には付く", func(t *testing.T) {
+		s := position.NewStudy(hirate(t))
+		if err := s.Play("7g7f"); err != nil {
+			t.Fatalf("Play: %v", err)
+		}
+		if !handOf(s, s.CurrentID()) {
+			t.Error("Hand が立っていません")
+		}
+	})
+
+	t.Run("エンジンの読み筋には付かない", func(t *testing.T) {
+		s := position.NewStudy(hirate(t))
+		first, _, _ := s.AddLine([]string{"7g7f"}, "e1")
+		if handOf(s, first) {
+			t.Error("エンジンの手に Hand が立っています")
+		}
+	})
+
+	// ⚠️ **棋譜の手には付かない**（`FromKIF` は印なしで指す）。
+	t.Run("棋譜の手には付かない", func(t *testing.T) {
+		src := "手合割：平手\n手数----指手---------消費時間--\n   1 ７六歩(77)\n"
+		st, _, err := position.FromKIF(src)
+		if err != nil {
+			t.Fatalf("FromKIF: %v", err)
+		}
+		nodes := st.Nodes()
+		if len(nodes) != 1 {
+			t.Fatalf("手数 = %d, want 1", len(nodes))
+		}
+		if nodes[0].Hand {
+			t.Error("棋譜の手に Hand が立っています")
+		}
+	})
+
+	// ⚠️ **エンジンが挙げた手を自分でも指したら、どちらの印も残ること。**
+	// 片方だけ残すと、どちらが消えたのか画面からは分からない。
+	t.Run("印は消さずに重なる", func(t *testing.T) {
+		s := position.NewStudy(hirate(t))
+		first, _, _ := s.AddLine([]string{"7g7f"}, "e1")
+		if err := s.Play("7g7f"); err != nil {
+			t.Fatalf("Play: %v", err)
+		}
+		if !handOf(s, first) || len(sourcesOf(s, first)) != 1 {
+			t.Errorf("印が落ちました: hand=%v sources=%v", handOf(s, first), sourcesOf(s, first))
 		}
 	})
 }

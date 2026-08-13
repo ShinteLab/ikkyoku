@@ -68,7 +68,10 @@ func FromKIF(text string) (*Study, KIFLoad, error) {
 
 	study := NewStudy(root)
 	for i, mv := range moves {
-		if err := study.Play(mv); err != nil {
+		// ⚠️ **`Play` を使わないこと**（2026-08-14）。あちらは「人が盤で指した」
+		// 印が付く。**棋譜の手は実際に現れた指し手**なので、自分で試しに指した手と
+		// 同じ印を付けると、手順リストでどちらか分からなくなる。
+		if err := study.play(mv, mark{}); err != nil {
 			name := mv
 			if i < len(doc.Moves) {
 				name = doc.Moves[i].Name

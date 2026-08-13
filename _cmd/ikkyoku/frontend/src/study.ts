@@ -338,7 +338,7 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
       num: string, label: string, id: number, title: string,
       o?: {
         depth?: number; main?: boolean; parent?: number; fork?: boolean;
-        sources?: string[];
+        sources?: string[]; hand?: boolean;
       },
     ) => {
       // ⚠️ **行は chip とトグルの 2 つ**（ボタンの中にボタンは置けない）。
@@ -384,10 +384,23 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
       t.className = "move-text";
       t.textContent = label;
       b.append(i, t);
+      // 自分で盤に指した手（2026-08-14）。**黒い丸で、目立たなくてよい** ——
+      // 読みたいのは「エンジンが挙げた手（色）」のほうで、これは
+      // **後から「これは自分で入れた手だ」と分かればよい**という程度の印。
+      // ⚠️ **棋譜（KIF / URL）の手には出ない**（Go 側が印を付けない）。
+      // あちらは**実際に現れた指し手**で、自分で試しに指した手とは別物。
+      if (o?.hand) {
+        const dot = document.createElement("span");
+        dot.className = "move-source is-hand";
+        dot.title = "自分で指した手";
+        b.appendChild(dot);
+      }
       // ⚠️ **手の後ろに出す**（前に置くと、手数と手のあいだに割り込んで
       // **縦に並んだ手の頭が揃わなくなる**）。
       // ⚠️ **複数出しうる** —— 同じ手を 2 つのエンジンが挙げるのは普通で、
       // **その一致が一番読みたいもの**。1 つに丸めないこと。
+      // ⚠️ **自分で指した手にエンジンの丸が並ぶこともある**（エンジンが挙げた手を
+      // 自分でも指したとき）。**どちらも本当**なので、片方に丸めないこと。
       for (const src of o?.sources ?? []) {
         const e = engineOf(src);
         const dot = document.createElement("span");
@@ -424,7 +437,7 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
             (m.main ? "" : "（枝）") + "（右クリックでこの手から下を消します）",
           {
             depth: m.depth, main: m.main, parent: m.parent, fork: isFork(m),
-            sources: m.sources ?? [],
+            sources: m.sources ?? [], hand: m.hand ?? false,
           }),
       );
     }

@@ -78,6 +78,17 @@ type Node struct {
 	// **後勝ちで上書きしないこと** —— 消すと「両方が同じ手を指した」という、
 	// **一番読みたい一致**が見えなくなる。
 	Sources []string `json:"sources,omitempty"`
+	// Hand は**人が盤で指した手か**（解析タブで駒を動かした手）。
+	//
+	// 手順リストでは**黒い丸**（`Sources` の色の丸と並ぶ）。⚠️ **目立たせない** ——
+	// 読みたいのは「エンジンが挙げた手（色）」のほうで、これは
+	// **自分で入れた手だと後から分かればよい**という程度の印。
+	//
+	// ⚠️ **棋譜（KIF / URL）の手には付かない。** あちらは**実際に現れた指し手**で、
+	// 「自分が試しに指した手」とは別物（`FromKIF` / `Graft` は付けない）。
+	// ⚠️ **`Play` を通るのは盤の操作だけではない**（`FromKIF` も 1 手ずつ指す）ので、
+	// **`Play` に印を付ける実装にしないこと。**
+	Hand bool `json:"hand,omitempty"`
 	// Main は**本譜か**（根から `kids[0]` だけを辿って届く手）。
 	//
 	// ⚠️ **「親の最初の子」ではない**（2026-08-13 に意味を変えた）。枝の中の
@@ -95,6 +106,8 @@ type treeNode struct {
 	parent *treeNode
 	// sources はこの手を挙げたエンジンの登録 ID（`Node.Sources`）。
 	sources []string
+	// hand は人が盤で指した手か（`Node.Hand`）。
+	hand bool
 	// kids は子。**kids[0] が本譜側**（`Graft` はここへ据え直す）。
 	kids []*treeNode
 }
@@ -259,6 +272,7 @@ func (n *treeNode) node(depth int, main bool) Node {
 		ID: n.id, Parent: parent, Number: n.number,
 		USI: n.usi, Text: n.text, Depth: depth, Main: main,
 		Sources: append([]string(nil), n.sources...),
+		Hand:    n.hand,
 	}
 }
 
@@ -351,8 +365,14 @@ func (s *Study) Legal() ([]legal.Move, error) {
 //
 // ⚠️ **同じ手が既にあるならそれを辿る**（枝を増やさない）。別の手なら**枝が生える**
 // ——**前の手順は消えない**（2026-08-13。それまでは捨てていた）。
-func (s *Study) Play(move string) error {
-	next, err := s.grow(s.cur, s.curPos, move, "")
+func (s *Study) Play(move string) error { return s.play(move, mark{hand: true}) }
+
+// play は印を指定して 1 手指す（`Play` の中身）。
+//
+// ⚠️ **棋譜の取り込み（`FromKIF`）もここを通る**ので、**印はゼロ値**で渡す。
+// あちらは実際に現れた指し手で、「自分で試しに指した手」ではない。
+func (s *Study) play(move string, m mark) error {
+	next, err := s.grow(s.cur, s.curPos, move, m)
 	if err != nil {
 		return err
 	}
@@ -382,7 +402,7 @@ func (s *Study) AddLine(moves []string, source string) (int, int, string) {
 	first, added := 0, 0
 	for i, mv := range moves {
 		before := len(at.kids)
-		next, err := s.grow(at, pos, mv, source)
+		next, err := s.grow(at, pos, mv, mark{engine: source})
 		if err != nil {
 			return first, added, fmt.Sprintf("%d手目「%s」で止まりました: %v", i+1, mv, err)
 		}
@@ -410,7 +430,7 @@ func (s *Study) Graft(moves []string) GraftResult {
 	at, pos := s.top, s.root.Clone()
 	for i, mv := range moves {
 		before := len(at.kids)
-		next, err := s.grow(at, pos, mv, "")
+		next, err := s.grow(at, pos, mv, mark{})
 		if err != nil {
 			r.Note = fmt.Sprintf("%d手目で止まりました: %v", i+1, err)
 			return r
@@ -464,16 +484,26 @@ func promote(parent, kid *treeNode) {
 	}
 }
 
+// pos は at の局面（合法手の判定に要る）。⚠️ **合法手でなければ足さない。**
+// mark はその手が**どこから来たか**（手順リストに出す印）。
+//
+// ⚠️ **棋譜（KIF / URL）の手には何も付けない**（ゼロ値）。あちらは**実際に現れた
+// 指し手**なので、「誰かがそう言った手」ではない。
+type mark struct {
+	// engine はこの手を挙げたエンジンの登録 ID（解析の候補手から足したとき）。
+	engine string
+	// hand は人が盤で指したか。
+	hand bool
+}
+
 // grow は at の子として move を生やす（**既にあるならそれを返す**）。
 //
-// pos は at の局面（合法手の判定に要る）。⚠️ **合法手でなければ足さない。**
-// source は**この手を挙げたエンジン**の登録 ID（人が指したなら空）。
-// ⚠️ **既にある手にも足す**（同じ手を 2 つのエンジンが挙げるのは普通にあり、
-// **その一致こそ読みたい**）。
-func (s *Study) grow(at *treeNode, pos *Position, move, source string) (*treeNode, error) {
+// ⚠️ **既にある手にも印を足す**（同じ手を 2 つのエンジンが挙げるのは普通にあり、
+// **その一致こそ読みたい**。棋譜の手を自分でも指したなら、それも印が要る）。
+func (s *Study) grow(at *treeNode, pos *Position, move string, m mark) (*treeNode, error) {
 	for _, k := range at.kids {
 		if k.usi == move {
-			k.addSource(source)
+			k.addMark(m)
 			return k, nil
 		}
 	}
@@ -487,7 +517,7 @@ func (s *Study) grow(at *treeNode, pos *Position, move, source string) (*treeNod
 		text:   move,
 		parent: at,
 	}
-	n.addSource(source)
+	n.addMark(m)
 	s.nextID++
 	s.index[n.id] = n
 	at.kids = append(at.kids, n)
@@ -501,19 +531,24 @@ func (s *Study) grow(at *treeNode, pos *Position, move, source string) (*treeNod
 	return n, nil
 }
 
-// addSource はこの手を挙げたエンジンを覚える（空なら何もしない＝人が指した手）。
+// addMark はその手に付いた印を足す（**消さない**）。
 //
 // ⚠️ **同じエンジンを重ねないこと**（連続解析では同じ読み筋を何度も足しうる）。
-func (n *treeNode) addSource(id string) {
-	if id == "" {
+// ⚠️ **一度付いた印は落とさないこと** —— エンジンが挙げた手を自分でも指したなら、
+// **どちらも本当**（片方だけ残すと、どちらが消えたのか画面からは分からない）。
+func (n *treeNode) addMark(m mark) {
+	if m.hand {
+		n.hand = true
+	}
+	if m.engine == "" {
 		return
 	}
 	for _, s := range n.sources {
-		if s == id {
+		if s == m.engine {
 			return
 		}
 	}
-	n.sources = append(n.sources, id)
+	n.sources = append(n.sources, m.engine)
 }
 
 // checkLegal は pos でその手が指せるかを見る。
