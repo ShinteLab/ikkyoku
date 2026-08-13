@@ -176,6 +176,8 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
   // 前の対局の畳み方が**関係の無い手を隠す**。
   const collapsed = new Set<number>();
   let lastRoot = "";
+  // 最後に描いたときの「今見ている手」。**道筋を開くのは、ここが変わったときだけ。**
+  let lastAt = -1;
 
   const legalMoves = (): LegalMove[] => state?.legal ?? [];
 
@@ -283,12 +285,20 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
       depthOf.set(n.id, n.depth);
       parentOf.set(n.id, n.parent);
     }
-    // ⚠️ **今見ている手は必ず見えていること。** 畳んだ中に入る手を選んだら
-    // （評価値グラフから飛ぶなど）、その道筋だけ開く。
-    for (let n = at; n > 0; n = parentOf.get(n) ?? -1) {
-      const up = parentOf.get(n) ?? -1;
-      if (up >= 0 && (depthOf.get(n) ?? 0) > (depthOf.get(up) ?? 0)) {
-        collapsed.delete(up);
+    // ⚠️ **見ている局面が変わったときだけ、その道筋を開く。**
+    // 畳んだ中の手へ飛んだら（評価値グラフから、など）見えるようにするための処理。
+    //
+    // ⚠️ **描き直しのたびに開かないこと**（2026-08-13 に踏んだ）。**畳む操作自体が
+    // 描き直し**なので、毎回開くと**今いる枝を含む手を畳めない**（押しても何も
+    // 起きないように見え、「別の手を選んでからでないと畳めない」になる）。
+    // **畳んだ結果、今見ている手が隠れるのは正しい**（盤には出ているし、開けば戻る）。
+    if (at !== lastAt) {
+      lastAt = at;
+      for (let n = at; n > 0; n = parentOf.get(n) ?? -1) {
+        const up = parentOf.get(n) ?? -1;
+        if (up >= 0 && (depthOf.get(n) ?? 0) > (depthOf.get(up) ?? 0)) {
+          collapsed.delete(up);
+        }
       }
     }
     const hidden = (id: number): boolean => {
@@ -658,6 +668,8 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
       if ((next.rootSfen ?? "") !== lastRoot) {
         lastRoot = next.rootSfen ?? "";
         collapsed.clear();
+        // ⚠️ **道筋を開く判定もやり直す**（別の木なので、前の位置と比べる意味が無い）。
+        lastAt = -1;
       }
       state = next;
       pick = null;
