@@ -592,7 +592,7 @@ func (s *StudyService) Evals() EvalGraph {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.study == nil {
-		return EvalGraph{Series: []EvalSeries{}, IDs: []int{}}
+		return EvalGraph{Series: []EvalSeries{}, IDs: []int{}, Ref: []EvalSeries{}}
 	}
 	// ⚠️ **点は「今の経路」だけ**（枝と本譜を 1 本の折れ線に混ぜない）。
 	line := s.study.Line()
@@ -606,6 +606,36 @@ func (s *StudyService) Evals() EvalGraph {
 	g.Number = base + s.study.Ply()
 	// ⚠️ **右端は「今辿っている 1 本」の終わり**（木全体の最大手数ではない）。
 	g.Last = base + len(line) - 1
+	// **枝に居るなら、分かれなかったほうの線も薄く出す**（2026-08-13）。
+	// 枝を選んだ結果がどう転んだかは、**元の線と並べて初めて読める。**
+	if forkID, ref, ok := s.study.Fork(); ok {
+		fork := 0
+		if n, found := s.nodeLocked(forkID); found {
+			fork = n.Number
+		}
+		g.Fork = base + fork
+		// ⚠️ **共有している手前は落とす**（同じ点を 2 本描くことになる）。
+		for _, se := range s.evals.series(ref) {
+			pts := make([]EvalPoint, 0, len(se.Points))
+			for _, p := range se.Points {
+				if p.Ply > fork {
+					pts = append(pts, p)
+				}
+			}
+			if len(pts) > 0 {
+				se.Points = pts
+				g.Ref = append(g.Ref, se)
+			}
+		}
+		// ⚠️ **元の線が先まで伸びているなら、横軸もそこまで広げること** ——
+		// 切ると**枝が今どのあたりに居るのか**が読めない（それがこの線の目的）。
+		if end := base + len(ref) - 1; end > g.Last {
+			g.Last = end
+		}
+	}
+	if g.Ref == nil {
+		g.Ref = []EvalSeries{}
+	}
 	return g
 }
 

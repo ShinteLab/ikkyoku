@@ -1682,9 +1682,35 @@ html.is-main #app {
   overflow: hidden;
 }
 
+/* 分かれなかったほうの線（枝に居るとき）。⚠️ **薄く・破線**で、主役の折れ線と
+   見分けが付くこと —— 比べる相手であって、今辿っている線ではない。 */
+.eval-line.is-ref {
+  opacity: 0.35;
+  stroke-dasharray: 4 3;
+  stroke-width: 1.2;
+}
+
+/* 枝が分かれた手。⚠️ **「今見ている手」の線（eval-cursor）とは別の見た目に**。 */
+.eval-fork {
+  stroke: #9b8cff;
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+}
+
+.eval-fork-tag {
+  font-size: 9px;
+  fill: #9b8cff;
+}
+
 .eval-legend {
   font-size: 11.5px;
   white-space: nowrap;
+}
+
+/* 凡例の「分岐前の手順」。薄い線と同じ扱いに見えること。 */
+.eval-legend.is-ref {
+  color: #7f8798;
+  opacity: 0.9;
 }
 
 /* 線の色を短い線で示す（文字色だけだと、細い折れ線との対応が取りにくい）。 */

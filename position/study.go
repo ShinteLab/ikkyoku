@@ -268,6 +268,44 @@ func (s *Study) Line() []int {
 	return out
 }
 
+// Fork は今の経路が**どこで分かれたか**と、**分かれなかったほうの経路**を返す。
+//
+// 「分かれなかったほう」＝ その分かれ道で `kids[0]`（先に指した/本譜側）を選んで
+// いたら辿っていた 1 本。**評価値グラフで元の線を薄く並べる**のに使う ——
+// 枝を選んだ結果がどう転んだかは、**元の線と並べて初めて読める。**
+//
+// ⚠️ **本譜とは限らない。** 見るのは**経路の一番深い分かれ道**なので、枝の中の
+// 枝に居るなら、比べる相手は 1 つ外側の枝になる（それが「親」）。
+//
+// forkID は分かれた**手前**の節点（＝分岐点。0 なら分かれていない＝本譜に居る）。
+// ok が false なら分かれ道はひとつも通っていない。
+func (s *Study) Fork() (forkID int, ref []int, ok bool) {
+	// 経路を上へ辿って、**最後に「最初の子ではない子」を通ったところ**を探す。
+	var at *treeNode
+	for n := s.cur; n.parent != nil; n = n.parent {
+		if len(n.parent.kids) > 0 && n.parent.kids[0] != n {
+			at = n.parent
+			break
+		}
+	}
+	if at == nil {
+		return 0, nil, false
+	}
+	// 分岐点までの道のり（共有している部分）＋ そこから `kids[0]` 側へ辿った先。
+	up := []int{}
+	for p := at; p != nil; p = p.parent {
+		up = append(up, p.id)
+	}
+	for i := len(up) - 1; i >= 0; i-- {
+		ref = append(ref, up[i])
+	}
+	for n := at; len(n.kids) > 0; {
+		n = n.kids[0]
+		ref = append(ref, n.id)
+	}
+	return at.id, ref, true
+}
+
 // MainLine は本譜（根から `kids[0]` を辿った並び）の手を返す。
 //
 // **棋譜の取り直し（`Graft`）の突き合わせ相手。** 枝に居ても本譜が返る。

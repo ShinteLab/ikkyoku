@@ -240,3 +240,56 @@ func TestStudyStateMoveNumberIsRelativeToRoot(t *testing.T) {
 		t.Errorf("今見ている節点 = %d, 手順の 1 手目 = %d", st.CurrentID, st.Nodes[0].ID)
 	}
 }
+
+// ⚠️ **枝に居るときは「分かれなかったほうの線」も返すこと**（2026-08-13）。
+//
+// **枝を選んだ結果がどう転んだかは、元の線と並べて初めて読める。**
+// ⚠️ **共有している手前は入れないこと**（同じ点を 2 本描くことになる）。
+func TestEvalGraphRefLineOnBranch(t *testing.T) {
+	s := adopted(t)
+	// 本譜 2 手（それぞれ評価値つき）。
+	record(t, s, "a", score(0))
+	if _, err := s.Play("7g7f"); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	record(t, s, "a", score(20))
+	if _, err := s.Play("3c3d"); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	record(t, s, "a", score(30))
+
+	// 1 手目に戻って別の手 → 枝。
+	if _, err := s.GoTo(1); err != nil {
+		t.Fatalf("GoTo: %v", err)
+	}
+	if _, err := s.Play("8c8d"); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	record(t, s, "a", score(-50))
+
+	g := s.Evals()
+	// 今の経路は 根 → ７六歩 → ８四歩。
+	if len(g.Series) != 1 || len(g.Series[0].Points) != 3 {
+		t.Fatalf("今の経路の点がおかしい: %+v", g.Series)
+	}
+	// **分かれた手数**（1 手目のあとで分かれた）。
+	if g.Fork != 1 {
+		t.Errorf("分かれた手数 = %d, want 1", g.Fork)
+	}
+	// 元の線（△３四歩）は**分岐点より先だけ**返ること。
+	if len(g.Ref) != 1 {
+		t.Fatalf("元の線が返っていません: %+v", g.Ref)
+	}
+	if len(g.Ref[0].Points) != 1 || g.Ref[0].Points[0].Ply != 2 {
+		t.Errorf("共有している手前まで入っています: %+v", g.Ref[0].Points)
+	}
+
+	// 本譜に戻れば、元の線は要らない（分かれていない）。
+	if _, err := s.GoTo(2); err != nil {
+		t.Fatalf("GoTo: %v", err)
+	}
+	g = s.Evals()
+	if g.Fork != 0 || len(g.Ref) != 0 {
+		t.Errorf("本譜に居るのに分岐扱いです: fork=%d ref=%+v", g.Fork, g.Ref)
+	}
+}

@@ -200,6 +200,44 @@ export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
       ).textContent = String(n);
     }
 
+    // ---- 分かれなかったほうの線（枝に居るとき）------------------------------
+    //
+    // ⚠️ **薄く・破線で、折れ線より先に描くこと**（下に敷く）。主役は今辿っている
+    // 線で、これは**比べる相手**。**枝を選んだ結果がどう転んだかは、元の線と
+    // 並べて初めて読める。**
+    //
+    // ⚠️ **点は打たない**（ホバーの相手も作らない）。今の経路の点と重なると、
+    // どちらの手順の値を読んでいるのか分からなくなる。
+    const refs = (graph?.ref ?? []).filter((s) => (s.points ?? []).length > 0);
+    const engineIndex = new Map<string, number>();
+    (graph?.series ?? []).forEach((s, i) => engineIndex.set(s.engineId, i));
+    for (const s of refs) {
+      const color = COLORS[(engineIndex.get(s.engineId) ?? 0) % COLORS.length];
+      const pts = (s.points ?? []).filter((p) => p.number >= x0 && p.number <= x1);
+      if (pts.length < 2) {
+        continue;
+      }
+      svg.appendChild(el("polyline", {
+        points: pts.map((p) => `${px(p.number)},${py(value(p))}`).join(" "),
+        class: "eval-line is-ref",
+        stroke: color,
+      }));
+    }
+
+    // ---- 枝が分かれた手 ----------------------------------------------------
+    //
+    // **どこから枝に入ったのか**が分からないと、2 本の線の意味が読めない。
+    // ⚠️ **「今見ている手」の線とは別の見た目にすること**（あちらはカーソル）。
+    const fork = graph?.fork ?? 0;
+    if (fork > 0 && fork >= x0 && fork <= x1) {
+      svg.appendChild(el("line", {
+        x1: px(fork), x2: px(fork), y1: top, y2: bottom, class: "eval-fork",
+      }));
+      const tag = el("text", { x: px(fork) + 3, y: top + 9, class: "eval-fork-tag" });
+      tag.textContent = "分岐";
+      svg.appendChild(tag);
+    }
+
     const series = (graph?.series ?? []).filter((s) => (s.points ?? []).length > 0);
     if (series.length === 0) {
       svg.appendChild(
@@ -269,6 +307,13 @@ export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
       chip.textContent = s.label || s.engineId;
       legend.appendChild(chip);
     });
+    // 枝に居るあいだは、薄い線が何なのかを 1 語で出す（凡例の末尾）。
+    if (refs.length > 0) {
+      const note = document.createElement("span");
+      note.className = "eval-legend is-ref";
+      note.textContent = "分岐前の手順";
+      legend.appendChild(note);
+    }
   };
 
   // 押した/触った位置の手数。
