@@ -27,8 +27,8 @@
  * ここで戻るが、解析だけは USI 経由のまま**にすること（棋力の問題を設定の問題にした
  * 意味が無くなる）。**用途が違う** —— こちらは手の検証であって解析ではない。
  * 
- * **これから**: 分岐ツリー（今は一直線。戻って別の手を指すと先は捨てる）。
- * 木の形は `core/kifu` が持てるようになってから決める。
+ * **手順は木**（2026-08-13）。戻って別の手を指すと**枝が生える**（前の手順は消えない）。
+ * 木の形の最終形は `core/kifu` が持てるようになってから決める（`position` に仮置き）。
  * @module
  */
 
@@ -39,6 +39,19 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
 import * as $models from "./models.js";
+
+/**
+ * AddLine は解析の候補手（読み筋）を**枝として木に足す**（候補手の右クリック）。
+ * 
+ * ⚠️ **押しても指さない**（＝今見ている局面は動かない）。動くと走っている解析が
+ * 別の局面のものになり、**候補を続けて足せない**。
+ * 
+ * ⚠️ **候補の頭が本譜と同じなら枝を増やさず、食い違うところで枝にする**
+ * （判断は `position.Study.AddLine`。**フロントで突き合わせないこと**）。
+ */
+export function AddLine(moves: string[] | null): $CancellablePromise<$models.AddLine> {
+    return $Call.ByID(4171557245, moves);
+}
 
 /**
  * Adopt は訂正タブの局面を採って、解析タブの根にする。
@@ -61,20 +74,20 @@ export function Clear(): $CancellablePromise<$models.StudyState> {
 }
 
 /**
- * DropFrom は n 手目とその先を手順から消す（**手順リストの右クリック**）。
+ * DropFrom はその手**とその先（子孫の枝も全部）**を消す（**手順リストの右クリック**）。
  * 
- * ⚠️ **「1手戻す」は無くなった**（2026-08-13）。分岐を入れていく前段として、
- * **消す量を手そのもので指す**形に変えてある —— `Undo` は「今どこを見ているか」に
- * 依存していたので、戻って見ている最中に押すと何が消えるのか分かりにくかった。
- * 今は**押した手から下が消える**で、画面の見た目とそのまま一致する。
+ * ⚠️ **「1手戻す」は無くなった**（2026-08-13）。**消す量を手そのもので指す**形に
+ * してある —— `Undo` は「今どこを見ているか」に依存していたので、戻って見ている
+ * 最中に押すと何が消えるのか分かりにくかった。今は**押した手から下**で、
+ * 画面の見た目とそのまま一致する。
  * 
- * **見るだけなら GoTo。混同しないこと**（あちらは手順を消さない）。
+ * **枝も本譜も同じように消せる**（本譜は URL から取り直せる）。
+ * **見るだけなら GoTo。混同しないこと**（あちらは何も消さない）。
  * 
- * ⚠️ **分岐ツリーが入ったら、ここは「消す」ではなく「枝として切り離す」になる**
- * （`TODO.md` の「本譜のロック」）。**入口はこの 1 か所**にしてある。
+ * ⚠️ **引数は節点の id で、手数ではない**（枝があると同じ手数が何個もある）。
  */
-export function DropFrom(n: number): $CancellablePromise<$models.StudyState> {
-    return $Call.ByID(2906104777, n);
+export function DropFrom(id: number): $CancellablePromise<$models.StudyState> {
+    return $Call.ByID(2906104777, id);
 }
 
 /**
@@ -91,10 +104,12 @@ export function Evals(): $CancellablePromise<$models.EvalGraph> {
 }
 
 /**
- * GoTo は手順の n 手目まで進めた局面を見る（0 なら根）。**手順は消さない。**
+ * GoTo はその節点の局面を見る（0 なら根）。**手順は消さない。**
+ * 
+ * ⚠️ **引数は節点の id で、手数ではない。**
  */
-export function GoTo(n: number): $CancellablePromise<$models.StudyState> {
-    return $Call.ByID(2871148087, n);
+export function GoTo(id: number): $CancellablePromise<$models.StudyState> {
+    return $Call.ByID(2871148087, id);
 }
 
 /**
@@ -151,7 +166,9 @@ export function NewGame(handicap: string): $CancellablePromise<$models.KifuLoad>
  * 書かないこと** —— 合法手の一覧は `StudyState.Legal` に出しているので、
  * 画面はそれを光らせるだけでよい）。
  * 
- * **戻って見ている途中で指すと、そこから先の手順は捨てる。**
+ * ⚠️ **戻って見ている途中で別の手を指すと、枝が生える**（2026-08-13。前の手順は
+ * **消えない**）。**評価値も捨てない** —— 記録は節点に紐づいているので、
+ * 枝を選び直せばそちらの折れ線がそのまま出る。
  */
 export function Play(move: string): $CancellablePromise<$models.StudyState> {
     return $Call.ByID(3489214574, move);

@@ -19,7 +19,7 @@ func record(t *testing.T, s *StudyService, engineID string, sc analyze.Score) {
 	if err != nil {
 		t.Fatalf("analyzeTarget: %v", err)
 	}
-	s.recordEval(target.Epoch, target.Ply, engineID, engineID, sc, 12)
+	s.recordEval(target.Epoch, target.NodeID, engineID, engineID, sc, 12)
 }
 
 // 手を進めながら記録すると、手数の順に並んだ折れ線になること。
@@ -60,9 +60,12 @@ func TestEvalGraphRecordsPerEngine(t *testing.T) {
 	}
 }
 
-// ⚠️ **戻って別の手を指したら、その先の評価値は捨てること。**
-// 別の手順に付いた値なので、残すと**指していない手の評価値がグラフに残る。**
-func TestEvalGraphDropsBranchedFuture(t *testing.T) {
+// ⚠️ **別の枝を選んだら、折れ線もその枝のものになること。**
+//
+// 枝が入ってからは**捨てるのではなく「今の経路の点だけを出す」**（2026-08-13）。
+// 混ぜると同じ手数に 2 つの値が並び、どちらの手順の評価値か分からなくなる。
+// ⚠️ **戻れば前の枝の折れ線がそのまま出ること**（消していないので）。
+func TestEvalGraphFollowsCurrentLine(t *testing.T) {
 	s := adopted(t)
 	record(t, s, "a", score(0))
 	if _, err := s.Play("7g7f"); err != nil {
@@ -78,17 +81,24 @@ func TestEvalGraphDropsBranchedFuture(t *testing.T) {
 		t.Fatalf("GoTo で評価値が消えました: %d 点", n)
 	}
 
-	// 別の手を指すと手順が切られる → その先の評価値も消える。
+	// 別の手を指すと**枝が生える** → 折れ線はその枝のものになる。
 	if _, err := s.Play("2g2f"); err != nil {
 		t.Fatalf("Play: %v", err)
 	}
 	pts := s.Evals().Series[0].Points
 	if len(pts) != 1 || pts[0].Ply != 0 {
-		t.Fatalf("捨てた枝の評価値が残っています: %+v", pts)
+		t.Fatalf("別の枝の評価値が混ざっています: %+v", pts)
+	}
+	// ⚠️ **前の枝へ戻せば、そちらの点はそのまま残っていること**（消していない）。
+	if _, err := s.GoTo(1); err != nil {
+		t.Fatalf("GoTo: %v", err)
+	}
+	if n := len(s.Evals().Series[0].Points); n != 2 {
+		t.Fatalf("枝の評価値が消えました: %d 点", n)
 	}
 }
 
-// 同じ手を指し直しただけなら手順は変わらないので、評価値も残ること。
+// 同じ手を指し直しただけなら枝は増えないので、評価値も残ること。
 func TestEvalGraphKeepsSameLine(t *testing.T) {
 	s := adopted(t)
 	if _, err := s.Play("7g7f"); err != nil {
@@ -121,23 +131,46 @@ func TestEvalGraphDropFromDropsPoint(t *testing.T) {
 	}
 }
 
-// ⚠️ **手順を切った後に届いた途中経過を書き戻さないこと。**
-// 解析は非同期なので、これが無いと**捨てた枝の評価値がグラフに戻る。**
+// ⚠️ **根を入れ替えた後に届いた途中経過を書き戻さないこと**（`Epoch`）。
+//
+// 節点の id は**木ごとに 1 から振り直す**ので、これが無いと
+// **前の対局の評価値が、同じ id の別の局面の点として書き戻る。**
 func TestEvalGraphIgnoresStaleEpoch(t *testing.T) {
 	s := adopted(t)
+	if _, err := s.Play("7g7f"); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
 	target, err := s.analyzeTarget()
 	if err != nil {
 		t.Fatalf("analyzeTarget: %v", err)
 	}
+	// 別の局面を採り直す（＝根が入れ替わり、木も id も作り直される）。
+	if _, err := s.Adopt(); err != nil {
+		t.Fatalf("Adopt: %v", err)
+	}
+	s.recordEval(target.Epoch, target.NodeID, "a", "a", score(30), 12)
+	if len(s.Evals().Series) != 0 {
+		t.Errorf("古い世代の評価値が書き戻りました: %+v", s.Evals().Series)
+	}
+}
+
+// ⚠️ **消した節点には書かないこと。** 右クリックで消した枝の解析は
+// **後から届く**ので、これが無いと消したはずの点が復活する。
+func TestEvalGraphIgnoresDroppedNode(t *testing.T) {
+	s := adopted(t)
 	if _, err := s.Play("7g7f"); err != nil {
 		t.Fatalf("Play: %v", err)
 	}
-	if _, err := s.DropFrom(1); err != nil { // 手順を切る（epoch が進む）
+	target, err := s.analyzeTarget()
+	if err != nil {
+		t.Fatalf("analyzeTarget: %v", err)
+	}
+	if _, err := s.DropFrom(target.NodeID); err != nil {
 		t.Fatalf("DropFrom: %v", err)
 	}
-	s.recordEval(target.Epoch, target.Ply, "a", "a", score(30), 12)
+	s.recordEval(target.Epoch, target.NodeID, "a", "a", score(30), 12)
 	if len(s.Evals().Series) != 0 {
-		t.Errorf("古い世代の評価値が書き戻りました: %+v", s.Evals().Series)
+		t.Errorf("消した手の評価値が書き戻りました: %+v", s.Evals().Series)
 	}
 }
 
@@ -181,9 +214,10 @@ func TestEvalGraphAxisStartsAtRootMoveNumber(t *testing.T) {
 	}
 }
 
-// ⚠️ **`Move.Number` は根からの手数（`GoTo` の引数）で、棋譜の手数ではない。**
+// ⚠️ **`Node.Number` は根からの手数で、棋譜の手数ではない。**
 // 画面に手数として出すときは `StudyState.First` を足す ——
 // **足し忘れると、撮った中盤の局面から始めたときにリストだけ 1 から数え直す。**
+// ⚠️ **`GoTo` に渡すのは `Node.ID`**（手数ではない。枝があると同じ手数が何個もある）。
 func TestStudyStateMoveNumberIsRelativeToRoot(t *testing.T) {
 	s := adopted(t)
 	if _, err := s.src.SetMoveNumber(41); err != nil {
@@ -199,7 +233,10 @@ func TestStudyStateMoveNumberIsRelativeToRoot(t *testing.T) {
 	if st.First != 40 {
 		t.Fatalf("First = %d, want 40", st.First)
 	}
-	if st.Moves[0].Number != 1 {
-		t.Errorf("Move.Number = %d, want 1（根からの手数。GoTo に渡す値）", st.Moves[0].Number)
+	if st.Nodes[0].Number != 1 {
+		t.Errorf("Node.Number = %d, want 1（根からの手数）", st.Nodes[0].Number)
+	}
+	if st.Nodes[0].ID != st.CurrentID {
+		t.Errorf("今見ている節点 = %d, 手順の 1 手目 = %d", st.CurrentID, st.Nodes[0].ID)
 	}
 }

@@ -66,6 +66,7 @@ import { iconMarkup } from "./icon";
 import { mountEditor } from "./editor";
 import { mountEvalGraph } from "./evalgraph";
 import { mountStudyBoard } from "./study";
+import { openPopup } from "./popup";
 import type { AppSettings, EngineSettings, KifuLoad, StudyState } from "../bindings/ikkyoku-app/models";
 import type { Stock } from "../bindings/github.com/ShinteLab/ikkyoku/position/models";
 // 認識の観測情報。**型を手で書き写さない**(Go 側は suteme の型をそのまま通しており、
@@ -1564,14 +1565,35 @@ export function mountMainScreen(root: HTMLElement): void {
       first.title = hint;
       moves.title = hint;
 
-      // ⚠️ **候補手を押しても指さない**（2026-08-12 に外した）。
+      // ⚠️ **左クリックでは何もしない**（2026-08-12 に「押すと指す」を外した）。
       //
       // ここに並んでいるのは**エンジンが読んだ枝**であって、本譜（＝実際に現れた
-      // 指し手）ではない。**押しただけで手順が伸びる**と、枝と本譜の区別が曖昧に
-      // なるうえ、戻って別の手を指したときに先を捨てる仕掛けと噛み合わない
-      // （`TODO.md` の「本譜のロック」）。**辿るのは盤の上で駒を動かす操作**。
+      // 指し手）ではない。**押しただけで手順が伸びる**と、枝と本譜の区別が
+      // 曖昧になる。**辿るのは盤の上で駒を動かす操作。**
       //
-      // ⚠️ **「押すと指す」を戻すなら、先に本譜と枝の区別を決めること。**
+      // ⚠️ **右クリックで「手順を追加」**（2026-08-13）。読み筋を**枝として**
+      // 木に足す —— 指すのではないので、**今見ている局面は動かない**
+      // （動くと走っている解析が別の局面のものになり、候補を続けて足せない）。
+      // ⚠️ **候補が本譜と同じ手なら枝を増やさず、食い違うところで枝になる。**
+      // その判断は Go 側（`StudyService.AddLine`）で、**フロントで手順を
+      // 突き合わせないこと。**
+      li.addEventListener("contextmenu", (e) => {
+        // ⚠️ **webview の既定メニューを止める**（手順リスト・訂正の盤と同じ）。
+        e.preventDefault();
+        const usis = l.moves ?? [];
+        if (usis.length === 0) {
+          return;
+        }
+        openPopup(e.clientX, e.clientY, {
+          label: "候補手",
+          items: [{
+            label: `手順を追加（${usis.length}手）`,
+            kind: "primary",
+            onPick: () => void addLineToStudy(usis),
+          }],
+        });
+      });
+      li.title = "右クリックでこの読み筋を枝として手順に足せます";
       li.append(score, first, moves);
       card.lines.appendChild(li);
     }
@@ -1631,10 +1653,16 @@ export function mountMainScreen(root: HTMLElement): void {
   let batchNext = -1;
   // 次へ進んでいる最中か（done はエンジンの数だけ届くので、二重に進めない）。
   let batchStepping = false;
+  // 今の経路の節点 id（`StudyState.line`）。**連続解析が次に進む先はここから取る。**
+  //
+  // ⚠️ **手数から `GoTo` の引数を作らないこと** —— 枝が入ってからは
+  // 「手数 → 局面」が一意に決まらない。
+  let studyLine: number[] = [];
   // 今見ている局面の棋譜の手数（`StudyState` 由来）。
   //
-  // ⚠️ **`studyPly` は根からの手数**（`GoTo` に渡す値）で、`studyFirst` を足すと
-  // 棋譜の手数になる。**連続解析の始点はこれ** —— カーソル位置がそのまま始点。
+  // ⚠️ **`studyPly` は根からの手数**（＝`studyLine` の添字）で、`studyFirst` を
+  // 足すと棋譜の手数になる。**連続解析の始点はこれ** —— カーソル位置がそのまま始点。
+  // ⚠️ **`GoTo` に渡すのは手数ではなく `studyLine[ply]`**（節点の id）。
   let studyFirst = 0;
   let studyMoveCount = 0;
   let studyPly = 0;
@@ -1709,8 +1737,13 @@ export function mountMainScreen(root: HTMLElement): void {
       batchNext++;
       // ⚠️ **手順リストを押すのと同じ経路**（`GoTo`。手順は消さない）。
       // 「解析のために局面を動かす」専用の道を作らないこと。
-      const ply = n - studyFirst;
-      showStudy(await StudyService.GoTo(ply));
+      // ⚠️ **渡すのは節点の id**（今の経路の ply 番目）。手数ではない。
+      const id = studyLine[n - studyFirst];
+      if (id === undefined) {
+        stopBatch("連続解析: 手順の終わりまで来ました");
+        return;
+      }
+      showStudy(await StudyService.GoTo(id));
       // ⚠️ **`showStudy` の中の自動解析（連続モード）には任せない。**
       // あちらは「まだ解析していない局面なら」という条件で動くので、
       // **連続モードが切ってあると 1 手目で止まる。**
@@ -1989,7 +2022,10 @@ export function mountMainScreen(root: HTMLElement): void {
     // 連続解析が進む範囲。**棋譜の手数で数える**（評価値グラフの横軸と同じ）。
     // ⚠️ **`Move.Number` も `Ply` も根からの手数**（`GoTo` の引数）なので、起点を足す。
     studyFirst = st.first ?? 0;
-    studyMoveCount = (st.moves ?? []).length;
+    // ⚠️ **数えるのは「今の経路」**（木の全部の手ではない）。枝に居るならその枝を
+    // 辿る。`line[0]` は根なので、手数は 1 つ引いたもの。
+    studyLine = st.line ?? [];
+    studyMoveCount = Math.max(0, studyLine.length - 1);
     // ⚠️ **連続解析の始点になる。** 手順リストで戻れば、そこから解析し直せる。
     studyPly = st.ply ?? 0;
     syncBatchButton();
@@ -2188,6 +2224,29 @@ export function mountMainScreen(root: HTMLElement): void {
     })();
   });
 
+  // addLineToStudy は候補手の読み筋を**枝として**手順に足す（候補手の右クリック）。
+  //
+  // ⚠️ **足しても今見ている局面は動かない**（指すのではない）。走っている解析も
+  // そのままなので、**候補を続けて足せる**。
+  const addLineToStudy = async (moves: string[]) => {
+    try {
+      const got = await StudyService.AddLine(moves);
+      showStudy(got.state);
+      // ⚠️ **1 手も増えないことがある**（候補が本譜と同じ手順のとき）。
+      // **それは失敗ではない**ので、そう分かる文言にする。
+      studyMoveStatus.textContent = got.added > 0
+        ? `${got.added}手を枝として足しました${got.note ? `（${got.note}）` : ""}`
+        : "その読み筋は既に手順にあります";
+      studyMoveStatus.classList.remove("is-error");
+      studyMoveStatus.hidden = false;
+    } catch (err) {
+      studyMoveStatus.textContent =
+        `手順に足せませんでした: ${String(err instanceof Error ? err.message : err)}`;
+      studyMoveStatus.classList.add("is-error");
+      studyMoveStatus.hidden = false;
+    }
+  };
+
   // 評価値グラフ（2026-08-12）。**手順の 1 手ごとの最善手の評価値**を折れ線にする。
   //
   // ⚠️ **点はここに溜めない。** 持っているのは Go 側（`StudyService.Evals`）で、
@@ -2202,10 +2261,11 @@ export function mountMainScreen(root: HTMLElement): void {
     legend: root.querySelector<HTMLElement>("#eval-graph-legend")!,
     readout: root.querySelector<HTMLElement>("#eval-graph-readout")!,
     // **押したらその局面へ戻る**（手順のチップと同じ「戻って見る」操作。手順は消さない）。
-    onSeek: (ply) => {
+    // ⚠️ **渡ってくるのは節点の id**（手数ではない。枝があると同じ手数が何個もある）。
+    onSeek: (id) => {
       void (async () => {
         try {
-          showStudy(await StudyService.GoTo(ply));
+          showStudy(await StudyService.GoTo(id));
         } catch (err) {
           studyMoveStatus.textContent = String(err instanceof Error ? err.message : err);
           studyMoveStatus.hidden = false;

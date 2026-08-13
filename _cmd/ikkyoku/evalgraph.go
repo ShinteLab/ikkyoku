@@ -13,13 +13,19 @@ package main
 //
 // ⚠️ **記録は手順に紐づく**（局面の SFEN ではない）。だから置き場所は
 // `StudyService`（手順を持っている側）で、`AnalyzeService` は記録を頼むだけ。
-// **戻って別の手を指したら、その先の評価値は捨てる** —— 別の手順の値なので。
-
-import "sort"
+//
+// ⚠️ **鍵は手順ツリーの節点 id**（2026-08-13。以前は手数だった）。枝が入ってからは
+// 同じ手数の局面が何本もあるので、手数では指せない。**節点で持つと、戻って別の手を
+// 指しても前の枝の評価値がそのまま残る** —— 捨てるのは**その節点を消したとき**だけ。
 
 // EvalPoint は折れ線の 1 点＝「ある局面に、あるエンジンが付けた評価値」。
 type EvalPoint struct {
-	// Ply は根からの手数（0 なら根の局面）。**押したときに `GoTo` へ渡す値。**
+	// ID は手順ツリーの節点（**押したときに `GoTo` へ渡す値**。0 は根）。
+	//
+	// ⚠️ **記録の鍵はこれ**（2026-08-13。以前は手数だった）。枝が入ると同じ手数の
+	// 局面が何個もあるので、**手数では「どの局面に付いた評価値か」を指せない。**
+	ID int `json:"id"`
+	// Ply は根からの手数（0 なら根の局面）。**横軸の位置を出すのに使う。**
 	Ply int `json:"ply"`
 	// Number は棋譜の数え方の手数（**グラフの横軸**）。
 	//
@@ -70,6 +76,11 @@ type EvalGraph struct {
 	Last int `json:"last"`
 	// First は根の棋譜手数（横軸の左端。根が初期局面なら 0）。
 	First int `json:"first"`
+	// IDs は今の経路の節点 id（**ply 番目の要素がその手数の節点**。IDs[0] は根の 0）。
+	//
+	// ⚠️ **グラフを押したときの行き先はこれで引く。** 枝が入ってからは
+	// 「手数 → 局面」が一意に決まらないので、**手数から `GoTo` の引数を作らないこと。**
+	IDs []int `json:"ids"`
 }
 
 // evalStore は評価値の記録。**`StudyService` のロックの中でだけ触ること。**
@@ -77,16 +88,20 @@ type evalStore struct {
 	// order はエンジンの登場順（凡例と折れ線の並び）。
 	order []string
 	label map[string]string
-	// points は engineID → ply → 点。**ply で上書きする**（深いほうが後から届く）。
-	points map[string]map[int]EvalPoint
-	// epoch は手順の世代。**手順を切ったときだけ進める。**
+	// points は engineID → 節点 id → 点。**節点で上書きする**（深いほうが後から届く）。
 	//
-	// ⚠️ **これが無いと、捨てたはずの枝の評価値が後から書き戻る。** 解析は
-	// 非同期なので、手を進めた後に前の局面の途中経過が届く。
+	// ⚠️ **手数で持たないこと**（枝が入ると同じ手数が何本もある）。節点で持つと、
+	// **戻って別の手を指しても前の枝の評価値がそのまま残る**（消す必要が無い）。
+	points map[string]map[int]EvalPoint
+	// epoch は根の世代。**根を入れ替えたときだけ進める。**
+	//
+	// ⚠️ **これが無いと、前の対局の途中経過が新しい木の同じ id に書き戻る**
+	// （id は木ごとに 1 から振り直すため）。⚠️ **枝を消したときは進めない** ——
+	// 消えた節点の点は `drop` が消しており、**走っている他の解析まで捨てる必要は無い。**
 	epoch int
 }
 
-// record は 1 点を記録する。**epoch が食い違っていたら捨てる**（捨てた枝の値）。
+// record は 1 点を記録する。**epoch が食い違っていたら捨てる**（前の対局の値）。
 func (s *evalStore) record(epoch int, engineID, label string, p EvalPoint) {
 	if epoch != s.epoch || engineID == "" {
 		return
@@ -102,20 +117,17 @@ func (s *evalStore) record(epoch int, engineID, label string, p EvalPoint) {
 	if label != "" {
 		s.label[engineID] = label
 	}
-	s.points[engineID][p.Ply] = p
+	s.points[engineID][p.ID] = p
 }
 
-// dropAfter は ply より先の記録を捨てる（**手順を切ったとき**）。
+// drop は消えた節点の記録を捨てる（**手順を消したとき**）。
 //
-// **epoch を進めるのはここだけ。** 走っている解析の途中経過が、捨てた枝の
-// 値として書き戻るのを止める。
-func (s *evalStore) dropAfter(ply int) {
-	s.epoch++
+// ⚠️ **epoch は進めない。** 消えたのはこの節点だけで、**他の枝で走っている解析の
+// 途中経過まで捨てる理由が無い**（進めると、消した瞬間に全部の結果が届かなくなる）。
+func (s *evalStore) drop(ids []int) {
 	for _, m := range s.points {
-		for n := range m {
-			if n > ply {
-				delete(m, n)
-			}
+		for _, id := range ids {
+			delete(m, id)
 		}
 	}
 }
@@ -128,22 +140,28 @@ func (s *evalStore) reset() {
 	s.points = nil
 }
 
-// series は折れ線を Ply の昇順で組み立てる。
-func (s *evalStore) series() []EvalSeries {
+// series は**今の経路にある点だけ**を手数の順で組み立てる。
+//
+// ⚠️ **木の全部を出さないこと。** 枝と本譜の点を 1 本の折れ線に混ぜると、
+// 同じ手数に 2 つの値が並んで**どちらの手順の評価値か分からなくなる**。
+// 見せるのは「今辿っている 1 本」で、枝を選べばそちらの折れ線になる。
+//
+// line は経路の節点 id（`position.Study.Line()`。先頭は根の 0）。
+func (s *evalStore) series(line []int) []EvalSeries {
 	out := make([]EvalSeries, 0, len(s.order))
 	for _, id := range s.order {
 		m := s.points[id]
 		if len(m) == 0 {
 			continue
 		}
-		plies := make([]int, 0, len(m))
-		for n := range m {
-			plies = append(plies, n)
+		pts := make([]EvalPoint, 0, len(m))
+		for _, node := range line {
+			if p, ok := m[node]; ok {
+				pts = append(pts, p)
+			}
 		}
-		sort.Ints(plies)
-		pts := make([]EvalPoint, 0, len(plies))
-		for _, n := range plies {
-			pts = append(pts, m[n])
+		if len(pts) == 0 {
+			continue
 		}
 		out = append(out, EvalSeries{EngineID: id, Label: s.label[id], Points: pts})
 	}

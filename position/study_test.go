@@ -115,7 +115,7 @@ func TestStudyPlay(t *testing.T) {
 		t.Errorf("Played = %q", got)
 	}
 	// 読み筋と同じく**日本語表記で出す**（画面に出すのは Text）。
-	ms := s.Moves()
+	ms := s.Nodes()
 	if len(ms) != 3 {
 		t.Fatalf("手数 = %d, want 3", len(ms))
 	}
@@ -144,7 +144,10 @@ func TestStudyPlayRejectsIllegal(t *testing.T) {
 	}
 }
 
-// 戻って別の手を指すと、**そこから先の手順は捨てる**（今は一直線）。
+// 戻って別の手を指すと**枝が生える**（2026-08-13。それまでは先を捨てていた）。
+//
+// ⚠️ **前の手順を消さないこと。** 「それもまた一局」——別の選択も一つの局として
+// 辿らせるのがこのアプリの中心なので、選び直した瞬間に前の枝が消えては話にならない。
 func TestStudyGoToAndBranch(t *testing.T) {
 	s := position.NewStudy(hirate(t))
 	for _, m := range []string{"7g7f", "3c3d"} {
@@ -156,21 +159,31 @@ func TestStudyGoToAndBranch(t *testing.T) {
 	if err := s.GoTo(1); err != nil {
 		t.Fatalf("GoTo: %v", err)
 	}
-	if len(s.Moves()) != 2 || s.Ply() != 1 {
-		t.Fatalf("戻っただけで手順が消えました: moves=%d ply=%d", len(s.Moves()), s.Ply())
+	if len(s.Nodes()) != 2 || s.Ply() != 1 {
+		t.Fatalf("戻っただけで手順が消えました: moves=%d ply=%d", len(s.Nodes()), s.Ply())
 	}
 	if got := strings.Join(s.Played(), " "); got != "7g7f" {
 		t.Errorf("Played = %q, want %q（先の手を渡さないこと）", got, "7g7f")
 	}
-	// そこで別の手を指すと、先は捨てる。
+	// そこで別の手を指すと、**枝が生える**（元の手は兄弟として残る）。
 	if err := s.Play("8c8d"); err != nil {
 		t.Fatalf("Play: %v", err)
 	}
 	if got := strings.Join(s.Played(), " "); got != "7g7f 8c8d" {
 		t.Errorf("分岐後の Played = %q", got)
 	}
-	if len(s.Moves()) != 2 {
-		t.Errorf("分岐したのに古い手が残っています: %+v", s.Moves())
+	if len(s.Nodes()) != 3 {
+		t.Errorf("分岐で古い手が消えました: %+v", s.Nodes())
+	}
+	// ⚠️ **同じ手を指し直したら枝は増えない**（既にある子を辿る）。
+	if err := s.GoTo(1); err != nil {
+		t.Fatalf("GoTo: %v", err)
+	}
+	if err := s.Play("3c3d"); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	if len(s.Nodes()) != 3 {
+		t.Errorf("同じ手で枝が増えました: %+v", s.Nodes())
 	}
 }
 
@@ -189,24 +202,24 @@ func TestStudyDropFrom(t *testing.T) {
 	if err := s.GoTo(1); err != nil {
 		t.Fatalf("GoTo: %v", err)
 	}
-	if err := s.DropFrom(2); err != nil {
+	if _, err := s.DropFrom(2); err != nil {
 		t.Fatalf("DropFrom: %v", err)
 	}
-	if len(s.Moves()) != 1 || s.Moves()[0].USI != "7g7f" {
-		t.Errorf("2手目以下が消えていません: %+v", s.Moves())
+	if len(s.Nodes()) != 1 || s.Nodes()[0].USI != "7g7f" {
+		t.Errorf("2手目以下が消えていません: %+v", s.Nodes())
 	}
 	// **見ていた位置は消えていないのでそのまま**（勝手に動かさない）。
 	if s.Ply() != 1 {
 		t.Errorf("消していない手まで戻りました: ply=%d", s.Ply())
 	}
 	// 最後の 1 手を消すと根に戻る（＝以前の「1手戻す」と同じ）。
-	if err := s.DropFrom(1); err != nil {
+	if _, err := s.DropFrom(1); err != nil {
 		t.Fatalf("DropFrom: %v", err)
 	}
-	if s.Ply() != 0 || len(s.Moves()) != 0 {
-		t.Errorf("手順が残っています: ply=%d moves=%+v", s.Ply(), s.Moves())
+	if s.Ply() != 0 || len(s.Nodes()) != 0 {
+		t.Errorf("手順が残っています: ply=%d moves=%+v", s.Ply(), s.Nodes())
 	}
-	if err := s.DropFrom(1); err == nil {
+	if _, err := s.DropFrom(1); err == nil {
 		t.Error("無い手を消せました")
 	}
 }
@@ -229,5 +242,167 @@ func TestStudyLegalFollowsCurrent(t *testing.T) {
 	}
 	if len(ms) != 30 {
 		t.Errorf("後手の合法手 = %d, want 30", len(ms))
+	}
+}
+
+// AddLine は読み筋を枝として足す（解析の候補手から）。
+//
+// ⚠️ **今見ている局面を動かさないこと。** 動くと走っている解析が別の局面のものに
+// なり、候補を続けて足せなくなる。
+func TestStudyAddLine(t *testing.T) {
+	s := position.NewStudy(hirate(t))
+	if err := s.Play("7g7f"); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	at := s.CurrentID()
+
+	first, added, note := s.AddLine([]string{"3c3d", "2g2f", "8c8d"})
+	if note != "" {
+		t.Fatalf("止まりました: %s", note)
+	}
+	if added != 3 || first == 0 {
+		t.Fatalf("枝が生えていません: first=%d added=%d", first, added)
+	}
+	if s.CurrentID() != at || s.Ply() != 1 {
+		t.Errorf("足しただけで局面が動きました: id=%d ply=%d", s.CurrentID(), s.Ply())
+	}
+	// **日本語表記も付くこと**（画面に出すのは Text）。
+	for _, n := range s.Nodes() {
+		if n.ID == first && n.Text != "△３四歩" {
+			t.Errorf("枝の表記 = %q, want %q", n.Text, "△３四歩")
+		}
+	}
+}
+
+// ⚠️ **候補が本譜と同じ手なら枝を増やさず、食い違うところまで辿ってから枝にする。**
+// これが分岐の肝で、崩すと同じ手順が何本も並ぶ。
+func TestStudyAddLineFollowsExisting(t *testing.T) {
+	s := position.NewStudy(hirate(t))
+	for _, mv := range []string{"7g7f", "3c3d", "2g2f"} {
+		if err := s.Play(mv); err != nil {
+			t.Fatalf("Play %s: %v", mv, err)
+		}
+	}
+	if err := s.GoTo(0); err != nil {
+		t.Fatalf("GoTo: %v", err)
+	}
+	// 頭 2 手は同じで、3 手目から食い違う読み筋。
+	_, added, note := s.AddLine([]string{"7g7f", "3c3d", "6g6f"})
+	if note != "" {
+		t.Fatalf("止まりました: %s", note)
+	}
+	if added != 1 {
+		t.Fatalf("同じ手まで枝にしています: added=%d", added)
+	}
+	if got := len(s.Nodes()); got != 4 {
+		t.Fatalf("節点 = %d, want 4（3 手 + 枝 1 手）: %+v", got, s.Nodes())
+	}
+	// 枝は 2 手目（△３四歩）の下に生えていること。
+	var branch position.Node
+	for _, n := range s.Nodes() {
+		if n.USI == "6g6f" {
+			branch = n
+		}
+	}
+	if branch.Number != 3 || branch.Depth != 1 || branch.Main {
+		t.Errorf("枝の生え方がおかしい: %+v", branch)
+	}
+}
+
+// ⚠️ **指せない手が出ても、足せたぶんは残すこと**（設計原則3）。
+func TestStudyAddLineStopsAtIllegal(t *testing.T) {
+	s := position.NewStudy(hirate(t))
+	_, added, note := s.AddLine([]string{"7g7f", "9i9h"})
+	if added != 1 {
+		t.Errorf("足せたぶんが残っていません: added=%d", added)
+	}
+	if note == "" {
+		t.Error("止まった理由が出ていません")
+	}
+}
+
+// Graft は棋譜の取り直し。**消さずに据える**（食い違った先は枝として残る）。
+//
+// ⚠️ **ここが崩れると、中継が 1 手進むたびに自分の検討が消える。**
+func TestStudyGraft(t *testing.T) {
+	s := position.NewStudy(hirate(t))
+	for _, mv := range []string{"7g7f", "3c3d"} {
+		if err := s.Play(mv); err != nil {
+			t.Fatalf("Play %s: %v", mv, err)
+		}
+	}
+	// 自分で足した検討（2 手目の下の枝）。
+	if _, added, note := s.AddLine([]string{"2g2f"}); added != 1 || note != "" {
+		t.Fatalf("AddLine: added=%d note=%s", added, note)
+	}
+
+	// 取り直したら 2 手目が別の手だった（URL が正）。
+	r := s.Graft([]string{"7g7f", "8c8d", "2g2f"})
+	if r.Note != "" {
+		t.Fatalf("止まりました: %s", r.Note)
+	}
+	if r.Kept != 1 || r.Added != 2 {
+		t.Errorf("突き合わせがおかしい: %+v", r)
+	}
+	// ⚠️ **押しのけた手数が出ること**（断りを出すのはこれが立ったときだけ）。
+	if r.MovedAt != 2 {
+		t.Errorf("押しのけた手数 = %d, want 2", r.MovedAt)
+	}
+	// **新しい手順が本譜**（先頭）になっていること。
+	if got := strings.Join(s.MainLine(), " "); got != "7g7f 8c8d 2g2f" {
+		t.Errorf("本譜 = %q", got)
+	}
+	// **前の手順も枝として残っていること**（消さない）。
+	found := false
+	for _, n := range s.Nodes() {
+		if n.USI == "3c3d" {
+			found = true
+			if n.Main {
+				t.Errorf("古い手が本譜のままです: %+v", n)
+			}
+		}
+	}
+	if !found {
+		t.Error("取り直しで自分の検討が消えました")
+	}
+}
+
+// 消した節点の id が返ること（**評価値をそれで捨てる**）。
+func TestStudyDropFromReturnsGone(t *testing.T) {
+	s := position.NewStudy(hirate(t))
+	for _, mv := range []string{"7g7f", "3c3d"} {
+		if err := s.Play(mv); err != nil {
+			t.Fatalf("Play %s: %v", mv, err)
+		}
+	}
+	if _, added, _ := s.AddLine([]string{"2g2f"}); added != 1 {
+		t.Fatal("AddLine")
+	}
+	gone, err := s.DropFrom(1)
+	if err != nil {
+		t.Fatalf("DropFrom: %v", err)
+	}
+	// 1 手目・2 手目・枝の 3 つが消える（**子孫も全部**）。
+	if len(gone) != 3 {
+		t.Errorf("消えた id = %v, want 3 つ", gone)
+	}
+	if s.Ply() != 0 || len(s.Nodes()) != 0 {
+		t.Errorf("木が残っています: %+v", s.Nodes())
+	}
+}
+
+// ⚠️ **中継が進んだだけ（手が増えただけ）なら「押しのけた」にしないこと。**
+// ここが立つと、1 手進むたびに「本譜を入れ替えました」と断ることになる。
+func TestStudyGraftAppendIsNotMove(t *testing.T) {
+	s := position.NewStudy(hirate(t))
+	if err := s.Play("7g7f"); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	r := s.Graft([]string{"7g7f", "3c3d"})
+	if r.MovedAt != 0 {
+		t.Errorf("伸びただけなのに押しのけた扱いです: %+v", r)
+	}
+	if r.Kept != 1 || r.Added != 1 {
+		t.Errorf("突き合わせがおかしい: %+v", r)
 	}
 }

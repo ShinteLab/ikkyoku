@@ -23,6 +23,7 @@
 import { StudyService } from "../bindings/ikkyoku-app";
 import type { StudyState } from "../bindings/ikkyoku-app/models";
 import type { Move as LegalMove } from "../bindings/github.com/ShinteLab/ikkyoku/legal/models";
+import { openPopup, type PopupHandle } from "./popup";
 
 const RANK_KANJI = ["一", "二", "三", "四", "五", "六", "七", "八", "九"];
 const cellLabel = (rank: number, file: number) => `${9 - file}${RANK_KANJI[rank] ?? "?"}`;
@@ -235,10 +236,13 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
       ? "打てる場所がありません（二歩・打ち歩詰め・行き所のない駒）"
       : `今は${state?.turnLabel ?? "相手の番"}です`;
 
-  // 手順（棋譜）。**盤の右に縦のリストで積む。クリックでその局面へ戻れる。**
+  // 手順（棋譜）。**盤の右に縦のツリービューで積む。クリックでその局面へ戻れる。**
   //
-  // ⚠️ **戻っても手順は消さない**（進め直せる）。消えるのは、戻った先で
-  // 別の手を指したときと、**右クリックで消したとき**（下記）。
+  // ⚠️ **一直線ではない**（2026-08-13）。枝は 1 段字下げして、**分かれた手の
+  // すぐ下**に出す（Go 側の Nodes() が既にその順で返す。**フロントで並べ替えない**）。
+  //
+  // ⚠️ **戻っても手順は消さない**（進め直せる）。消えるのは**右クリックで
+  // 消したとき**だけ（別の手を指しても、もう消えない —— 枝が生える）。
   //
   // ⚠️ **左クリック＝戻る / 右クリック＝その手以下を消す**（2026-08-13）。
   // 左を消す操作にしない —— **戻って見る**のは手順リストの主な用途なので、
@@ -248,10 +252,13 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
     if (!state?.loaded) {
       return;
     }
-    const ply = state.ply ?? 0;
+    const at = state.currentId ?? 0;
     // 手数と手を別の要素にして、**手数の桁を揃える**（縦に並ぶので、揃っていないと
     // 何手目を見ているのかが読み取りにくい）。
-    const chip = (num: string, label: string, n: number, title: string) => {
+    const chip = (
+      num: string, label: string, id: number, title: string,
+      o?: { depth?: number; main?: boolean; parent?: number },
+    ) => {
       const b = document.createElement("button");
       b.type = "button";
       b.className = "move-chip";
@@ -263,20 +270,29 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
       t.className = "move-text";
       t.textContent = label;
       b.append(i, t);
-      b.classList.toggle("is-current", n === ply);
-      // ⚠️ **消す範囲を出すのに要る**（`.is-doomed` を付ける相手を選ぶ鍵）。
-      b.dataset.n = String(n);
-      b.addEventListener("click", () => void run(() => StudyService.GoTo(n)));
+      b.classList.toggle("is-current", id === at);
+      // ⚠️ **枝は見た目で分かるようにする**（字下げ + 色）。同じ手数の手が
+      // 何行も並ぶので、**どれが本譜か**が分からないと読めない。
+      b.classList.toggle("is-branch", o?.main === false);
+      // 字下げは CSS 変数で（深い枝ほど右へ。**上限は CSS 側で頭打ちにする**）。
+      b.style.setProperty("--move-depth", String(o?.depth ?? 0));
+      // ⚠️ **id と親は消す範囲を出すのに要る**（`.is-doomed` を付ける相手を辿る鍵）。
+      // ⚠️ **GoTo に渡すのも id**（手数ではない。枝があると同じ手数が何個もある）。
+      b.dataset.id = String(id);
+      b.dataset.parent = String(o?.parent ?? -1);
+      b.addEventListener("click", () => void run(() => StudyService.GoTo(id)));
       return b;
     };
     movesPanel.appendChild(chip("", "開始局面", 0, "採ったときの局面に戻ります"));
-    for (const m of state.moves ?? []) {
+    for (const m of state.nodes ?? []) {
       movesPanel.appendChild(
-        // ⚠️ **出す数字と `GoTo` に渡す値は別物。** `m.number` は根からの手数
-        // （`GoTo` の引数）で、画面に出すのは棋譜の手数（＝根の手数を足したもの）。
-        // 撮った 41 手目の局面を根にすると、この 2 つは 40 ずれる。
-        chip(String((state.first ?? 0) + m.number), m.text || m.usi, m.number,
-          `${m.usi} までの局面に戻ります（右クリックでこの手から下を消します）`),
+        // ⚠️ **出す数字と GoTo に渡す値は別物。** m.number は根からの手数で、
+        // 画面に出すのは棋譜の手数（＝根の手数を足したもの）。撮った 41 手目の
+        // 局面を根にすると、この 2 つは 40 ずれる。**渡すのは m.id。**
+        chip(String((state.first ?? 0) + m.number), m.text || m.usi, m.id,
+          `${m.usi} までの局面に戻ります` +
+            (m.main ? "" : "（枝）") + "（右クリックでこの手から下を消します）",
+          { depth: m.depth, main: m.main, parent: m.parent }),
       );
     }
     // 今見ている手が画面の外にあると、進めても手順が動いていないように見える。
@@ -314,7 +330,7 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
   // 実戦の手順が辿れなくなる）。**閉じただけなら指さない**（誤操作の取り消し）。
 
   // ask は開いているダイアログ。**開いているあいだは盤の操作を止める。**
-  let ask: { close: () => void } | null = null;
+  let ask: PopupHandle | null = null;
 
   const closeAsk = () => {
     ask?.close();
@@ -325,60 +341,14 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
   // 選ばずに閉じたら onPick は呼ばれない（＝指さない）。
   const askPromote = (x: number, y: number, onPick: (promote: boolean) => void) => {
     closeAsk();
-    const box = document.createElement("div");
-    box.className = "promote-ask";
-    box.setAttribute("role", "dialog");
-    box.setAttribute("aria-label", "成るかどうか");
-
-    const button = (label: string, promote: boolean, primary: boolean) => {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.className = primary ? "promote-btn is-primary" : "promote-btn";
-      b.textContent = label;
-      b.addEventListener("click", () => {
-        closeAsk();
-        onPick(promote);
-      });
-      return b;
-    };
-    // **「成る」を先に置いて初期フォーカスにする**（成るほうが圧倒的に多い）。
-    const yes = button("成る", true, true);
-    box.append(yes, button("成らず", false, false));
-
-    // ⚠️ **`position: fixed` で body に置く**（盤の箱に入れると、はみ出したぶんが
-    // 切られる）。押した場所の右下に出し、画面から出るなら内側へ寄せる。
-    document.body.appendChild(box);
-    const r = box.getBoundingClientRect();
-    const m = 8;
-    box.style.left = `${Math.min(Math.max(x + 12, m), window.innerWidth - r.width - m)}px`;
-    box.style.top = `${Math.min(Math.max(y + 12, m), window.innerHeight - r.height - m)}px`;
-    yes.focus();
-
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        closeAsk();
-      }
-    };
-    const onOutside = (e: Event) => {
-      if (!box.contains(e.target as Node | null)) {
-        closeAsk();
-      }
-    };
-    // ⚠️ **今の click が終わってから外側の監視を始める。** 同じフレームで付けると、
-    // ダイアログを開いたこのクリックがそのまま「外側」として届いて即座に閉じる。
-    const timer = window.setTimeout(() => {
-      document.addEventListener("pointerdown", onOutside, true);
-    }, 0);
-    document.addEventListener("keydown", onKey, true);
-
-    ask = {
-      close: () => {
-        window.clearTimeout(timer);
-        document.removeEventListener("pointerdown", onOutside, true);
-        document.removeEventListener("keydown", onKey, true);
-        box.remove();
-      },
-    };
+    ask = openPopup(x, y, {
+      label: "成るかどうか",
+      // **「成る」を先に置いて初期フォーカスにする**（成るほうが圧倒的に多い）。
+      items: [
+        { label: "成る", kind: "primary", onPick: () => onPick(true) },
+        { label: "成らず", onPick: () => onPick(false) },
+      ],
+    });
   };
 
   // ---- 手順を消す（手順リストの右クリック）--------------------------------
@@ -391,79 +361,52 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
   // ⚠️ **聞いているあいだ、消える範囲を赤く光らせる**（`.is-doomed`）——
   // 「その手以下が消える」は文字で言うより見せたほうが早い。
 
-  // markDoomed は from 手目から下を「消える」見た目にする（0 で全部消す）。
+  // markDoomed はその手とその子孫を「消える」見た目にする（0 で全部戻す）。
+  //
+  // ⚠️ **子孫は親を辿って決めること。** 字下げ（depth）では見分けられない ——
+  // **本譜の続きは親と同じ深さのまま**だからで、深さで切ると本譜側だけ
+  // 消えないように見える。
   const markDoomed = (from: number) => {
-    for (const el of movesPanel.querySelectorAll<HTMLElement>(".move-chip")) {
-      const n = Number(el.dataset.n ?? "0");
-      el.classList.toggle("is-doomed", from > 0 && n >= from);
+    const chips = [...movesPanel.querySelectorAll<HTMLElement>(".move-chip")];
+    const parent = new Map<number, number>();
+    for (const el of chips) {
+      parent.set(Number(el.dataset.id ?? "0"), Number(el.dataset.parent ?? "-1"));
+    }
+    const doomed = (id: number): boolean => {
+      for (let n = id; n > 0; n = parent.get(n) ?? -1) {
+        if (n === from) {
+          return true;
+        }
+      }
+      return false;
+    };
+    for (const el of chips) {
+      el.classList.toggle(
+        "is-doomed", from > 0 && doomed(Number(el.dataset.id ?? "0")));
     }
   };
 
   // askDrop は押した場所で「ここから消す」を聞く。
-  // ⚠️ **`window.confirm` は使わない**（成る/成らずと同じ理由。あちらの節を読むこと）。
-  const askDrop = (x: number, y: number, n: number, label: string, count: number) => {
+  const askDrop = (x: number, y: number, id: number, label: string, count: number) => {
     closeAsk();
-    markDoomed(n);
-
-    const box = document.createElement("div");
-    box.className = "drop-ask";
-    box.setAttribute("role", "dialog");
-    box.setAttribute("aria-label", "手順を消す");
-
-    const yes = document.createElement("button");
-    yes.type = "button";
-    yes.className = "promote-btn is-danger";
-    // **何が何手消えるかを文言に出す**（押す前に読めること）。
-    yes.textContent = count > 1 ? `${label} から下を消す（${count}手）` : `${label} を消す`;
-    yes.addEventListener("click", () => {
-      closeAsk();
-      void run(() => StudyService.DropFrom(n));
+    markDoomed(id);
+    ask = openPopup(x, y, {
+      label: "手順を消す",
+      // ⚠️ **初期フォーカスは「やめる」**（成る/成らずと逆）。こちらは消す操作なので、
+      // Enter の連打で消えてしまわないほうを既定にする。
+      focus: 1,
+      items: [
+        {
+          // **何が何手消えるかを文言に出す**（押す前に読めること）。
+          label: count > 1 ? `${label} から下を消す（${count}手）` : `${label} を消す`,
+          kind: "danger",
+          onPick: () => void run(() => StudyService.DropFrom(id)),
+        },
+        { label: "やめる", onPick: () => {} },
+      ],
+      // **消える範囲の色も一緒に落とす**（残ると、消していないのに消えた顔をする）。
+      onClose: () => markDoomed(0),
     });
-
-    const no = document.createElement("button");
-    no.type = "button";
-    no.className = "promote-btn";
-    no.textContent = "やめる";
-    no.addEventListener("click", () => closeAsk());
-
-    box.append(yes, no);
-    // ⚠️ **`position: fixed` で body に置く**（手順の列に入れると、
-    // `overflow-y: auto` に切られるうえスクロールで一緒に動く）。
-    document.body.appendChild(box);
-    const r = box.getBoundingClientRect();
-    const m = 8;
-    box.style.left = `${Math.min(Math.max(x + 12, m), window.innerWidth - r.width - m)}px`;
-    box.style.top = `${Math.min(Math.max(y + 12, m), window.innerHeight - r.height - m)}px`;
-    // ⚠️ **初期フォーカスは「やめる」**（成る/成らずと逆）。こちらは消す操作なので、
-    // Enter の連打で消えてしまわないほうを既定にする。
-    no.focus();
-
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        closeAsk();
-      }
-    };
-    const onOutside = (e: Event) => {
-      if (!box.contains(e.target as Node | null)) {
-        closeAsk();
-      }
-    };
-    // ⚠️ **今のイベントが終わってから外側の監視を始める**（成る/成らずと同じ）。
-    const timer = window.setTimeout(() => {
-      document.addEventListener("pointerdown", onOutside, true);
-    }, 0);
-    document.addEventListener("keydown", onKey, true);
-
-    ask = {
-      close: () => {
-        window.clearTimeout(timer);
-        document.removeEventListener("pointerdown", onOutside, true);
-        document.removeEventListener("keydown", onKey, true);
-        box.remove();
-        // **消える範囲の色も一緒に落とす**（残ると、消していないのに消えた顔をする）。
-        markDoomed(0);
-      },
-    };
   };
 
   // 手順リストの右クリック。**チップの上でだけ受ける**（列の余白では既定のまま）。
@@ -474,14 +417,27 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
     }
     // ⚠️ **webview の既定メニューを止める**（訂正タブの盤と同じ）。
     e.preventDefault();
-    const n = Number(chip.dataset.n ?? "0");
+    const id = Number(chip.dataset.id ?? "0");
     // 「開始局面」は手ではないので消せない（消したいなら 1 手目を押す）。
-    if (n < 1 || !state?.loaded) {
+    if (id < 1 || !state?.loaded) {
       return;
     }
-    const total = (state.moves ?? []).length;
-    const label = chip.querySelector<HTMLElement>(".move-text")?.textContent ?? `${n}手目`;
-    askDrop(e.clientX, e.clientY, n, label, total - n + 1);
+    // ⚠️ **消えるのは「その手 + 子孫」**（ぶら下がった枝も全部）。字下げでは
+    // 数えられないので、親を辿って数える（markDoomed と同じ理由）。
+    const parent = new Map<number, number>();
+    for (const n of state.nodes ?? []) {
+      parent.set(n.id, n.parent);
+    }
+    const count = (state.nodes ?? []).filter((n) => {
+      for (let x = n.id; x > 0; x = parent.get(x) ?? -1) {
+        if (x === id) {
+          return true;
+        }
+      }
+      return false;
+    }).length;
+    const label = chip.querySelector<HTMLElement>(".move-text")?.textContent ?? "この手";
+    askDrop(e.clientX, e.clientY, id, label, count);
   });
 
   // play は移動先が決まったときに 1 手指す。

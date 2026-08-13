@@ -474,7 +474,7 @@ func (s *AnalyzeService) runOne(
 			return
 		}
 		best := p.Lines[0] // Lines は Rank の昇順（analyze.Progress）
-		s.study.recordEval(target.Epoch, target.Ply, entry.ID, label, best.Score, best.Depth)
+		s.study.recordEval(target.Epoch, target.NodeID, entry.ID, label, best.Score, best.Depth)
 	}
 	res, err := s.sessionFor(entry).Analyze(ctx, target.Root, opt, func(p analyze.Progress) {
 		record(p)

@@ -2420,10 +2420,9 @@ html.is-main #app {
    「OK / キャンセル」でしか聞けない（「キャンセル＝不成」は読み取れない）。
 
    ⚠️ **position: fixed で body に置く**（盤の箱に入れると、はみ出したぶんが切られる）。 */
-/* ⚠️ **手順を消すダイアログ（.drop-ask）も同じ形**（2026-08-13）。押した場所に
-   小さく出して聞く、という作りが同じなので見た目も揃える。**別々に書かないこと。** */
-.promote-ask,
-.drop-ask {
+/* 押した場所に出す小さなダイアログ（成る/成らず・手順を消す・手順を追加）。
+   ⚠️ **3 つとも同じ形**（作りも `popup.ts` の 1 か所）。**別々に書かないこと。** */
+.popup-menu {
   position: fixed;
   z-index: 50;
   display: flex;
@@ -2435,7 +2434,7 @@ html.is-main #app {
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
 }
 
-.promote-btn {
+.popup-btn {
   padding: 5px 12px;
   font-size: 13px;
   color: #f2f3f5;
@@ -2446,26 +2445,26 @@ html.is-main #app {
   white-space: nowrap;
 }
 
-.promote-btn:hover {
+.popup-btn:hover {
   border-color: #5ea0ff;
 }
 
 /* 消す側のボタン。⚠️ **赤にすること**（元に戻せない操作で、消えるのは 1 手とは
    限らない）。⚠️ **初期フォーカスは当てない** —— 既定は「やめる」のほう。 */
-.promote-btn.is-danger {
+.popup-btn.is-danger {
   color: #0f1115;
   background: #ff7a7a;
   border-color: #ff7a7a;
 }
 
-/* 成るほうが圧倒的に多いので、そちらを既定の見た目にして初期フォーカスも当てる。 */
-.promote-btn.is-primary {
+/* 既定の選択肢（成る／手順を追加）。初期フォーカスもこちらに当てる。 */
+.popup-btn.is-primary {
   color: #0f1115;
   background: #5ea0ff;
   border-color: #5ea0ff;
 }
 
-.promote-btn:focus-visible {
+.popup-btn:focus-visible {
   outline: 2px solid #f2f3f5;
   outline-offset: 1px;
 }
@@ -2546,8 +2545,12 @@ html.is-main #app {
   padding-right: 2px;
 }
 
+/* 手順の 1 手。**ツリービュー**なので、枝は深さぶん字下げする（2026-08-13）。
+   ⚠️ **字下げの上限を付けること**（min）。深い枝で右へ流れ続けると、
+   細い列では手が読めなくなる。 */
 .move-chip {
   flex: 0 0 auto;
+  margin-left: calc(min(var(--move-depth, 0), 4) * 10px);
   display: flex;
   align-items: baseline;
   gap: 6px;
@@ -2581,6 +2584,15 @@ html.is-main #app {
 .move-chip:hover {
   border-color: #5ea0ff;
   background: rgba(94, 160, 255, 0.1);
+}
+
+/* 枝（本譜ではない手）。⚠️ **見た目で分かること。** 同じ手数の手が何行も
+   並ぶので、どれが本譜かが分からないと読めない。字下げだけだと、スクロール
+   していると基準の列が見えない。 */
+.move-chip.is-branch {
+  color: #9aa4b8;
+  border-left: 2px solid #4a5265;
+  border-radius: 0 4px 4px 0;
 }
 
 /* 今見ている局面。**戻って見ているときにどこに居るかが分からないと、

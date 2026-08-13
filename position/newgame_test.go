@@ -20,8 +20,8 @@ func TestNewGameHirate(t *testing.T) {
 	if got != want {
 		t.Errorf("初期局面が違います\n got: %s\nwant: %s", got, want)
 	}
-	if s.Ply() != 0 || len(s.Moves()) != 0 {
-		t.Errorf("手順が空ではありません: ply=%d moves=%d", s.Ply(), len(s.Moves()))
+	if s.Ply() != 0 || len(s.Nodes()) != 0 {
+		t.Errorf("手順が空ではありません: ply=%d moves=%d", s.Ply(), len(s.Nodes()))
 	}
 	// 初期局面から指せる手は 30 通り。**盤を作っただけで指せる状態**であること
 	// （出せないと、始めた直後に駒を押しても何も光らない）。

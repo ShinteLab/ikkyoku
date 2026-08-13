@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/ShinteLab/ikkyoku/analyze"
+	"github.com/ShinteLab/ikkyoku/position"
 	"golang.org/x/text/encoding/japanese"
 	"golang.org/x/text/transform"
 )
@@ -40,8 +41,8 @@ func TestStudyServiceAdoptHasLegalMoves(t *testing.T) {
 	if !st.Loaded {
 		t.Fatal("採ったのに Loaded が false です")
 	}
-	if st.Ply != 0 || len(st.Moves) != 0 {
-		t.Errorf("採った直後に手順があります: ply=%d moves=%+v", st.Ply, st.Moves)
+	if st.Ply != 0 || len(st.Nodes) != 0 {
+		t.Errorf("採った直後に手順があります: ply=%d moves=%+v", st.Ply, st.Nodes)
 	}
 	if len(st.Legal) != 30 {
 		t.Errorf("合法手 = %d, want 30", len(st.Legal))
@@ -61,11 +62,11 @@ func TestStudyServicePlay(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Play: %v", err)
 	}
-	if st.Ply != 1 || len(st.Moves) != 1 {
-		t.Fatalf("手順が記録されていません: ply=%d moves=%+v", st.Ply, st.Moves)
+	if st.Ply != 1 || len(st.Nodes) != 1 {
+		t.Fatalf("手順が記録されていません: ply=%d moves=%+v", st.Ply, st.Nodes)
 	}
-	if st.Moves[0].Text != "▲７六歩" {
-		t.Errorf("手順の表記 = %q, want %q", st.Moves[0].Text, "▲７六歩")
+	if st.Nodes[0].Text != "▲７六歩" {
+		t.Errorf("手順の表記 = %q, want %q", st.Nodes[0].Text, "▲７六歩")
 	}
 	if st.Turn != 2 {
 		t.Errorf("手番 = %d, want 2（後手番）", st.Turn)
@@ -136,8 +137,8 @@ func TestStudyServiceGoToAndDropFrom(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GoTo: %v", err)
 	}
-	if st.Ply != 1 || len(st.Moves) != 2 {
-		t.Errorf("GoTo で手順が消えました: ply=%d moves=%d", st.Ply, len(st.Moves))
+	if st.Ply != 1 || len(st.Nodes) != 2 {
+		t.Errorf("GoTo で手順が消えました: ply=%d moves=%d", st.Ply, len(st.Nodes))
 	}
 	if strings.Join(st.Played, " ") != "7g7f" {
 		t.Errorf("Played = %v（先の手を渡さないこと）", st.Played)
@@ -148,8 +149,8 @@ func TestStudyServiceGoToAndDropFrom(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DropFrom: %v", err)
 	}
-	if st.Ply != 0 || len(st.Moves) != 0 {
-		t.Errorf("DropFrom で消えていません: ply=%d moves=%d", st.Ply, len(st.Moves))
+	if st.Ply != 0 || len(st.Nodes) != 0 {
+		t.Errorf("DropFrom で消えていません: ply=%d moves=%d", st.Ply, len(st.Nodes))
 	}
 	if _, err := s.DropFrom(1); err == nil {
 		t.Error("無い手を消せました")
@@ -177,8 +178,8 @@ func TestStudyServiceAdoptResetsMoves(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Adopt: %v", err)
 	}
-	if st.Ply != 0 || len(st.Moves) != 0 {
-		t.Errorf("採り直したのに手順が残っています: ply=%d moves=%+v", st.Ply, st.Moves)
+	if st.Ply != 0 || len(st.Nodes) != 0 {
+		t.Errorf("採り直したのに手順が残っています: ply=%d moves=%+v", st.Ply, st.Nodes)
 	}
 }
 
@@ -193,7 +194,7 @@ func TestStudyServicePlayWithoutPosition(t *testing.T) {
 	if st.Loaded {
 		t.Error("局面が無いのに Loaded です")
 	}
-	if st.Legal == nil || st.Moves == nil || st.Played == nil {
+	if st.Legal == nil || st.Nodes == nil || st.Played == nil {
 		t.Error("空でも配列を返すこと（フロントが null を踏む）")
 	}
 }
@@ -213,7 +214,7 @@ func TestStudyServiceLoadKifu(t *testing.T) {
 		t.Errorf("止まった理由が出ている: %s", load.Note)
 	}
 	st := load.State
-	if !st.Loaded || st.Ply != 4 || len(st.Moves) != 4 {
+	if !st.Loaded || st.Ply != 4 || len(st.Nodes) != 4 {
 		t.Fatalf("最終手まで反映されていません: %+v", st)
 	}
 	// **解析に渡せる形になっていること**（根 + 手順）。
@@ -316,7 +317,7 @@ func TestStudyServiceNewGame(t *testing.T) {
 		t.Errorf("Summary = %q（手合割が出ていない）", got.Summary)
 	}
 	st := got.State
-	if !st.Loaded || st.Ply != 0 || len(st.Moves) != 0 {
+	if !st.Loaded || st.Ply != 0 || len(st.Nodes) != 0 {
 		t.Fatalf("始めた直後の状態が変です: %+v", st)
 	}
 	if want := hirateBoard; st.BoardSFEN != want {
@@ -396,10 +397,11 @@ func TestStudyServiceReloadKifuKeepsEvals(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReloadKifu: %v", err)
 	}
+	// ⚠️ **伸びただけなら断りを出さないこと**（中継は 1 手ごとに伸びる）。
 	if load.Note != "" {
 		t.Errorf("食い違っていないのに差し替えの断りが出ています: %s", load.Note)
 	}
-	if load.State.Ply != 4 || len(load.State.Moves) != 4 {
+	if load.State.Ply != 4 || len(load.State.Nodes) != 4 {
 		t.Fatalf("最新の手順まで進んでいません: %+v", load.State)
 	}
 	// **解析結果はそのまま**（3 点とも残っていること）。
@@ -412,9 +414,10 @@ func TestStudyServiceReloadKifuKeepsEvals(t *testing.T) {
 	}
 }
 
-// 食い違ったら**その先だけ**捨てて URL の手順を正にすること。
+// 食い違ったら**URL の手順を本譜にし、それまでの手順は枝として残す**こと。
 //
-// 一致している範囲の評価値は残す（**捨てるのは別の手順に付いた値だけ**）。
+// ⚠️ **消さないのが要点**（2026-08-13。枝が入るまでは捨てていた）。
+// 評価値も節点に紐づいているので、**枝へ戻ればそのまま出る**。
 func TestStudyServiceReloadKifuReplacesDivergedMoves(t *testing.T) {
 	body := kifuHead + "   1 ７六歩(77)\n   2 ３四歩(33)\n"
 	srv := kifuServer(t, &body)
@@ -439,19 +442,44 @@ func TestStudyServiceReloadKifuReplacesDivergedMoves(t *testing.T) {
 		t.Fatalf("ReloadKifu: %v", err)
 	}
 	if load.Note == "" {
-		t.Error("差し替えたことが出ていません（黙って手順が変わる）")
+		t.Error("差し替えたことが出ていません（黙って本譜が変わる）")
 	}
 	st := load.State
-	if len(st.Moves) != 2 || st.Moves[1].USI != "8c8d" {
-		t.Fatalf("URL の手順になっていません: %+v", st.Moves)
+	// **本譜は URL のもの**（今見ている経路もそちら）。
+	if len(st.Line) != 3 {
+		t.Fatalf("本譜が 2 手になっていません: %+v", st.Line)
 	}
-	// 一致していた 1 手目までは残り、その先は消えること。
+	var main, branch *position.Node
+	for i := range st.Nodes {
+		n := &st.Nodes[i]
+		if n.USI == "8c8d" {
+			main = n
+		}
+		if n.USI == "3c3d" {
+			branch = n
+		}
+	}
+	if main == nil || !main.Main {
+		t.Fatalf("URL の手が本譜になっていません: %+v", st.Nodes)
+	}
+	// ⚠️ **前の手順が消えていないこと**（枝として残る）。
+	if branch == nil || branch.Main {
+		t.Fatalf("前の手順が消えました: %+v", st.Nodes)
+	}
+	// 一致していた 1 手目までの評価値は今の経路に出る（**枝の点は混ぜない**）。
 	g := s.Evals()
 	if len(g.Series) != 1 {
 		t.Fatalf("折れ線が消えました: %+v", g.Series)
 	}
 	if n := len(g.Series[0].Points); n != 2 {
-		t.Fatalf("残す/捨てるの線引きがずれています: %d点 %+v", n, g.Series[0].Points)
+		t.Fatalf("今の経路の点だけになっていません: %d点 %+v", n, g.Series[0].Points)
+	}
+	// ⚠️ **枝へ戻せば、そちらに付けた評価値がそのまま出ること**（消していない）。
+	if _, err := s.GoTo(branch.ID); err != nil {
+		t.Fatalf("GoTo: %v", err)
+	}
+	if n := len(s.Evals().Series[0].Points); n != 3 {
+		t.Errorf("枝の評価値が消えました: %d点", n)
 	}
 }
 
@@ -488,7 +516,92 @@ func TestStudyServiceReloadKifuKeepsMovesOnError(t *testing.T) {
 	if err == nil {
 		t.Fatal("棋譜でない中身でエラーになりませんでした")
 	}
-	if load.State.Ply != 2 || len(load.State.Moves) != 2 {
+	if load.State.Ply != 2 || len(load.State.Nodes) != 2 {
 		t.Errorf("失敗したのに手順が壊れています: %+v", load.State)
+	}
+}
+
+// 候補手の読み筋を枝として足せること（解析タブの候補手の右クリック）。
+//
+// ⚠️ **足しただけで今見ている局面が動かないこと。** 動くと走っている解析が
+// 別の局面のものになり、候補を続けて足せない。
+func TestStudyServiceAddLine(t *testing.T) {
+	s := adopted(t)
+	if _, err := s.Play("7g7f"); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	at := s.State().CurrentID
+
+	got, err := s.AddLine([]string{"3c3d", "2g2f"})
+	if err != nil {
+		t.Fatalf("AddLine: %v", err)
+	}
+	if got.Added != 2 || got.FirstID == 0 {
+		t.Fatalf("枝が生えていません: %+v", got)
+	}
+	if got.State.CurrentID != at {
+		t.Errorf("足しただけで局面が動きました: %d -> %d", at, got.State.CurrentID)
+	}
+	// **見ている局面は動かないが、経路（＝この先どう続くか）はそこへ伸びる。**
+	// ⚠️ 続きが他に無いのだから、それが今の経路になるのが正しい
+	// （連続解析もそこを辿る）。**カーソルが動いていないことと混同しないこと。**
+	if got.State.Ply != 1 || len(got.State.Line) != 4 {
+		t.Errorf("経路がおかしい: ply=%d line=%+v", got.State.Ply, got.State.Line)
+	}
+}
+
+// ⚠️ **候補が本譜と同じ手なら枝を増やさないこと**（食い違うところまで辿る）。
+func TestStudyServiceAddLineFollowsMainLine(t *testing.T) {
+	s := adopted(t)
+	for _, mv := range []string{"7g7f", "3c3d"} {
+		if _, err := s.Play(mv); err != nil {
+			t.Fatalf("Play %s: %v", mv, err)
+		}
+	}
+	if _, err := s.GoTo(0); err != nil {
+		t.Fatalf("GoTo: %v", err)
+	}
+	got, err := s.AddLine([]string{"7g7f", "3c3d"})
+	if err != nil {
+		t.Fatalf("AddLine: %v", err)
+	}
+	if got.Added != 0 || got.FirstID != 0 {
+		t.Errorf("同じ手順で枝が増えました: %+v", got)
+	}
+	if len(got.State.Nodes) != 2 {
+		t.Errorf("節点が増えました: %+v", got.State.Nodes)
+	}
+}
+
+// ⚠️ **枝を消しても、他の枝と本譜は残ること**（消えるのは子孫だけ）。
+func TestStudyServiceDropFromKeepsSiblings(t *testing.T) {
+	s := adopted(t)
+	if _, err := s.Play("7g7f"); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	got, err := s.AddLine([]string{"3c3d"})
+	if err != nil {
+		t.Fatalf("AddLine: %v", err)
+	}
+	branch := got.FirstID
+	other, err := s.AddLine([]string{"8c8d"})
+	if err != nil {
+		t.Fatalf("AddLine: %v", err)
+	}
+
+	st, err := s.DropFrom(branch)
+	if err != nil {
+		t.Fatalf("DropFrom: %v", err)
+	}
+	if len(st.Nodes) != 2 {
+		t.Fatalf("消しすぎ/消し足りません: %+v", st.Nodes)
+	}
+	for _, n := range st.Nodes {
+		if n.ID == branch {
+			t.Errorf("消えていません: %+v", n)
+		}
+	}
+	if _, err := s.GoTo(other.FirstID); err != nil {
+		t.Errorf("兄弟の枝まで消えました: %v", err)
 	}
 }

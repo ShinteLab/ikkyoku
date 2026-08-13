@@ -74,7 +74,8 @@ export interface EvalGraphOptions {
   // onSeek はグラフを押したときの行き先（根からの手数）。
   //
   // **手順のリストと同じ「戻って見る」操作**（手順は消さない）。
-  onSeek(ply: number): void;
+  // onSeek はその局面へ戻す。**引数は手順ツリーの節点 id**（手数ではない）。
+  onSeek(id: number): void;
 }
 
 export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
@@ -311,15 +312,20 @@ export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
 
   // seek はその手数の局面へ戻す（**手順は消さない**。手順のチップと同じ操作）。
   // **手順の外を押しても何もしない。**
+  //
+  // ⚠️ **`onSeek` に渡すのは節点の id**（手数ではない）。枝が入ってからは
+  // 「手数 → 局面」が一意に決まらないので、**今の経路の id を Go 側から
+  // 受け取って引く**（`EvalGraph.ids`）。**手数から作らないこと。**
   const seek = (n: number) => {
     if (!graph) {
       return;
     }
     const ply = n - (graph.first ?? 0);
-    if (ply < 0 || ply > (graph.last ?? 0) - (graph.first ?? 0)) {
+    const id = (graph.ids ?? [])[ply];
+    if (ply < 0 || id === undefined) {
       return;
     }
-    onSeek(ply);
+    onSeek(id);
   };
 
   // ⚠️ **クリックとドラッグは同じボタンで始まる**ので、**どちらだったかは

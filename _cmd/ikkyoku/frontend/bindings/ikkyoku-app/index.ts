@@ -19,6 +19,7 @@ export {
 };
 
 export type {
+    AddLine,
     AnalyzeEngine,
     AnalyzeState,
     AppSettings,

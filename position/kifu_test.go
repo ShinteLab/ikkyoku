@@ -33,7 +33,7 @@ func TestFromKIF(t *testing.T) {
 		t.Errorf("手数が合わない: total=%d loaded=%d", load.Total, load.Loaded)
 	}
 	// 投了は指し手ではないので手順に載らない。
-	if got := len(study.Moves()); got != 4 {
+	if got := len(study.Nodes()); got != 4 {
 		t.Errorf("手順の数 = %d, want 4", got)
 	}
 	// **最終手まで進んだ状態**で返ること（戻って見ている状態にしない）。
@@ -54,7 +54,7 @@ func TestFromKIF(t *testing.T) {
 		t.Errorf("取った角が駒台に載っていない: %v", black)
 	}
 	// 手順の日本語表記が付くこと（"同" も出る）。
-	moves := study.Moves()
+	moves := study.Nodes()
 	if moves[0].Text != "▲７六歩" || moves[3].Text != "△同　銀" {
 		t.Errorf("表記が付かない: %q / %q", moves[0].Text, moves[3].Text)
 	}

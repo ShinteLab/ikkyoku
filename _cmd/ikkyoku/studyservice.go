@@ -40,8 +40,8 @@ import (
 // ここで戻るが、解析だけは USI 経由のまま**にすること（棋力の問題を設定の問題にした
 // 意味が無くなる）。**用途が違う** —— こちらは手の検証であって解析ではない。
 //
-// **これから**: 分岐ツリー（今は一直線。戻って別の手を指すと先は捨てる）。
-// 木の形は `core/kifu` が持てるようになってから決める。
+// **手順は木**（2026-08-13）。戻って別の手を指すと**枝が生える**（前の手順は消えない）。
+// 木の形の最終形は `core/kifu` が持てるようになってから決める（`position` に仮置き）。
 type StudyService struct {
 	logger *slog.Logger
 	// src は訂正タブの局面。**読むのは Adopt の瞬間だけ。**
@@ -71,8 +71,8 @@ type StudyService struct {
 	sourceURL string
 	// evals は手順の 1 手ごとの評価値（評価値グラフ。2026-08-12）。
 	//
-	// ⚠️ **置き場所がここなのは、記録が手順に紐づくから。** 手順を切る操作
-	// （`Play` の分岐・`Undo`・根の入れ替え）を知っているのはここだけなので、
+	// ⚠️ **置き場所がここなのは、記録が手順に紐づくから。** 節点を消す操作
+	// （`DropFrom`・根の入れ替え）を知っているのはここだけなので、
 	// **どこまでを捨てるかの判断もここに置く**（`AnalyzeService` は記録を頼むだけ）。
 	evals evalStore
 }
@@ -129,11 +129,20 @@ type StudyState struct {
 	// `Move.Number` は 1 から始まるので、**画面に手数として出すときは First を足す**。
 	// 評価値グラフの横軸（`EvalGraph.First`）と**同じ値**にすること。
 	First int `json:"first"`
-	// Moves は根から指した手順（棋譜の順。日本語表記つき）。
-	Moves []position.Move `json:"moves"`
+	// Nodes は手順ツリーの全部の手（**表示順**。日本語表記つき）。
+	//
+	// ⚠️ **一直線ではない**（2026-08-13）。`Depth` が字下げ、`Main` が本譜側。
+	// 並びは「その手 → 枝 → 本譜の続き」で、**ある手の子孫は必ずその直後に固まる**。
+	Nodes []position.Node `json:"nodes"`
+	// CurrentID は今見ている節点（0 なら根）。**手順リストの現在位置。**
+	CurrentID int `json:"currentId"`
+	// Line は今の経路の節点 id（**ply 番目がその手数の節点**。先頭は根の 0）。
+	//
+	// ⚠️ **連続解析が次に進む先はここから取る。** 枝に居るならその枝を辿る。
+	Line []int `json:"line"`
 	// Ply は今どこまで進めて見ているか（0 なら根）。
 	//
-	// **len(Moves) より小さいことがある**（戻って見ている状態）。
+	// **len(Line)-1 より小さいことがある**（戻って見ている状態）。
 	Ply int `json:"ply"`
 	// Played は今の局面までの手（USI）。**解析に渡す moves そのもの。**
 	Played []string `json:"played"`
@@ -229,6 +238,21 @@ func (s *StudyService) LoadKifu(text string) (KifuLoad, error) {
 	return KifuLoad{State: st, Summary: kifuSummary(load), Note: load.Note}, nil
 }
 
+// AddLine は候補手を枝として足した結果（解析タブの候補手の右クリック）。
+type AddLine struct {
+	// State は足したあとの解析タブの状態。**今見ている局面は動いていない。**
+	State StudyState `json:"state"`
+	// FirstID は最初に生えた節点（**0 なら 1 手も増えていない**＝全部が既にあった）。
+	//
+	// ⚠️ **0 を失敗として扱わないこと。** 候補が本譜と同じ手順なら 1 手も
+	// 増えないのが正しい（そのときは既にある手順を辿るだけ）。
+	FirstID int `json:"firstId"`
+	// Added は新しく生えた手数。
+	Added int `json:"added"`
+	// Note は全部は足せなかった理由（足せたなら空）。**エラーではない**（設計原則3）。
+	Note string `json:"note"`
+}
+
 // kifuFetchTimeout は棋譜を取りに行くときの上限。
 //
 // 棋譜 1 局は数十 KB なので、これで足りないのは相手が居ないときだけ。
@@ -313,64 +337,74 @@ func (s *StudyService) ReloadKifu() (KifuLoad, error) {
 	}
 
 	s.mu.Lock()
-	kept, dropped := s.mergeReloadLocked(study)
-	s.study = study
+	graft := s.mergeReloadLocked(study)
 	s.game = load.Game
 	st := s.state()
 	s.mu.Unlock()
 
 	summary := kifuSummary(load) + fmt.Sprintf("（%s）", got.Encoding)
 	note := load.Note
-	if dropped > 0 {
-		// **黙って捨てない。** 自分で指した手が消えるので、どこからどれだけ
-		// 差し替わったかを出す。
-		msg := fmt.Sprintf("%d手目から食い違ったので、その先の%d手を棋譜のものに差し替えました",
-			kept+1, dropped)
+	for _, msg := range []string{graft.Note, reloadNote(graft)} {
+		if msg == "" {
+			continue
+		}
 		if note == "" {
 			note = msg
 		} else {
 			note += "／" + msg
 		}
 	}
-	s.logger.Info("棋譜を取り直しました",
-		"url", got.URL, "moves", load.Loaded, "kept", kept, "dropped", dropped)
+	s.logger.Info("棋譜を取り直しました", "url", got.URL, "moves", load.Loaded,
+		"kept", graft.Kept, "added", graft.Added, "movedAt", graft.MovedAt)
 	return KifuLoad{State: st, Summary: summary, Note: note}, nil
 }
 
-// mergeReloadLocked は取り直した手順と今の手順を突き合わせ、**残す評価値を決める**。
+// reloadNote は取り直しで**本譜が入れ替わった**ことの断り（入れ替わっていなければ空）。
 //
-// 戻り値は（一致した手数・捨てた手数）。**ロックを取った状態で呼ぶこと。**
-// ⚠️ **`s.study` の入れ替えはここではしない**（呼び出し側でまとめて行う）。
-func (s *StudyService) mergeReloadLocked(next *position.Study) (kept, dropped int) {
+// **黙って据え替えない。** 自分で指していた手が本譜から外れるので、どこからかを出す。
+//
+// ⚠️ **手が増えただけのときは何も言わない。** 中継が進めば毎回増えるので、
+// 毎回断ると読み飛ばされる（**本当に読んでほしいのは押しのけたとき**）。
+func reloadNote(g position.GraftResult) string {
+	if g.MovedAt == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d手目から棋譜のものにしました（それまでの手順は枝として残ります）",
+		g.MovedAt)
+}
+
+// mergeReloadLocked は取り直した棋譜を**今の木に据え直す**（`position.Study.Graft`）。
+//
+// ⚠️ **木ごと入れ替えないこと**（2026-08-13。枝が入るまではそうしていた）。
+// 入れ替えると**ユーザーが足した検討が中継の 1 手ごとに消える** ——
+// `TODO.md`「本譜のロック」の「本譜は URL が更新し続け、分岐は手入力」が
+// 一番よくある使い方なので、ここが消すと使い物にならない。
+//
+// **ロックを取った状態で呼ぶこと。**
+func (s *StudyService) mergeReloadLocked(next *position.Study) position.GraftResult {
 	// ⚠️ **組み上がらなかった側は「違う」に倒す**（両方空を一致と読まないこと）。
 	if s.study == nil || rootSFEN(s.study) == "" || rootSFEN(s.study) != rootSFEN(next) {
-		// **別の対局**（あるいは初回）。前の折れ線は別の局面の話になる。
+		// **別の対局**（あるいは初回）。木ごと入れ替えて折れ線も捨てる。
+		s.study = next
 		s.evals.reset()
-		return 0, 0
+		return position.GraftResult{}
 	}
-	prev := s.study.Moves()
-	cur := next.Moves()
-	for kept < len(prev) && kept < len(cur) && prev[kept].USI == cur[kept].USI {
-		kept++
+	// **最後の手を見ていたか**を、据え直す前に覚えておく（下記）。
+	atEnd := s.study.Ply() >= len(s.study.MainLine())
+	r := s.study.Graft(next.MainLine())
+	// **見ている位置。** ⚠️ **最後の手を見ていたなら、伸びた先の最後まで進める**
+	// —— 中継を追う使い方では「今の局面が見たい」が普通だから。途中や枝を見て
+	// いたなら**そのまま**（据え直しでは何も消えていないので、行き先が生きている）。
+	if atEnd {
+		// ⚠️ **本譜の終わりまで進める。** 今居る節点から `Line()` を取ると、
+		// 押しのけられた**古い枝の終わり**へ行ってしまう（実際に踏んだ）。
+		// 根まで戻れば `Line()` は本譜そのものになる。
+		if err := s.study.GoTo(0); err == nil {
+			line := s.study.Line()
+			_ = s.study.GoTo(line[len(line)-1])
+		}
 	}
-	dropped = len(prev) - kept
-	if dropped > 0 {
-		// **食い違ったところから先の評価値だけを捨てる**（epoch も進む）。
-		s.evals.dropAfter(kept)
-	}
-	// **見ている位置を保つ。** ⚠️ **最後の手を見ていたなら、伸びた先の最後まで
-	// 進める** —— 中継を追う使い方では「今の局面が見たい」が普通だから。
-	// 途中を見ていたなら、**一致している範囲までに丸めて**そこへ戻す
-	// （食い違った先は別の手順なので、同じ手数でも別の局面になる）。
-	at := s.study.Ply()
-	if at >= len(prev) {
-		at = len(cur)
-	} else if at > kept {
-		at = kept
-	}
-	// GoTo は範囲内なら失敗しない。**失敗しても最後まで進んだ状態のままでよい。**
-	_ = next.GoTo(at)
-	return kept, dropped
+	return r
 }
 
 // rootSFEN は根の局面の SFEN（組み上がらなければ空）。**同じ対局かの判定用。**
@@ -451,64 +485,78 @@ func kifuSummary(load position.KIFLoad) string {
 // 書かないこと** —— 合法手の一覧は `StudyState.Legal` に出しているので、
 // 画面はそれを光らせるだけでよい）。
 //
-// **戻って見ている途中で指すと、そこから先の手順は捨てる。**
+// ⚠️ **戻って見ている途中で別の手を指すと、枝が生える**（2026-08-13。前の手順は
+// **消えない**）。**評価値も捨てない** —— 記録は節点に紐づいているので、
+// 枝を選び直せばそちらの折れ線がそのまま出る。
 func (s *StudyService) Play(move string) (StudyState, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.study == nil {
 		return s.state(), fmt.Errorf("まだ局面がありません")
 	}
-	// ⚠️ **手順を切るかどうかは指す前にしか分からない。** 戻って見ている途中で
-	// 別の手を指すと、そこから先の手順は捨てられる（`position.Study.Play`）ので、
-	// **その先の評価値も一緒に捨てる**（別の手順に付いた値なので）。
-	// 同じ手を指し直しただけなら手順は変わらないので、評価値も残す。
-	ply := s.study.Ply()
-	prev := s.study.Moves()
-	branched := ply >= len(prev) || prev[ply].USI != move
 	if err := s.study.Play(move); err != nil {
 		return s.state(), err
 	}
-	if branched {
-		s.evals.dropAfter(ply)
-	}
 	return s.state(), nil
 }
 
-// DropFrom は n 手目とその先を手順から消す（**手順リストの右クリック**）。
+// AddLine は解析の候補手（読み筋）を**枝として木に足す**（候補手の右クリック）。
 //
-// ⚠️ **「1手戻す」は無くなった**（2026-08-13）。分岐を入れていく前段として、
-// **消す量を手そのもので指す**形に変えてある —— `Undo` は「今どこを見ているか」に
-// 依存していたので、戻って見ている最中に押すと何が消えるのか分かりにくかった。
-// 今は**押した手から下が消える**で、画面の見た目とそのまま一致する。
+// ⚠️ **押しても指さない**（＝今見ている局面は動かない）。動くと走っている解析が
+// 別の局面のものになり、**候補を続けて足せない**。
 //
-// **見るだけなら GoTo。混同しないこと**（あちらは手順を消さない）。
+// ⚠️ **候補の頭が本譜と同じなら枝を増やさず、食い違うところで枝にする**
+// （判断は `position.Study.AddLine`。**フロントで突き合わせないこと**）。
+func (s *StudyService) AddLine(moves []string) (AddLine, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.study == nil {
+		return AddLine{State: s.state()}, fmt.Errorf("まだ局面がありません")
+	}
+	if len(moves) == 0 {
+		return AddLine{State: s.state()}, fmt.Errorf("読み筋がありません")
+	}
+	first, added, note := s.study.AddLine(moves)
+	return AddLine{State: s.state(), FirstID: first, Added: added, Note: note}, nil
+}
+
+// DropFrom はその手**とその先（子孫の枝も全部）**を消す（**手順リストの右クリック**）。
 //
-// ⚠️ **分岐ツリーが入ったら、ここは「消す」ではなく「枝として切り離す」になる**
-// （`TODO.md` の「本譜のロック」）。**入口はこの 1 か所**にしてある。
-func (s *StudyService) DropFrom(n int) (StudyState, error) {
+// ⚠️ **「1手戻す」は無くなった**（2026-08-13）。**消す量を手そのもので指す**形に
+// してある —— `Undo` は「今どこを見ているか」に依存していたので、戻って見ている
+// 最中に押すと何が消えるのか分かりにくかった。今は**押した手から下**で、
+// 画面の見た目とそのまま一致する。
+//
+// **枝も本譜も同じように消せる**（本譜は URL から取り直せる）。
+// **見るだけなら GoTo。混同しないこと**（あちらは何も消さない）。
+//
+// ⚠️ **引数は節点の id で、手数ではない**（枝があると同じ手数が何個もある）。
+func (s *StudyService) DropFrom(id int) (StudyState, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.study == nil {
 		return s.state(), fmt.Errorf("まだ局面がありません")
 	}
-	if err := s.study.DropFrom(n); err != nil {
+	gone, err := s.study.DropFrom(id)
+	if err != nil {
 		return s.state(), err
 	}
-	// **手順から消えた手の評価値も消す**（`GoTo` との違いがここにも出る。
-	// あちらは手順を消さないので、評価値もそのまま残す）。
-	// ⚠️ **残るのは n-1 手なので、そこから先を捨てる。**
-	s.evals.dropAfter(n - 1)
+	// **消えた節点の評価値も消す**（`GoTo` との違いがここにも出る。
+	// あちらは何も消さないので、評価値もそのまま残る）。
+	s.evals.drop(gone)
 	return s.state(), nil
 }
 
-// GoTo は手順の n 手目まで進めた局面を見る（0 なら根）。**手順は消さない。**
-func (s *StudyService) GoTo(n int) (StudyState, error) {
+// GoTo はその節点の局面を見る（0 なら根）。**手順は消さない。**
+//
+// ⚠️ **引数は節点の id で、手数ではない。**
+func (s *StudyService) GoTo(id int) (StudyState, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.study == nil {
 		return s.state(), fmt.Errorf("まだ局面がありません")
 	}
-	if err := s.study.GoTo(n); err != nil {
+	if err := s.study.GoTo(id); err != nil {
 		return s.state(), err
 	}
 	return s.state(), nil
@@ -543,18 +591,21 @@ func (s *StudyService) Clear() StudyState {
 func (s *StudyService) Evals() EvalGraph {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	g := EvalGraph{Series: s.evals.series()}
+	if s.study == nil {
+		return EvalGraph{Series: []EvalSeries{}, IDs: []int{}}
+	}
+	// ⚠️ **点は「今の経路」だけ**（枝と本譜を 1 本の折れ線に混ぜない）。
+	line := s.study.Line()
+	g := EvalGraph{Series: s.evals.series(line), IDs: line}
 	if g.Series == nil {
 		g.Series = []EvalSeries{}
-	}
-	if s.study == nil {
-		return g
 	}
 	base := s.moveBaseLocked()
 	g.First = base
 	g.Ply = s.study.Ply()
 	g.Number = base + s.study.Ply()
-	g.Last = base + len(s.study.Moves())
+	// ⚠️ **右端は「今辿っている 1 本」の終わり**（木全体の最大手数ではない）。
+	g.Last = base + len(line) - 1
 	return g
 }
 
@@ -576,34 +627,49 @@ func (s *StudyService) moveBaseLocked() int {
 // ⚠️ **公開しない**（Service の公開メソッドはフロントの API になる）。記録するのは
 // エンジンの答えであって、フロントが決めることではない。
 //
-// epoch は `analyzeTarget` で受け取った手順の世代。**食い違っていたら捨てる** ——
-// 解析は非同期なので、**手順を切った後に前の枝の途中経過が届く**。
-func (s *StudyService) recordEval(epoch, ply int, engineID, label string, sc analyze.Score, depth int) {
+// epoch は `analyzeTarget` で受け取った根の世代。**食い違っていたら捨てる** ——
+// 解析は非同期なので、**根を入れ替えた後に前の対局の途中経過が届く**（節点の id は
+// 木ごとに 1 から振り直すので、そのままだと別の局面の値として書き戻る）。
+//
+// ⚠️ **記録の鍵は節点の id**（手数ではない）。**消えた節点には書かない。**
+func (s *StudyService) recordEval(epoch, id int, engineID, label string, sc analyze.Score, depth int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.study == nil {
 		return
 	}
-	moves := s.study.Moves()
-	if ply < 0 || ply > len(moves) {
+	// ⚠️ **消えた節点なら捨てる**（右クリックで消した枝の解析が後から届く）。
+	node, ok := s.nodeLocked(id)
+	if !ok {
 		return
 	}
-	text := ""
-	if ply > 0 {
-		text = moves[ply-1].Text
-		if text == "" {
-			text = moves[ply-1].USI
-		}
+	text := node.Text
+	if text == "" {
+		text = node.USI
 	}
 	s.evals.record(epoch, engineID, label, EvalPoint{
-		Ply:    ply,
-		Number: s.moveBaseLocked() + ply,
+		ID:     id,
+		Ply:    node.Number,
+		Number: s.moveBaseLocked() + node.Number,
 		CP:     sc.CP,
 		Mate:   sc.Mate,
 		Label:  sc.Label,
 		Depth:  depth,
 		Move:   text,
 	})
+}
+
+// nodeLocked は節点の写しを引く（0 は根。**消えていれば false**）。
+func (s *StudyService) nodeLocked(id int) (position.Node, bool) {
+	if id == 0 {
+		return position.Node{}, true
+	}
+	for _, n := range s.study.Nodes() {
+		if n.ID == id {
+			return n, true
+		}
+	}
+	return position.Node{}, false
 }
 
 // analyzeTarget は解析にかける対象（AnalyzeService 用）。
@@ -618,12 +684,16 @@ type analyzeTarget struct {
 	// 値なのか」を出すためと、**局面が変わったら結果を消す**判定のため。
 	// ⚠️ 手を進めても Root は変わらないので、**Root で判定すると結果が残り続ける。**
 	Current string
-	// Ply は解析する局面が根から何手目か。**評価値グラフの横軸の位置。**
-	Ply int
-	// Epoch は手順の世代。**記録を書き戻すときの合鍵**（`recordEval`）。
+	// NodeID は解析する局面の節点（**評価値の記録先**。0 は根）。
 	//
-	// ⚠️ **解析は非同期なので、手順を切った後に途中経過が届く。** これが無いと
-	// **捨てたはずの枝の評価値がグラフに書き戻る。**
+	// ⚠️ **手数ではない**（枝があると同じ手数が何個もある）。手数に丸めると、
+	// **枝で出した評価値が本譜の同じ手数の点として書き戻る。**
+	NodeID int
+	// Epoch は根の世代。**記録を書き戻すときの合鍵**（`recordEval`）。
+	//
+	// ⚠️ **解析は非同期なので、根を入れ替えた後に途中経過が届く。** 節点の id は
+	// 木ごとに 1 から振り直すので、これが無いと**前の対局の評価値が同じ id の
+	// 別の局面に書き戻る。**
 	Epoch int
 }
 
@@ -653,7 +723,7 @@ func (s *StudyService) analyzeTarget() (analyzeTarget, error) {
 		Root:    root,
 		Moves:   s.study.Played(),
 		Current: cur,
-		Ply:     s.study.Ply(),
+		NodeID:  s.study.CurrentID(),
 		Epoch:   s.evals.epoch,
 	}, nil
 }
@@ -663,7 +733,8 @@ func (s *StudyService) state() StudyState {
 	if s.study == nil {
 		return StudyState{
 			Hands: []position.Stock{}, Warnings: []string{},
-			Moves: []position.Move{}, Played: []string{}, Legal: []legal.Move{},
+			Nodes: []position.Node{}, Line: []int{},
+			Played: []string{}, Legal: []legal.Move{},
 		}
 	}
 	// **描くのは常に「今見ている局面」**（根 + 手順の ply 手目まで）。
@@ -693,7 +764,9 @@ func (s *StudyService) state() StudyState {
 		Warnings:   warnings,
 		RootSFEN:   root,
 		First:      s.moveBaseLocked(),
-		Moves:      s.study.Moves(),
+		Nodes:      s.study.Nodes(),
+		CurrentID:  s.study.CurrentID(),
+		Line:       s.study.Line(),
 		Ply:        s.study.Ply(),
 		Played:     s.study.Played(),
 		Legal:      moves,

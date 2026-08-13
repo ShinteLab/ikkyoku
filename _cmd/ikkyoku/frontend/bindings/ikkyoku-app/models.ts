@@ -12,6 +12,34 @@ import * as position$0 from "../github.com/ShinteLab/ikkyoku/position/models.js"
 import * as recognize$0 from "../github.com/ShinteLab/ikkyoku/recognize/models.js";
 
 /**
+ * AddLine は候補手を枝として足した結果（解析タブの候補手の右クリック）。
+ */
+export interface AddLine {
+    /**
+     * State は足したあとの解析タブの状態。**今見ている局面は動いていない。**
+     */
+    "state": StudyState;
+
+    /**
+     * FirstID は最初に生えた節点（**0 なら 1 手も増えていない**＝全部が既にあった）。
+     * 
+     * ⚠️ **0 を失敗として扱わないこと。** 候補が本譜と同じ手順なら 1 手も
+     * 増えないのが正しい（そのときは既にある手順を辿るだけ）。
+     */
+    "firstId": number;
+
+    /**
+     * Added は新しく生えた手数。
+     */
+    "added": number;
+
+    /**
+     * Note は全部は足せなかった理由（足せたなら空）。**エラーではない**（設計原則3）。
+     */
+    "note": string;
+}
+
+/**
  * AnalyzeEngine は解析に参加しているエンジン 1 つ（フロントの表示の単位）。
  */
 export interface AnalyzeEngine {
@@ -396,6 +424,14 @@ export interface EvalGraph {
      * First は根の棋譜手数（横軸の左端。根が初期局面なら 0）。
      */
     "first": number;
+
+    /**
+     * IDs は今の経路の節点 id（**ply 番目の要素がその手数の節点**。IDs[0] は根の 0）。
+     * 
+     * ⚠️ **グラフを押したときの行き先はこれで引く。** 枝が入ってからは
+     * 「手数 → 局面」が一意に決まらないので、**手数から `GoTo` の引数を作らないこと。**
+     */
+    "ids": number[] | null;
 }
 
 /**
@@ -403,7 +439,15 @@ export interface EvalGraph {
  */
 export interface EvalPoint {
     /**
-     * Ply は根からの手数（0 なら根の局面）。**押したときに `GoTo` へ渡す値。**
+     * ID は手順ツリーの節点（**押したときに `GoTo` へ渡す値**。0 は根）。
+     * 
+     * ⚠️ **記録の鍵はこれ**（2026-08-13。以前は手数だった）。枝が入ると同じ手数の
+     * 局面が何個もあるので、**手数では「どの局面に付いた評価値か」を指せない。**
+     */
+    "id": number;
+
+    /**
+     * Ply は根からの手数（0 なら根の局面）。**横軸の位置を出すのに使う。**
      */
     "ply": number;
 
@@ -607,14 +651,29 @@ export interface StudyState {
     "first": number;
 
     /**
-     * Moves は根から指した手順（棋譜の順。日本語表記つき）。
+     * Nodes は手順ツリーの全部の手（**表示順**。日本語表記つき）。
+     * 
+     * ⚠️ **一直線ではない**（2026-08-13）。`Depth` が字下げ、`Main` が本譜側。
+     * 並びは「その手 → 枝 → 本譜の続き」で、**ある手の子孫は必ずその直後に固まる**。
      */
-    "moves": position$0.Move[] | null;
+    "nodes": position$0.Node[] | null;
+
+    /**
+     * CurrentID は今見ている節点（0 なら根）。**手順リストの現在位置。**
+     */
+    "currentId": number;
+
+    /**
+     * Line は今の経路の節点 id（**ply 番目がその手数の節点**。先頭は根の 0）。
+     * 
+     * ⚠️ **連続解析が次に進む先はここから取る。** 枝に居るならその枝を辿る。
+     */
+    "line": number[] | null;
 
     /**
      * Ply は今どこまで進めて見ているか（0 なら根）。
      * 
-     * **len(Moves) より小さいことがある**（戻って見ている状態）。
+     * **len(Line)-1 より小さいことがある**（戻って見ている状態）。
      */
     "ply": number;
 
