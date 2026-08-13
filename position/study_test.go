@@ -443,6 +443,10 @@ func TestStudyNodesIndentsBranchSiblingsEqually(t *testing.T) {
 	if at["2g2f"].Depth != at["8c8d"].Depth+1 {
 		t.Errorf("枝の中の分かれ道が下がっていません: %+v", at["2g2f"])
 	}
+	// ⚠️ **変化の頭（△８四歩）は 1 段上に居ること** —— そこが「畳める節点」になる。
+	if at["8c8d"].Depth != 1 {
+		t.Errorf("変化の頭の深さ = %d, want 1: %+v", at["8c8d"].Depth, at["8c8d"])
+	}
 	// **本譜は下がらない**（1 手目と同じ深さのまま）。
 	if at["3c3d"].Depth != 0 || !at["3c3d"].Main {
 		t.Errorf("本譜が字下げされました: %+v", at["3c3d"])
@@ -450,5 +454,33 @@ func TestStudyNodesIndentsBranchSiblingsEqually(t *testing.T) {
 	// 枝は本譜ではない（色分けの鍵）。
 	if at["8c8d"].Main || at["2g2f"].Main {
 		t.Errorf("枝が本譜になっています: %+v / %+v", at["8c8d"], at["2g2f"])
+	}
+}
+
+// ⚠️ **2 本目を足しても 1 本目の字下げが変わらないこと**（2026-08-13）。
+//
+// 変化の頭の子を「1 本でも下げる」ようにしてある理由がこれ。下げないと、
+// **2 本目を足した瞬間に 1 本目が右へずれて、別のものになったように見える。**
+func TestStudyNodesShapeIsStableWhenSiblingAdded(t *testing.T) {
+	s := position.NewStudy(hirate(t))
+	if err := s.Play("7g7f"); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	// 1 本目（本譜から分かれる変化）。
+	if _, added, note := s.AddLine([]string{"8c8d", "2g2f"}); added != 2 || note != "" {
+		t.Fatalf("AddLine: added=%d note=%s", added, note)
+	}
+	before := map[string]int{}
+	for _, n := range s.Nodes() {
+		before[n.USI] = n.Depth
+	}
+	// 2 本目（頭は同じ、その先だけ違う）。
+	if _, added, note := s.AddLine([]string{"8c8d", "6g6f"}); added != 1 || note != "" {
+		t.Fatalf("AddLine: added=%d note=%s", added, note)
+	}
+	for _, n := range s.Nodes() {
+		if d, ok := before[n.USI]; ok && d != n.Depth {
+			t.Errorf("2 本目を足したら 1 本目がずれました: %s %d -> %d", n.USI, d, n.Depth)
+		}
 	}
 }
