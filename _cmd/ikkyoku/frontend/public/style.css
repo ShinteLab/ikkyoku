@@ -2773,7 +2773,10 @@ html.is-main #app {
   display: flex;
   align-items: baseline;
   gap: 6px;
-  padding: 3px 8px;
+  /* ⚠️ **余白は chip ではなく手数（`.move-num`）が持つ**（2026-08-14）。
+     chip 側に上下の padding があると、手数の右の縦線がその分だけ短くなり、
+     **行と行のあいだで途切れる**。0 にして手数側で取ると線が縦に繋がる。 */
+  padding: 0;
   font-size: 12.5px;
   text-align: left;
   color: #c8cdd8;
@@ -2790,11 +2793,16 @@ html.is-main #app {
    **全ての行に出す** —— 枝かどうかとは関係が無い（以前は
    `.move-chip.is-branch` の `border-left` として**枝にだけ**出ていたが、
    あれは字下げの位置に立つので**行ごとに左右へ動き、縦に揃わなかった**）。
-   ⚠️ **枝の見分けは色と字下げが持つ**ので、この線に兼ねさせないこと。 */
+   ⚠️ **枝の見分けは色と字下げが持つ**ので、この線に兼ねさせないこと。
+   ⚠️ **行の余白をここで取ること**（`.move-chip` は `padding: 0`）——
+   線は箱の高さぶんしか伸びないので、上下の余白を chip 側で取ると
+   **行と行のあいだで線が途切れる**。 */
 .move-num {
   flex: 0 0 auto;
-  width: 2.2em;
-  padding-right: 6px;
+  /* ⚠️ **padding を足した幅にすること**（`box-sizing: border-box`）。
+     2.2em のままだと数字の入る幅が 8px 減り、**3 桁の手数が切れる**。 */
+  width: calc(2.2em + 8px);
+  padding: 4px;
   border-right: 1px solid #3a4353;
   text-align: right;
   font-variant-numeric: tabular-nums;
