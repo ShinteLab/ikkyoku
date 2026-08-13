@@ -1282,8 +1282,24 @@ export function mountMainScreen(root: HTMLElement): void {
     // 押して切り替えた瞬間に、そのエンジンの今の値が出るのが期待どおり
     // （切り替えたら次の更新まで空になる、では比べられない）。
     best: AnalyzeLine | null;
+    // id は設定の登録 ID。**選択（下記）がどのエンジンの候補かを指す鍵。**
+    id: string;
+    // list は今この枠に出ている候補手。**選んだ手を足すときに読む。**
+    //
+    // ⚠️ **選んだ瞬間の写しを持たないこと。** 読み筋は深さが進むたびに伸びるので、
+    // **足すのは押した時点の最新**でなければ「画面に出ているものと違う手順が入る」。
+    list: AnalyzeLine[];
   }
   const engineCards = new Map<string, EngineCard>();
+
+  // 選んでいる候補手（**枝にする相手**。2026-08-13）。
+  //
+  // ⚠️ **エンジンと順位で指す**（要素を覚えない）。候補の行は `analyze:info` が
+  // 届くたびに作り直されるので、**要素を持つとすぐ迷子になる**。
+  //
+  // ⚠️ **1 つだけ。** エンジンをまたいで複数選べるようにしない —— 足すのは
+  // 「この読み筋」という 1 本で、**どれを足したのかが分からなくなる**のが一番困る。
+  let selectedLine: { engineId: string; rank: number } | null = null;
   const winrateRow = root.querySelector<HTMLDivElement>("#winrate-row")!;
   const playerNames = {
     black: root.querySelector<HTMLElement>("#player-name-black")!,
@@ -1350,6 +1366,9 @@ export function mountMainScreen(root: HTMLElement): void {
   // 確保してあるので、ここでは中身を空にするだけにする。
   const clearAnalyzeResult = () => {
     analyzedSfen = "";
+    // ⚠️ **選択も捨てる。** 候補は局面ごとの答えなので、局面が変わったあとも
+    // 選ばれたままだと**別の局面の読み筋を足す**ことになる。
+    selectedLine = null;
     engineCards.clear();
     analyzeEnginesBox.replaceChildren();
     // ⚠️ **勝率バーも一緒に空に戻すこと。** 別の局面の勝率が盤の上に残っていると、
@@ -1460,6 +1479,10 @@ export function mountMainScreen(root: HTMLElement): void {
   // **起動を待っているあいだも見出しを出す**（エンジンによっては評価関数の読み込みで
   // 数秒かかる）。何も出ないと、走っていないのか遅いのかが分からない。
   const buildEngineCards = (engines: { id: string; label: string; name: string }[]) => {
+    // ⚠️ **選択は解析ごとに捨てる**（勝率バーのエンジンとは扱いが違う）。
+    // あちらは「どのエンジンを見たいか」という好みなので残すが、こちらは
+    // **その局面のその読み筋**を指しているので、持ち越すと中身が別物になる。
+    selectedLine = null;
     engineCards.clear();
     analyzeEnginesBox.replaceChildren();
     // ⚠️ **選んでいたエンジンが今回も走っているなら、その選択を残すこと。**
@@ -1490,6 +1513,8 @@ export function mountMainScreen(root: HTMLElement): void {
         lines: card.querySelector<HTMLOListElement>(".analyze-lines")!,
         error: card.querySelector<HTMLElement>(".analyze-engine-error")!,
         best: null,
+        id: e.id,
+        list: [],
       };
       // 見出しは**設定タブで付けた名前**。エンジンが名乗る名前（`id name`）は
       // 繋いで初めて分かるので、届いたら括弧で足す（下の showEngineName）。
@@ -1509,12 +1534,50 @@ export function mountMainScreen(root: HTMLElement): void {
       name && name !== card.label ? `${card.label}（${name}）` : card.label;
   };
 
+  // paintSelection は選んでいる候補だけを光らせる（**作り直さない**）。
+  //
+  // ⚠️ **全部の枠を見ること。** 選択は 1 つだけなので、**他のエンジンの行から
+  // 外す**のもここの仕事（別々に消すと、2 本選ばれているように見える）。
+  const paintSelection = () => {
+    for (const [id, card] of engineCards) {
+      for (const li of card.lines.querySelectorAll<HTMLElement>(".analyze-line")) {
+        const rank = Number(li.dataset.rank ?? "0");
+        li.classList.toggle(
+          "is-selected",
+          !!selectedLine && selectedLine.engineId === id && selectedLine.rank === rank,
+        );
+      }
+    }
+  };
+
+  // selectLine は候補手を選ぶ（**同じものをもう一度押したら外す**）。
+  //
+  // ⚠️ **選ぶだけで、指しも足しもしない。** 足すのは右クリックの「手順を追加」で、
+  // **押しただけで手順が伸びない**というこの一覧の約束は変わらない。
+  const selectLine = (engineId: string, rank: number) => {
+    const same = selectedLine?.engineId === engineId && selectedLine.rank === rank;
+    selectedLine = same ? null : { engineId, rank };
+    paintSelection();
+  };
+
+  // selectedMoves は選んでいる候補の**今の**読み筋（無ければ空）。
+  const selectedMoves = (): string[] => {
+    if (!selectedLine) {
+      return [];
+    }
+    const card = engineCards.get(selectedLine.engineId);
+    return card?.list.find((l) => l.rank === selectedLine?.rank)?.moves ?? [];
+  };
+
   const showAnalyzeProgress = (card: EngineCard, p: AnalyzeProgress["progress"]) => {
     const lines = p.lines ?? [];
     // 盤の上の勝率バーは**最善手（順位 1）の評価値**で描く（評価値グラフに
     // 残すのと同じ値）。⚠️ **候補手の一覧と同じ 1 か所で更新すること。**
     // **値はエンジンごとに覚え、描くのは今選ばれている 1 つだけ**（押すと変わる）。
     card.best = lines[0] ?? null;
+    // ⚠️ **選んだ相手を引くのに要る**（読み筋は深さが進むと伸びるので、
+    // **足すのは押した時点の最新**）。
+    card.list = lines;
     renderWinRate();
     card.lines.replaceChildren();
     for (const [i, l] of lines.entries()) {
@@ -1524,6 +1587,13 @@ export function mountMainScreen(root: HTMLElement): void {
       // 小さくするのは**評価値と次の 1 手だけ** —— その先の読み筋はもともと
       // 小さいので、そちらまで変えると 1 番手の行と揃わなくなる。
       li.className = i === 0 ? "analyze-line" : "analyze-line is-sub";
+      // ⚠️ **順位を持たせること**（選択は「エンジン + 順位」で指す。要素は
+      // `analyze:info` のたびに作り直されるので覚えられない）。
+      li.dataset.rank = String(l.rank);
+      li.classList.toggle(
+        "is-selected",
+        selectedLine?.engineId === card.id && selectedLine.rank === l.rank,
+      );
 
       const score = document.createElement("span");
       score.textContent = l.score.label;
@@ -1565,11 +1635,16 @@ export function mountMainScreen(root: HTMLElement): void {
       first.title = hint;
       moves.title = hint;
 
-      // ⚠️ **左クリックでは何もしない**（2026-08-12 に「押すと指す」を外した）。
+      // ⚠️ **左クリックは「選ぶ」だけ**（2026-08-13）。**指さない・足さない。**
       //
       // ここに並んでいるのは**エンジンが読んだ枝**であって、本譜（＝実際に現れた
       // 指し手）ではない。**押しただけで手順が伸びる**と、枝と本譜の区別が
-      // 曖昧になる。**辿るのは盤の上で駒を動かす操作。**
+      // 曖昧になる（2026-08-12 に「押すと指す」を外したのはそのため）。
+      // **辿るのは盤の上で駒を動かす操作。**
+      //
+      // **選ぶ意味は「これを枝にする」** —— 選んでから右クリックで足す。
+      // ⚠️ **もう一度押したら外れること**（選びっぱなしにさせない）。
+      li.addEventListener("click", () => selectLine(card.id, l.rank));
       //
       // ⚠️ **右クリックで「手順を追加」**（2026-08-13）。読み筋を**枝として**
       // 木に足す —— 指すのではないので、**今見ている局面は動かない**
@@ -1580,7 +1655,16 @@ export function mountMainScreen(root: HTMLElement): void {
       li.addEventListener("contextmenu", (e) => {
         // ⚠️ **webview の既定メニューを止める**（手順リスト・訂正の盤と同じ）。
         e.preventDefault();
-        const usis = l.moves ?? [];
+        // ⚠️ **右クリックした行を選んでおくこと。** 別の行が選ばれたまま
+        // メニューが出ると、**光っている行と足す行が食い違う。**
+        if (selectedLine?.engineId !== card.id || selectedLine.rank !== l.rank) {
+          selectedLine = { engineId: card.id, rank: l.rank };
+          paintSelection();
+        }
+        // ⚠️ **足すのは「今選ばれている行の、今の読み筋」**（`selectedMoves`）。
+        // 閉じ込めた `l` を使わないこと —— あれは**この行を描いた時点**の写しで、
+        // 読み筋は深さが進むと伸びるので、**画面に出ているものと違う手順が入る。**
+        const usis = selectedMoves();
         if (usis.length === 0) {
           return;
         }
@@ -1593,7 +1677,7 @@ export function mountMainScreen(root: HTMLElement): void {
           }],
         });
       });
-      li.title = "右クリックでこの読み筋を枝として手順に足せます";
+      li.title = "クリックで選択／右クリックでこの読み筋を枝として手順に足せます";
       li.append(score, first, moves);
       card.lines.appendChild(li);
     }
