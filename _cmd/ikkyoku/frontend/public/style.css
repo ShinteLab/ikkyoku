@@ -22,8 +22,15 @@
   /* 評価値グラフの高さ（解析タブ。2026-08-12）。
      ⚠️ **:root に置いてあるのは、#panel-study の --board-size がこれを引くから。**
      カスタムプロパティは下へしか継承しないので、グラフの箱の中で定義すると
-     盤の大きさの式から読めない（引き忘れると盤が縦にはみ出す）。 */
-  --eval-graph-h: 116px;
+     盤の大きさの式から読めない（引き忘れると盤が縦にはみ出す）。
+
+     ⚠️ **この値がそのままグラフの箱の高さではない**（2026-08-14）。
+     `.eval-graph` は**ここから 38px 詰めた高さ**で描く（箱いっぱいだと折れ線が
+     間延びする）。**見えるグラフを今までと同じ 116px に保つため、既定を
+     116px → 154px にしてある。**
+     ⚠️ **mainscreen.ts の EVAL_GRAPH_DEFAULT と同じ値にすること**
+     （食い違うと起動直後だけ跳ねる）。 */
+  --eval-graph-h: 154px;
 
   /* 候補手の一覧の高さ。**max ではなく固定**（.analyze-lines）。
      ⚠️ **実際の値は JS が入れる**（mainscreen.ts の reserveLines。候補の本数の
@@ -1587,6 +1594,9 @@ html.is-main #app {
    枠だけ消す（0 の箱に背景と角丸が残ると、1px の線として見える）。 */
 .eval-graph-row.is-collapsed .eval-graph {
   background: none;
+  /* ⚠️ **畳んだら余白も落とすこと。** 高さ 0 の箱に margin が残ると、
+     そのぶん盤が下へ押される（畳んだ意味が減る）。 */
+  margin: 0;
 }
 
 .eval-graph-range,
@@ -1632,7 +1642,17 @@ html.is-main #app {
 
 .eval-graph {
   flex: 0 0 auto;
-  height: var(--eval-graph-h);
+  /* ⚠️ **--eval-graph-h をそのまま高さにしない**（2026-08-14）。**箱いっぱいに
+     引くと折れ線が縦に間延びして読みにくい** ——実測で 218px のとき 180px 前後が
+     ちょうどよかったので、**一律 38px 詰める**。
+     ⚠️ **`max(0px, ...)` にすること** —— 畳んだとき（--eval-graph-h: 0）に
+     計算結果が負になる。
+     ⚠️ **--board-size の式は今までどおり --eval-graph-h を引く**（詰めたぶんは
+     盤の上下の余白になる）。**盤の大きさは変えない。** */
+  height: max(0px, calc(var(--eval-graph-h) - 38px));
+  /* #panel-study は padding を持たないので、そのままだとグラフが窓の左右と
+     下の端に貼り付く。**5px だけ浮かせる**（2026-08-14）。 */
+  margin: 0 5px 5px;
   /* ⚠️ **高さ 0（畳んだ状態）でも中の SVG が食み出さないこと。** */
   overflow: hidden;
   background: #23262e;

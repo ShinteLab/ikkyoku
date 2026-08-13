@@ -2415,12 +2415,20 @@ export function mountMainScreen(root: HTMLElement): void {
   const evalGraphToggle = root.querySelector<HTMLButtonElement>("#eval-graph-toggle")!;
   // 既定値は style.css の `--eval-graph-h` と同じにすること（起動直後に
   // JS が書き込むまでは CSS 側の値が出ているので、食い違うと初回だけ跳ねる）。
-  const EVAL_GRAPH_DEFAULT = 116;
+  // ⚠️ **この値はグラフの箱の高さそのものではない**（2026-08-14）。
+  // `.eval-graph` は**ここから 38px 詰めた高さ**で描くので、見えるグラフは
+  // 116px（＝今までと同じ）になる。
+  const EVAL_GRAPH_DEFAULT = 154;
+  // 詰めるぶん（38px）。**style.css の `.eval-graph` の calc と同じ値にすること。**
+  const EVAL_GRAPH_CHROME = 38;
   // これより低いと折れ線が読めないので、ここが「畳んでいない」ときの下限。
-  const EVAL_GRAPH_MIN = 48;
+  // ⚠️ **見えるグラフのほうで 48px を確保する**（詰めるぶんを足しておく）。
+  const EVAL_GRAPH_MIN = 48 + EVAL_GRAPH_CHROME;
   // ⚠️ **下限より下へドラッグしたら畳む**（0 にする）。下限で止めると、
   // ドラッグだけでは畳めないのに「一番下まで下げた」ようには見える。
-  const EVAL_GRAPH_SNAP = 32;
+  // ⚠️ **こちらも詰めるぶんを足す**（掴んでいる位置＝この値なので、見えている
+  // グラフが 32px を切ったところで畳む、という手応えに揃える）。
+  const EVAL_GRAPH_SNAP = 32 + EVAL_GRAPH_CHROME;
   let evalGraphH = EVAL_GRAPH_DEFAULT;
   // 畳む前の高さ。**畳んで開き直したときに元の高さへ戻すため**に覚えておく
   // （既定に戻すと、せっかく広げたのが畳むたびに失われる）。
