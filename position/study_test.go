@@ -520,3 +520,38 @@ func TestStudyNodesForkChildrenAreHeads(t *testing.T) {
 		t.Errorf("分かれた手の続きが下がっていません: %+v", at["6i7h"])
 	}
 }
+
+// ⚠️ **変化の頭のすぐ下で分かれる場合も、分かれた手が「頭」になること**
+// （2026-08-13。実際にここが `cont` に固定されていて分かれて見えなかった）。
+//
+// 同じ手を挙げた 2 つのエンジンの読み筋が**次の手から違う**、というのは普通にある。
+func TestStudyNodesForkRightUnderHead(t *testing.T) {
+	s := position.NewStudy(hirate(t))
+	for _, mv := range []string{"7g7f", "3c3d"} {
+		if err := s.Play(mv); err != nil {
+			t.Fatalf("Play %s: %v", mv, err)
+		}
+	}
+	if err := s.GoTo(1); err != nil {
+		t.Fatalf("GoTo: %v", err)
+	}
+	// 頭（△８四歩）は同じで、その次の手から違う 2 本。
+	s.AddLine([]string{"8c8d", "2g2f", "8d8e"})
+	s.AddLine([]string{"8c8d", "6g6f", "4a3b"})
+
+	at := map[string]position.Node{}
+	for _, n := range s.Nodes() {
+		at[n.USI] = n
+	}
+	// 分かれた 2 手は同じ深さ。
+	if at["2g2f"].Depth != at["6g6f"].Depth {
+		t.Errorf("分かれた手の深さが違います: %+v / %+v", at["2g2f"], at["6g6f"])
+	}
+	// ⚠️ **その続きは 1 段下がっていること**（＝分かれた手が畳める節点になる）。
+	if at["8d8e"].Depth != at["2g2f"].Depth+1 {
+		t.Errorf("分かれた手の続きが下がっていません: %+v", at["8d8e"])
+	}
+	if at["4a3b"].Depth != at["6g6f"].Depth+1 {
+		t.Errorf("分かれた手の続きが下がっていません: %+v", at["4a3b"])
+	}
+}
