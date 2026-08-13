@@ -1471,6 +1471,10 @@ export function mountMainScreen(root: HTMLElement): void {
     // ⚠️ **選択も捨てる。** 候補は局面ごとの答えなので、局面が変わったあとも
     // 選ばれたままだと**別の局面の読み筋を足す**ことになる。
     selectedLine = null;
+    // ⚠️ **盤の矢印も一緒に消すこと。** 別の局面の候補手が盤に残っていると、
+    // **今の局面の読み筋として読まれる**（勝率バーを空に戻すのと同じ理由で、
+    // むしろこちらのほうが盤の上にあるぶん目に入る）。
+    studyBoardUI.showHint(null);
     engineCards.clear();
     analyzeEnginesBox.replaceChildren();
     // ⚠️ **勝率バーも一緒に空に戻すこと。** 別の局面の勝率が盤の上に残っていると、
@@ -1585,6 +1589,9 @@ export function mountMainScreen(root: HTMLElement): void {
     // あちらは「どのエンジンを見たいか」という好みなので残すが、こちらは
     // **その局面のその読み筋**を指しているので、持ち越すと中身が別物になる。
     selectedLine = null;
+    // ⚠️ **盤の矢印も一緒に消す**（選択を捨てたのに矢印だけ残ると、
+    // どの行の手なのかを指すものが画面から消える）。
+    studyBoardUI.showHint(null);
     engineCards.clear();
     analyzeEnginesBox.replaceChildren();
     // ⚠️ **選んでいたエンジンが今回も走っているなら、その選択を残すこと。**
@@ -1662,6 +1669,10 @@ export function mountMainScreen(root: HTMLElement): void {
         );
       }
     }
+    // ⚠️ **選んだ候補の 1 手目を盤にも出す**（2026-08-14。移動元 → 移動先の矢印）。
+    // **光っている行と盤の矢印は必ず同じ手**でなければならないので、
+    // **更新はここ 1 か所**にしてある（別々に呼ぶと食い違う）。
+    studyBoardUI.showHint(selectedMoves()[0] ?? null);
   };
 
   // selectLine は候補手を選ぶ（**同じものをもう一度押したら外す**）。
@@ -1791,7 +1802,9 @@ export function mountMainScreen(root: HTMLElement): void {
           }],
         });
       });
-      li.title = "クリックで選択／右クリックでこの読み筋を枝として手順に足せます";
+      li.title =
+        "クリックで選択（その手を盤に矢印で出します）／" +
+        "右クリックでこの読み筋を枝として手順に足せます";
       li.append(score, first, moves);
       card.lines.appendChild(li);
     }
@@ -1812,6 +1825,9 @@ export function mountMainScreen(root: HTMLElement): void {
       parts.push("接続を使い回し");
     }
     card.meta.textContent = parts.join(" / ");
+    // ⚠️ **深さが進むと読み筋は伸び、1 手目も変わりうる。** 盤に出している矢印は
+    // **今の読み筋の 1 手目**でなければ、光っている行と食い違う。
+    studyBoardUI.showHint(selectedMoves()[0] ?? null);
   };
 
   // ---- 連続解析（旧「全て解析」。2026-08-12）-------------------------------

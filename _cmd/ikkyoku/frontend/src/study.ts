@@ -52,6 +52,16 @@ export interface StudyBoardHandle {
   // ⚠️ **見え方とモデルが反対になる**ので、重ねるグリッドは
   // 「見た目の位置 → 局面のマス」を読み替える。
   setFlip(flip: boolean): void;
+  // showHint は候補手を盤の上に重ねて出す（**移動元 → 移動先の矢印**。打ちは
+  // 打つ駒を打ち先に薄く置く）。`null` で消す。
+  //
+  // ⚠️ **見せるだけで、局面も手順も動かさない。** 解析の候補手は**エンジンが
+  // 読んだ枝**であって本譜ではないので、押しただけで手順が伸びる場所にしない
+  // （左クリックが「選ぶだけ」であることの延長で、選んだ手を盤に見せる）。
+  //
+  // ⚠️ **渡すのは USI**（`Line.moves[0]`）。座標は**今の局面の合法手**から
+  // 引き当てるので、**呼び出し側で USI を解釈しないこと。**
+  showHint(usi: string | null): void;
   // foldForkAt は「その手が分かれ道の 1 本なら、分かれた手をまとめて畳む」。
   //
   // **読み筋を足した直後に呼ぶ**（`AddLine` が返した最初の節点）。⚠️ 読み筋は
@@ -118,6 +128,25 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
   }
   stage.appendChild(grid);
 
+  // ---- 候補手の重ね表示（2026-08-14）--------------------------------------
+  //
+  // **解析の候補手を押したら、その手を盤の上に矢印で出す**（移動元 → 移動先）。
+  // 打ちは矢印にできない（移動元が盤の外）ので、**打つ駒を打ち先に薄く置く**。
+  //
+  // ⚠️ **局面は動かさない。** ここに出るのは**エンジンが読んだ枝**であって
+  // 本譜ではないので、**見せるだけ**（辿るのは盤で駒を動かす操作／右クリックの
+  // 「手順を追加」）。候補手の左クリックが「選ぶだけ」なのと同じ約束。
+  //
+  // ⚠️ **矢印は盤の上に置くので `pointer-events: none`。** 塞ぐと、
+  // 光った移動先を押せなくなる（矢印の先はまさにそのマス）。
+  const hintSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  hintSvg.setAttribute("class", "study-hint");
+  // マス 1 つ = 1 の座標系にしておくと、盤の大きさが変わっても描き直さなくてよい
+  // （伸び縮みは viewBox が吸収する）。**盤は正方形なので歪まない。**
+  hintSvg.setAttribute("viewBox", "0 0 9 9");
+  hintSvg.setAttribute("preserveAspectRatio", "none");
+  stage.appendChild(hintSvg);
+
   // 視点（表示だけの反転）。**局面には効かない。**
   //
   // ⚠️ グリッドの DOM は**見た目の順**に並んでいるので、`dataset` に入れる
@@ -162,6 +191,7 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
     const h = bottomRight.y - topLeft.y;
     if (w <= 0 || h <= 0) {
       grid.style.display = "none";
+      hintSvg.style.display = "none";
       return;
     }
     grid.style.display = "";
@@ -169,6 +199,13 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
     grid.style.top = `${topLeft.y - base.top}px`;
     grid.style.width = `${w}px`;
     grid.style.height = `${h}px`;
+    // ⚠️ **矢印はグリッドと同じ矩形に重ねる**（別々に測らないこと。ずれると
+    // 矢印だけ 1 マス外れる）。中身は viewBox の座標なので描き直しは要らない。
+    hintSvg.style.display = "";
+    hintSvg.style.left = grid.style.left;
+    hintSvg.style.top = grid.style.top;
+    hintSvg.style.width = grid.style.width;
+    hintSvg.style.height = grid.style.height;
   };
 
   const observer = new ResizeObserver(() => layoutGrid());
@@ -189,6 +226,123 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
   let lastAt = -1;
 
   const legalMoves = (): LegalMove[] => state?.legal ?? [];
+
+  // 重ね表示している候補手（USI）。**画面だけの状態**（局面も手順も動かない）。
+  let hint: string | null = null;
+
+  // drawHint は候補手を盤の上に描く。
+  //
+  // ⚠️ **USI をここで解釈しないこと。** 座標の読み替えは Go 側（`ikkyoku/legal`）の
+  // 1 か所に閉じてあり（`core/usi` の内部 x は筋番号ではない、という落とし穴がある）、
+  // **ここで同じ変換を書くと 3 か所目になる** —— 間違えても「矢印が 1 マスずれる」
+  // という、画面を見ても正しいのか分からない壊れ方をする。
+  // **今の局面の合法手（`state.legal`）から同じ USI を引く**のが正しい引き当て方で、
+  // 候補手の 1 手目は必ずその中にある（無ければ描かない）。
+  const drawHint = () => {
+    hintSvg.replaceChildren();
+    const usi = hint;
+    if (!usi || !state?.loaded) {
+      return;
+    }
+    const m = legalMoves().find((x) => x.usi === usi);
+    if (!m) {
+      return;
+    }
+    // 局面の座標 → 見た目の座標（視点の反転）。**読み替えはここだけ**
+    // （`applyFlip` と同じ考え方で、他の場所に「反転しているなら…」を散らさない）。
+    const vx = (file: number) => (flipped ? 8 - file : file) + 0.5;
+    const vy = (rank: number) => (flipped ? 8 - rank : rank) + 0.5;
+    const ns = "http://www.w3.org/2000/svg";
+    const add = <K extends keyof SVGElementTagNameMap>(
+      name: K, attrs: Record<string, string | number>,
+    ): SVGElementTagNameMap[K] => {
+      const el = document.createElementNS(ns, name);
+      for (const [k, v] of Object.entries(attrs)) {
+        el.setAttribute(k, String(v));
+      }
+      hintSvg.appendChild(el);
+      return el;
+    };
+
+    const tx = vx(m.toFile);
+    const ty = vy(m.toRank);
+
+    if (m.drop >= 0) {
+      // 打ちは矢印にできない（移動元が盤の外）ので、**打つ駒を打ち先に薄く置く**。
+      //
+      // ⚠️ **駒の文字は USI からそのまま取る**（"P*5e" の "P"）。駒台の駒と同じ
+      // ShogiSFEN フォントで描くので、**盤に並んでいる駒と同じ字**になる。
+      // ⚠️ **回すのは「奥の側」の駒**（後手ではない）。視点を反転すると入れ替わる
+      // ——駒台の駒（`.stock-chip`）と同じ規則。
+      const black = state.turn === 1;
+      const letter = black ? usi[0].toUpperCase() : usi[0].toLowerCase();
+      add("rect", {
+        class: "study-hint-drop",
+        x: tx - 0.44, y: ty - 0.44, width: 0.88, height: 0.88, rx: 0.08,
+      });
+      // ⚠️ **大きさは盤の駒に揃える**（core/web の FONT_SIZE 44 / CELL 56）。
+      // **向こうが変わったらここも直す**（グリッドの MARGIN / CELL と同じ約束）。
+      const t = add("text", {
+        class: "study-hint-piece",
+        x: tx, y: ty, "text-anchor": "middle", "dominant-baseline": "central",
+        "font-size": 44 / 56,
+      });
+      if (black === flipped) {
+        t.setAttribute("transform", `rotate(180 ${tx} ${ty})`);
+      }
+      t.textContent = letter;
+      return;
+    }
+
+    const fx = vx(m.fromFile);
+    const fy = vy(m.fromRank);
+    // 移動元は枠で囲む（「この駒が動く」）。矢印の根本だけだと、どの駒の話か
+    // 分かりにくい局面がある（駒が密集しているところ）。
+    add("rect", {
+      class: "study-hint-from",
+      x: fx - 0.44, y: fy - 0.44, width: 0.88, height: 0.88, rx: 0.08,
+    });
+
+    // 矢印。**根本と先端をマスの内側で少し詰める**（1 マス動く手でも、
+    // 矢印が駒を覆い隠さないように）。
+    const dx = tx - fx;
+    const dy = ty - fy;
+    const len = Math.hypot(dx, dy) || 1;
+    const ux = dx / len;
+    const uy = dy / len;
+    const head = 0.3;
+    const x0 = fx + ux * 0.26;
+    const y0 = fy + uy * 0.26;
+    const x1 = tx - ux * 0.2;
+    const y1 = ty - uy * 0.2;
+    add("line", {
+      class: "study-hint-line",
+      x1: x0, y1: y0, x2: x1 - ux * head * 0.8, y2: y1 - uy * head * 0.8,
+    });
+    // 先端（三角）。
+    const px = -uy;
+    const py = ux;
+    const bx = x1 - ux * head;
+    const by = y1 - uy * head;
+    add("polygon", {
+      class: "study-hint-head",
+      points: [
+        `${x1},${y1}`,
+        `${bx + px * 0.22},${by + py * 0.22}`,
+        `${bx - px * 0.22},${by - py * 0.22}`,
+      ].join(" "),
+    });
+    // 成る手は先端に「成」を添える（同じ移動先に成/不成が並ぶので、
+    // **どちらの候補なのかが矢印だけでは読めない**）。
+    if (m.promote) {
+      const p = add("text", {
+        class: "study-hint-promote",
+        x: tx + 0.3, y: ty - 0.3, "text-anchor": "middle",
+        "dominant-baseline": "central", "font-size": 0.4,
+      });
+      p.textContent = "成";
+    }
+  };
 
   // 掴んだ駒から指せる手。**光らせる先はこれ。**
   const movesFromPick = (): LegalMove[] => {
@@ -253,6 +407,9 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
         chip.title = canDrop || !loaded ? base : `${base}／${dropReason(!!mine)}`;
       }
     }
+    // ⚠️ **候補手の重ね表示もここで描き直す**（描き直しの入口を 1 本にする）。
+    // 別の経路を作ると、盤だけ新しくて矢印が前の局面のまま、という食い違いが出る。
+    drawHint();
   };
 
   // dropReason は駒台の駒を打てない理由。**押したときにも同じ文言を出す**
@@ -723,6 +880,10 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
     state = next;
     // **局面が変わったら選択は捨てる。** 掴んでいた駒はもう同じ駒ではない。
     pick = null;
+    // ⚠️ **重ね表示している候補手も捨てる。** あれは**前の局面**でエンジンが
+    // 読んだ手なので、盤が進んだあとも残っていると**今の局面の候補として読まれる**
+    // （解析結果を局面が変わったら消すのと同じ理由）。
+    hint = null;
     onState(next);
     renderMoves();
     // onState が盤の sfen 属性を書き換える（= SVG を描き直す）ので、
@@ -792,6 +953,14 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
       applyFlip();
       layoutGrid();
       paint();
+    },
+    showHint(usi: string | null) {
+      const next = usi || null;
+      if (next === hint) {
+        return;
+      }
+      hint = next;
+      drawHint();
     },
   };
 }

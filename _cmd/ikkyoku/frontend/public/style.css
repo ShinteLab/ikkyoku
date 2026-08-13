@@ -2563,6 +2563,64 @@ html.is-main #app {
   background: rgba(94, 160, 255, 0.28);
 }
 
+/* ---- 候補手の重ね表示(2026-08-14) ----------------------------------------
+   解析の候補手を押すと、その 1 手目を盤の上に矢印で出す（打ちは打つ駒を薄く置く）。
+
+   ⚠️ **pointer-events: none。** 盤の上に載るので、塞ぐと光った移動先を押せなくなる
+   （矢印の先はまさにそのマス）。
+
+   ⚠️ **色は青にしないこと。** 青は「今こちらが掴んでいる駒／指せる位置」の色で、
+   こちらは**エンジンが読んだだけの手**（押しても指さない）。同じ色にすると、
+   矢印の先を押せば指せるように見える。 */
+.study-hint {
+  position: absolute;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.study-hint-line {
+  stroke: rgba(255, 176, 64, 0.92);
+  stroke-width: 0.14;
+  stroke-linecap: round;
+}
+
+.study-hint-head {
+  fill: rgba(255, 176, 64, 0.92);
+}
+
+/* 移動元。「この駒が動く」の印なので、塗らずに枠だけ（駒が読めなくなる）。 */
+.study-hint-from {
+  fill: rgba(255, 176, 64, 0.14);
+  stroke: rgba(255, 176, 64, 0.9);
+  stroke-width: 0.05;
+}
+
+/* 打ち先。矢印の代わりなので、**打つ駒をそこに薄く置く**（移動元が盤の外なので
+   矢印を引く相手が居ない）。枠は移動元と同じ見た目にして、「エンジンが言っている
+   のはここ」を揃える。 */
+.study-hint-drop {
+  fill: rgba(255, 176, 64, 0.18);
+  stroke: rgba(255, 176, 64, 0.95);
+  stroke-width: 0.05;
+}
+
+/* ⚠️ **薄く出すこと。** 盤の駒と同じ濃さにすると、**実際に打った局面に見える**
+   （盤は動いていない）。 */
+.study-hint-piece {
+  /* ⚠️ **ドキュメント側に登録した ShogiSFEN**（mainscreen.ts の registerBoardFont）。
+     shadow root の @font-face は Chromium が無視するので、盤と同じ経路で解決する。 */
+  font-family: "ShogiSFEN", serif;
+  fill: rgba(26, 26, 26, 0.6);
+}
+
+.study-hint-promote {
+  fill: #ffb040;
+  font-weight: 700;
+  paint-order: stroke;
+  stroke: rgba(18, 20, 24, 0.85);
+  stroke-width: 0.12;
+}
+
 /* 成る / 成らずを聞くダイアログ。**押した場所に出す**（study.ts が座標を入れる）。
    ⚠️ **window.confirm を使わないこと** —— あれは画面の真ん中に出るうえ、
    「OK / キャンセル」でしか聞けない（「キャンセル＝不成」は読み取れない）。
