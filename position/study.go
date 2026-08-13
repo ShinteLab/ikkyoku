@@ -108,6 +108,13 @@ type treeNode struct {
 	sources []string
 	// hand は人が盤で指した手か（`Node.Hand`）。
 	hand bool
+	// variation は**この手から先は本譜ではない**という印（「分岐にする」）。
+	//
+	// ⚠️ **順番だけでは表せないから要る**（2026-08-14）。枝と本譜の違いは
+	// 普段「親の何番目の子か」だけだが、**子が 1 つしかないとその子は必ず
+	// `kids[0]`＝本譜**になる。本譜の先端から試しに指した手がまさにそれで、
+	// **「これは自分の検討で、対局の手ではない」と言う手段が無かった。**
+	variation bool
 	// kids は子。**kids[0] が本譜側**（`Graft` はここへ据え直す）。
 	kids []*treeNode
 }
@@ -226,6 +233,15 @@ func (s *Study) Nodes() []Node {
 			return
 		}
 		switch {
+		case mode == main && n.kids[0].variation:
+			// **本譜はここで終わり**（「分岐にする」で下げた手）。続きは
+			// **全部変化**なので、順番のまま 1 段下げて頭にする。
+			// ⚠️ **`kids[0]` を後ろへ回さないこと** —— 下げただけで順番まで
+			// 変わると、**画面のどこへ動いたのか目で追えない。**
+			for _, k := range n.kids {
+				out = append(out, k.node(depth+1, false))
+				walk(k, depth+1, head)
+			}
 		case mode == main:
 			// **枝が先、本譜があと**（枝は 1 段下げて、そこが変化の頭になる）。
 			for _, k := range n.kids[1:] {
@@ -340,6 +356,12 @@ func (s *Study) Fork() (forkID int, ref []int, ok bool) {
 func (s *Study) MainLine() []string {
 	out := []string{}
 	for n := s.top; len(n.kids) > 0; {
+		// ⚠️ **「分岐にする」で下げた手から先は本譜ではない**（2026-08-14）。
+		// ここで止めないと、**自分の検討が本譜として扱われる**
+		// （棋譜の取り直しで「最後の手を見ていたか」の判定にも使う）。
+		if n.kids[0].variation {
+			break
+		}
 		n = n.kids[0]
 		out = append(out, n.usi)
 	}
@@ -447,6 +469,9 @@ func (s *Study) Graft(moves []string) GraftResult {
 			r.MovedAt = i + 1
 		}
 		// **本譜側（先頭）へ据え直す。** 既にあった続きは枝として後ろへ下がる。
+		// ⚠️ **「分岐にする」の印も落とすこと** —— URL が同じ手を本譜として
+		// 持ってきたなら、それは**実際に現れた指し手**（自分の検討ではない）。
+		next.variation = false
 		promote(at, next)
 		at = next
 		if err := pos.ApplyMove(mv); err != nil {
@@ -624,6 +649,28 @@ func (s *Study) GoTo(id int) error {
 // 消した節点の id を返す（**評価値もそれで捨てる**）。
 //
 // ⚠️ **今見ている節点が消える範囲に入っていたら、親へ戻す。**
+// Branch はその手から先を**本譜ではなく変化にする**（手順リストの「分岐にする」）。
+//
+// **本譜の先端から試しに指した手を、エンジンの読み筋と同じ扱いに落とす操作。**
+// 手順リストでは 1 段下がって**前の手にぶら下がり**、畳めるようになる。
+//
+// ⚠️ **順番の入れ替えでは表せない。** 枝と本譜の違いは普段「親の何番目の子か」
+// だけだが、**子が 1 つならその子は必ず `kids[0]`＝本譜**になる。試しに指した手が
+// まさにそれなので、印を持たせている（`treeNode.variation`）。
+//
+// ⚠️ **手順は 1 手も消えない**（`DropFrom` と混同しないこと）。見ている局面も動かない。
+//
+// **元に戻すのは棋譜の取り直し**（`Graft` が印を落とす）。⚠️ URL が同じ手を
+// 本譜として持ってきたら、それは実際に現れた指し手なので**印は消える**のが正しい。
+func (s *Study) Branch(id int) error {
+	n, ok := s.index[id]
+	if !ok || n.parent == nil {
+		return fmt.Errorf("ikkyoku/position: その手はありません: %d", id)
+	}
+	n.variation = true
+	return nil
+}
+
 func (s *Study) DropFrom(id int) ([]int, error) {
 	n, ok := s.index[id]
 	if !ok || n.parent == nil {

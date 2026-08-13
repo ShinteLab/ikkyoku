@@ -707,3 +707,123 @@ func TestStudyHandMark(t *testing.T) {
 		}
 	})
 }
+
+// TestStudyBranch は「分岐にする」を固定する（2026-08-14）。
+//
+// **本譜の先端から試しに指した手を、エンジンの読み筋と同じ扱いに落とす操作。**
+// ⚠️ **順番の入れ替えでは表せない** —— 子が 1 つならその子は必ず `kids[0]`＝本譜
+// なので、印（`treeNode.variation`）で表している。
+func TestStudyBranch(t *testing.T) {
+	nodeOf := func(s *position.Study, id int) (position.Node, bool) {
+		for _, n := range s.Nodes() {
+			if n.ID == id {
+				return n, true
+			}
+		}
+		return position.Node{}, false
+	}
+
+	// 1 本道（子が 1 つ）でも変化に落ちること。**ここが順番では表せない場面。**
+	t.Run("1本道でも変化になる", func(t *testing.T) {
+		s := position.NewStudy(hirate(t))
+		if err := s.Play("7g7f"); err != nil {
+			t.Fatalf("Play: %v", err)
+		}
+		id := s.CurrentID()
+		if err := s.Play("3c3d"); err != nil {
+			t.Fatalf("Play: %v", err)
+		}
+		if n, _ := nodeOf(s, id); !n.Main {
+			t.Fatal("最初から本譜ではありません")
+		}
+		if err := s.Branch(id); err != nil {
+			t.Fatalf("Branch: %v", err)
+		}
+		n, ok := nodeOf(s, id)
+		if !ok {
+			t.Fatal("手が消えました")
+		}
+		if n.Main {
+			t.Error("本譜のままです")
+		}
+		// **1 段下がって前の手にぶら下がること**（エンジンの読み筋と同じ形）。
+		if n.Depth != 1 {
+			t.Errorf("Depth = %d, want 1", n.Depth)
+		}
+		// ⚠️ **その先も本譜ではなくなること。**
+		for _, m := range s.Nodes() {
+			if m.ID != id && m.Main {
+				t.Errorf("先の手が本譜のままです: %+v", m)
+			}
+		}
+	})
+
+	// ⚠️ **手は 1 手も消えない**（`DropFrom` と混同しない）。局面も動かない。
+	t.Run("手も局面も動かない", func(t *testing.T) {
+		s := position.NewStudy(hirate(t))
+		for _, mv := range []string{"7g7f", "3c3d", "2g2f"} {
+			if err := s.Play(mv); err != nil {
+				t.Fatalf("Play %s: %v", mv, err)
+			}
+		}
+		at, ply, n := s.CurrentID(), s.Ply(), len(s.Nodes())
+		if err := s.Branch(1); err != nil {
+			t.Fatalf("Branch: %v", err)
+		}
+		if len(s.Nodes()) != n {
+			t.Errorf("手数が変わりました: %d -> %d", n, len(s.Nodes()))
+		}
+		if s.CurrentID() != at || s.Ply() != ply {
+			t.Errorf("局面が動きました: id=%d ply=%d", s.CurrentID(), s.Ply())
+		}
+	})
+
+	// ⚠️ **本譜はそこで終わる**（棋譜の取り直しが「最後の手を見ていたか」の
+	// 判定に `MainLine` を使うので、自分の検討が本譜として扱われると狂う）。
+	t.Run("MainLine がそこで止まる", func(t *testing.T) {
+		s := position.NewStudy(hirate(t))
+		if err := s.Play("7g7f"); err != nil {
+			t.Fatalf("Play: %v", err)
+		}
+		id := s.CurrentID()
+		if err := s.Play("3c3d"); err != nil {
+			t.Fatalf("Play: %v", err)
+		}
+		if got := len(s.MainLine()); got != 2 {
+			t.Fatalf("MainLine = %d 手, want 2", got)
+		}
+		if err := s.Branch(id); err != nil {
+			t.Fatalf("Branch: %v", err)
+		}
+		if got := s.MainLine(); len(got) != 0 {
+			t.Errorf("MainLine = %v, want 空", got)
+		}
+	})
+
+	// ⚠️ **棋譜が同じ手を本譜として持ってきたら印は消える**（実際に現れた指し手）。
+	t.Run("取り直しで本譜に戻る", func(t *testing.T) {
+		s := position.NewStudy(hirate(t))
+		if err := s.Play("7g7f"); err != nil {
+			t.Fatalf("Play: %v", err)
+		}
+		id := s.CurrentID()
+		if err := s.Branch(id); err != nil {
+			t.Fatalf("Branch: %v", err)
+		}
+		s.Graft([]string{"7g7f", "3c3d"})
+		if n, _ := nodeOf(s, id); !n.Main {
+			t.Error("取り直しても本譜に戻っていません")
+		}
+	})
+
+	t.Run("知らない id は断る", func(t *testing.T) {
+		s := position.NewStudy(hirate(t))
+		if err := s.Branch(999); err == nil {
+			t.Error("エラーになるべき")
+		}
+		// 根（開始局面）は手ではない。
+		if err := s.Branch(0); err == nil {
+			t.Error("根はエラーになるべき")
+		}
+	})
+}

@@ -23,7 +23,7 @@
 import { StudyService } from "../bindings/ikkyoku-app";
 import type { StudyState } from "../bindings/ikkyoku-app/models";
 import type { Move as LegalMove } from "../bindings/github.com/ShinteLab/ikkyoku/legal/models";
-import { openPopup, type PopupHandle } from "./popup";
+import { openPopup, type PopupHandle, type PopupItem } from "./popup";
 
 const RANK_KANJI = ["一", "二", "三", "四", "五", "六", "七", "八", "九"];
 const cellLabel = (rank: number, file: number) => `${9 - file}${RANK_KANJI[rank] ?? "?"}`;
@@ -563,20 +563,30 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
     });
   };
 
-  // askDropMenu は右クリックで最初に出すメニュー。
+  // askMoveMenu は手を右クリックしたときのメニュー。
   //
-  // ⚠️ **ここでは消さない**（押すと確認が出る）。⚠️ **`danger` にしないこと** ——
-  // 赤くするのは「押したら消える」ボタンだけで、メニューの段で赤いと
-  // **確認が出ることに気づかず身構える**。
-  const askDropMenu = (x: number, y: number, id: number, label: string, count: number) => {
+  // ⚠️ **ここでは何も起きない**（消すほうは押すと確認が出る）。
+  // ⚠️ **`danger` にしないこと** —— 赤くするのは「押したら消える」ボタンだけで、
+  // メニューの段で赤いと**確認が出ることに気づかず身構える**。
+  const askMoveMenu = (
+    x: number, y: number, id: number, label: string, count: number, main: boolean,
+  ) => {
     closeAsk();
-    ask = openPopup(x, y, {
-      label: "手順",
-      items: [{
-        label: "以降の手を削除",
-        onPick: () => askDrop(x, y, id, label, count),
-      }],
+    const items: PopupItem[] = [];
+    // 「分岐にする」は**本譜の手にだけ出す**（枝は既に分岐なので、押しても
+    // 何も起きない項目が並ぶだけ）。⚠️ **確認は挟まない** —— 何も消えないし、
+    // もう一度指すか棋譜を取り直せば戻る。
+    if (main) {
+      items.push({
+        label: "分岐にする",
+        onPick: () => void run(() => StudyService.Branch(id)),
+      });
+    }
+    items.push({
+      label: "以降の手を削除",
+      onPick: () => askDrop(x, y, id, label, count),
     });
+    ask = openPopup(x, y, { label: "手順", items });
   };
 
   // 手順リストの右クリック。**チップの上でだけ受ける**（列の余白では既定のまま）。
@@ -607,7 +617,9 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
       return false;
     }).length;
     const label = chip.querySelector<HTMLElement>(".move-text")?.textContent ?? "この手";
-    askDropMenu(e.clientX, e.clientY, id, label, count);
+    // 「分岐にする」を出すかどうか（本譜の手だけ）。
+    const main = (state.nodes ?? []).some((n) => n.id === id && n.main);
+    askMoveMenu(e.clientX, e.clientY, id, label, count, main);
   });
 
   // play は移動先が決まったときに 1 手指す。

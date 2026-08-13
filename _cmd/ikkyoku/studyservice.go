@@ -524,6 +524,29 @@ func (s *StudyService) AddLine(engineID string, moves []string) (AddLine, error)
 	return AddLine{State: s.state(), FirstID: first, Added: added, Note: note}, nil
 }
 
+// Branch はその手から先を**本譜ではなく変化にする**（手順リストの右クリック →
+// 「分岐にする」。2026-08-14）。
+//
+// **本譜の先端から試しに指した手を、エンジンの読み筋と同じ扱いに落とす操作。**
+// 手順リストでは 1 段下がって**前の手にぶら下がり**、畳めるようになる。
+//
+// ⚠️ **手順は 1 手も消えない**（`DropFrom` と混同しないこと）。**見ている局面も
+// 動かない** —— 見え方が変わるだけなので、盤まで動くと何が起きたのか分からない。
+//
+// ⚠️ **評価値も捨てない。** 節点はそのまま（id も変わらない）で、
+// **本譜かどうかが変わるだけ**。
+func (s *StudyService) Branch(id int) (StudyState, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.study == nil {
+		return s.state(), fmt.Errorf("まだ局面がありません")
+	}
+	if err := s.study.Branch(id); err != nil {
+		return s.state(), err
+	}
+	return s.state(), nil
+}
+
 // DropFrom はその手**とその先（子孫の枝も全部）**を消す（**手順リストの右クリック**）。
 //
 // ⚠️ **「1手戻す」は無くなった**（2026-08-13）。**消す量を手そのもので指す**形に
