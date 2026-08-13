@@ -28,6 +28,25 @@ const NS = "http://www.w3.org/2000/svg";
 // 3000 だと ±1500 の線が入る。
 const CAP = 3000;
 
+// 横線の刻み（2026-08-14。以前は `CAP / 2` ＝ 1500 だった）。**評価値は 1000 単位で
+// 語られる**ので、目盛りもそこに合わせる。⚠️ **CAP を変えたらここも見直すこと**
+// —— CAP を上げたまま刻みが細かいと、線だらけになって折れ線が読めなくなる。
+const TICK_STEP = 1000;
+
+// 0 と ±CAP を含む、`step` ごとの目盛りの値（上から下へ）。
+// ⚠️ **端（±CAP）は刻みで割り切れなくても必ず入れる** —— そこが頭打ちの線なので、
+// 無いと「これ以上は潰れている」ことが読めない。
+const ticks = (cap: number, step: number): number[] => {
+  const out: number[] = [cap];
+  for (let v = Math.floor(cap / step) * step; v > -cap; v -= step) {
+    if (v < cap) {
+      out.push(v);
+    }
+  }
+  out.push(-cap);
+  return out;
+};
+
 // 折れ線の色（登場順）。**エンジンの数だけ回す。**
 // 評価値の色（青＝先手 / 橙＝後手）とは別の役割なので、そちらと同じ色を先頭に
 // 置かない —— 「線の色 = どのエンジンか」であって、形勢の色ではない。
@@ -178,7 +197,12 @@ export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
     // ---- 目盛り ------------------------------------------------------------
     //
     // 0 の線だけ明るくする（**形勢が入れ替わる線**なので、そこだけは読めること）。
-    for (const v of [CAP, CAP / 2, 0, -CAP / 2, -CAP]) {
+    //
+    // ⚠️ **刻みは CAP に依らず 1000 ごと**（2026-08-14。以前は CAP の半分＝1500）。
+    // 評価値は 1000 単位で語られるので、**線の数を増やすより読める数字にする**
+    // ほうが目盛りとして役に立つ。⚠️ **CAP を変えたら刻みも見直すこと**
+    // （細かすぎると線だらけになって折れ線が読めない）。
+    for (const v of ticks(CAP, TICK_STEP)) {
       svg.appendChild(
         el("line", {
           x1: left, x2: right, y1: py(v), y2: py(v),
