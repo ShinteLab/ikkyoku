@@ -52,6 +52,7 @@ import {
   FiCopy,
   FiImage,
   FiMinus,
+  FiRefreshCw,
   FiSquare,
   FiX,
 } from "react-icons/fi";
@@ -732,7 +733,14 @@ export function mountMainScreen(root: HTMLElement): void {
                  **今の手順がどこから来たか**とは別物になる）。 -->
             <div class="study-move-head">
               <span class="field-label">手順</span>
-              <button id="study-reload" class="ghost-btn" type="button" hidden>再読み込み</button>
+              <!-- 取り直しは**「手順」の真横**（2026-08-15。以前は右側の
+                   ghost-btn だった）。⚠️ **取り直す相手は「その手順」**なので、
+                   見出しの隣に置いて位置で対象を示す（連続解析のボタンを
+                   手順の見出しの行へ移したのと同じ考え方）。
+                   ⚠️ **アイコンだけなので、意味は aria-label / title が持つ。**
+                   文言は showStudy が URL つきで入れ替える。 -->
+              <button id="study-reload" class="icon-btn" type="button" hidden
+                      aria-label="棋譜を再読み込み">${iconMarkup(FiRefreshCw)}</button>
               <!-- ⚠️ **文言は syncBatchButton が入れる**（「x手目から解析」）。
                    ここに書いてあるのは、まだ局面が無いときの見た目だけ。
                    ⚠️ この markup は template literal の中なので、
@@ -2394,10 +2402,12 @@ export function mountMainScreen(root: HTMLElement): void {
     // 入力タブの URL 欄を見ないこと —— あちらは打ち換えられる。
     const src = st.sourceUrl ?? "";
     studyReload.hidden = !studyLoaded || src === "";
+    // ⚠️ **アイコンだけのボタンなので、title を空にしないこと**
+    // （2026-08-15。文字が無いぶん、何のボタンかはこれでしか読めない）。
     studyReload.title = src
-      ? `${src} から棋譜を取り直します（食い違ったところから先だけ差し替え、` +
-        `それより前の解析結果はそのまま残ります）`
-      : "";
+      ? `棋譜を再読み込み: ${src} から取り直します（食い違ったところから先だけ` +
+        `差し替え、それより前の解析結果はそのまま残ります）`
+      : "棋譜を再読み込み";
     if (studyLoaded) {
       studyBoard.setAttribute("sfen", st.boardSfen);
       // 手番と手数は SFEN に入っているが、読むのに要るのは文字のほう。

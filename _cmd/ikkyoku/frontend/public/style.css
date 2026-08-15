@@ -2873,9 +2873,63 @@ html.is-main #app {
   flex-wrap: wrap;
 }
 
-/* 見出しのすぐ後ろを空けて、ボタンを右へ寄せる。 */
-.study-move-head > .field-label {
-  margin-right: auto;
+/* ⚠️ **右へ寄せるのは連続解析のボタンだけ**（2026-08-15。以前は `.field-label` に
+   `margin-right: auto` を置いていた）。取り直しのアイコンが「手順」の真横に
+   来たので、**見出しの直後で空けると間にアイコンが挟まらない**。
+   ⚠️ **`margin-left: auto` にしてあるのは、取り直しが出ていないときも同じように
+   右へ寄るため**（あちらは URL から読んだときだけ出る）。 */
+.study-move-head > #analyze-batch-run {
+  margin-left: auto;
+}
+
+/* 取り直しのアイコンボタン（「手順」の真横）。**文字を持たないので正方形。**
+   ⚠️ **意味は aria-label / title が持つ**（アイコンは装飾）。 */
+.study-move-head > .icon-btn {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  font-size: 13px;
+  color: #9aa6c0;
+  background: none;
+  border: 1px solid #3a3d47;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+/* ⚠️ **`display: flex` は `hidden` に勝つ**（UA の `display: none` を打ち消す）。
+   このボタンは URL から読んだときだけ出すので、**打ち消しを忘れると
+   撮った局面でも取り直しのアイコンが出てしまう**（押しても取り直す先が無い）。
+   `<shogi-board hidden>` で踏んだのと同じ話。 */
+.study-move-head > .icon-btn[hidden] {
+  display: none;
+}
+
+.study-move-head > .icon-btn:hover:not(:disabled) {
+  color: #f2f3f5;
+  background: #3a3d47;
+}
+
+/* 取り直しの最中。**押せないことが見て分かる程度には落とす**
+   （中継が重いと数秒かかる）。 */
+.study-move-head > .icon-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ⚠️ **取り直している最中は回す。** 文字が無くなったぶん、**押した手応えが
+   アイコンにしか出せない**（理由は下の行にも出るが、目はボタンを見ている）。 */
+.study-move-head > .icon-btn:disabled svg {
+  animation: reload-spin 1s linear infinite;
+}
+
+@keyframes reload-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* ⚠️ **この行のボタンは縮ませない・文字を折り返さない**（2026-08-15）。
@@ -2883,8 +2937,10 @@ html.is-main #app {
    **手が進むほど文字が長くなる**。縮ませると文字が欠ける。
 
    ⚠️ **そのぶん左右の余白を詰めてある**（`.ghost-btn` の 14px → 9px）。
-   詰めないと、一番細い列で 1 行に収まらない。 */
-.study-move-head > button {
+   詰めないと、一番細い列で 1 行に収まらない。
+   ⚠️ **アイコンボタンは対象外**（上で正方形にしてある。この規則が後に来ると
+   幅が潰れる）。 */
+.study-move-head > button.ghost-btn {
   flex: 0 0 auto;
   padding-left: 9px;
   padding-right: 9px;
