@@ -59,6 +59,7 @@ import {
 import {
   AnalyzeService,
   CaptureService,
+  FontService,
   SettingsService,
   StudyService,
   TrainingService,
@@ -68,7 +69,14 @@ import { mountEditor } from "./editor";
 import { mountEvalGraph } from "./evalgraph";
 import { mountStudyBoard } from "./study";
 import { openPopup } from "./popup";
-import type { AppSettings, EngineSettings, KifuLoad, StudyState } from "../bindings/ikkyoku-app/models";
+import type {
+  AppSettings,
+  EngineSettings,
+  FontChoice,
+  FontState,
+  KifuLoad,
+  StudyState,
+} from "../bindings/ikkyoku-app/models";
 import type { EngineColorOption } from "../bindings/github.com/ShinteLab/ikkyoku/models";
 import type { Stock } from "../bindings/github.com/ShinteLab/ikkyoku/position/models";
 // 認識の観測情報。**型を手で書き写さない**(Go 側は suteme の型をそのまま通しており、
@@ -213,6 +221,46 @@ async function registerBoardFont(): Promise<void> {
   style.textContent =
     `@font-face { font-family: "ShogiSFEN"; src: url("${FONT_DATA_URL}") format("truetype"); }`;
   document.head.appendChild(style);
+}
+
+// registerFontFace は data URL のフォントをドキュメントに登録する（`<style>` 1 枚）。
+//
+// **同じ id を渡せば中身ごと差し替わる**（前の `@font-face` は消える）ので、
+// 家族名を使い回さない限り取り違えは起きない。
+function registerFontFace(id: string, family: string, dataUrl: string): void {
+  let style = document.getElementById(id) as HTMLStyleElement | null;
+  if (!style) {
+    style = document.createElement("style");
+    style.id = id;
+    document.head.appendChild(style);
+  }
+  style.textContent =
+    `@font-face { font-family: "${family}"; src: url("${dataUrl}") format("truetype"); }`;
+}
+
+// applyPieceFont は設定の「駒の字」で選んだフォントを画面に当てる
+// （**端末に入っているフォントから焼いた駒の字**。Go 側の `FontService`）。
+//
+// ⚠️ **当て方は `--shogi-font` ただ 1 つ。** `<shogi-board>`（core/web）も、
+// 駒台の駒も、掴んだ駒の絵も、候補手の重ね表示も、この変数を見ている
+// （style.css）。**要素ごとに font-family を書かないこと** —— 1 か所でも
+// 直し忘れると、そこだけ書体が食い違う。
+//
+// ⚠️ **同梱の ShogiSFEN は上書きしない**（`registerBoardFont` が登録したまま）。
+// 同名の family を二重に登録すると**どちらが当たるかがブラウザ任せ**になり、
+// 同梱に戻せなくなる。だから family は登録ごとに違う名前になっている
+// （Go 側の `ikkyoku.PieceFontFamily`）。
+function applyPieceFont(face: { family: string; dataUrl: string } | null): void {
+  const id = "shinte-piece-font";
+  if (!face) {
+    // 同梱に戻す。**変数を消すだけ**で、CSS の既定値（"ShogiSFEN"）に落ちる。
+    document.getElementById(id)?.remove();
+    document.documentElement.style.removeProperty("--shogi-font");
+    return;
+  }
+  registerFontFace(id, face.family, face.dataUrl);
+  // ⚠️ **引用符ごと入れること**（値は CSS の font-family。core/web の README）。
+  document.documentElement.style.setProperty("--shogi-font", `"${face.family}"`);
 }
 
 export function mountMainScreen(root: HTMLElement): void {
@@ -858,6 +906,60 @@ export function mountMainScreen(root: HTMLElement): void {
           </span>
         </label>
         <p id="settings-status" class="status" role="status" aria-live="polite"></p>
+
+        <!-- 駒の字（2026-08-16）。**端末に入っているフォントから駒の字を焼いて使う。**
+
+             同梱できる駒フォントは「派生物の作成と再配布を認める」ライセンスの
+             ものに限られる（core/web/README.md。游明朝・どへた・桜鯰は実際に外している）。
+             一方**自分の端末に入っているフォントを、自分の端末で表示に使うのは
+             再配布ではない**、というのがこの機能の拠り所。
+
+             ⚠️ **焼いた字を書き出す口を作らないこと**（Go 側にも無い）。
+             書き出せると「その端末で表示する」を越えてしまい、元フォントの
+             条項が効く側の話になる。 -->
+        <div class="setting-group">
+          <span class="setting-title">駒の字</span>
+          <span class="setting-note">
+            盤に並ぶ駒の書体です。端末に入っているフォントから、駒に要る
+            <code id="font-required"></code> の字だけを抜き出して使います。
+            <strong>抜き出した字はこのアプリの表示に使うだけで、ファイルとしては
+            保存も配布もされません。</strong>
+            <strong>元フォントの利用条件はそのまま効きます</strong>ので、
+            作った盤面を配ったり素材として使ったりするときは、そちらを確認してください。
+          </span>
+          <ul id="font-list" class="engine-list"></ul>
+          <div class="setting-fields">
+            <button id="font-scan" class="ghost-btn" type="button"
+                    title="端末に入っているフォントを探します（数秒かかります）">フォントを追加…</button>
+          </div>
+          <p id="font-status" class="status" role="status" aria-live="polite"></p>
+
+          <!-- 端末のフォントの一覧。**押したときだけ探す**（実測で 190 ファイル・
+               577MB を読んで 1 秒弱）。起動のたびに走らせる類の処理ではない。 -->
+          <div id="font-picker" class="font-picker" hidden>
+            <div class="setting-fields">
+              <label class="field">
+                <span class="field-label">絞り込み</span>
+                <input id="font-filter" type="search" placeholder="名前・ファイル名"
+                       spellcheck="false" autocomplete="off" />
+              </label>
+              <!-- ⚠️ **既定は切**（＝全部出す）。駒の字が無いフォントを消してしまうと、
+                   **探しているのか対象外なのかが画面から分からない。** -->
+              <label class="setting is-inline">
+                <input id="font-only-usable" type="checkbox" />
+                <span class="setting-body">
+                  <span class="setting-title">駒の字が揃うものだけ</span>
+                </span>
+              </label>
+            </div>
+            <!-- 選んだ行の見本。**実際に焼いてから当てる**ので、盤に出る字そのもの。 -->
+            <p id="font-sample" class="font-sample" hidden></p>
+            <ul id="font-choices" class="font-choices"></ul>
+            <!-- 探した場所。**目当てのフォントが出てこないときに、どこを見たのかが
+                 分からないと打つ手が無い。** -->
+            <p id="font-dirs" class="setting-path"></p>
+          </div>
+        </div>
 
         <!-- 解析エンジン。**繋ぎ先は「USI を話すプロセス」なら何でもよい**
              （やねうら王・水匠・prokishi.exe・同梱のエンジン）。検討ツールとして
@@ -4042,6 +4144,351 @@ export function mountMainScreen(root: HTMLElement): void {
   const engineAddBuiltin = root.querySelector<HTMLButtonElement>("#engine-add-builtin")!;
   const engineStatus = root.querySelector<HTMLParagraphElement>("#engine-status")!;
 
+  // ---- 駒の字（2026-08-16）----
+  //
+  // **端末に入っているフォントから駒の 19 グリフだけを焼いて使う**（Go 側の
+  // `FontService`）。同梱できるフォントがライセンスの都合で限られる一方、
+  // 自分の端末のフォントを自分の端末で表示に使うのは再配布ではない、というのが
+  // この機能の拠り所。⚠️ **書き出す口は作らないこと。**
+  const fontRequired = root.querySelector<HTMLElement>("#font-required")!;
+  const fontList = root.querySelector<HTMLUListElement>("#font-list")!;
+  const fontScanBtn = root.querySelector<HTMLButtonElement>("#font-scan")!;
+  const fontStatus = root.querySelector<HTMLParagraphElement>("#font-status")!;
+  const fontPicker = root.querySelector<HTMLDivElement>("#font-picker")!;
+  const fontFilter = root.querySelector<HTMLInputElement>("#font-filter")!;
+  const fontOnlyUsable = root.querySelector<HTMLInputElement>("#font-only-usable")!;
+  const fontSample = root.querySelector<HTMLParagraphElement>("#font-sample")!;
+  const fontChoices = root.querySelector<HTMLUListElement>("#font-choices")!;
+  const fontDirs = root.querySelector<HTMLParagraphElement>("#font-dirs")!;
+
+  // 探した結果。**探したときだけ埋まる**（1 秒近くかかるので、絞り込みのたびに
+  // 探し直さない —— 手元に持っておいて絞るのはこちらの仕事）。
+  let fontChoiceRows: FontChoice[] = [];
+  // 見本に出す字（＝駒に要る字）。**Go 側が返したものをそのまま使う**
+  // （`core/shogifont.Required`。フロントで並べ直さないこと）。
+  let fontSampleText = "";
+
+  const setFontStatus = (msg: string, kind: "" | "error" | "warn" = "") => {
+    fontStatus.textContent = msg;
+    fontStatus.classList.toggle("is-error", kind === "error");
+    fontStatus.classList.toggle("is-warn", kind === "warn");
+  };
+
+  // 一覧の 1 行。**先頭は必ず同梱**（id は空文字）で、ラジオで 1 つだけ選ぶ。
+  //
+  // ⚠️ **「使う」を行の中のチェックにしないこと。** 盤は 1 つしかなく駒の字も
+  // 同時に 1 つしか使えないので、**2 つに印が付いている状態を作れてはいけない**
+  // （エンジンの `Enabled` とは性格が違う）。
+  const fontRow = (
+    opts: {
+      id: string;
+      name: string;
+      custom?: boolean;
+      file?: string;
+      note?: string;
+      ok: boolean;
+      copyright?: string;
+      license?: string;
+      licenseUrl?: string;
+    },
+    selected: boolean,
+  ): HTMLLIElement => {
+    const li = document.createElement("li");
+    li.className = "engine-row font-row";
+    li.classList.toggle("is-selected", selected);
+
+    const head = document.createElement("label");
+    head.className = "font-row-head";
+    const radio = document.createElement("input");
+    radio.type = "radio";
+    radio.name = "piece-font";
+    radio.checked = selected;
+    // ⚠️ **使えない登録でも選べること。** フォントを入れ直せばそのまま戻るので、
+    // 選択ごと奪うと「入れ直したのに戻らない」に見える（理由は下の行に出る）。
+    radio.addEventListener("change", () => {
+      void useFont(opts.id);
+    });
+    head.appendChild(radio);
+
+    if (opts.id === "") {
+      const span = document.createElement("span");
+      span.className = "font-row-name";
+      span.textContent = opts.name;
+      head.appendChild(span);
+    } else {
+      // ⚠️ **既定の名前を value に入れないこと**（エンジンの行と同じ）。
+      // 入れると、元フォントの名前が変わっても追従しなくなる。
+      const input = document.createElement("input");
+      input.type = "text";
+      input.className = "font-row-name-input";
+      input.placeholder = opts.name;
+      input.value = opts.custom ? opts.name : "";
+      input.title = "この登録に付ける名前（空にすると元フォントの名前に戻ります）";
+      input.addEventListener("change", () => {
+        void renameFont(opts.id, input.value);
+      });
+      head.appendChild(input);
+    }
+    li.appendChild(head);
+
+    const meta = document.createElement("div");
+    meta.className = "font-row-meta";
+    if (opts.file) {
+      const file = document.createElement("span");
+      file.className = "font-row-file";
+      file.textContent = opts.file;
+      meta.appendChild(file);
+    }
+    // 権利表記。**何に由来する字かを利用者が判断できるように出す。**
+    // ⚠️ **空でも「制約が無い」ではない**ので、無いときに「自由に使えます」とは書かない。
+    const rights = [opts.copyright, opts.license].filter(Boolean).join(" / ");
+    if (rights) {
+      const span = document.createElement("span");
+      span.className = "font-row-rights";
+      span.textContent = rights;
+      span.title = rights + (opts.licenseUrl ? `\n${opts.licenseUrl}` : "");
+      meta.appendChild(span);
+    }
+    if (meta.childElementCount > 0) {
+      li.appendChild(meta);
+    }
+
+    if (opts.note) {
+      const note = document.createElement("p");
+      note.className = "status is-warn";
+      note.textContent = opts.note;
+      li.appendChild(note);
+    }
+
+    if (opts.id !== "") {
+      const actions = document.createElement("div");
+      actions.className = "font-row-actions";
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "ghost-btn";
+      del.textContent = "削除";
+      del.title = "この登録を消します（フォントそのものは消えません）";
+      del.addEventListener("click", () => {
+        void removeFont(opts.id);
+      });
+      actions.appendChild(del);
+      li.appendChild(actions);
+    }
+    return li;
+  };
+
+  const showFontState = (st: FontState) => {
+    fontRequired.textContent = st.required;
+    fontSampleText = st.required;
+    // ⚠️ **当てるのはここ 1 か所。** 盤も駒台も候補手の重ね表示も
+    // `--shogi-font` を見ているので、要素ごとに書かない。
+    applyPieceFont(st.face);
+
+    fontList.replaceChildren();
+    fontList.appendChild(
+      fontRow({ id: "", name: st.builtinName, ok: true }, st.current === ""),
+    );
+    for (const f of st.fonts ?? []) {
+      fontList.appendChild(
+        fontRow(
+          {
+            id: f.id, name: f.name, custom: f.custom, file: f.file,
+            note: f.note, ok: f.ok,
+            copyright: f.copyright, license: f.license, licenseUrl: f.licenseUrl,
+          },
+          st.current === f.id,
+        ),
+      );
+    }
+    // ⚠️ **焼けなくてもエラーにしない**（同梱の字で描けている。設計原則3）。
+    if (st.note) {
+      setFontStatus(st.note, "warn");
+    } else {
+      setFontStatus("");
+    }
+    // 一覧が開きっぱなしなら、登録済みの印を取り直す。
+    if (!fontPicker.hidden) {
+      const registered = new Set((st.fonts ?? []).map((f) => `${f.path.toLowerCase()}|${f.index}`));
+      for (const c of fontChoiceRows) {
+        c.registered = registered.has(`${c.path.toLowerCase()}|${c.index}`);
+      }
+      renderFontChoices();
+    }
+  };
+
+  // 端末のフォントの一覧を描く。**足りないものも出して、選べない見た目にするだけ**
+  // （消すと、探しているのか対象外なのかが画面から分からない）。
+  const renderFontChoices = () => {
+    const q = fontFilter.value.trim().toLowerCase();
+    const onlyUsable = fontOnlyUsable.checked;
+    const rows = fontChoiceRows.filter((c) => {
+      if (onlyUsable && c.missing) {
+        return false;
+      }
+      if (!q) {
+        return true;
+      }
+      return (
+        c.name.toLowerCase().includes(q) ||
+        c.file.toLowerCase().includes(q) ||
+        (c.family ?? "").toLowerCase().includes(q)
+      );
+    });
+
+    fontChoices.replaceChildren();
+    if (rows.length === 0) {
+      const li = document.createElement("li");
+      li.className = "font-choice is-empty";
+      li.textContent = fontChoiceRows.length === 0
+        ? "フォントが見つかりませんでした。"
+        : "絞り込みに合うフォントがありません。";
+      fontChoices.appendChild(li);
+      return;
+    }
+
+    for (const c of rows) {
+      const li = document.createElement("li");
+      li.className = "font-choice";
+      li.classList.toggle("is-unusable", !!c.missing);
+
+      const name = document.createElement("span");
+      name.className = "font-choice-name";
+      name.textContent = c.name;
+      li.appendChild(name);
+
+      const meta = document.createElement("span");
+      meta.className = "font-choice-meta";
+      // ⚠️ **ファイル名も出すこと。** 同じ名前の書体が別のファイルに入っていることが
+      // あるうえ、日本語名を持たないフォントはファイル名が唯一の手掛かりになる。
+      meta.textContent = c.family ? `${c.family} — ${c.file}` : c.file;
+      meta.title = c.path;
+      li.appendChild(meta);
+
+      if (c.missing) {
+        const why = document.createElement("span");
+        why.className = "font-choice-why";
+        why.textContent = `字が足りません: ${c.missing}`;
+        why.title = `駒に要る字のうち ${c.missing} がこのフォントにありません`;
+        li.appendChild(why);
+      } else {
+        const actions = document.createElement("span");
+        actions.className = "font-choice-actions";
+
+        const preview = document.createElement("button");
+        preview.type = "button";
+        preview.className = "ghost-btn";
+        preview.textContent = "見本";
+        preview.title = "このフォントで駒の字を焼いて、下に見本を出します（登録はしません）";
+        preview.addEventListener("click", () => {
+          void previewFont(c);
+        });
+        actions.appendChild(preview);
+
+        const use = document.createElement("button");
+        use.type = "button";
+        use.className = "ghost-btn";
+        use.textContent = c.registered ? "これにする" : "追加して使う";
+        use.title = c.registered
+          ? "この書体は登録済みです。押すと駒の字をこれに切り替えます"
+          : "この書体を登録して、駒の字をこれに切り替えます";
+        use.addEventListener("click", () => {
+          void addFont(c);
+        });
+        actions.appendChild(use);
+
+        li.appendChild(actions);
+      }
+      fontChoices.appendChild(li);
+    }
+  };
+
+  // 見本。**実際に焼いてから当てる**ので、盤に出る字そのものになる。
+  // ⚠️ **family は Go 側が毎回変えて返す** —— 同じ名前で焼き直すと、
+  // どちらが当たるかがブラウザ任せになって**前のフォントのまま**に見えることがある。
+  const previewFont = async (c: FontChoice) => {
+    setFontStatus(`「${c.name}」の駒の字を作っています…`);
+    try {
+      const face = await FontService.Preview(c.path, c.index);
+      registerFontFace("shinte-piece-font-preview", face.family, face.dataUrl);
+      fontSample.hidden = false;
+      fontSample.style.fontFamily = `"${face.family}", serif`;
+      fontSample.textContent = fontSampleText;
+      fontSample.title = `${c.name}（${c.file}）`;
+      setFontStatus(`「${c.name}」の見本です。使うには「追加して使う」を押してください。`);
+    } catch (err) {
+      setFontStatus(`見本を作れませんでした: ${String(err)}`, "error");
+    }
+  };
+
+  const addFont = async (c: FontChoice) => {
+    setFontStatus(`「${c.name}」を登録しています…`);
+    try {
+      showFontState(await FontService.Add(c.path, c.index));
+      setFontStatus(`駒の字を「${c.name}」にしました。`);
+    } catch (err) {
+      setFontStatus(`登録できませんでした: ${String(err)}`, "error");
+    }
+  };
+
+  const useFont = async (id: string) => {
+    try {
+      showFontState(await FontService.Use(id));
+    } catch (err) {
+      setFontStatus(`切り替えられませんでした: ${String(err)}`, "error");
+      // 画面を設定ファイルの内容に戻す（食い違ったまま使わせない）。
+      try {
+        showFontState(await FontService.State());
+      } catch {
+        /* 読み直せないなら画面はそのまま。理由は上に出ている。 */
+      }
+    }
+  };
+
+  const removeFont = async (id: string) => {
+    try {
+      showFontState(await FontService.Remove(id));
+    } catch (err) {
+      setFontStatus(`消せませんでした: ${String(err)}`, "error");
+    }
+  };
+
+  const renameFont = async (id: string, name: string) => {
+    try {
+      showFontState(await FontService.Rename(id, name));
+    } catch (err) {
+      setFontStatus(`名前を変えられませんでした: ${String(err)}`, "error");
+    }
+  };
+
+  // ⚠️ **押したときだけ探す**（実測 1 秒弱）。**待ちを出すこと** ——
+  // 押しても何も起きない時間があると、壊れているように見える。
+  fontScanBtn.addEventListener("click", () => {
+    void (async () => {
+      fontScanBtn.disabled = true;
+      const label = fontScanBtn.textContent;
+      fontScanBtn.textContent = "探しています…";
+      setFontStatus("端末に入っているフォントを探しています…");
+      try {
+        const scan = await FontService.Scan();
+        fontChoiceRows = scan.fonts ?? [];
+        fontPicker.hidden = false;
+        fontDirs.textContent = `探した場所: ${(scan.dirs ?? []).join(" / ")}`;
+        renderFontChoices();
+        setFontStatus(
+          `${fontChoiceRows.length} 書体のうち、${scan.usable} 書体で駒の字を作れます。`,
+        );
+      } catch (err) {
+        setFontStatus(`フォントを探せませんでした: ${String(err)}`, "error");
+      } finally {
+        fontScanBtn.disabled = false;
+        fontScanBtn.textContent = label;
+      }
+    })();
+  });
+
+  fontFilter.addEventListener("input", renderFontChoices);
+  fontOnlyUsable.addEventListener("change", renderFontChoices);
+
   const showSettings = (s: {
     fitOnStartup: boolean;
     path: string;
@@ -4650,6 +5097,20 @@ export function mountMainScreen(root: HTMLElement): void {
     } catch (err) {
       settingsStatus.textContent = `設定を読み込めませんでした: ${String(err)}`;
       settingsStatus.classList.add("is-error");
+    }
+  })();
+
+  // 駒の字。**起動した時点で当てる**（設定タブを開くまで同梱の字、では遅い ——
+  // 最初に見えるのは盤なので、そこが既に選んだ書体になっている必要がある）。
+  //
+  // ⚠️ **失敗しても黙って同梱のままにすること**（設計原則3）。フォントを
+  // 消していても、盤は描けるし解析もできる。理由は設定タブに出る。
+  void (async () => {
+    try {
+      showFontState(await FontService.State());
+    } catch (err) {
+      fontStatus.textContent = `駒の字の設定を読み込めませんでした: ${String(err)}`;
+      fontStatus.classList.add("is-error");
     }
   })();
 

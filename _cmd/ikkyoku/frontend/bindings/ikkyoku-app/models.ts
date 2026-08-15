@@ -672,6 +672,110 @@ export interface FitResult {
 }
 
 /**
+ * FontChoice は端末に入っているフォント 1 つ（追加するときに選ぶ一覧の 1 行）。
+ */
+export interface FontChoice {
+    "path": string;
+    "file": string;
+    "index": number;
+    "name": string;
+
+    /**
+     * Family は英語の family 名。**日本語名と違うときだけ埋める**
+     * （同じものを 2 回出さない）。
+     */
+    "family"?: string;
+
+    /**
+     * Missing は足りない駒の字。**空なら使える。**
+     * 
+     * ⚠️ **足りないものも一覧に出すこと**（選べない見た目にするだけ）。
+     * 消すと、探しているのか対象外なのかが画面から分からない。
+     */
+    "missing"?: string;
+
+    /**
+     * Registered は既に登録済みか（**同じ書体を 2 つ登録しても意味が無い**）。
+     */
+    "registered": boolean;
+}
+
+/**
+ * FontFace は webview に登録する 1 つ分（family 名と data URL）。
+ */
+export interface FontFace {
+    /**
+     * Family は CSS の font-family に入れる名前。
+     * 
+     * ⚠️ **登録ごとに違う名前であること**（`ikkyoku.PieceFontFamily`）。
+     * 同名で複数登録すると、どれが当たるかがブラウザ任せになる。
+     */
+    "family": string;
+
+    /**
+     * DataURL は焼いた TTF（`data:font/ttf;base64,...`）。19 グリフで約 10KB。
+     */
+    "dataUrl": string;
+}
+
+/**
+ * FontScan は端末のフォントを探した結果。
+ */
+export interface FontScan {
+    "fonts": FontChoice[] | null;
+
+    /**
+     * Usable は駒の字が揃っていた書体の数（**見出しに出す**）。
+     */
+    "usable": number;
+
+    /**
+     * Dirs は探した場所。**表示用** —— 目当てのフォントが出てこないときに、
+     * どこを見たのかが分からないと打つ手が無い。
+     */
+    "dirs": string[] | null;
+}
+
+/**
+ * FontState は「駒の字」の設定の今の状態。
+ */
+export interface FontState {
+    /**
+     * Fonts は登録した駒フォントの一覧（登録順）。
+     */
+    "fonts": PieceFontSettings[] | null;
+
+    /**
+     * Current は今使っている登録の ID。**空なら同梱。**
+     */
+    "current": string;
+
+    /**
+     * BuiltinName は同梱を選んでいるときの表示名（フロントに書かせない）。
+     */
+    "builtinName": string;
+
+    /**
+     * Required は駒に要る字。**説明とプレビューの見本を兼ねる。**
+     * ⚠️ **フロントで並べ直さないこと**（`core/shogifont` が持っている）。
+     */
+    "required": string;
+
+    /**
+     * Face は今使うフォント。**同梱なら null**（フロントは既定に戻す）。
+     */
+    "face": FontFace | null;
+
+    /**
+     * Note は選んだフォントを焼けなかった理由。**空なら問題なし。**
+     * 
+     * ⚠️ **焼けなくても同梱で描けるので、エラーにしない**（設計原則3）。
+     * フォントを消したりアンインストールしたりするのは普通に起きる。
+     */
+    "note"?: string;
+}
+
+/**
  * GuideLayout は枠ウィンドウの描画寸法(CSS px)をフロントに渡すための型。
  */
 export interface GuideLayout {
@@ -700,6 +804,53 @@ export interface KifuLoad {
      * 解析できる（設計原則3）。**フロントで空でないことをエラー扱いしないこと。**
      */
     "note": string;
+}
+
+/**
+ * PieceFontSettings は登録した駒フォント 1 つ（設定タブの 1 行）。
+ */
+export interface PieceFontSettings {
+    "id": string;
+
+    /**
+     * Name は画面に出す名前。**空欄なら Go 側が解決した既定の名前が入る。**
+     */
+    "name": string;
+
+    /**
+     * Custom は名前を人が付けたか（false なら Name は既定の解決結果）。
+     * エンジンの行と同じで、フロントは Custom のときだけ Name を欄に入れる。
+     */
+    "custom": boolean;
+    "path": string;
+    "file": string;
+    "index": number;
+
+    /**
+     * Missing は今このフォントに足りない駒の字。空なら使える。
+     */
+    "missing"?: string;
+
+    /**
+     * Note は使えない理由（消えた・字が足りない）。**表示用。**
+     * 
+     * ⚠️ **使えない登録を黙って消さないこと。** フォントを入れ直せば戻るし、
+     * 消すと「登録したはずのものが無い」になる。
+     */
+    "note"?: string;
+
+    /**
+     * OK は今そのまま使えるか。
+     */
+    "ok": boolean;
+
+    /**
+     * 元フォントの権利表記。**何に由来する字かを利用者が判断できるように出す。**
+     * ⚠️ **空でも「制約が無い」ではない。**
+     */
+    "copyright"?: string;
+    "license"?: string;
+    "licenseUrl"?: string;
 }
 
 /**

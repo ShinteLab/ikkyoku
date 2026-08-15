@@ -998,6 +998,190 @@ html.is-main #app {
   color: #ff8d8d;
 }
 
+/* 駒の字（設定タブ。2026-08-16）。**端末に入っているフォントから焼いた駒の字。**
+
+   一覧は `.engine-list` を使い回している（同じ「登録の一覧」なので見た目を
+   揃える）が、⚠️ **選び方が違う** —— エンジンは行ごとのチェック（複数が同時に
+   走る）で、駒の字は**ラジオで 1 つだけ**（盤は 1 つしかない）。 */
+.font-row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+
+/* 選んでいる行。⚠️ **ラジオだけでは分かりにくい**（行が縦に積まれるので、
+   どれに丸が付いているかを目で追うことになる）。 */
+.font-row.is-selected {
+  border-color: #4a5570;
+  background: #262b36;
+}
+
+.font-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.font-row-name {
+  font-size: 13px;
+  color: #f2f3f5;
+}
+
+/* 名前の欄。⚠️ **既定の名前は placeholder に出す**（value に入れると、
+   元フォントの名前が変わっても追従しなくなる）。 */
+.font-row-name-input {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.font-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding-left: 22px;
+  font-size: 11px;
+  color: #9aa6c0;
+}
+
+.font-row-file {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* 元フォントの権利表記。**何に由来する字かの判断材料**なので出しておく。
+   ⚠️ **長いので 1 行に丸める**（全文はツールチップ）。 */
+.font-row-rights {
+  flex: 1 1 200px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.font-row-actions {
+  display: flex;
+  gap: 6px;
+  padding-left: 22px;
+}
+
+/* 端末のフォントの一覧。**押したときだけ出る**（探すのに 1 秒近くかかる）。 */
+.font-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-left: 22px;
+  padding: 8px;
+  background: #1e2129;
+  border: 1px solid #2f323b;
+  border-radius: 6px;
+}
+
+/* 絞り込みの行。`.setting-fields` の字下げはここでは要らない
+   （箱そのものが既に字下げされている）。 */
+.font-picker .setting-fields {
+  padding-left: 0;
+}
+
+.font-picker .setting-fields .field.is-wide,
+.font-picker input[type="search"] {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+/* 「駒の字が揃うものだけ」。1 行に収めるためにチェックの体裁を寝かせる。 */
+.setting.is-inline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.setting.is-inline .setting-title {
+  font-size: 12px;
+  font-weight: 400;
+}
+
+/* 選んだフォントの見本。**実際に焼いた字**を当てて出す（盤に出る字そのもの）。
+   ⚠️ **font-family は JS が当てる**（family がプレビューごとに変わるため）。 */
+.font-sample {
+  margin: 0;
+  padding: 6px 8px;
+  font-size: 30px;
+  line-height: 1.3;
+  letter-spacing: 2px;
+  color: #1a1a1a;
+  background: #f3c877;
+  border: 1px solid #5a3b1a;
+  border-radius: 4px;
+  word-break: break-all;
+}
+
+/* 一覧。⚠️ **高さを頭打ちにして中でスクロールさせること** ——
+   端末には 200 書体を超えて入っていることがあり（実測で 239）、
+   素直に並べると設定タブが縦に伸びきって下の設定に辿り着けない。 */
+.font-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 260px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.font-choice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 4px 6px;
+  font-size: 12px;
+  color: #c9ccd3;
+  border-radius: 4px;
+}
+
+.font-choice:hover {
+  background: #262b36;
+}
+
+/* ⚠️ **駒の字が足りないフォントも一覧に出す**（消すと、探しているのか
+   対象外なのかが画面から分からない）。選べないことが見て分かる程度に落とす。 */
+.font-choice.is-unusable {
+  opacity: 0.5;
+}
+
+.font-choice.is-empty {
+  color: #9aa6c0;
+}
+
+.font-choice-name {
+  flex: 0 1 auto;
+  color: #f2f3f5;
+}
+
+.font-choice-meta {
+  flex: 1 1 140px;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 11px;
+  color: #9aa6c0;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.font-choice-why {
+  font-size: 11px;
+  color: #d9a441;
+}
+
+.font-choice-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
 /* エンジンの設定（USI の option。2026-08-15）。**行の中の折りたたみ。**
 
    ⚠️ **既定で閉じる。** やねうら王級だと option が 40 件を超えるので、
@@ -2711,7 +2895,7 @@ html.is-main #app {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-family: "ShogiSFEN", serif;
+  font-family: var(--shogi-font, "ShogiSFEN"), serif;
   font-size: 34px;
   color: #1a1a1a;
   background: #f3c877;
@@ -2831,8 +3015,13 @@ html.is-main #app {
    （盤は動いていない）。 */
 .study-hint-piece {
   /* ⚠️ **ドキュメント側に登録した ShogiSFEN**（mainscreen.ts の registerBoardFont）。
-     shadow root の @font-face は Chromium が無視するので、盤と同じ経路で解決する。 */
-  font-family: "ShogiSFEN", serif;
+     shadow root の @font-face は Chromium が無視するので、盤と同じ経路で解決する。
+
+     ⚠️ **`--shogi-font` を経由すること**（2026-08-16）。設定の「駒の字」で
+     端末のフォントから焼いた字に差し替えられるようになったので、ここだけ
+     `"ShogiSFEN"` を直に書くと**盤の駒とこの駒だけ書体が食い違う**。
+     `<shogi-board>` も同じ変数を見る（core/web）。 */
+  font-family: var(--shogi-font, "ShogiSFEN"), serif;
   fill: rgba(26, 26, 26, 0.6);
 }
 
@@ -3430,7 +3619,7 @@ html.is-main #app {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-family: "ShogiSFEN", serif;
+  font-family: var(--shogi-font, "ShogiSFEN"), serif;
   font-size: 22px;
   color: #1a1a1a;
   background: #f3c877;
