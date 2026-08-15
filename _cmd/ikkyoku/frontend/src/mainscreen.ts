@@ -1306,6 +1306,10 @@ export function mountMainScreen(root: HTMLElement): void {
     // label は設定タブで付けた名前。**エンジンが名乗る名前とは別に持つ**
     // （同じ exe を option 違いで 2 つ登録していると、名乗る名前では区別が付かない）。
     label: string;
+    // custom は label を人が付けたか。**名乗った名前を見出しに足すかの判断**
+    // （`showEngineName`）。⚠️ **判断は Go 側の値を使うこと** —— 名前を付けたか
+    // どうかは設定が持っている事実で、`label === name` かどうかとは別物。
+    custom: boolean;
     // まだ結果が届いていないエンジンか（走っているエンジンの数を数えるのに使う）。
     pending: boolean;
     // 起動〜readyok にかかった時間（done で届く）。**エンジンごとに違う。**
@@ -1598,7 +1602,9 @@ export function mountMainScreen(root: HTMLElement): void {
   //
   // **起動を待っているあいだも見出しを出す**（エンジンによっては評価関数の読み込みで
   // 数秒かかる）。何も出ないと、走っていないのか遅いのかが分からない。
-  const buildEngineCards = (engines: { id: string; label: string; name: string }[]) => {
+  const buildEngineCards = (
+    engines: { id: string; label: string; name: string; custom: boolean }[],
+  ) => {
     // ⚠️ **選択は解析ごとに捨てる**（勝率バーのエンジンとは扱いが違う）。
     // あちらは「どのエンジンを見たいか」という好みなので残すが、こちらは
     // **その局面のその読み筋**を指しているので、持ち越すと中身が別物になる。
@@ -1636,6 +1642,7 @@ export function mountMainScreen(root: HTMLElement): void {
       `;
       const entry: EngineCard = {
         label: e.label,
+        custom: e.custom,
         pending: true,
         startupMs: 0,
         reused: false,
@@ -1664,9 +1671,18 @@ export function mountMainScreen(root: HTMLElement): void {
 
   // エンジンが名乗った名前を見出しに足す。**設定の名前は消さない**
   // （同じ exe を option 違いで 2 つ登録していると、名乗る名前だけでは区別が付かない）。
+  //
+  // ⚠️ **人が名前を付けていたら足さない**（2026-08-15）。そう呼びたくて付けた名前
+  // なので、**横に別の名前を並べる理由が無い**（prokishi 越しだと `id name` に
+  // プラグイン名まで並んで長い）。付けていないときの `label` は既定の解決結果
+  // （ファイル名 /「同梱エンジン」）でしかないので、**名乗った名前のほうが情報がある**。
+  //
+  // ⚠️ **足さない場合も `title` には残すこと** —— 何を名乗ったかは繋いで初めて
+  // 分かる情報で、**設定が正しい相手に繋がっているかの唯一の手掛かり**になる。
   const showEngineName = (card: EngineCard, name: string) => {
-    card.name.textContent =
-      name && name !== card.label ? `${card.label}（${name}）` : card.label;
+    const add = name && name !== card.label && !card.custom;
+    card.name.textContent = add ? `${card.label}（${name}）` : card.label;
+    card.name.title = name ? `${card.label} / エンジンの名乗り: ${name}` : card.label;
   };
 
   // paintSelection は選んでいる候補だけを光らせる（**作り直さない**）。

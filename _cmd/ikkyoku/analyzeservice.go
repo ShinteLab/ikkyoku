@@ -103,6 +103,17 @@ type AnalyzeEngine struct {
 	Label string `json:"label"`
 	// Name はエンジンが名乗った名前（`id name`。まだ繋いでいなければ空）。
 	Name string `json:"name"`
+	// Custom は Label を人が付けたか（設定タブの名前欄）。
+	//
+	// ⚠️ **名乗った名前を見出しに足すかどうかの判断**（2026-08-15）。
+	// 人が名前を付けているなら、**そう呼びたくて付けた名前**なので足さない
+	// （prokishi 越しだと `id name` にプラグイン名まで並んで長い）。
+	// 付けていないときは既定の解決結果（ファイル名 / 「同梱エンジン」）でしかないので、
+	// **名乗った名前のほうが情報がある**から足す。
+	//
+	// ⚠️ **フロントで `label === name` を見て判断しないこと** —— 名前を付けたかどうかは
+	// 設定が持っている事実で、たまたま一致したかどうかとは別物。
+	Custom bool `json:"custom"`
 	// Builtin は同梱のエンジンか。
 	Builtin bool `json:"builtin"`
 }
@@ -433,6 +444,7 @@ func (s *AnalyzeService) Start(seconds, multiPV int) (AnalyzeState, error) {
 			ID:      e.ID,
 			Label:   e.DisplayName(),
 			Name:    s.lastEngine[e.ID],
+			Custom:  e.Name != "",
 			Builtin: e.Path == "",
 		})
 	}
