@@ -1320,6 +1320,12 @@ html.is-main #app {
      上書きされる**。ここにあるのは、まだ決めていないときの既定。 */
   height: var(--analyze-engines-h);
   min-height: var(--analyze-card-h);
+  /* ⚠️ **中身だけを左右に寄せる**（2026-08-15。解析の行・手順の見出しと同じ 6px）。
+     列の縁（左は縦のスプリットバー、右は窓の端）に文字が貼り付かないようにする。
+     ⚠️ **スプリットバーには付けないこと** —— あちらは区切りの線なので、
+     端まで引いてあるほうが「ここで区切られている」ことが読み取れる。 */
+  margin-left: 6px;
+  margin-right: 6px;
   overflow-y: auto;
   /* ⚠️ **横には流さない**（2026-08-12）。読み筋は行の幅で切って `title` で読ませる
      作りなので、横スクロールバーが出ても得るものが無い。しかも**出た横バーが
@@ -1482,6 +1488,9 @@ html.is-main #app {
   flex-wrap: wrap;
   align-items: baseline;
   gap: 6px 10px;
+  /* 列の縁に文字が貼り付かないように（2026-08-15。エンジンの枠・手順の見出しと同じ）。 */
+  margin-left: 6px;
+  margin-right: 6px;
 }
 
 .analyze-row[hidden] {
@@ -2971,6 +2980,9 @@ html.is-main #app {
   display: flex;
   align-items: center;
   gap: 6px;
+  /* 列の縁に文字が貼り付かないように（2026-08-15。解析の行・エンジンの枠と同じ）。 */
+  margin-left: 6px;
+  margin-right: 6px;
   /* ⚠️ **折り返しは「はみ出すよりまし」の逃げ道**（2026-08-15）。連続解析のボタンが
      手数と秒数を持つようになって、一番細い列（--study-side-min = 300px）では
      ぎりぎりになった。**普段は 1 行に収まる**ように下でボタンを詰めてあるが、
