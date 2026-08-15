@@ -661,8 +661,23 @@ export function mountMainScreen(root: HTMLElement): void {
               <label class="analyze-time">
                 <select id="analyze-seconds"
                         title="考える時間。途中で切っても、そこまでの評価値は出ます。「無制限」は停止するまで考え続けます（そのあいだエンジンは起動したままです）">
+                  <!-- 1〜10 秒を刻んで、そのあと 30 秒と無制限（2026-08-15）。
+                       ⚠️ **細かいのは短いほうだけでよい** —— 連続解析は
+                       「手数 × 秒数」で待ち時間が決まるので、**1 秒の差が
+                       150 手では 2 分半になる**（長いほうは刻んでも使い分けない）。
+                       ⚠️ **既定は 3 秒**（selected を付けた option）。変えると
+                       連続解析のボタンの文言と見積もりが一緒に動く。
+                       ⚠️ template literal の中なので、コメントにバッククォートを
+                       使わないこと（文字列がそこで切れる）。 -->
                   <option value="1">1秒</option>
+                  <option value="2">2秒</option>
                   <option value="3" selected>3秒</option>
+                  <option value="4">4秒</option>
+                  <option value="5">5秒</option>
+                  <option value="6">6秒</option>
+                  <option value="7">7秒</option>
+                  <option value="8">8秒</option>
+                  <option value="9">9秒</option>
                   <option value="10">10秒</option>
                   <option value="30">30秒</option>
                   <option value="0">無制限</option>
