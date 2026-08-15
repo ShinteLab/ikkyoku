@@ -1496,29 +1496,50 @@ export function mountMainScreen(root: HTMLElement): void {
     analyzeStatus.textContent = "";
   };
 
-  // reserveLines は候補手の一覧に確保する高さを、本数の指定に合わせて決める。
+  // linesHeight は候補 n 本ぶんの一覧の高さ（px）。
   //
-  // ⚠️ **高さは固定しておく**（`--analyze-lines-h`）。連続モードでは 1 手ごとに
-  // 「消す → 起こす → 結果が届く」を繰り返すので、届いた本数で伸び縮みすると
-  // **盤ごと画面が上下に跳ねる**。本数を変えたときだけ高さが変わればよい。
+  // 1 行 28px + 行間 2px（**CSS の `--analyze-line-h` と揃えること**）。
+  // ⚠️ **4 本ぶんで頭打ち**（2026-08-11 から変えていない）。MultiPV を上げると
+  // 候補は何本にもなるので、溢れたぶんは中でスクロールさせる。
+  const LINES_CAP = 4;
+  const linesPx = (n: number) => {
+    const want = Math.min(Math.max(n || 1, 1), LINES_CAP);
+    return want * 28 + (want - 1) * 2;
+  };
+
+  // sizeLines は**そのエンジンの本数**で一覧の高さを決める（2026-08-15）。
   //
-  // ⚠️ **本数ぶん全部は確保しない**（4 本ぶんで頭打ち）。MultiPV を上げると
-  // 候補は何本にもなるので、そのぶん盤の下が伸びる。溢れたら中でスクロールさせる。
-  // ⚠️ **本数はエンジンごとに違う**（2026-08-15）。**一番多いものに合わせる** ——
-  // 少ないほうに合わせると、多いエンジンの候補が枠からはみ出す（あるいは
-  // 出るたびに高さが動く）。⚠️ **エンジンごとに枠の高さを変えないこと** ——
-  // 揃っていないと、候補を縦に読み比べられない。
+  // ⚠️ **枠ごとに違ってよい。** 本数がエンジンごとになったので、一番多いものに
+  // 揃えると**1 本しか出さないエンジンの下に 3 行ぶんの空白**が残る。
+  // ⚠️ **1 つの枠の中では固定であることは変わらない** —— 候補の本数は深さごとに
+  // 変わりうるので、届いた数で伸び縮みさせると**そのたびに画面が上下に動く**
+  // （連続モードでは 1 手ごとに「消す → 起こす → 結果が届く」を繰り返す）。
+  const sizeLines = (lines: HTMLElement, n: number) => {
+    lines.style.height = `${linesPx(n)}px`;
+  };
+
+  // reserveLines は**枠全体**（`.analyze-engines`）の取り分を決める。
+  //
+  // ⚠️ **`--analyze-lines-h` は「まだ枠が無いとき」の既定**（`.analyze-lines` の
+  // CSS が読む）。実際の高さは枠ごとに `sizeLines` が入れる。
+  //
+  // ⚠️ **`--analyze-engines-h` は「背の高いほうから 2 つ」の合計**（2026-08-15。
+  // 以前は「一番高いカード × 2」だった）。**エンジン 2 つはそのまま見える**という
+  // 約束は変わらないが、本数が違うときに低いほうまで高いほうで見積もると、
+  // **見えない余白のぶん手順のリストが短くなる**。
+  //
+  // ⚠️ **:root（documentElement）に入れること**（2026-08-12）。**カスタム
+  // プロパティは下へしか継承しない**ので、枠の要素に入れると読めない側が出る。
   const reserveLines = () => {
-    const most = Math.max(1, ...engineMultiPV.values());
-    const want = Math.min(Math.max(most, 1), 4);
-    // 1 行 28px + 行間 2px（CSS の --analyze-line-h と揃えること）。
-    //
-    // ⚠️ **:root（documentElement）に入れること**（2026-08-12）。枠の高さ
-    // （--analyze-engines-h）と `#panel-study` の --board-size がこれを引いており、
-    // **カスタムプロパティは下へしか継承しない**ので、枠の要素に入れると
-    // 盤の大きさの式から読めない（--winrate-rows と同じ）。
-    document.documentElement.style.setProperty(
-      "--analyze-lines-h", `${want * 28 + (want - 1) * 2}px`);
+    const counts = [...engineMultiPV.values()];
+    // 29px = 見出し + 上下の padding（CSS の `--analyze-card-h` の実測値）。
+    const cards = (counts.length > 0 ? counts : [1])
+      .map((n) => linesPx(n) + 29)
+      .sort((a, b) => b - a);
+    const two = cards.slice(0, 2).reduce((a, b) => a + b, 0) + 8;
+    const root = document.documentElement.style;
+    root.setProperty("--analyze-lines-h", `${linesPx(Math.max(1, ...counts))}px`);
+    root.setProperty("--analyze-engines-h", `${Math.min(two, 300)}px`);
   };
   // ⚠️ **取り直すのは `showSettings`**（本数は設定の一部になったので）。
   // ここでの 1 回は、設定が届く前の初期値。
@@ -1665,6 +1686,8 @@ export function mountMainScreen(root: HTMLElement): void {
       const dot = card.querySelector<HTMLButtonElement>(".analyze-engine-color")!;
       dot.addEventListener("click", (ev) => askEngineColor(e.id, ev.clientX, ev.clientY));
       fillMultiPV(card.querySelector<HTMLSelectElement>(".analyze-engine-multipv")!, e);
+      // ⚠️ **高さはこの枠の本数で決める**（他のエンジンに揃えない。2026-08-15）。
+      sizeLines(entry.lines, e.multiPv);
       engineCards.set(e.id, entry);
       analyzeEnginesBox.appendChild(card);
     }
@@ -1716,9 +1739,14 @@ export function mountMainScreen(root: HTMLElement): void {
     }
     if (analyzeRunning) {
       await startAnalyze();
-    } else {
-      // 走っていないときは、次に解析したときの高さだけ合わせておく。
-      reserveLines();
+      return;
+    }
+    // 走っていないときは枠を作り直さないので、**その枠の高さだけここで直す**
+    // （結果が出たまま残っているので、作り直すと読んでいたものが消える）。
+    // ⚠️ **枠全体の取り分は `showSettings` が `reserveLines` で取り直し済み。**
+    const card = engineCards.get(id);
+    if (card) {
+      sizeLines(card.lines, n);
     }
   };
 
