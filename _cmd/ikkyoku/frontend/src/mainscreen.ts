@@ -683,17 +683,8 @@ export function mountMainScreen(root: HTMLElement): void {
                   <option value="0">無制限</option>
                 </select>
               </label>
-              <!-- 候補手を全部出すか（2026-08-15）。**本数はエンジンごとの設定**だが、
-                   **どれだけ画面に出すかは見え方の話**なので、こちらは全体で 1 つ。
-
-                   ⚠️ **既定は切**（3 件まで。溢れたら枠の中でスクロール）。
-                   候補を増やすと枠がそのぶん縦に伸び、**同じ列にある手順のリストが
-                   そのぶん短くなる**ので、伸ばすのは「今そうしたい」と言ったときだけ。 -->
-              <label class="analyze-continuous"
-                     title="候補手を全部出します（切ると 3 件まで。溢れたぶんは枠の中でスクロール）。本数そのものはエンジンごとの設定です">
-                <input id="analyze-show-all" type="checkbox" />
-                <span>全て表示</span>
-              </label>
+              <!-- ⚠️ **「全て表示」もここには無い**（2026-08-15）。**エンジンごと**なので、
+                   入口は本数（MultiPV）と同じ**エンジンの見出し**。 -->
               <!-- ⚠️ **候補手の本数（MultiPV）の欄はここには無い**（2026-08-15 に外した）。
                    **エンジンごとの設定**になったので、入口は下の**エンジンの見出し**。
                    全エンジン共通の欄を 1 つ置くと、速いエンジンは多めに・重いエンジンは
@@ -711,6 +702,14 @@ export function mountMainScreen(root: HTMLElement): void {
                  並べて人が読む。中の候補手（MultiPV）は **1 本しか来なくても一覧の形で
                  出す** —— 次善手を辿るのが構想の中心なので、複数本になるのが前提の作り。 -->
             <div id="analyze-engines" class="analyze-engines" hidden></div>
+            <!-- エンジンの結果と手順の境目（2026-08-15）。**高さは人が決める。**
+                 ⚠️ **候補の本数で自動では動かさない** —— 動かすと、手で決めた高さが
+                 解析のたびに上書きされる。書き換えるのは --analyze-engines-h
+                 ただ 1 つで、余りは手順のリストがもらう。
+                 ⚠️ **他の 2 本（評価値グラフ・解析の列）と操作の形を揃えること。** -->
+            <div id="analyze-split" class="split-bar" role="separator" hidden
+                 aria-orientation="horizontal" aria-label="解析結果の高さ" tabindex="0"
+                 title="ドラッグで解析結果の高さを変えます（余りは手順に渡ります）。上下キーでも動きます"></div>
             <p id="analyze-status" class="note is-caution" hidden></p>
             <!-- 手順（Phase 5「手を進める UI」）。**盤の右の列の下半分。**
                  ⚠️ **高さを中身に依存させないこと**（中でスクロールさせる）。 -->
@@ -1287,7 +1286,6 @@ export function mountMainScreen(root: HTMLElement): void {
   const analyzeRun = root.querySelector<HTMLButtonElement>("#analyze-run")!;
   const analyzeSeconds = root.querySelector<HTMLSelectElement>("#analyze-seconds")!;
   const analyzeContinuous = root.querySelector<HTMLInputElement>("#analyze-continuous")!;
-  const analyzeShowAll = root.querySelector<HTMLInputElement>("#analyze-show-all")!;
   const analyzeEnginesBox = root.querySelector<HTMLDivElement>("#analyze-engines")!;
   const analyzeMeta = root.querySelector<HTMLElement>("#analyze-meta")!;
   const analyzeHint = root.querySelector<HTMLElement>("#analyze-hint")!;
@@ -1530,7 +1528,7 @@ export function mountMainScreen(root: HTMLElement): void {
   //
   // 1 行 28px + 行間 2px（**CSS の `--analyze-line-h` と揃えること**）。
   //
-  // ⚠️ **頭打ちは「全て表示」で変わる**（2026-08-15）:
+  // ⚠️ **頭打ちは「全て表示」で変わる**（2026-08-15。**エンジンごと**）:
   //
   //   切（既定）… **3 本ぶん**。溢れたぶんは枠の中でスクロール
   //   入        … **10 本ぶん**（＝選べる本数の上限。事実上「全部出す」）
@@ -1541,11 +1539,17 @@ export function mountMainScreen(root: HTMLElement): void {
   // 枠が画面いっぱいまで伸びて、手順が見えなくなる。
   const LINES_CAP = 3;
   const LINES_CAP_ALL = 10;
-  const linesCap = () => (analyzeShowAll.checked ? LINES_CAP_ALL : LINES_CAP);
-  const linesPx = (n: number) => {
-    const want = Math.min(Math.max(n || 1, 1), linesCap());
+  const linesPx = (n: number, all: boolean) => {
+    const want = Math.min(Math.max(n || 1, 1), all ? LINES_CAP_ALL : LINES_CAP);
     return want * 28 + (want - 1) * 2;
   };
+
+  // 「全て表示」を入れているエンジン。**画面だけの状態**（`config.json` には持たない。
+  // 視点・グラフの高さと同じ扱い）。
+  //
+  // ⚠️ **枠は解析のたびに作り直される**ので、**ここで覚えていないと 1 手ごとに
+  // 切に戻る**（勝率バーで選んだエンジンを覚えているのと同じ理由）。
+  const engineShowAll = new Set<string>();
 
   // sizeLines は**そのエンジンの本数**で一覧の高さを決める（2026-08-15）。
   //
@@ -1554,49 +1558,97 @@ export function mountMainScreen(root: HTMLElement): void {
   // ⚠️ **1 つの枠の中では固定であることは変わらない** —— 候補の本数は深さごとに
   // 変わりうるので、届いた数で伸び縮みさせると**そのたびに画面が上下に動く**
   // （連続モードでは 1 手ごとに「消す → 起こす → 結果が届く」を繰り返す）。
-  const sizeLines = (lines: HTMLElement, n: number) => {
-    lines.style.height = `${linesPx(n)}px`;
+  const sizeLines = (card: EngineCard) => {
+    card.lines.style.height = `${linesPx(card.multiPv, engineShowAll.has(card.id))}px`;
   };
 
-  // reserveLines は**枠全体**（`.analyze-engines`）の取り分を決める。
+  // reserveLines は**枠がまだ無いとき**の一覧の高さを決める。
   //
-  // ⚠️ **`--analyze-lines-h` は「まだ枠が無いとき」の既定**（`.analyze-lines` の
-  // CSS が読む）。実際の高さは枠ごとに `sizeLines` が入れる。
+  // ⚠️ **`--analyze-lines-h` は既定**（`.analyze-lines` の CSS が読む）。
+  // 実際の高さは枠ごとに `sizeLines` が入れる。
   //
-  // ⚠️ **`--analyze-engines-h` は「背の高いほうから 2 つ」の合計**（2026-08-15。
-  // 以前は「一番高いカード × 2」だった）。**エンジン 2 つはそのまま見える**という
-  // 約束は変わらないが、本数が違うときに低いほうまで高いほうで見積もると、
-  // **見えない余白のぶん手順のリストが短くなる**。
+  // ⚠️ **枠全体（`--analyze-engines-h`）はここでは触らない**（2026-08-15）。
+  // **あれはスプリットバーで人が決める値**になった —— 候補の本数で勝手に動くと、
+  // **手で決めた高さが解析のたびに上書きされる**。
   //
   // ⚠️ **:root（documentElement）に入れること**（2026-08-12）。**カスタム
   // プロパティは下へしか継承しない**ので、枠の要素に入れると読めない側が出る。
-  // ⚠️ **枠全体の頭打ちも「全て表示」で変わる。** 伸ばせるようにしないと、
-  // 候補を全部出しても**枠の側でスクロールするだけ**で、伸ばした意味が無い。
-  // ⚠️ **無制限にはしないこと** —— 同じ列に手順のリストが居るので、
-  // 伸ばし切ると手順が読めない高さまで潰れる。
-  const ENGINES_CAP = 300;
-  const ENGINES_CAP_ALL = 480;
-
   const reserveLines = () => {
     const counts = [...engineMultiPV.values()];
-    // 29px = 見出し + 上下の padding（CSS の `--analyze-card-h` の実測値）。
-    const cards = (counts.length > 0 ? counts : [1])
-      .map((n) => linesPx(n) + 29)
-      .sort((a, b) => b - a);
-    const two = cards.slice(0, 2).reduce((a, b) => a + b, 0) + 8;
-    const cap = analyzeShowAll.checked ? ENGINES_CAP_ALL : ENGINES_CAP;
-    const root = document.documentElement.style;
-    root.setProperty("--analyze-lines-h", `${linesPx(Math.max(1, ...counts))}px`);
-    root.setProperty("--analyze-engines-h", `${Math.min(two, cap)}px`);
+    document.documentElement.style.setProperty(
+      "--analyze-lines-h", `${linesPx(Math.max(1, ...counts), false)}px`);
   };
 
-  // 「全て表示」を切り替えたら、**出ている枠も作り直さずに背を変える**
-  // （作り直すと読んでいた候補が消える。色を変えたときと同じ扱い）。
-  analyzeShowAll.addEventListener("change", () => {
-    for (const card of engineCards.values()) {
-      sizeLines(card.lines, card.multiPv);
+  // ---- 解析結果と手順の境目（スプリットバー。2026-08-15）--------------------
+  //
+  // **書き換えるのは `--analyze-engines-h` ただ 1 つ**で、余りは手順のリストが
+  // もらう（`.study-moves` は `flex: 1 1 0`）。評価値グラフ・解析の列のバーと
+  // **同じ形**にしてある（掴む・上下キー・遅れて光る）。
+  //
+  // ⚠️ **候補の本数では動かさないこと**（2026-08-15 にそう決めた）。動かすと、
+  // **手で決めた高さが解析のたびに上書きされる。**
+  const analyzeSplit = root.querySelector<HTMLDivElement>("#analyze-split")!;
+  // 下限はカード 1 つぶん（**2 つ目のエンジンが見えなくても、1 つは読める**）。
+  const ANALYZE_H_MIN = 60;
+  let analyzeH = 0; // 0 = まだ人が決めていない（CSS の既定に任せる）
+
+  // 上限は**手順のリストに残す最低限**から決める（列の高さは窓で変わるので、
+  // px の定数ではなく**その場で測る**）。⚠️ **手順を 0 まで潰させないこと。**
+  const analyzeMax = () => {
+    const side = studySide.clientHeight;
+    return Math.max(ANALYZE_H_MIN, (side > 0 ? side : window.innerHeight) - 160);
+  };
+
+  const setAnalyzeH = (px: number) => {
+    const next = Math.min(Math.max(Math.round(px), ANALYZE_H_MIN), analyzeMax());
+    if (next === analyzeH) {
+      return;
     }
-    reserveLines();
+    analyzeH = next;
+    // ⚠️ **:root に入れること**（`--analyze-card-h` 経由で他からも読まれる）。
+    document.documentElement.style.setProperty("--analyze-engines-h", `${next}px`);
+    analyzeSplit.setAttribute("aria-valuenow", String(next));
+  };
+
+  // ドラッグ。**下へ引くと解析結果が高くなる**（境目そのものを掴む感覚）。
+  // ⚠️ **pointer capture を取ること** —— 掴んだままバーの外へ出るのが普通。
+  analyzeSplit.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    analyzeSplit.setPointerCapture(e.pointerId);
+    analyzeSplit.classList.add("is-dragging");
+    const startY = e.clientY;
+    // ⚠️ **起点は「今の実寸」**（まだ人が決めていないときは CSS の既定なので、
+    // 変数からは読めない）。測れば、どちらの経路でも掴んだ位置から動く。
+    const startH = analyzeEnginesBox.clientHeight;
+    const onMove = (ev: PointerEvent) => setAnalyzeH(startH + (ev.clientY - startY));
+    const onUp = () => {
+      analyzeSplit.classList.remove("is-dragging");
+      analyzeSplit.removeEventListener("pointermove", onMove);
+      analyzeSplit.removeEventListener("pointerup", onUp);
+      analyzeSplit.removeEventListener("pointercancel", onUp);
+    };
+    analyzeSplit.addEventListener("pointermove", onMove);
+    analyzeSplit.addEventListener("pointerup", onUp);
+    analyzeSplit.addEventListener("pointercancel", onUp);
+  });
+
+  analyzeSplit.addEventListener("keydown", (e) => {
+    const step = e.shiftKey ? 32 : 8;
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setAnalyzeH((analyzeH || analyzeEnginesBox.clientHeight) - step);
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setAnalyzeH((analyzeH || analyzeEnginesBox.clientHeight) + step);
+    }
+  });
+
+  // 窓が低くなると上限も下がる。**はみ出したままにしないこと**
+  // （⚠️ **決めていないうちは触らない** —— 0 を書き込むと下限に張り付く）。
+  window.addEventListener("resize", () => {
+    if (analyzeH > 0) {
+      setAnalyzeH(analyzeH);
+    }
   });
   // ⚠️ **取り直すのは `showSettings`**（本数は設定の一部になったので）。
   // ここでの 1 回は、設定が届く前の初期値。
@@ -1749,6 +1801,15 @@ export function mountMainScreen(root: HTMLElement): void {
           <select class="analyze-engine-multipv"
                   aria-label="候補手の本数"
                   title="候補手を何本出させるか（MultiPV）。このエンジンの設定として保存します"></select>
+          <!-- 全て表示（2026-08-15）。⚠️ **本数とは別物** —— あちらは
+               「何本読ませるか」、こちらは**この枠に何本ぶんの高さを取るか**。
+               ⚠️ **エンジンごと**（1 本しか出さないエンジンの枠まで伸ばさない）。
+               切のときは 3 件まで（溢れたら枠の中でスクロール）。 -->
+          <label class="analyze-engine-all"
+                 title="このエンジンの候補手を全部出します（切ると 3 件まで。溢れたぶんは中でスクロール）">
+            <input class="analyze-engine-all-input" type="checkbox" />
+            <span>全て</span>
+          </label>
           <span class="analyze-engine-meta note"></span>
         </div>
         <ol class="analyze-lines"></ol>
@@ -1776,8 +1837,21 @@ export function mountMainScreen(root: HTMLElement): void {
       const dot = card.querySelector<HTMLButtonElement>(".analyze-engine-color")!;
       dot.addEventListener("click", (ev) => askEngineColor(e.id, ev.clientX, ev.clientY));
       fillMultiPV(card.querySelector<HTMLSelectElement>(".analyze-engine-multipv")!, e);
+      // 「全て表示」。⚠️ **エンジンごと**で、**解析をまたいで残す**
+      // （枠は 1 手ごとに作り直されるので、覚えていないと毎回切に戻る）。
+      const all = card.querySelector<HTMLInputElement>(".analyze-engine-all-input")!;
+      all.checked = engineShowAll.has(e.id);
+      all.addEventListener("change", () => {
+        if (all.checked) {
+          engineShowAll.add(e.id);
+        } else {
+          engineShowAll.delete(e.id);
+        }
+        // ⚠️ **枠を作り直さないこと**（読んでいた候補が消える）。背だけ変える。
+        sizeLines(entry);
+      });
       // ⚠️ **高さはこの枠の本数で決める**（他のエンジンに揃えない。2026-08-15）。
-      sizeLines(entry.lines, e.multiPv);
+      sizeLines(entry);
       engineCards.set(e.id, entry);
       analyzeEnginesBox.appendChild(card);
     }
@@ -1837,7 +1911,7 @@ export function mountMainScreen(root: HTMLElement): void {
     const card = engineCards.get(id);
     if (card) {
       card.multiPv = n;
-      sizeLines(card.lines, n);
+      sizeLines(card);
     }
   };
 
@@ -2411,6 +2485,9 @@ export function mountMainScreen(root: HTMLElement): void {
     // ⚠️ **局面があるあいだは枠を出しっぱなしにする**（中身が空でも）。
     // 解析のたびに畳むと、連続モードでは**1 手ごとに盤が上下に跳ねる**。
     analyzeEnginesBox.hidden = !studyLoaded;
+    // ⚠️ **境目のバーも枠と一緒に出し入れすること**（枠が無いときにバーだけ残ると、
+    // 分ける相手が居ないのに線が浮く。縦のバーと同じ扱い）。
+    analyzeSplit.hidden = !studyLoaded;
     // 勝率バーも同じ（**まだ結果が無くても枠だけ出す**）。出たり消えたりすると
     // 盤が上下に動くうえ、盤の**上**の行なので動くと盤ごと押し下げる。
     winrateRow.hidden = !studyLoaded;
