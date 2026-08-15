@@ -3313,6 +3313,8 @@ html.is-main #app {
   min-height: 0;
   overflow-y: auto;
   padding-right: 2px;
+  margin-left: 6px;
+  margin-right: 6px;
 }
 
 /* 手順の 1 行 ＝ **[+/-] + 手**（2026-08-13）。
