@@ -1560,6 +1560,38 @@ export function mountMainScreen(root: HTMLElement): void {
   // ここでの 1 回は、設定が届く前の初期値。
   reserveLines();
 
+  // 考える秒数は**設定に持つ**（2026-08-15）。連続解析では「手数 × 秒数」が
+  // そのまま待ち時間になるので、**起動のたびに選び直させない**。
+  // ⚠️ **連続モードのチェックとは扱いが違う**（あちらはその場かぎりの操作）。
+  //
+  // ⚠️ **設定ファイルには選択肢に無い値も入りうる**（手で書けば 15 でも通る）。
+  // **今の値が一覧に無ければ足すこと** —— 足さないと `select.value` が空になり、
+  // **選び直すまで画面が嘘をつく**（MultiPV と同じ話）。
+  const showAnalyzeSeconds = (sec: number) => {
+    const v = String(Math.max(0, sec));
+    if (![...analyzeSeconds.options].some((o) => o.value === v)) {
+      const opt = document.createElement("option");
+      opt.value = v;
+      opt.textContent = `${v}秒`;
+      // 「無制限」（0）の手前に置く（**無制限は一番下**のままにする）。
+      analyzeSeconds.insertBefore(opt, analyzeSeconds.options[analyzeSeconds.options.length - 1]);
+    }
+    analyzeSeconds.value = v;
+    // ⚠️ **連続解析のボタンは秒数を出している**ので、一緒に描き直すこと。
+    syncBatchButton();
+  };
+
+  analyzeSeconds.addEventListener("change", () => {
+    void (async () => {
+      try {
+        showSettings(await SettingsService.SetAnalyzeSeconds(Number(analyzeSeconds.value) || 0));
+      } catch (err) {
+        analyzeStatus.textContent = String(err instanceof Error ? err.message : err);
+        analyzeStatus.hidden = false;
+      }
+    })();
+  });
+
   // ---- 勝率バー（盤の上）---------------------------------------------------
   //
   // **左が後手（青）・右が先手（赤）。** 評価値は Go 側が先手視点に揃えてあるので、
@@ -3887,6 +3919,7 @@ export function mountMainScreen(root: HTMLElement): void {
     training: { enabled: boolean; host: string; port: number; token: string; target: string };
     engines: EngineSettings[] | null;
     engineColors: EngineColorOption[] | null;
+    analyzeSeconds: number;
     ponanzaConstant: number;
   }) => {
     fitOnStartup.checked = s.fitOnStartup;
@@ -3911,6 +3944,9 @@ export function mountMainScreen(root: HTMLElement): void {
     // ⚠️ **候補手の高さもここで取り直す**（本数は設定の一部になったので、
     // 変えた結果がそのまま効く）。
     reserveLines();
+    // 考える秒数（2026-08-15 に設定へ移した）。⚠️ **既定の解決は Go 側**
+    // （`Config.ThinkSeconds`）。**フロントに「未設定なら 3」を書かないこと。**
+    showAnalyzeSeconds(s.analyzeSeconds);
     engineColorOptions = s.engineColors ?? [];
     paintEngineColors();
     showEngineList(s.engines ?? []);

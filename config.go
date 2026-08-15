@@ -40,6 +40,19 @@ type Config struct {
 	// Training は訂正した局面を suteme の学習用サーバへ送る設定。
 	Training TrainingConfig `json:"training"`
 
+	// AnalyzeSeconds は解析タブの「考える秒数」。
+	//
+	// ⚠️ **ポインタなのは 0 に意味があるから**（`0` = 無制限）。値で持って
+	// `omitempty` を付けると、**「無制限」を選んだ設定がファイルから消えて、
+	// 次の起動で既定（3 秒）に戻る**。nil が「まだ選んでいない」。
+	//
+	// **既定値はここに書かない**（解決は `Config.ThinkSeconds`）。
+	//
+	// ⚠️ **連続モードのチェックとは扱いが違う**（あちらは起動のたびに入で始まる
+	// その場かぎりの操作）。秒数は**待ち時間を決める値**で、連続解析では
+	// 「手数 × 秒数」がそのまま所要時間になるので、**選び直しを毎回やらせない。**
+	AnalyzeSeconds *int `json:"analyzeSeconds,omitempty"`
+
 	// PonanzaConstant は評価値を勝率に直すときの定数（解析タブの勝率バー）。
 	//
 	//	勝率(先手) = 1 / (1 + exp(-評価値 / この値))
@@ -191,6 +204,28 @@ func (e EngineEntry) OptionValue(o EngineOption) (value string, custom bool) {
 		return v, true
 	}
 	return o.Default, false
+}
+
+// DefaultAnalyzeSeconds は「考える秒数」の既定（解析タブ）。
+//
+// ⚠️ **短すぎず、待たされすぎない線。** 連続解析では「手数 × 秒数」がそのまま
+// 所要時間になるので（150 手なら 3 秒で 7 分半）、既定を伸ばすと**通しで解析する
+// のが現実的でなくなる**。
+const DefaultAnalyzeSeconds = 3
+
+// ThinkSeconds は「考える秒数」を返す（**0 は無制限**）。
+//
+// ⚠️ **「未設定なら既定」の解決はここ 1 か所。** 呼び出し側にもフロントにも
+// 書かないこと（既定を変えたときに食い違う。`DisplayName` / 折れ線の色と同じ）。
+func (c Config) ThinkSeconds() int {
+	if c.AnalyzeSeconds == nil {
+		return DefaultAnalyzeSeconds
+	}
+	if *c.AnalyzeSeconds < 0 {
+		// 手で書き換えて壊れている。**無制限として扱う**（解析できなくしない）。
+		return 0
+	}
+	return *c.AnalyzeSeconds
 }
 
 // MultiPVOption は候補手の本数を決める USI option の名前。

@@ -39,6 +39,11 @@ type AppSettings struct {
 	// ⚠️ **フロントに色の表を書かないこと**（既定色の解決も Go 側なので、
 	// 2 つ持つと「選べる色」と「既定で付く色」が食い違う）。
 	EngineColors []ikkyoku.EngineColorOption `json:"engineColors"`
+	// AnalyzeSeconds は解析タブの「考える秒数」（**0 は無制限**）。
+	//
+	// **既定値（3）は解決済みで返る**（`ikkyoku.Config.ThinkSeconds`）。
+	// ⚠️ **フロントに既定値を書かないこと。**
+	AnalyzeSeconds int `json:"analyzeSeconds"`
 	// PonanzaConstant は評価値 → 勝率の変換に使う定数（解析タブの勝率バー）。
 	//
 	// **既定値（1500）は解決済みで返る**（`analyze.PonanzaConstantOr`）。
@@ -272,6 +277,7 @@ func (s *SettingsService) settings() AppSettings {
 		Training:        trainingSettings(s.cfg.Training),
 		Engines:         engines,
 		EngineColors:    ikkyoku.EngineColors,
+		AnalyzeSeconds:  s.cfg.ThinkSeconds(),
 		PonanzaConstant: analyze.PonanzaConstantOr(s.cfg.PonanzaConstant),
 		Path:            s.path,
 	}
@@ -867,6 +873,23 @@ func (s *SettingsService) SetPonanzaConstant(v float64) (AppSettings, error) {
 		v = 0
 	}
 	return s.save(func(cfg *ikkyoku.Config) { cfg.PonanzaConstant = v })
+}
+
+// SetAnalyzeSeconds は「考える秒数」を保存する（解析タブの選択。**0 は無制限**）。
+//
+// ⚠️ **0 も保存すること**（「無制限」は正当な選択）。`Config.AnalyzeSeconds` が
+// ポインタなのはこのため —— 値で持って省略すると、**次の起動で既定に戻る**。
+//
+// ⚠️ **連続モードのチェックとは扱いが違う**（あちらは起動のたびに入で始まる
+// その場かぎりの操作）。秒数は待ち時間を決める値で、連続解析では
+// 「手数 × 秒数」がそのまま所要時間になるので、**選び直しを毎回やらせない。**
+func (s *SettingsService) SetAnalyzeSeconds(v int) (AppSettings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if v < 0 {
+		return s.settings(), fmt.Errorf("考える秒数は 0 以上で指定してください（0 は無制限）: %d", v)
+	}
+	return s.save(func(cfg *ikkyoku.Config) { cfg.AnalyzeSeconds = &v })
 }
 
 // SetFitOnStartup は「起動時に盤面を探す」を切り替えて保存する。

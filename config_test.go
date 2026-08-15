@@ -270,3 +270,39 @@ func TestEngineDisplayColor(t *testing.T) {
 		t.Errorf("%d 番目の既定色 = %q, want %q", n, got, EngineColors[0].Value)
 	}
 }
+
+// 「考える秒数」が設定ファイルに残ること（2026-08-15）。
+//
+// ⚠️ **一番の要点は「無制限（0）」が消えないこと。** 値で持って `omitempty` を
+// 付けると、**0 を選んだ設定がファイルから消えて次の起動で既定（3 秒）に戻る**
+// （しかも画面では「設定が効いていない」としか分からない）。だからポインタ。
+func TestConfigAnalyzeSecondsRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+
+	for _, tt := range []struct {
+		name string
+		set  *int
+		want int
+	}{
+		{"未設定なら既定", nil, DefaultAnalyzeSeconds},
+		{"選んだ秒数が残る", ptr(7), 7},
+		{"無制限(0)も残る", ptr(0), 0},
+		{"壊れた値は無制限に倒す", ptr(-5), 0},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(dir, tt.name+".json")
+			if err := SaveConfig(path, Config{AnalyzeSeconds: tt.set}); err != nil {
+				t.Fatalf("SaveConfig() error = %v", err)
+			}
+			got, err := LoadConfig(path)
+			if err != nil {
+				t.Fatalf("LoadConfig() error = %v", err)
+			}
+			if n := got.ThinkSeconds(); n != tt.want {
+				t.Errorf("ThinkSeconds() = %d, want %d", n, tt.want)
+			}
+		})
+	}
+}
+
+func ptr(v int) *int { return &v }

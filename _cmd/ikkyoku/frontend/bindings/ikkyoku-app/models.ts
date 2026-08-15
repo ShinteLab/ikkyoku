@@ -150,6 +150,14 @@ export interface AppSettings {
     "engineColors": ikkyoku$0.EngineColorOption[] | null;
 
     /**
+     * AnalyzeSeconds は解析タブの「考える秒数」（**0 は無制限**）。
+     * 
+     * **既定値（3）は解決済みで返る**（`ikkyoku.Config.ThinkSeconds`）。
+     * ⚠️ **フロントに既定値を書かないこと。**
+     */
+    "analyzeSeconds": number;
+
+    /**
      * PonanzaConstant は評価値 → 勝率の変換に使う定数（解析タブの勝率バー）。
      * 
      * **既定値（1500）は解決済みで返る**（`analyze.PonanzaConstantOr`）。

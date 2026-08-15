@@ -91,6 +91,20 @@ export function ResetEngineOptions(id: string): $CancellablePromise<$models.AppS
 }
 
 /**
+ * SetAnalyzeSeconds は「考える秒数」を保存する（解析タブの選択。**0 は無制限**）。
+ * 
+ * ⚠️ **0 も保存すること**（「無制限」は正当な選択）。`Config.AnalyzeSeconds` が
+ * ポインタなのはこのため —— 値で持って省略すると、**次の起動で既定に戻る**。
+ * 
+ * ⚠️ **連続モードのチェックとは扱いが違う**（あちらは起動のたびに入で始まる
+ * その場かぎりの操作）。秒数は待ち時間を決める値で、連続解析では
+ * 「手数 × 秒数」がそのまま所要時間になるので、**選び直しを毎回やらせない。**
+ */
+export function SetAnalyzeSeconds(v: number): $CancellablePromise<$models.AppSettings> {
+    return $Call.ByID(1365801749, v);
+}
+
+/**
  * SetEngineColor は評価値グラフの折れ線の色を決める（空にすると既定色に戻る）。
  * 
  * **入口は解析タブのエンジンの見出し**（候補手を出しているところ）。設定タブでは
