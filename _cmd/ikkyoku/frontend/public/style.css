@@ -991,6 +991,113 @@ html.is-main #app {
   color: #ff8d8d;
 }
 
+/* エンジンの設定（USI の option。2026-08-15）。**行の中の折りたたみ。**
+
+   ⚠️ **既定で閉じる。** やねうら王級だと option が 40 件を超えるので、
+   開きっぱなしにすると一覧そのものが読めなくなる（見出しに件数を出してあるので、
+   畳んだままでも既定のままかどうかは分かる）。 */
+.engine-options {
+  flex: 1 0 100%;
+  border-top: 1px dashed #3a3d47;
+  padding-top: 5px;
+}
+
+.engine-options > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #c9ccd3;
+  cursor: pointer;
+  user-select: none;
+}
+
+.engine-options-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  /* ⚠️ **高さを頭打ちにして中でスクロールさせること。** 40 件を素直に並べると
+     設定タブが縦に伸びきって、下にある他の設定へ辿り着けなくなる。 */
+  max-height: 260px;
+  overflow-y: auto;
+  margin-top: 6px;
+  padding: 6px 8px;
+  background: #1b1e25;
+  border: 1px solid #2f323b;
+  border-radius: 5px;
+}
+
+.engine-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+}
+
+/* 名前の幅を揃える。**入力欄の左端が縦に揃っていないと、何を変えたのかを
+   目で追えない**（項目が多いほど効く）。溢れたら省略して title で読ませる。 */
+.engine-option-name {
+  flex: 0 0 190px;
+  min-width: 0;
+  font-size: 12px;
+  color: #9aa6c0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 既定から変えた項目は名前を明るくする。**一覧の中で「自分が触ったもの」が
+   一目で分かること**が、設定を戻すときの手掛かりになる。 */
+.engine-option.is-custom > .engine-option-name {
+  color: #f2f3f5;
+  font-weight: 600;
+}
+
+.engine-option-input {
+  flex: 0 1 240px;
+  min-width: 0;
+  padding: 3px 6px;
+  font-size: 12.5px;
+  color: #f2f3f5;
+  background: #23262e;
+  border: 1px solid #3a3d47;
+  border-radius: 4px;
+}
+
+.engine-option-input:focus {
+  outline: none;
+  border-color: #6ad3ff;
+}
+
+/* チェックボックスだけは箱の見た目を持たない（枠を付けると二重に見える）。 */
+.engine-option-input[type="checkbox"] {
+  flex: 0 0 auto;
+  padding: 0;
+  background: none;
+  border: none;
+}
+
+.engine-option-reset {
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  font-size: 11px;
+  color: #9aa6c0;
+  background: #2b2f38;
+  border: 1px solid #3a3d47;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.engine-option-reset:hover {
+  color: #f2f3f5;
+  background: #3a3d47;
+}
+
+.engine-options-reset {
+  align-self: flex-start;
+  margin-top: 4px;
+}
+
 /* 勝率バー（解析タブ。2026-08-12）。**盤の上**に置く。
 
    **左が後手（青）・右が先手（赤）。** 評価値は Go 側が先手視点に揃えているので、

@@ -77,6 +77,16 @@ export function RemoveEngine(id: string): $CancellablePromise<$models.AppSetting
 }
 
 /**
+ * ResetEngineOptions は設定した値を全部捨てて、エンジンの既定に戻す。
+ * 
+ * **宣言（`OptionSpecs`）は捨てない** —— 入力欄が作れなくなるので、
+ * 戻す先が画面から消えてしまう。
+ */
+export function ResetEngineOptions(id: string): $CancellablePromise<$models.AppSettings> {
+    return $Call.ByID(2207888277, id);
+}
+
+/**
  * SetEngineColor は評価値グラフの折れ線の色を決める（空にすると既定色に戻る）。
  * 
  * **入口は解析タブのエンジンの見出し**（候補手を出しているところ）。設定タブでは
@@ -109,6 +119,26 @@ export function SetEngineEnabled(id: string, enabled: boolean): $CancellableProm
  */
 export function SetEngineName(id: string, name: string): $CancellablePromise<$models.AppSettings> {
     return $Call.ByID(2068350557, id, name);
+}
+
+/**
+ * SetEngineOption は `setoption` で送る値を 1 つ決める（設定タブのエンジンの行）。
+ * 
+ * **空文字にすると設定から消え、エンジンが宣言した既定値に戻る**（＝送られるのは
+ * 既定値。`core/usi/client.plannedOptions`）。⚠️ **既定と同じ値を書き込んだときも
+ * 消す** —— 書き残すと「エンジンの既定に従う」という指定ができなくなり、
+ * **エンジンのバージョンが上がって既定が変わっても古い値で固まる**（しかも
+ * 画面では気づけない）。
+ * 
+ * ⚠️ **値の検分は宣言があるときだけ。** 宣言に無い名前も受ける（宣言していない
+ * option を受け付けるエンジンがあり、**設定ファイルを手で編集する経路を塞がない**）。
+ * 
+ * ⚠️ **`isready` の前にしか効かない option なので、繋ぎ直しが要る。** 判断は
+ * `AnalyzeService.engineKey`（パス + options の指紋）が持っているので、
+ * **ここで接続を触らないこと。**
+ */
+export function SetEngineOption(id: string, name: string, value: string): $CancellablePromise<$models.AppSettings> {
+    return $Call.ByID(3103718499, id, name, value);
 }
 
 /**

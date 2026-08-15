@@ -276,6 +276,16 @@ type EngineInfo struct {
 	Author string `json:"author"`
 	// Options はエンジンが `usi` で宣言した option の数。
 	Options int `json:"options"`
+	// Declared はエンジンが `usi` で宣言した option そのもの（宣言順）。
+	//
+	// **設定タブの入力欄はこれで組み立てる**（型・既定値・範囲・選択肢）。
+	// ⚠️ **値の意味づけはしない**（`core/usi/client.Session.Options` の注記と同じ）。
+	// どれを画面に出すか・どう入力させるかは呼び出し側が決める。
+	//
+	// ⚠️ **宣言順のまま渡すこと。** 前の option が後の option の意味を変える
+	// エンジンがある（評価関数の種類を決めてからそのパスを渡す等）ので、
+	// 並べ替えると画面の並びが実際の依存と食い違う。
+	Declared []coreusi.Option `json:"-"`
 	// Applied は `isready` の前に送った `setoption` の数（**既定値を含む**）。
 	//
 	// 宣言より少ないのが普通（button と、既定値が空のものは送らない）。
@@ -301,6 +311,7 @@ func (s *Session) Connect(ctx context.Context) (EngineInfo, error) {
 		Name:      eng.ID,
 		Author:    eng.Author,
 		Options:   len(eng.Options),
+		Declared:  eng.Options,
 		Applied:   len(eng.Applied),
 		StartupMS: startup.Milliseconds(),
 	}, nil

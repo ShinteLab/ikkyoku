@@ -92,15 +92,37 @@ type EngineEntry struct {
 
 	// Options は接続時に `setoption` で送る値（option 名 → 値）。
 	//
-	// ⚠️ **設定ファイルを手で編集する前提。画面には出していない。** USI の option は
-	// エンジンごとに名前も型も既定値も違うので、汎用の設定 UI を作り込むと重い。
-	// 素通しにしておけば、必要な人が必要なものだけ書ける。
+	// **画面から編集できる**（2026-08-15。設定タブのエンジンの行）。入力欄の形は
+	// `OptionSpecs` に控えた宣言（型・既定値・範囲・選択肢）から組み立てる。
+	// ⚠️ **設定ファイルを手で編集する経路も残す** —— 宣言に無い option を受け付ける
+	// エンジンがあるので、**画面から選べる範囲と、受け付ける範囲は別物**
+	// （折れ線の色と同じ扱い）。
 	//
 	// 例: `{"USI_Hash": "1024", "Threads": "4", "EvalDir": "eval"}`
+	//
+	// ⚠️ **既定値と同じ値は書き残さない**（`SettingsService.SetEngineOption` が消す）。
+	// エンジンが宣言した option には、ここに書いていなくても既定値が送られる
+	// （`core/usi/client.plannedOptions`）ので、**書き残すと「エンジンの既定に従う」
+	// という指定ができなくなる**（バージョンが上がって既定が変わっても古い値で固まる）。
 	//
 	// ⚠️ **`isready` の前に送られる**（置換表の確保や評価関数の読み込みに間に合わせるため。
 	// `core/usi/client.Open` の注記）。探索ごとに変えるもの（MultiPV）はここではない。
 	Options map[string]string `json:"options,omitempty"`
+
+	// OptionSpecs はエンジンが `usi` の応答で宣言した option（宣言順の控え）。
+	//
+	// **「接続を確認」で繋いだときに書き込む**（`AnalyzeService.CheckEngine`）。
+	// ⚠️ **控えておくのが要点** —— 宣言はエンジンに繋がないと分からないので、
+	// これが無いと**設定タブを開くたびにエンジンを起こす**ことになる
+	// （NNUE の読み込みで数秒かかるものがある）。
+	//
+	// ⚠️ **これは「今の値」ではない**（値は `Options`）。宣言そのものなので、
+	// **入力欄の作り方（型・範囲・選択肢）と、既定値に戻す先**がここから決まる。
+	//
+	// ⚠️ **実行ファイルを差し替えたら捨てる**（別のエンジンの宣言なので）。
+	// **`Options` のほうは捨てない** —— 置き場所を移しただけのことがあるうえ、
+	// 人が書いた値を黙って消さない（宣言に無い値は画面でもそう出す）。
+	OptionSpecs []EngineOption `json:"optionSpecs,omitempty"`
 
 	// Enabled は解析のときに使うか。**外した登録は消さずに残る**
 	// （エンジンを入れ替えて比べる作業では、外したものをまた戻すことが多い）。
@@ -118,6 +140,55 @@ type EngineEntry struct {
 	// **空なら登録順の既定色**（`DefaultEngineColor`）。⚠️ **既定の解決を
 	// 呼び出し側に書かないこと**（`DisplayName` と同じ）。
 	Color string `json:"color,omitempty"`
+}
+
+// EngineOption はエンジンが `usi` の応答で宣言した option 1 つ。
+//
+// **`core/usi.Option` を写したもの。** ⚠️ **あちらを直接 config に埋めない** ——
+// これは**設定ファイルに書き出す形**（JSON のキーが決まる）で、プロトコルの
+// 語彙とは寿命が違う。写す場所は `_cmd/ikkyoku` の 1 か所だけ。
+type EngineOption struct {
+	// Name は option 名。**空白を含みうる**（"Book File" など）。
+	Name string `json:"name"`
+	// Type は "check" / "spin" / "combo" / "button" / "string" / "filename"。
+	//
+	// ⚠️ **button は値を持たない**（送ること自体が「押した」という動作）。
+	// 設定できる対象ではないので、値を書き込まないこと。
+	Type string `json:"type"`
+	// Default はエンジンが宣言した既定値。**「値を消したときに戻る先」。**
+	Default string `json:"default,omitempty"`
+	// Min / Max は spin の範囲（Has* が false なら宣言が無かった）。
+	Min    int  `json:"min,omitempty"`
+	Max    int  `json:"max,omitempty"`
+	HasMin bool `json:"hasMin,omitempty"`
+	HasMax bool `json:"hasMax,omitempty"`
+	// Vars は combo の選択肢。
+	Vars []string `json:"vars,omitempty"`
+}
+
+// IsButton は押すだけの option か（値を持たない）。
+func (o EngineOption) IsButton() bool { return o.Type == "button" }
+
+// OptionSpec は宣言を名前で 1 つ引く。
+func (e EngineEntry) OptionSpec(name string) (EngineOption, bool) {
+	for _, o := range e.OptionSpecs {
+		if o.Name == name {
+			return o, true
+		}
+	}
+	return EngineOption{}, false
+}
+
+// OptionValue は option の今の値と、それを人が決めたかを返す。
+//
+// **設定に無ければ宣言された既定値**（＝エンジンに送られるのもその値。
+// `core/usi/client.plannedOptions` が宣言に既定値を送るため）。
+// ⚠️ **「空なら既定」の解決を呼び出し側に書かないこと**（`DisplayName` と同じ）。
+func (e EngineEntry) OptionValue(o EngineOption) (value string, custom bool) {
+	if v, ok := e.Options[o.Name]; ok {
+		return v, true
+	}
+	return o.Default, false
 }
 
 // EngineConfig は**旧形式**の単一エンジン設定（`Config.Engine`）。

@@ -109,6 +109,60 @@ func TestConfigEngineRoundTrip(t *testing.T) {
 	}
 }
 
+// エンジンが宣言した option（`optionSpecs`）が設定ファイルに残ること。
+//
+// **控えておかないと、設定タブを開くたびにエンジンを起こす**ことになる
+// （NNUE の読み込みで数秒かかるものがある）。⚠️ **値（`options`）とは別物**なので、
+// 両方が往復することを見ている。
+func TestConfigEngineOptionSpecsRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+
+	want := Config{Engines: []EngineEntry{{
+		ID: "engine-1", Path: filepath.Join(dir, "engine.exe"), Enabled: true,
+		Options: map[string]string{"USI_Hash": "1024"},
+		OptionSpecs: []EngineOption{
+			{Name: "USI_Hash", Type: "spin", Default: "256", Min: 1, Max: 33554432, HasMin: true, HasMax: true},
+			{Name: "USI_Ponder", Type: "check", Default: "false"},
+			{Name: "EvalDir", Type: "string", Default: "eval"},
+			{Name: "BookMoves", Type: "combo", Default: "no_book", Vars: []string{"no_book", "standard_book"}},
+			{Name: "Clear Hash", Type: "button"},
+		},
+	}}}
+	if err := SaveConfig(path, want); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+	got, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	if !reflect.DeepEqual(got.Engines, want.Engines) {
+		t.Fatalf("Engines = %+v, want %+v", got.Engines, want.Engines)
+	}
+
+	e := got.Engines[0]
+	// 設定してある値はその値、していない値は**宣言された既定値**。
+	// ⚠️ **「空なら既定」を呼び出し側に書かせないための解決**なので、両方見る。
+	spec, ok := e.OptionSpec("USI_Hash")
+	if !ok {
+		t.Fatal("OptionSpec(USI_Hash) が引けない")
+	}
+	if v, custom := e.OptionValue(spec); v != "1024" || !custom {
+		t.Errorf("OptionValue(USI_Hash) = %q, %v, want \"1024\", true", v, custom)
+	}
+	spec, _ = e.OptionSpec("EvalDir")
+	if v, custom := e.OptionValue(spec); v != "eval" || custom {
+		t.Errorf("OptionValue(EvalDir) = %q, %v, want 既定の \"eval\", false", v, custom)
+	}
+	if _, ok := e.OptionSpec("NoSuchOption"); ok {
+		t.Error("宣言に無い名前が引けてしまった")
+	}
+	// button は「押すだけ」。値を持つ項目と混ぜないための印。
+	if spec, _ := e.OptionSpec("Clear Hash"); !spec.IsButton() {
+		t.Error("Clear Hash が button と判定されない")
+	}
+}
+
 // 登録が 1 つも無いときは**同梱エンジン 1 つ**として振る舞うこと。
 // 設定ファイルを作っていない状態でも解析できる、という既定の挙動。
 func TestEngineListDefaultsToBuiltin(t *testing.T) {

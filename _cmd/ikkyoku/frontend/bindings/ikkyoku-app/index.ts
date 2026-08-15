@@ -27,6 +27,7 @@ export type {
     EditCell,
     EditState,
     EngineCheck,
+    EngineOptionSettings,
     EngineSettings,
     EvalGraph,
     EvalPoint,

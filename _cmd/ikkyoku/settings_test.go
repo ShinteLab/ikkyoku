@@ -3,6 +3,7 @@ package main
 import (
 	"io"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -208,4 +209,210 @@ func TestSetEngineColor(t *testing.T) {
 			t.Errorf("断ったのに色が変わった: %q", got.Engines[0].Color)
 		}
 	})
+}
+
+// engineWithSpecs は option を宣言済みのエンジン 1 件（「接続を確認」を通った状態）。
+func engineWithSpecs() []ikkyoku.EngineEntry {
+	return []ikkyoku.EngineEntry{{
+		ID: "a", Path: "C:/shogi/YaneuraOu.exe", Enabled: true,
+		OptionSpecs: []ikkyoku.EngineOption{
+			{Name: "USI_Hash", Type: "spin", Default: "256", Min: 1, Max: 4096, HasMin: true, HasMax: true},
+			{Name: "USI_Ponder", Type: "check", Default: "false"},
+			{Name: "EvalDir", Type: "string", Default: "eval"},
+			{Name: "BookMoves", Type: "combo", Default: "no_book", Vars: []string{"no_book", "standard_book"}},
+			{Name: "Clear Hash", Type: "button"},
+		},
+	}}
+}
+
+func optionOf(s AppSettings, i int, name string) (EngineOptionSettings, bool) {
+	for _, o := range s.Engines[i].Options {
+		if o.Name == name {
+			return o, true
+		}
+	}
+	return EngineOptionSettings{}, false
+}
+
+// TestSetEngineOption は**エンジンの設定値**を固定する（2026-08-15）。
+//
+// 送るのは `engines[].options`（`isready` の前の `setoption`）で、⚠️ **応答が
+// 返らないので、間違った値を送っても画面では気づけない**。だから入れた時点で断る、
+// というのがここの要点。
+func TestSetEngineOption(t *testing.T) {
+	t.Run("値が保存され、返る設定にも入る", func(t *testing.T) {
+		s := newTestSettings(t, engineWithSpecs())
+		got, err := s.SetEngineOption("a", "USI_Hash", "1024")
+		if err != nil {
+			t.Fatalf("SetEngineOption: %v", err)
+		}
+		o, ok := optionOf(got, 0, "USI_Hash")
+		if !ok || o.Value != "1024" || !o.Custom {
+			t.Errorf("USI_Hash = %+v, want 1024（人が決めた値）", o)
+		}
+		cfg, err := ikkyoku.LoadConfig(s.path)
+		if err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		if cfg.Engines[0].Options["USI_Hash"] != "1024" {
+			t.Errorf("保存された値 = %+v", cfg.Engines[0].Options)
+		}
+	})
+
+	// ⚠️ **既定と同じ値は書き残さない。** 書き残すと「エンジンの既定に従う」という
+	// 指定ができなくなり、**バージョンが上がって既定が変わっても古い値で固まる**。
+	t.Run("既定と同じ値は書き残さない", func(t *testing.T) {
+		s := newTestSettings(t, engineWithSpecs())
+		got, err := s.SetEngineOption("a", "USI_Hash", "256")
+		if err != nil {
+			t.Fatalf("SetEngineOption: %v", err)
+		}
+		o, _ := optionOf(got, 0, "USI_Hash")
+		if o.Value != "256" || o.Custom {
+			t.Errorf("USI_Hash = %+v, want 既定のまま（custom=false）", o)
+		}
+		cfg, _ := ikkyoku.LoadConfig(s.path)
+		if _, ok := cfg.Engines[0].Options["USI_Hash"]; ok {
+			t.Errorf("既定と同じ値が書き残された: %+v", cfg.Engines[0].Options)
+		}
+	})
+
+	// 空にすると設定から消えて、宣言された既定値に戻る（＝送られるのも既定値）。
+	t.Run("空にすると既定へ戻る", func(t *testing.T) {
+		s := newTestSettings(t, engineWithSpecs())
+		if _, err := s.SetEngineOption("a", "EvalDir", "eval_nnue"); err != nil {
+			t.Fatalf("SetEngineOption: %v", err)
+		}
+		got, err := s.SetEngineOption("a", "EvalDir", "")
+		if err != nil {
+			t.Fatalf("SetEngineOption(空): %v", err)
+		}
+		o, _ := optionOf(got, 0, "EvalDir")
+		if o.Value != "eval" || o.Custom {
+			t.Errorf("EvalDir = %+v, want 既定の eval", o)
+		}
+	})
+
+	// 型ごとの検分。**エンジンが必ず断る値だけ**を弾く。
+	t.Run("型に合わない値は断る", func(t *testing.T) {
+		for _, tt := range []struct{ name, value string }{
+			{"USI_Hash", "たくさん"}, // spin に数字でない
+			{"USI_Hash", "0"},    // min 未満
+			{"USI_Hash", "9999"}, // max 超え
+			{"USI_Ponder", "はい"}, // check に true/false 以外
+			{"BookMoves", "my_book"},
+			{"Clear Hash", "1"}, // button は値を持たない
+		} {
+			s := newTestSettings(t, engineWithSpecs())
+			got, err := s.SetEngineOption("a", tt.name, tt.value)
+			if err == nil {
+				t.Errorf("%s = %q: エラーになるべき", tt.name, tt.value)
+			}
+			// ⚠️ **断ったときに今の設定を変えないこと**（画面が食い違ったままになる）。
+			if o, _ := optionOf(got, 0, tt.name); o.Custom {
+				t.Errorf("%s = %q: 断ったのに値が入った", tt.name, tt.value)
+			}
+		}
+	})
+
+	// ⚠️ **宣言に無い名前も受ける。** 宣言していない option を受け付けるエンジンが
+	// あり、設定ファイルを手で編集する経路も残してある（値はそのまま送られる）。
+	t.Run("宣言に無い名前も受ける", func(t *testing.T) {
+		s := newTestSettings(t, engineWithSpecs())
+		got, err := s.SetEngineOption("a", "SomeHiddenOption", "42")
+		if err != nil {
+			t.Fatalf("SetEngineOption: %v", err)
+		}
+		o, ok := optionOf(got, 0, "SomeHiddenOption")
+		if !ok || o.Value != "42" || o.Known {
+			t.Errorf("SomeHiddenOption = %+v, want 値 42・known=false", o)
+		}
+	})
+
+	t.Run("知らないエンジンでは断る", func(t *testing.T) {
+		s := newTestSettings(t, engineWithSpecs())
+		if _, err := s.SetEngineOption("zzz", "USI_Hash", "512"); err == nil {
+			t.Error("エラーになるべき")
+		}
+	})
+}
+
+// TestEngineOptionSettings は**画面に出す形**を固定する。
+//
+// ⚠️ 見ているのは 2 つ: **宣言の順を並べ替えないこと**（前の option が後の option の
+// 意味を変えるエンジンがある）と、**「まだ繋いでいない」と「宣言が 1 つも無い」を
+// 区別できること**（`OptionsKnown`。画面に出す文言が違う）。
+func TestEngineOptionSettings(t *testing.T) {
+	s := newTestSettings(t, engineWithSpecs())
+	got := s.Settings()
+	if !got.Engines[0].OptionsKnown {
+		t.Error("OptionsKnown = false, want true（宣言を控えてある）")
+	}
+	want := []string{"USI_Hash", "USI_Ponder", "EvalDir", "BookMoves", "Clear Hash"}
+	names := make([]string, 0, len(got.Engines[0].Options))
+	for _, o := range got.Engines[0].Options {
+		names = append(names, o.Name)
+	}
+	if !equalStrings(names, want) {
+		t.Errorf("並び = %v, want %v（宣言順）", names, want)
+	}
+
+	// 繋いでいない登録は「未取得」。**宣言が無いのと同じに見せないこと。**
+	s2 := newTestSettings(t, []ikkyoku.EngineEntry{{ID: "a", Enabled: true}})
+	if s2.Settings().Engines[0].OptionsKnown {
+		t.Error("繋いでいない登録が OptionsKnown = true になっている")
+	}
+}
+
+// TestResetEngineOptions は「全部を既定に戻す」を固定する。
+//
+// ⚠️ **宣言（OptionSpecs）は捨てない** —— 捨てると入力欄が作れなくなり、
+// 戻す先そのものが画面から消える。
+func TestResetEngineOptions(t *testing.T) {
+	s := newTestSettings(t, engineWithSpecs())
+	if _, err := s.SetEngineOption("a", "USI_Hash", "1024"); err != nil {
+		t.Fatalf("SetEngineOption: %v", err)
+	}
+	got, err := s.ResetEngineOptions("a")
+	if err != nil {
+		t.Fatalf("ResetEngineOptions: %v", err)
+	}
+	if got.Engines[0].OptionCount != 0 {
+		t.Errorf("OptionCount = %d, want 0", got.Engines[0].OptionCount)
+	}
+	if !got.Engines[0].OptionsKnown {
+		t.Error("宣言まで捨てている（入力欄が作れなくなる）")
+	}
+	if o, _ := optionOf(got, 0, "USI_Hash"); o.Value != "256" || o.Custom {
+		t.Errorf("USI_Hash = %+v, want 既定の 256", o)
+	}
+}
+
+// TestSetEnginePathDropsOptionSpecs は**実行ファイルを差し替えたら宣言を捨てる**
+// ことを固定する。
+//
+// 別のエンジンの宣言をそのまま出すと、**違うエンジンの入力欄**を出すことになる。
+// ⚠️ **値のほうは捨てない**（置き場所を移しただけのことがあり、人が書いた値を
+// 黙って消さない）。
+func TestSetEnginePathDropsOptionSpecs(t *testing.T) {
+	dir := t.TempDir()
+	other := filepath.Join(dir, "other.exe")
+	if err := os.WriteFile(other, []byte("dummy"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	s := newTestSettings(t, engineWithSpecs())
+	if _, err := s.SetEngineOption("a", "USI_Hash", "1024"); err != nil {
+		t.Fatalf("SetEngineOption: %v", err)
+	}
+	got, err := s.SetEnginePath("a", other)
+	if err != nil {
+		t.Fatalf("SetEnginePath: %v", err)
+	}
+	if got.Engines[0].OptionsKnown {
+		t.Error("実行ファイルを差し替えたのに、前のエンジンの宣言が残っている")
+	}
+	o, ok := optionOf(got, 0, "USI_Hash")
+	if !ok || o.Value != "1024" || o.Known {
+		t.Errorf("USI_Hash = %+v, want 値は残り、宣言に無い扱い", o)
+	}
 }

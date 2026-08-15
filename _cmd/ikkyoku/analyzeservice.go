@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	coreusi "github.com/ShinteLab/core/usi"
 	"github.com/ShinteLab/ikkyoku"
 	"github.com/ShinteLab/ikkyoku/analyze"
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -294,10 +295,31 @@ func (s *AnalyzeService) CheckEngine(id string) EngineCheck {
 	out.Options = info.Options
 	out.Applied = info.Applied
 	out.StartupMS = info.StartupMS
+	// ⚠️ **宣言を設定ファイルに控える。** これが無いと、設定タブで option を
+	// 出すたびにエンジンを起こすことになる（評価関数の読み込みで数秒かかるものがある）。
+	// **控える入口はここだけ** —— 宣言は繋いで初めて分かるので、繋ぐ操作と
+	// 結び付いているのが素直（保存の操作では繋がない、という線引きは変えていない）。
+	s.settings.setEngineOptionSpecs(entry.ID, engineOptions(info.Declared))
 	s.rememberEngine(entry.ID, info.Name)
 	s.logger.Info("エンジンに繋がりました",
 		"id", entry.ID, "name", info.Name, "path", entry.Path,
 		"options", info.Options, "applied", info.Applied, "startupMs", info.StartupMS)
+	return out
+}
+
+// engineOptions は `core/usi` の宣言を設定ファイルに書く形へ写す。
+//
+// ⚠️ **写す場所はここ 1 か所。** `core/usi.Option` をそのまま設定ファイルに
+// 埋めると、プロトコルの語彙の変更が**保存形式の変更**になってしまう
+// （`ikkyoku.EngineOption` の注記）。
+func engineOptions(declared []coreusi.Option) []ikkyoku.EngineOption {
+	out := make([]ikkyoku.EngineOption, 0, len(declared))
+	for _, o := range declared {
+		out = append(out, ikkyoku.EngineOption{
+			Name: o.Name, Type: o.Type, Default: o.Default,
+			Min: o.Min, Max: o.Max, HasMin: o.HasMin, HasMax: o.HasMax, Vars: o.Vars,
+		})
+	}
 	return out
 }
 

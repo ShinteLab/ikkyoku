@@ -6,6 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -82,11 +85,17 @@ type EngineSettings struct {
 	// Builtin は同梱のエンジンを使う状態か（Path が空）。**表示用。**
 	// フロントで `path === ""` を判定させないため（判断の基準を Go 側に置く）。
 	Builtin bool `json:"builtin"`
-	// OptionCount は config.json に書いた setoption の数。**表示用。**
-	//
-	// option は画面に出していない（エンジンごとに違いすぎる）ので、
-	// **書いたものが効いていることだけ**は見えるようにしておく。
+	// OptionCount は既定から変えた setoption の数。**表示用**（折りたたみの見出し）。
 	OptionCount int `json:"optionCount"`
+	// Options はこのエンジンの設定項目（宣言順 → 宣言に無いものの順）。
+	//
+	// **エンジンに繋ぐまでは空**（宣言は繋がないと分からない）。`OptionsKnown` が
+	// その区別で、⚠️ **フロントで `options.length === 0` を「宣言が無い」と
+	// 読まないこと** —— 「まだ確かめていない」と「宣言が 1 つも無い（同梱エンジン）」は
+	// 別の状態で、画面に出す文言も違う。
+	Options []EngineOptionSettings `json:"options"`
+	// OptionsKnown は option の宣言を読み込み済みか（「接続を確認」で入る）。
+	OptionsKnown bool `json:"optionsKnown"`
 	// Enabled は解析に使うか。**外した登録も残る。**
 	Enabled bool `json:"enabled"`
 	// Color は評価値グラフの折れ線の色（`#rrggbb`）。
@@ -97,19 +106,88 @@ type EngineSettings struct {
 	Color string `json:"color"`
 }
 
+// EngineOptionSettings は USI の option 1 つを画面に出す形にしたもの。
+//
+// **入力欄の形は Type で決まる**（check → チェックボックス、spin → 数値、
+// combo → 選択、string/filename → テキスト、button → 押すだけ）。
+// ⚠️ **フロントで型ごとの既定値や範囲を組み立てないこと** —— 宣言はエンジンごとに
+// 違うので、写しを持つと必ず食い違う。
+type EngineOptionSettings struct {
+	Name string `json:"name"`
+	// Type は "check" / "spin" / "combo" / "button" / "string" / "filename"。
+	//
+	// ⚠️ **宣言が無い（設定ファイルに手で書いた）ものは "string" で返す。**
+	// 型が分からないだけで、値としては正当（宣言していない option を受け付ける
+	// エンジンがある）。⚠️ **黙って捨てないこと。**
+	Type string `json:"type"`
+	// Value は今の値（設定に無ければ宣言された既定値）。
+	Value string `json:"value"`
+	// Default は宣言された既定値（**「既定に戻す」で戻る先**）。
+	Default string `json:"default"`
+	// Custom は人が既定から変えたか（＝設定ファイルに書いてあるか）。
+	Custom bool `json:"custom"`
+	// Known はエンジンが宣言している option か。
+	//
+	// false は「設定ファイルに書いてあるが、エンジンは宣言していない」。
+	// **送りはする**（`core/usi/client.plannedOptions` が拾う）ので、
+	// 画面でもそう出す（消す口だけ用意する）。
+	Known bool `json:"known"`
+	// Min / Max は spin の範囲（Has* が false なら宣言が無かった）。
+	Min    int  `json:"min"`
+	Max    int  `json:"max"`
+	HasMin bool `json:"hasMin"`
+	HasMax bool `json:"hasMax"`
+	// Vars は combo の選択肢。
+	Vars []string `json:"vars"`
+}
+
+// engineOptionSettings は 1 つの登録の option を画面に出す順に並べる。
+//
+// 並びは**エンジンが宣言した順**、そのあとに**宣言に無い値**（設定ファイルに
+// 手で書いたもの・実行ファイルを差し替えて宣言だけ捨てたもの）を名前順で。
+// ⚠️ **宣言の順を並べ替えないこと**（`EngineInfo.Declared` の注記）。
+func engineOptionSettings(e ikkyoku.EngineEntry) []EngineOptionSettings {
+	out := make([]EngineOptionSettings, 0, len(e.OptionSpecs)+len(e.Options))
+	seen := make(map[string]bool, len(e.OptionSpecs))
+	for _, o := range e.OptionSpecs {
+		seen[o.Name] = true
+		value, custom := e.OptionValue(o)
+		out = append(out, EngineOptionSettings{
+			Name: o.Name, Type: o.Type, Value: value, Default: o.Default,
+			Custom: custom, Known: true,
+			Min: o.Min, Max: o.Max, HasMin: o.HasMin, HasMax: o.HasMax, Vars: o.Vars,
+		})
+	}
+	rest := make([]string, 0, len(e.Options))
+	for name := range e.Options {
+		if !seen[name] {
+			rest = append(rest, name)
+		}
+	}
+	sort.Strings(rest)
+	for _, name := range rest {
+		out = append(out, EngineOptionSettings{
+			Name: name, Type: "string", Value: e.Options[name], Custom: true,
+		})
+	}
+	return out
+}
+
 // engineSettings は設定ファイルのエントリを画面に出す形にする。
 //
 // i は**一覧の中での位置**（未設定の色を登録順で決めるのに要る）。
 func engineSettings(e ikkyoku.EngineEntry, i int) EngineSettings {
 	return EngineSettings{
-		ID:          e.ID,
-		Name:        e.DisplayName(),
-		Custom:      e.Name != "",
-		Path:        e.Path,
-		Builtin:     e.Path == "",
-		OptionCount: len(e.Options),
-		Enabled:     e.Enabled,
-		Color:       e.DisplayColor(i),
+		ID:           e.ID,
+		Name:         e.DisplayName(),
+		Custom:       e.Name != "",
+		Path:         e.Path,
+		Builtin:      e.Path == "",
+		OptionCount:  len(e.Options),
+		Options:      engineOptionSettings(e),
+		OptionsKnown: len(e.OptionSpecs) > 0,
+		Enabled:      e.Enabled,
+		Color:        e.DisplayColor(i),
 	}
 }
 
@@ -192,6 +270,11 @@ func (s *SettingsService) enabledEngines() []ikkyoku.EngineEntry {
 func (s *SettingsService) engineEntry(id string) (ikkyoku.EngineEntry, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.entryLocked(id)
+}
+
+// entryLocked は engineEntry の中身。**ロックを取った状態で呼ぶこと。**
+func (s *SettingsService) entryLocked(id string) (ikkyoku.EngineEntry, bool) {
 	for _, e := range s.cfg.EngineList() {
 		if e.ID == id {
 			return e, true
@@ -335,8 +418,159 @@ func (s *SettingsService) SetEnginePath(id, path string) (AppSettings, error) {
 	}
 	return s.editEngines(func(list []ikkyoku.EngineEntry) []ikkyoku.EngineEntry {
 		for i := range list {
+			if list[i].ID != id || list[i].Path == p {
+				continue
+			}
+			list[i].Path = p
+			// ⚠️ **控えてある option の宣言は捨てる**（別のエンジンの宣言なので、
+			// 残すと**違うエンジンの入力欄を出す**ことになる）。
+			// **値のほうは捨てない** —— 置き場所を移しただけのことがあるうえ、
+			// 人が書いた値を黙って消さない（宣言に無い値として画面に残る）。
+			list[i].OptionSpecs = nil
+		}
+		return list
+	})
+}
+
+// setEngineOptionSpecs はエンジンが宣言した option を控える（「接続を確認」の後）。
+//
+// ⚠️ **公開しない**（Service の公開メソッドはフロントの API になる）。宣言は
+// **繋いで初めて分かる**ので、入口は `AnalyzeService.CheckEngine` の 1 つだけ。
+//
+// ⚠️ **控えるのは宣言だけで、値（`Options`）には触らない。** 人が書いた値を
+// 繋ぎ直しただけで消さない（宣言に無い値は画面でもそう出る）。
+func (s *SettingsService) setEngineOptionSpecs(id string, specs []ikkyoku.EngineOption) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, err := s.editEngines(func(list []ikkyoku.EngineEntry) []ikkyoku.EngineEntry {
+		for i := range list {
 			if list[i].ID == id {
-				list[i].Path = p
+				list[i].OptionSpecs = specs
+			}
+		}
+		return list
+	}); err != nil {
+		s.logger.Warn("エンジンの option を控えられませんでした", "id", id, "error", err)
+	}
+}
+
+// SetEngineOption は `setoption` で送る値を 1 つ決める（設定タブのエンジンの行）。
+//
+// **空文字にすると設定から消え、エンジンが宣言した既定値に戻る**（＝送られるのは
+// 既定値。`core/usi/client.plannedOptions`）。⚠️ **既定と同じ値を書き込んだときも
+// 消す** —— 書き残すと「エンジンの既定に従う」という指定ができなくなり、
+// **エンジンのバージョンが上がって既定が変わっても古い値で固まる**（しかも
+// 画面では気づけない）。
+//
+// ⚠️ **値の検分は宣言があるときだけ。** 宣言に無い名前も受ける（宣言していない
+// option を受け付けるエンジンがあり、**設定ファイルを手で編集する経路を塞がない**）。
+//
+// ⚠️ **`isready` の前にしか効かない option なので、繋ぎ直しが要る。** 判断は
+// `AnalyzeService.engineKey`（パス + options の指紋）が持っているので、
+// **ここで接続を触らないこと。**
+func (s *SettingsService) SetEngineOption(id, name, value string) (AppSettings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	n := strings.TrimSpace(name)
+	if n == "" {
+		return s.settings(), fmt.Errorf("option 名が空です")
+	}
+	entry, ok := s.entryLocked(id)
+	if !ok {
+		return s.settings(), fmt.Errorf("そのエンジンの登録が見つかりません")
+	}
+	v := strings.TrimSpace(value)
+	spec, known := entry.OptionSpec(n)
+	if known {
+		var err error
+		if v, err = checkOptionValue(spec, v); err != nil {
+			return s.settings(), err
+		}
+	}
+	return s.editEngines(func(list []ikkyoku.EngineEntry) []ikkyoku.EngineEntry {
+		for i := range list {
+			if list[i].ID != id {
+				continue
+			}
+			// **既定に戻すときは行ごと消す**（上の注記）。
+			if v == "" || (known && v == spec.Default) {
+				delete(list[i].Options, n)
+				if len(list[i].Options) == 0 {
+					list[i].Options = nil
+				}
+				continue
+			}
+			if list[i].Options == nil {
+				list[i].Options = map[string]string{}
+			}
+			list[i].Options[n] = v
+		}
+		return list
+	})
+}
+
+// checkOptionValue は宣言に照らして値を検分する（通れば送る形に正規化して返す）。
+//
+// **弾くのは「エンジンが必ず断る値」だけ。** 範囲外の spin や、選択肢に無い combo は
+// 送っても無視されるうえ、**`setoption` には応答が返らないので画面では気づけない**。
+// 入れた瞬間に断るほうが早い。
+func checkOptionValue(o ikkyoku.EngineOption, v string) (string, error) {
+	switch o.Type {
+	case "button":
+		// ⚠️ **button は値を持たない**（送ること自体が「押した」という動作）。
+		// 設定として保存する対象ではない。
+		return "", fmt.Errorf("%s は押すだけの項目で、値を設定できません", o.Name)
+	case "check":
+		if v == "" {
+			return "", nil
+		}
+		switch strings.ToLower(v) {
+		case "true":
+			return "true", nil
+		case "false":
+			return "false", nil
+		}
+		return "", fmt.Errorf("%s は true / false で指定してください: %s", o.Name, v)
+	case "spin":
+		if v == "" {
+			return "", nil
+		}
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return "", fmt.Errorf("%s は整数で指定してください: %s", o.Name, v)
+		}
+		if o.HasMin && n < o.Min {
+			return "", fmt.Errorf("%s は %d 以上で指定してください: %d", o.Name, o.Min, n)
+		}
+		if o.HasMax && n > o.Max {
+			return "", fmt.Errorf("%s は %d 以下で指定してください: %d", o.Name, o.Max, n)
+		}
+		return strconv.Itoa(n), nil
+	case "combo":
+		if v == "" || len(o.Vars) == 0 {
+			return v, nil
+		}
+		if slices.Contains(o.Vars, v) {
+			return v, nil
+		}
+		return "", fmt.Errorf("%s に選べない値です: %s", o.Name, v)
+	}
+	// string / filename と、型の分からないもの。**そのまま通す。**
+	return v, nil
+}
+
+// ResetEngineOptions は設定した値を全部捨てて、エンジンの既定に戻す。
+//
+// **宣言（`OptionSpecs`）は捨てない** —— 入力欄が作れなくなるので、
+// 戻す先が画面から消えてしまう。
+func (s *SettingsService) ResetEngineOptions(id string) (AppSettings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.editEngines(func(list []ikkyoku.EngineEntry) []ikkyoku.EngineEntry {
+		for i := range list {
+			if list[i].ID == id {
+				list[i].Options = nil
 			}
 		}
 		return list

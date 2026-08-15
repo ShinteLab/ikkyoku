@@ -353,6 +353,64 @@ export interface EngineCheck {
 }
 
 /**
+ * EngineOptionSettings は USI の option 1 つを画面に出す形にしたもの。
+ * 
+ * **入力欄の形は Type で決まる**（check → チェックボックス、spin → 数値、
+ * combo → 選択、string/filename → テキスト、button → 押すだけ）。
+ * ⚠️ **フロントで型ごとの既定値や範囲を組み立てないこと** —— 宣言はエンジンごとに
+ * 違うので、写しを持つと必ず食い違う。
+ */
+export interface EngineOptionSettings {
+    "name": string;
+
+    /**
+     * Type は "check" / "spin" / "combo" / "button" / "string" / "filename"。
+     * 
+     * ⚠️ **宣言が無い（設定ファイルに手で書いた）ものは "string" で返す。**
+     * 型が分からないだけで、値としては正当（宣言していない option を受け付ける
+     * エンジンがある）。⚠️ **黙って捨てないこと。**
+     */
+    "type": string;
+
+    /**
+     * Value は今の値（設定に無ければ宣言された既定値）。
+     */
+    "value": string;
+
+    /**
+     * Default は宣言された既定値（**「既定に戻す」で戻る先**）。
+     */
+    "default": string;
+
+    /**
+     * Custom は人が既定から変えたか（＝設定ファイルに書いてあるか）。
+     */
+    "custom": boolean;
+
+    /**
+     * Known はエンジンが宣言している option か。
+     * 
+     * false は「設定ファイルに書いてあるが、エンジンは宣言していない」。
+     * **送りはする**（`core/usi/client.plannedOptions` が拾う）ので、
+     * 画面でもそう出す（消す口だけ用意する）。
+     */
+    "known": boolean;
+
+    /**
+     * Min / Max は spin の範囲（Has* が false なら宣言が無かった）。
+     */
+    "min": number;
+    "max": number;
+    "hasMin": boolean;
+    "hasMax": boolean;
+
+    /**
+     * Vars は combo の選択肢。
+     */
+    "vars": string[] | null;
+}
+
+/**
  * EngineSettings は登録した USI エンジン 1 つ（設定タブの 1 行）。
  * 
  * **「外部エンジンを使うか」の真偽値は持たない。** パスが空なら同梱のエンジン、
@@ -391,12 +449,24 @@ export interface EngineSettings {
     "builtin": boolean;
 
     /**
-     * OptionCount は config.json に書いた setoption の数。**表示用。**
-     * 
-     * option は画面に出していない（エンジンごとに違いすぎる）ので、
-     * **書いたものが効いていることだけ**は見えるようにしておく。
+     * OptionCount は既定から変えた setoption の数。**表示用**（折りたたみの見出し）。
      */
     "optionCount": number;
+
+    /**
+     * Options はこのエンジンの設定項目（宣言順 → 宣言に無いものの順）。
+     * 
+     * **エンジンに繋ぐまでは空**（宣言は繋がないと分からない）。`OptionsKnown` が
+     * その区別で、⚠️ **フロントで `options.length === 0` を「宣言が無い」と
+     * 読まないこと** —— 「まだ確かめていない」と「宣言が 1 つも無い（同梱エンジン）」は
+     * 別の状態で、画面に出す文言も違う。
+     */
+    "options": EngineOptionSettings[] | null;
+
+    /**
+     * OptionsKnown は option の宣言を読み込み済みか（「接続を確認」で入る）。
+     */
+    "optionsKnown": boolean;
 
     /**
      * Enabled は解析に使うか。**外した登録も残る。**

@@ -851,8 +851,10 @@ export function mountMainScreen(root: HTMLElement): void {
             USI を話すエンジンの実行ファイルを登録します（やねうら王・水匠など）。
             <strong>「解析に使う」を付けたエンジンが同時に走り、解析タブに結果が並びます。</strong>
             実行ファイルを<strong>空にするとその登録は同梱のエンジン</strong>になります。
-            同じエンジンを <code>setoption</code> 違いで 2 つ登録して比べることもできます
-            （送る値は設定ファイルの <code>engines[].options</code>）。
+            同じエンジンを <code>setoption</code> 違いで 2 つ登録して比べることもできます。
+            <strong>「接続を確認」を押すと、そのエンジンの設定項目（option）を読み込んで
+            各行の「エンジンの設定」から変えられるようになります。</strong>
+            変えた値は次の解析から送られます。
           </span>
           <ul id="engine-list" class="engine-list"></ul>
           <div class="setting-fields">
@@ -3796,10 +3798,20 @@ export function mountMainScreen(root: HTMLElement): void {
   const engineRowNote = (row: HTMLElement) =>
     row.querySelector<HTMLElement>(".engine-note")!;
 
+  // 行を id で引き直す。⚠️ **要素を覚えておかないこと** ——「接続を確認」の途中で
+  // 設定を読み直して**一覧ごと描き直す**ので、掴んでいた要素は捨てられている
+  // （候補手の選択を「エンジン + 順位」で持っているのと同じ話）。
+  const engineRow = (id: string) =>
+    engineList.querySelector<HTMLElement>(`.engine-row[data-id="${id}"]`);
+
   // エンジン 1 つに実際に繋いでみる。**1 行ずつ**（まとめて起こすと、どれが遅くて
   // どれが落ちたのか分からない）。確かめたら閉じるので、プロセスは残らない。
-  const checkEngine = async (id: string, row: HTMLElement, btn: HTMLButtonElement) => {
-    const note = engineRowNote(row);
+  //
+  // ⚠️ **繋がったら設定を読み直す。** Go 側がこのときに option の宣言を控えるので、
+  // 読み直さないと**設定項目が画面に出てくるのが次に設定タブを開いたとき**になる
+  // （押した結果が見えないと、効いたのかどうか分からない）。
+  const checkEngine = async (id: string, btn: HTMLButtonElement) => {
+    const note = engineRowNote(engineRow(id)!);
     btn.disabled = true;
     note.classList.remove("is-error");
     note.textContent = "起動して確かめています…";
@@ -3810,6 +3822,16 @@ export function mountMainScreen(root: HTMLElement): void {
         note.classList.add("is-error");
         return;
       }
+      // 宣言を控えたぶんを画面に出す（**この呼び出しで一覧が描き直される**）。
+      try {
+        openOptions.add(id); // 読めた設定項目をそのまま開いて見せる
+        showSettings(await SettingsService.Settings());
+      } catch {
+        /* 読み直せないなら一覧はそのまま。結果は下に出る。 */
+      }
+      const after = engineRow(id);
+      if (!after) return; // 行ごと消えた（削除された）。出す先が無い
+      const note2 = engineRowNote(after);
       // **何を送ったかまで出す。** setoption には応答が返らないので、
       // 効いているかどうかを確かめる手掛かりがこれしかない。
       const applied =
@@ -3819,13 +3841,208 @@ export function mountMainScreen(root: HTMLElement): void {
       // ⚠️ **起動の時間は「解析タブで最初に解析するとき」に 1 回払う**
       // （そのあとは接続を使い回す）。繋ぎ先を選ぶ材料になるので出しておく。
       const startup = `起動 ${(r.startupMs / 1000).toFixed(1)} 秒（解析タブで最初に解析するときにかかります）`;
-      note.textContent = `繋がりました: ${r.name} / ${applied} / ${startup}`;
+      note2.textContent = `繋がりました: ${r.name} / ${applied} / ${startup}`;
     } catch (err) {
-      note.textContent = `確認できませんでした: ${String(err instanceof Error ? err.message : err)}`;
-      note.classList.add("is-error");
+      const now = engineRow(id);
+      if (!now) return;
+      const n = engineRowNote(now);
+      n.textContent = `確認できませんでした: ${String(err instanceof Error ? err.message : err)}`;
+      n.classList.add("is-error");
     } finally {
+      // ⚠️ **押したボタンではなく、今そこにあるボタンを戻す**（描き直しで別物になっている）。
+      const now = engineRow(id)?.querySelector<HTMLButtonElement>(".engine-check");
+      if (now) now.disabled = false;
       btn.disabled = false;
     }
+  };
+
+  // フォーカスを戻す相手を引くクラス名を選ぶ。
+  //
+  // ⚠️ **`engine-` で始まるクラスを優先すること。** 素朴に「最初のクラス」で引くと、
+  // `ghost-btn engine-check` のような**見た目のクラスが先に来ているボタン**で
+  // **同じ行の別のボタン（参照…）に戻ってしまう**。役割を表しているのは後ろのほう。
+  const keepId = (cls: string) => {
+    const names = cls.split(" ").filter(Boolean);
+    return names.find((n) => n.startsWith("engine-")) ?? names[0] ?? "";
+  };
+
+  // 開いているエンジンの設定（折りたたみ）。⚠️ **画面だけの状態なので Go に持たせない**
+  // （手順の畳み方と同じ扱い）。一覧は保存のたびに描き直されるので、
+  // **覚えておかないと値を 1 つ変えるたびに閉じる。**
+  const openOptions = new Set<string>();
+
+  // option 1 つぶんの入力欄を作る。**型ごとに形を変える**のがここの仕事:
+  //
+  //   check              → チェックボックス
+  //   spin               → 数値（min/max つき）
+  //   combo              → 選択（var の並び）
+  //   string / filename  → テキスト
+  //   button             → **押すだけ**。値を持たないので設定できない（下記）
+  //
+  // ⚠️ **既定値も範囲も選択肢も Go 側が渡したものをそのまま使う。** エンジンごとに
+  // 違うので、フロントに表を書くと必ず食い違う。
+  const engineOptionRow = (
+    id: string,
+    o: NonNullable<EngineSettings["options"]>[number],
+  ): HTMLElement => {
+    const box = document.createElement("div");
+    box.className = "engine-option";
+    box.dataset.name = o.name;
+    box.classList.toggle("is-custom", o.custom);
+
+    const label = document.createElement("label");
+    label.className = "engine-option-name";
+    label.textContent = o.name;
+    // 何を送る項目なのかは名前だけでは分からないので、型と既定値を添える。
+    label.title =
+      `${o.name}（${o.known ? o.type : "宣言に無い項目"}）` +
+      (o.known && o.default !== "" ? ` / 既定: ${o.default}` : "") +
+      (o.hasMin || o.hasMax
+        ? ` / 範囲: ${o.hasMin ? o.min : ""}〜${o.hasMax ? o.max : ""}`
+        : "");
+    box.appendChild(label);
+
+    // 保存は**その場で**（設定タブの他の項目と同じ。適用ボタンを置かない）。
+    const save = (value: string) => {
+      void applyEngineChange(() => SettingsService.SetEngineOption(id, o.name, value));
+    };
+
+    if (o.type === "button") {
+      // ⚠️ **button は値を持たない**（送ること自体が「押した」という動作）。
+      // 押せる相手は**繋がっているエンジン**だけで、ここには居ない
+      // （接続は解析タブに居るあいだしか生きていない）。**設定として保存しない。**
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "ghost-btn engine-option-input";
+      btn.textContent = o.name;
+      btn.disabled = true;
+      btn.title = "押すだけの項目です（値を持たないので、ここでは設定できません）";
+      box.appendChild(btn);
+      return box;
+    }
+
+    let input: HTMLInputElement | HTMLSelectElement;
+    if (o.type === "check") {
+      const el = document.createElement("input");
+      el.type = "checkbox";
+      el.checked = o.value === "true";
+      el.addEventListener("change", () => save(el.checked ? "true" : "false"));
+      input = el;
+    } else if (o.type === "combo" && (o.vars ?? []).length > 0) {
+      const el = document.createElement("select");
+      for (const v of o.vars ?? []) {
+        const opt = document.createElement("option");
+        opt.value = v;
+        opt.textContent = v;
+        el.appendChild(opt);
+      }
+      el.value = o.value;
+      el.addEventListener("change", () => save(el.value));
+      input = el;
+    } else if (o.type === "spin") {
+      const el = document.createElement("input");
+      el.type = "number";
+      if (o.hasMin) el.min = String(o.min);
+      if (o.hasMax) el.max = String(o.max);
+      el.value = o.value;
+      // ⚠️ **change（確定時）で拾う**（設定タブのテキスト欄と同じ）。
+      // input だと 1 文字ごとに保存して、打っている途中の値で弾かれる。
+      el.addEventListener("change", () => save(el.value));
+      input = el;
+    } else {
+      const el = document.createElement("input");
+      el.type = "text";
+      el.spellcheck = false;
+      el.value = o.value;
+      el.placeholder = o.default;
+      el.addEventListener("change", () => save(el.value));
+      input = el;
+    }
+    input.className = "engine-option-input";
+    box.appendChild(input);
+
+    // 既定に戻す口。⚠️ **人が変えた項目にだけ出す**（押せるものが常に並んでいると、
+    // どれを変えたのかが分からない）。宣言に無い項目では「消す」ことになる。
+    if (o.custom) {
+      const reset = document.createElement("button");
+      reset.type = "button";
+      reset.className = "engine-option-reset";
+      reset.textContent = o.known ? "既定" : "消す";
+      reset.title = o.known
+        ? `既定（${o.default === "" ? "空" : o.default}）に戻します`
+        : "この項目を設定から消します";
+      reset.addEventListener("click", () => save(""));
+      box.appendChild(reset);
+    }
+    if (!o.known) {
+      const note = document.createElement("span");
+      note.className = "engine-option-note note";
+      note.textContent = "宣言に無い項目";
+      note.title =
+        "エンジンが宣言していない option です（設定ファイルに書いたものか、" +
+        "実行ファイルを差し替えて宣言だけ捨てたもの）。値はそのまま送ります。";
+      box.appendChild(note);
+    }
+    return box;
+  };
+
+  // エンジン 1 つぶんの設定（行の中の折りたたみ）。
+  //
+  // ⚠️ **既定で閉じる。** 数十件あるエンジンが普通なので、開きっぱなしにすると
+  // 一覧が読めない。⚠️ **見出しに「何件変えているか」を出すこと** ——
+  // 畳んだままでも、既定のままなのかどうかが分かる必要がある。
+  const engineOptionsBox = (e: EngineSettings): HTMLElement => {
+    const box = document.createElement("details");
+    box.className = "engine-options";
+    box.open = openOptions.has(e.id);
+    box.addEventListener("toggle", () => {
+      if (box.open) openOptions.add(e.id);
+      else openOptions.delete(e.id);
+    });
+
+    const head = document.createElement("summary");
+    head.textContent = "エンジンの設定";
+    const count = document.createElement("span");
+    count.className = "note";
+    const options = e.options ?? [];
+    count.textContent = e.optionsKnown
+      ? `（${options.length} 項目${e.optionCount > 0 ? ` / ${e.optionCount} 件を変更中` : ""}）`
+      : options.length > 0
+        ? `（${options.length} 件。宣言は未取得）`
+        : "（未取得）";
+    head.appendChild(count);
+    box.appendChild(head);
+
+    const body = document.createElement("div");
+    body.className = "engine-options-body";
+    if (!e.optionsKnown) {
+      // ⚠️ **「宣言が無い」と言い切らないこと。** まだ繋いでいないだけかもしれない。
+      const hint = document.createElement("p");
+      hint.className = "note";
+      hint.textContent =
+        "「接続を確認」を押すと、このエンジンが受け付ける設定項目を読み込みます。";
+      body.appendChild(hint);
+    } else if (options.length === 0) {
+      const hint = document.createElement("p");
+      hint.className = "note";
+      hint.textContent = "このエンジンは設定項目を宣言していません。";
+      body.appendChild(hint);
+    }
+    for (const o of options) body.appendChild(engineOptionRow(e.id, o));
+
+    if (e.optionCount > 0) {
+      const reset = document.createElement("button");
+      reset.type = "button";
+      reset.className = "ghost-btn engine-options-reset";
+      reset.textContent = "全部を既定に戻す";
+      reset.title = "設定した値を全部捨てて、エンジンの既定値に戻します";
+      reset.addEventListener("click", () => {
+        void applyEngineChange(() => SettingsService.ResetEngineOptions(e.id));
+      });
+      body.appendChild(reset);
+    }
+    box.appendChild(body);
+    return box;
   };
 
   // 一覧を描き直す。
@@ -3837,6 +4054,9 @@ export function mountMainScreen(root: HTMLElement): void {
     const keep = active?.closest<HTMLElement>(".engine-row")?.dataset.id;
     const keepValue = active instanceof HTMLInputElement ? active.value : "";
     const keepClass = active?.className ?? "";
+    // option の欄はクラス名が全部同じなので、**どの項目だったか**も覚えておく
+    // （名前で引き直す。⚠️ 落とすと、1 つ変えるたびに一覧の先頭へフォーカスが飛ぶ）。
+    const keepOption = active?.closest<HTMLElement>(".engine-option")?.dataset.name;
 
     engineList.replaceChildren();
     for (const [index, e] of engines.entries()) {
@@ -3911,11 +4131,15 @@ export function mountMainScreen(root: HTMLElement): void {
       });
       const checkBtn = row.querySelector<HTMLButtonElement>(".engine-check")!;
       checkBtn.addEventListener("click", () => {
-        void checkEngine(e.id, row, checkBtn);
+        void checkEngine(e.id, checkBtn);
       });
       row.querySelector<HTMLButtonElement>(".engine-remove")!.addEventListener("click", () => {
         void applyEngineChange(() => SettingsService.RemoveEngine(e.id));
       });
+
+      // エンジンの設定（option）。⚠️ **行の中に置くこと** —— どのエンジンの設定かは
+      // 位置で示す（設定タブに別の区画を作ると、行と結び付かない）。
+      row.appendChild(engineOptionsBox(e));
 
       engineList.appendChild(row);
     }
@@ -3924,12 +4148,19 @@ export function mountMainScreen(root: HTMLElement): void {
     //
     // ⚠️ **ボタンにも戻すこと**（並べ替えの ▲▼）。行ごと描き直すので、戻さないと
     // **1 つ動かすたびにフォーカスが飛んで、続けて押せない**（3 つ上げたいときに
-    // 毎回カーソルで押しにいくことになる）。ボタンは**最初のクラス名で引く**ので、
-    // `.engine-up` / `.engine-down` の順で書いてある（`.engine-move` を先頭にすると
-    // 下ボタンを押したのに上ボタンへ戻る）。
+    // 毎回カーソルで押しにいくことになる）。ボタンは**役割のクラス名で引く**ので
+    // （`keepId`）、`.engine-up` / `.engine-down` の順で書いてある
+    // （`.engine-move` を先頭にすると下ボタンを押したのに上ボタンへ戻る）。
     if (keep) {
       const row = engineList.querySelector<HTMLElement>(`.engine-row[data-id="${keep}"]`);
-      const el = row?.querySelector<HTMLElement>(`.${keepClass.split(" ")[0]}`);
+      // option の欄は**その項目の中から**引く（クラス名は全部同じなので、
+      // 行から引くと必ず先頭の項目に戻ってしまう）。
+      const scope = keepOption
+        ? [...(row?.querySelectorAll<HTMLElement>(".engine-option") ?? [])].find(
+            (b) => b.dataset.name === keepOption,
+          )
+        : row;
+      const el = scope?.querySelector<HTMLElement>(`.${keepId(keepClass)}`);
       if (el instanceof HTMLInputElement && el.type === "text") {
         el.value = keepValue;
       }
