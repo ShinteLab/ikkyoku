@@ -1918,7 +1918,13 @@ export function mountMainScreen(root: HTMLElement): void {
     // ⚠️ **どこから始まるかをボタン自身に出す**（2026-08-15。以前は「連続解析」の
     // 一言で、始点はツールチップにしか無かった）。始点は**今どこを見ているか**で
     // 決まるので、**押す前に読めないと押せない**（範囲の欄を置かない代わりの表示）。
-    batchRun.textContent = batchActive() ? "停止" : `${batchFrom()}手目から解析`;
+    //
+    // **秒数も出す**（「3秒毎2手目から解析」）。⚠️ **これが何分かかるかを決めている**
+    // ので、押す前に**手数と一緒に**読めるのが要る（残り時間は手数 × 秒数）。
+    // ⚠️ **秒数が決まっていないときは書かない**（「無制限」。0 秒と書かないこと）。
+    batchRun.textContent = batchActive()
+      ? "停止"
+      : `${batchSecondsLabel()}${batchFrom()}手目から解析`;
     batchRun.classList.toggle("is-active", batchActive());
     // 走っている最中は止められる。走っていないときは、解析できる局面かつ
     // 秒数が決まっているときだけ押せる。
@@ -1942,11 +1948,72 @@ export function mountMainScreen(root: HTMLElement): void {
   // batchTo は最後に考えさせる手の手数（同じ数え方）。
   const batchTo = () => studyFirst + studyMoveCount + 1;
 
-  const batchRangeText = () =>
-    batchFrom() === batchTo()
-      ? `${batchFrom()}手目を考えさせます（手順の最後に居ます）`
-      : `${batchFrom()}手目から${batchTo()}手目まで、1 手ずつ順に考えさせます` +
-        `（今見ている局面から手順の最後まで）`;
+  // batchSeconds は 1 手に使う秒数（0 なら「無制限」＝連続解析はできない）。
+  const batchSeconds = () => Math.max(0, Number(analyzeSeconds.value) || 0);
+  const batchSecondsLabel = () => {
+    const s = batchSeconds();
+    return s > 0 ? `${s}秒毎` : "";
+  };
+
+  const batchRangeText = () => {
+    const per = batchSeconds() > 0 ? `1 手あたり ${batchSeconds()} 秒。` : "";
+    return (
+      per +
+      (batchFrom() === batchTo()
+        ? `${batchFrom()}手目を考えさせます（手順の最後に居ます）`
+        : `${batchFrom()}手目から${batchTo()}手目まで、1 手ずつ順に考えさせます` +
+          `（今見ている局面から手順の最後まで）` +
+          `。全部で ${durationText((batchTo() - batchFrom() + 1) * batchSeconds())}ほど`)
+    );
+  };
+
+  // durationText は秒数を「3分20秒」の形にする。**0 なら空。**
+  const durationText = (sec: number) => {
+    const n = Math.max(0, Math.ceil(sec));
+    if (n < 60) {
+      return `${n}秒`;
+    }
+    const m = Math.floor(n / 60);
+    const s = n % 60;
+    return s === 0 ? `${m}分` : `${m}分${s}秒`;
+  };
+
+  // 連続解析の残り時間（**単純な掛け算**）。
+  //
+  // ⚠️ **これは目安であって予測ではない。** 掛けているのは「残りの手数 × 1 手の秒数」
+  // だけで、**エンジンの起動・局面の移動・解析の後始末は入っていない**ので、
+  // 実際は少し長くかかる。⚠️ **だから「約」を外さないこと。**
+  //
+  // ⚠️ **1 手ごとに引き直す**（`batchEndAt` を毎手入れ替える）。通しで 1 回だけ
+  // 計算すると、上のぶんの遅れが積もって**最後は大きく外れる**。
+  let batchEndAt = 0;
+  let batchTick = 0;
+
+  // 幕に出す「今どこまで来たか」。⚠️ **手数は指した手の番号**（手順リストと
+  // 揃える。ボタンの「x手目から」とは 1 つずれるが、あちらは考えさせる手の番号）。
+  const showBatchProgress = (n: number) => {
+    const left = batchEndAt > 0 ? (batchEndAt - Date.now()) / 1000 : 0;
+    // ⚠️ **見積もりを過ぎても「終わった」と書かないこと**（まだ走っている）。
+    const rest = left > 0 ? `／残り約 ${durationText(left)}` : "／まもなく終わります";
+    batchVeilNote.textContent = `連続解析中… ${n} / ${batchLast}手目${rest}`;
+  };
+
+  // startBatchTick は残り時間を 1 秒ごとに描き直す。
+  //
+  // ⚠️ **止めるときは必ず消すこと**（`stopBatch`）。残すと、幕を畳んだあとも
+  // 動き続けて**存在しない要素を書き換える**。
+  const startBatchTick = (n: number) => {
+    stopBatchTick();
+    showBatchProgress(n);
+    batchTick = window.setInterval(() => showBatchProgress(n), 1000);
+  };
+
+  const stopBatchTick = () => {
+    if (batchTick) {
+      window.clearInterval(batchTick);
+      batchTick = 0;
+    }
+  };
 
   // 走っているエンジンが残っているか。**1 つ終わっただけでは解析は終わらない。**
   const syncAnalyzeRunning = () => {
@@ -1966,6 +2033,9 @@ export function mountMainScreen(root: HTMLElement): void {
     batchLast = -1;
     batchNext = -1;
     batchStepping = false;
+    // ⚠️ **残り時間の更新を止めること**（残すと、幕を畳んだあとも動き続ける）。
+    stopBatchTick();
+    batchEndAt = 0;
     syncBatchButton();
     if (message) {
       analyzeMeta.textContent = message;
@@ -2001,7 +2071,12 @@ export function mountMainScreen(root: HTMLElement): void {
       analyzeMeta.textContent = `連続解析: ${n}〜${batchLast}手目のうち ${n}手目`;
       // ⚠️ **幕にも出すこと。** 下の行は幕越しで読みにくいので、
       // **どこまで進んだか**が分からないと、止めるかどうかを判断できない。
-      batchVeilNote.textContent = `連続解析中… ${n} / ${batchLast}手目`;
+      //
+      // 残り時間は**この手を含めた残り手数 × 1 手の秒数**（単純な掛け算）。
+      // ⚠️ **1 手ごとに引き直す** —— 通しで 1 回だけ計算すると、起動や移動のぶんの
+      // 遅れが積もって最後は大きく外れる。
+      batchEndAt = Date.now() + (batchLast - n + 1) * batchSeconds() * 1000;
+      startBatchTick(n);
       if (!analyzeRunning) {
         // 起動そのものに失敗した（エンジンが選ばれていない等）。
         // **ここで止めないと、残りの手でも同じ失敗を繰り返す。**
