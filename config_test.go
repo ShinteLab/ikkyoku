@@ -306,3 +306,110 @@ func TestConfigAnalyzeSecondsRoundTrip(t *testing.T) {
 }
 
 func ptr(v int) *int { return &v }
+
+// 駒フォントの登録が往復すること。
+//
+// **端末のフォントから焼く駒の字**（`piecefont`）の設定。焼いた TTF は
+// 持たないので、残るのは「元フォントのどれを使うか」だけ。
+func TestConfigPieceFontRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	want := Config{
+		PieceFonts: []PieceFontEntry{
+			{ID: "font-1", Path: `C:\Windows\Fonts\msmincho.ttc`, Index: 1, Source: "ＭＳ Ｐ明朝"},
+			{ID: "font-2", Name: "楷書", Path: `C:\Users\me\fonts\kaisho.ttf`},
+		},
+		PieceFont: "font-2",
+	}
+	if err := SaveConfig(path, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got.PieceFonts, want.PieceFonts) {
+		t.Errorf("PieceFonts = %+v, want %+v", got.PieceFonts, want.PieceFonts)
+	}
+	// ⚠️ **TTC の書体番号が落ちると、別の書体で焼く**（msmincho.ttc の
+	// MS 明朝と MS P明朝が入れ替わる）。しかも画面では気づきにくい。
+	if got.PieceFonts[0].Index != 1 {
+		t.Errorf("書体番号が落ちた: %d", got.PieceFonts[0].Index)
+	}
+	if got.PieceFont != "font-2" {
+		t.Errorf("選択が残っていない: %q", got.PieceFont)
+	}
+}
+
+// 選択の解決。**空なら同梱**で、消えた登録を指していても同梱に落ちるだけ。
+func TestCurrentPieceFont(t *testing.T) {
+	c := Config{PieceFonts: []PieceFontEntry{{ID: "font-1", Path: "a.ttf"}}}
+
+	if _, ok := c.CurrentPieceFont(); ok {
+		t.Error("空なら同梱のはず")
+	}
+	c.PieceFont = "font-1"
+	got, ok := c.CurrentPieceFont()
+	if !ok || got.Path != "a.ttf" {
+		t.Errorf("選択を引けない: %+v ok=%v", got, ok)
+	}
+	// ⚠️ **無い ID を指していてもエラーにしない**（設定ファイルは手で編集する
+	// 前提でもある。指し先が無いだけで盤が描けなくなるのは行き過ぎ）。
+	c.PieceFont = "font-9"
+	if _, ok := c.CurrentPieceFont(); ok {
+		t.Error("無い登録を指しているのに引けてしまった")
+	}
+}
+
+// 表示名は「空なら元フォントの名前」。**この解決は 1 か所だけ。**
+func TestPieceFontDisplayName(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		entry PieceFontEntry
+		want  string
+	}{
+		{"付けた名前が優先", PieceFontEntry{Name: "楷書", Source: "玉ねぎ楷書"}, "楷書"},
+		{"空なら元フォントの名前", PieceFontEntry{Source: "玉ねぎ楷書"}, "玉ねぎ楷書"},
+		{"それも無ければファイル名", PieceFontEntry{Path: `C:\fonts\kaisho.ttf`}, "kaisho.ttf"},
+		{"空白だけの名前は付けていない扱い", PieceFontEntry{Name: "  ", Source: "游明朝"}, "游明朝"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.entry.DisplayName(); got != tc.want {
+				t.Errorf("DisplayName = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// family 名は登録ごとに違い、**同梱の ShogiSFEN とも必ず違う**こと。
+//
+// ⚠️ **同名で上書き登録すると同梱に戻せなくなる**（どれが当たるかは
+// ブラウザ任せになる）。
+func TestPieceFontFamily(t *testing.T) {
+	a, b := PieceFontFamily("font-1"), PieceFontFamily("font-2")
+	if a == b {
+		t.Errorf("登録が違うのに family が同じ: %q", a)
+	}
+	for _, f := range []string{a, b} {
+		if f == "ShogiSFEN" || !strings.Contains(f, "font-") {
+			t.Errorf("family が不適切: %q", f)
+		}
+	}
+}
+
+// ⚠️ **エンジンと違って、空のときに既定を差し込まないこと。**
+// 登録が無くても同梱で描けるので、「登録が 1 つある」ように見せる理由が無い。
+func TestPieceFontListStaysEmpty(t *testing.T) {
+	if got := (Config{}).PieceFontList(); len(got) != 0 {
+		t.Errorf("空の設定で %d 件返った", len(got))
+	}
+}
+
+func TestNextPieceFontID(t *testing.T) {
+	if got := NextPieceFontID(nil); got != "font-1" {
+		t.Errorf("NextPieceFontID(nil) = %q", got)
+	}
+	fonts := []PieceFontEntry{{ID: "font-1"}, {ID: "font-3"}}
+	if got := NextPieceFontID(fonts); got != "font-2" {
+		t.Errorf("空いている番号を使っていない: %q", got)
+	}
+}

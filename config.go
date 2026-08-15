@@ -79,6 +79,121 @@ type Config struct {
 	// ⚠️ **読み込んだ時点で Engines へ移し、この欄は捨てる**（`LoadConfig`）。
 	// 次に保存したときにファイルからも消える。**新しいコードはここを読まないこと。**
 	Engine *EngineConfig `json:"engine,omitempty"`
+
+	// PieceFonts は登録した駒フォント（＝端末のフォントから焼く駒の字）の一覧。
+	//
+	// **同梱フォントを配れる範囲が狭いのでこうなっている**（`piecefont` の
+	// パッケージコメント）。登録は端末の中の話で、**焼いたフォントは
+	// ディスクにも残さないし配りもしない。**
+	//
+	// ⚠️ **空なら同梱の駒フォント 1 つだけ**（`PieceFontList` は空を返し、
+	// 画面は「同梱」を選んでいる状態になる）。エンジンと違って
+	// **「登録が無いと動かない」ということが無い**ので、既定を差し込まない。
+	PieceFonts []PieceFontEntry `json:"pieceFonts,omitempty"`
+
+	// PieceFont は今使っている駒フォントの登録 ID。**空なら同梱。**
+	//
+	// ⚠️ **登録の中に「使う」印を持たせない**（エンジンの `Enabled` とは違う）。
+	// 盤は 1 つしかなく、駒の字も同時に 1 つしか使えないので、
+	// **どれを使うかは一覧の外に 1 つ持つのが正しい** ——
+	// 印にすると「2 つに印が付いている」という表せてはいけない状態が作れる。
+	PieceFont string `json:"pieceFont,omitempty"`
+}
+
+// PieceFontEntry は登録した駒フォント 1 つ。
+//
+// **持っているのは「元フォントのどれを使うか」だけ。** 焼いた TTF は
+// 持たない（起動のたびに焼き直す。`piecefont` のパッケージコメント）。
+type PieceFontEntry struct {
+	// ID は一覧の中でこの登録を指す識別子。
+	//
+	// ⚠️ **パスを鍵にしないこと。** TTC は 1 ファイルに複数の書体が入っており
+	// （`msmincho.ttc` の MS 明朝と MS P明朝）、パスだけでは指せない。
+	// **CSS の family 名もこの ID から作る**（`PieceFontFamily`）。
+	ID string `json:"id"`
+
+	// Name は表示名。**空なら元フォントの名前**（`Source`）。
+	//
+	// ⚠️ **既定の名前を value に入れないこと**（エンジンの `Name` と同じ）。
+	// 入れると、登録し直しても名前が追従しなくなる。
+	Name string `json:"name,omitempty"`
+
+	// Path / Index は元フォントの場所と、その中の書体番号。
+	Path  string `json:"path"`
+	Index int    `json:"index,omitempty"`
+
+	// Source は登録したときの書体名。
+	//
+	// **フォントが消えた・入れ替わったときに「何だったか」が残る**ようにしてある。
+	// ⚠️ **これを表示の正としないこと** —— 今そこにある書体の名前は読み直せば分かる。
+	Source string `json:"source,omitempty"`
+}
+
+// DisplayName は画面に出す名前を返す。
+//
+// ⚠️ **「空なら元フォントの名前」の解決はここ 1 か所。**
+// フロントにも呼び出し側にも書かないこと（`EngineEntry.DisplayName` と同じ）。
+func (e PieceFontEntry) DisplayName() string {
+	if n := strings.TrimSpace(e.Name); n != "" {
+		return n
+	}
+	if s := strings.TrimSpace(e.Source); s != "" {
+		return s
+	}
+	return filepath.Base(e.Path)
+}
+
+// BuiltinPieceFontName は同梱の駒フォントの表示名（`PieceFont` が空のとき）。
+const BuiltinPieceFontName = "同梱（Noto Serif JP）"
+
+// PieceFontFamily は登録 1 つ分の CSS の family 名を返す。
+//
+// ⚠️ **登録ごとに違う名前であること。** 同じ名前で複数登録すると、どれが当たるかが
+// ブラウザ任せになって切り替えが効かなくなる（`core/web/README.md`）。
+// ⚠️ **同梱の `ShogiSFEN` とも必ず違うこと** —— 同名で上書き登録すると、
+// **同梱に戻せなくなる。**
+func PieceFontFamily(id string) string { return "ShogiUser-" + id }
+
+// PieceFontList は登録済みの駒フォント一覧を返す。
+//
+// ⚠️ **エンジンと違って、空のときに既定を差し込まない。**
+// あちらは「登録が無いと解析できない」ので同梱を 1 つ返すが、駒の字は
+// **登録が無くても同梱で描ける**（`PieceFont` が空 ＝ 同梱）。
+func (c Config) PieceFontList() []PieceFontEntry {
+	out := make([]PieceFontEntry, len(c.PieceFonts))
+	copy(out, c.PieceFonts)
+	return out
+}
+
+// CurrentPieceFont は今使っている登録を返す（同梱なら ok=false）。
+//
+// ⚠️ **消えた登録を指したままでも同梱に落ちるだけにすること**（エラーにしない）。
+// 設定ファイルは手で編集する前提でもあるので、**指し先が無いだけで盤が
+// 描けなくなるのは行き過ぎ。**
+func (c Config) CurrentPieceFont() (PieceFontEntry, bool) {
+	if c.PieceFont == "" {
+		return PieceFontEntry{}, false
+	}
+	for _, e := range c.PieceFonts {
+		if e.ID == c.PieceFont {
+			return e, true
+		}
+	}
+	return PieceFontEntry{}, false
+}
+
+// NextPieceFontID は既存の一覧とぶつからない ID を作る。
+func NextPieceFontID(fonts []PieceFontEntry) string {
+	used := make(map[string]bool, len(fonts))
+	for _, f := range fonts {
+		used[f.ID] = true
+	}
+	for i := 1; ; i++ {
+		id := fmt.Sprintf("font-%d", i)
+		if !used[id] {
+			return id
+		}
+	}
 }
 
 // EngineEntry は登録した USI エンジン 1 つ。

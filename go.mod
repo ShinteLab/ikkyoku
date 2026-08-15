@@ -17,6 +17,7 @@ require (
 	github.com/goml/gobrain v0.0.0-20201212123421-2e2d98ca8249 // indirect
 	github.com/jezek/xgb v1.1.1 // indirect
 	github.com/lxn/win v0.0.0-20210218163916-a377121e959e // indirect
+	golang.org/x/image v0.44.0 // indirect
 	golang.org/x/sys v0.24.0 // indirect
 	golang.org/x/xerrors v0.0.0-20231012003039-104605ab7028 // indirect
 )

@@ -60,6 +60,9 @@ func main() {
 	captureSvc := NewCaptureService(logger, cfg.SutemeDataDir)
 	positionSvc := NewPositionService(logger)
 	trainingSvc := NewTrainingService(logger, settingsSvc)
+	// 「駒の字」（設定タブ）。端末に入っているフォントから駒の字を焼く。
+	// **盤に当てるのはフロント**で、ここが返すのは family 名と data URL まで。
+	fontSvc := NewFontService(logger, settingsSvc)
 	// 局面を持つ Service は 2 つあり、**別のものを持っている**（混同しないこと）。
 	//
 	//   positionSvc … 訂正タブ。認識の誤りを直す面。未決・不正でよい
@@ -84,6 +87,7 @@ func main() {
 			application.NewService(positionSvc),
 			application.NewService(studySvc),
 			application.NewService(trainingSvc),
+			application.NewService(fontSvc),
 			application.NewService(analyzeSvc),
 			application.NewService(diagSvc),
 		},

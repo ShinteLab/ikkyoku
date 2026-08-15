@@ -904,6 +904,21 @@ func (s *SettingsService) SetFitOnStartup(v bool) (AppSettings, error) {
 // **保存の前にファイルを読み直す。** 設定ファイルは手で編集する前提でもあり、
 // アプリ起動中に足された項目(学習データの置き場所など)を、こちらが抱えている
 // 古い内容で上書きしてしまわないようにするため。
+// editConfig は設定を書き換えて保存し、**保存後の設定そのもの**を返す。
+//
+// `save` が返すのは設定タブの形（`AppSettings`）だが、駒フォント（`FontService`）は
+// 自分の形（`FontState`）を組み立てる。**AppSettings に駒フォントの項目を
+// 足していないのはそのため** —— あちらは設定タブの 1 枚岩で、
+// 焼いた data URL のような「画面に出さない値」を混ぜたくない。
+func (s *SettingsService) editConfig(apply func(*ikkyoku.Config)) (ikkyoku.Config, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, err := s.save(apply); err != nil {
+		return s.cfg, err
+	}
+	return s.cfg, nil
+}
+
 func (s *SettingsService) save(apply func(*ikkyoku.Config)) (AppSettings, error) {
 	if s.path == "" {
 		// 保存先が決められない環境。今回限りの変更にする。
