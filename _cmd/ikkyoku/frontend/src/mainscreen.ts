@@ -733,6 +733,10 @@ export function mountMainScreen(root: HTMLElement): void {
             <div class="study-move-head">
               <span class="field-label">手順</span>
               <button id="study-reload" class="ghost-btn" type="button" hidden>再読み込み</button>
+              <!-- ⚠️ **文言は syncBatchButton が入れる**（「x手目から解析」）。
+                   ここに書いてあるのは、まだ局面が無いときの見た目だけ。
+                   ⚠️ この markup は template literal の中なので、
+                   コメントにバッククォートを使わないこと（文字列がそこで切れる）。 -->
               <button id="analyze-batch-run" class="ghost-btn" type="button">連続解析</button>
             </div>
             <!-- ⚠️ **「1手戻す」は無くなった**（2026-08-13。分岐を入れる前段）。
@@ -1911,18 +1915,38 @@ export function mountMainScreen(root: HTMLElement): void {
       // **キーボードでも止められるように**、出したらフォーカスを移す。
       batchVeilCancel.focus();
     }
-    batchRun.textContent = batchActive() ? "停止" : "連続解析";
+    // ⚠️ **どこから始まるかをボタン自身に出す**（2026-08-15。以前は「連続解析」の
+    // 一言で、始点はツールチップにしか無かった）。始点は**今どこを見ているか**で
+    // 決まるので、**押す前に読めないと押せない**（範囲の欄を置かない代わりの表示）。
+    batchRun.textContent = batchActive() ? "停止" : `${batchFrom()}手目から解析`;
     batchRun.classList.toggle("is-active", batchActive());
     // 走っている最中は止められる。走っていないときは、解析できる局面かつ
     // 秒数が決まっているときだけ押せる。
     batchRun.disabled = !batchActive() && (!analyzeReady || blocked !== "");
-    // **どこから始まるかをツールチップに出す。** 範囲の欄が無くなったぶん、
-    // 「今の位置から」であることが読めるようにしておく。
     batchRun.title = batchActive()
       ? "連続解析を止めます（そこまでの評価値は残ります）"
-      : blocked ||
-        `今見ている ${studyFirst + studyPly}手目から ${studyFirst + studyMoveCount}手目まで、1 手ずつ順に解析します`;
+      : blocked || batchRangeText();
   };
+
+  // batchFrom は連続解析が**最初に考えさせる手**の手数。
+  //
+  // ⚠️ **今見ている手の「次の手」**（＝ +1）。解析は「この局面で次に何を指すか」を
+  // 出すものなので、**1 手目を見ているなら答えは 2 手目**になる。
+  // CLAUDE.md の「SFEN の手数と棋譜の手数は 1 つずれる」と同じ話で、
+  // **「次は x 手目」と書けば、どちらの数え方かを聞くまでもなく決まる。**
+  //
+  // ⚠️ **手順リストのチップや幕の進み具合とは 1 つずれる**（あちらは
+  // **指した手**の番号で、リストの位置と一致していないと辿れない）。
+  // **どちらも正しい** —— ボタンは「何を考えさせるか」、リストは「どこに居るか」。
+  const batchFrom = () => studyFirst + studyPly + 1;
+  // batchTo は最後に考えさせる手の手数（同じ数え方）。
+  const batchTo = () => studyFirst + studyMoveCount + 1;
+
+  const batchRangeText = () =>
+    batchFrom() === batchTo()
+      ? `${batchFrom()}手目を考えさせます（手順の最後に居ます）`
+      : `${batchFrom()}手目から${batchTo()}手目まで、1 手ずつ順に考えさせます` +
+        `（今見ている局面から手順の最後まで）`;
 
   // 走っているエンジンが残っているか。**1 つ終わっただけでは解析は終わらない。**
   const syncAnalyzeRunning = () => {
