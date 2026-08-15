@@ -263,6 +263,52 @@ function applyPieceFont(face: { family: string; dataUrl: string } | null): void 
   document.documentElement.style.setProperty("--shogi-font", `"${face.family}"`);
 }
 
+// applyPieceStyle は「王/玉」「馬/左馬」を画面に当てる。
+//
+// 中身は**駒フォントの stylistic set**（`ss01` = 王→玉 / `ss02` = 馬→左馬）。
+// ⚠️ **`K` と `k` はフォント上で同じグリフ**なので、盤全体にまとめて当てると
+// **先後を分けられない。** そのため当て方が 2 通りある:
+//
+//   盤（`<shogi-board>`）    … `gyoku` / `hidari-uma` 属性。core/web が駒 1 つずつに当てる
+//   ikkyoku が自分で描く駒  … 先手用・後手用の 2 つを CSS 変数で配る（style.css）
+//
+// 後者に当たるのは**「足りない駒」の王**と**掴んだ駒の絵**（駒台に王も馬も
+// 出てこないので、そこは実質効かない）。⚠️ **どちらか片方だけ直すと、
+// 「盤は玉なのに掴むと王」という見ないと分からない食い違いが出る。**
+//
+// ⚠️ **組み立ては Go 側**（`pieceStyle`）。`font-feature-settings` は
+// **個別の値が積み上がらない**（後から当てた宣言が丸ごと勝つ）ので玉と左馬を
+// 1 つの値にまとめる必要があり、**その判断を 2 か所に持たない。**
+function applyPieceStyle(
+  style: {
+    boardGyoku: string;
+    boardGyokuOn: boolean;
+    boardHidariUma: boolean;
+    black: string;
+    white: string;
+  },
+  boards: Element[],
+): void {
+  const root = document.documentElement.style;
+  root.setProperty("--piece-features-black", style.black);
+  root.setProperty("--piece-features-white", style.white);
+  for (const b of boards) {
+    // ⚠️ **属性そのものを外すこと。** 値を空にして残すと「値なし」＝
+    // **先後とも玉**になる（`core/web/README.md` の表）。
+    if (style.boardGyokuOn) {
+      b.setAttribute("gyoku", style.boardGyoku);
+    } else {
+      b.removeAttribute("gyoku");
+    }
+    // ⚠️ **左馬は有無だけ**（値を書いても見られない。盤全体に効く）。
+    if (style.boardHidariUma) {
+      b.setAttribute("hidari-uma", "");
+    } else {
+      b.removeAttribute("hidari-uma");
+    }
+  }
+}
+
 export function mountMainScreen(root: HTMLElement): void {
   // ⚠️ **この中の HTML コメントにバッククォートを書かないこと。** テンプレート
   // リテラルなので、`.foo` のような引用がそこで文字列を終わらせる。**エラーは
@@ -928,6 +974,28 @@ export function mountMainScreen(root: HTMLElement): void {
             作った盤面を配ったり素材として使ったりするときは、そちらを確認してください。
           </span>
           <ul id="font-list" class="engine-list"></ul>
+
+          <!-- 王/玉と馬/左馬（2026-08-16）。**どのフォントでも効く**
+               （駒フォントは同じ生成器で焼いているので ss01/ss02 が必ず入っている）。
+
+               ⚠️ **先後を分けられるのは玉だけ。** 玉は王将/玉将という**駒そのものの
+               呼び分け**（上位者が王）なので片側だけがありうるが、左馬は**盤の
+               見た目の選択**なので、使うと決めたら盤全体がそうなる。
+               **左馬に先後の欄を足さないこと**（core/web/README.md）。 -->
+          <div class="setting-fields">
+            <label class="field">
+              <span class="field-label">王 / 玉</span>
+              <select id="font-gyoku"
+                      title="王を玉で書くか。先手だけ・後手だけも選べます"></select>
+            </label>
+            <label class="setting is-inline">
+              <input id="font-hidari-uma" type="checkbox" />
+              <span class="setting-body">
+                <span class="setting-title">馬を左馬にする</span>
+              </span>
+            </label>
+          </div>
+
           <div class="setting-fields">
             <button id="font-scan" class="ghost-btn" type="button"
                     title="端末に入っているフォントを探します（数秒かかります）">フォントを追加…</button>
@@ -4160,6 +4228,15 @@ export function mountMainScreen(root: HTMLElement): void {
   const fontSample = root.querySelector<HTMLParagraphElement>("#font-sample")!;
   const fontChoices = root.querySelector<HTMLUListElement>("#font-choices")!;
   const fontDirs = root.querySelector<HTMLParagraphElement>("#font-dirs")!;
+  const fontGyoku = root.querySelector<HTMLSelectElement>("#font-gyoku")!;
+  const fontHidariUma = root.querySelector<HTMLInputElement>("#font-hidari-uma")!;
+
+  // 王/玉・左馬を当てる相手。**2 つの盤の両方**（訂正タブと解析タブ）。
+  // ⚠️ **片方だけだと、採った瞬間に字が変わって見える。**
+  const pieceBoards = [
+    root.querySelector<HTMLElement>("#board")!,
+    root.querySelector<HTMLElement>("#study-board")!,
+  ];
 
   // 探した結果。**探したときだけ埋まる**（1 秒近くかかるので、絞り込みのたびに
   // 探し直さない —— 手元に持っておいて絞るのはこちらの仕事）。
@@ -4283,6 +4360,24 @@ export function mountMainScreen(root: HTMLElement): void {
     // ⚠️ **当てるのはここ 1 か所。** 盤も駒台も候補手の重ね表示も
     // `--shogi-font` を見ているので、要素ごとに書かない。
     applyPieceFont(st.face);
+    // 王/玉と馬/左馬。**盤（属性）と自前の駒（CSS 変数）を一緒に当てる**
+    // ——別々に当てると「盤は玉なのに掴むと王」になる。
+    applyPieceStyle(st.style, pieceBoards);
+
+    // 選択肢は Go 側が返したものをそのまま並べる（**フロントに表を書かない**）。
+    if (fontGyoku.options.length !== (st.gyokuOptions ?? []).length) {
+      fontGyoku.replaceChildren();
+      for (const o of st.gyokuOptions ?? []) {
+        const opt = document.createElement("option");
+        opt.value = o.value;
+        opt.textContent = o.label;
+        fontGyoku.appendChild(opt);
+      }
+    }
+    // ⚠️ **Go 側が倒した結果をそのまま入れること**（知らない値は「王のまま」に
+    // 倒して返ってくるので、選び直されたことが画面に出る）。
+    fontGyoku.value = st.gyoku;
+    fontHidariUma.checked = st.hidariUma;
 
     fontList.replaceChildren();
     fontList.appendChild(
@@ -4488,6 +4583,27 @@ export function mountMainScreen(root: HTMLElement): void {
 
   fontFilter.addEventListener("input", renderFontChoices);
   fontOnlyUsable.addEventListener("change", renderFontChoices);
+
+  // 王/玉・左馬。**変えたその場で保存して、その場で盤に出る**
+  // （設定タブの他の項目と同じで、適用ボタンは置かない）。
+  fontGyoku.addEventListener("change", () => {
+    void (async () => {
+      try {
+        showFontState(await FontService.SetGyoku(fontGyoku.value));
+      } catch (err) {
+        setFontStatus(`保存できませんでした: ${String(err)}`, "error");
+      }
+    })();
+  });
+  fontHidariUma.addEventListener("change", () => {
+    void (async () => {
+      try {
+        showFontState(await FontService.SetHidariUma(fontHidariUma.checked));
+      } catch (err) {
+        setFontStatus(`保存できませんでした: ${String(err)}`, "error");
+      }
+    })();
+  });
 
   const showSettings = (s: {
     fitOnStartup: boolean;

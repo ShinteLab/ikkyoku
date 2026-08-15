@@ -767,6 +767,29 @@ export interface FontState {
     "face": FontFace | null;
 
     /**
+     * Gyoku は王を玉で書くか（`""` / `"black"` / `"white"` / `"both"`）。
+     * 
+     * **値はそのまま `<shogi-board>` の `gyoku` 属性に渡せる**（`Style.BoardGyoku`
+     * が「属性を付けるかどうか」まで解決して返す）。
+     */
+    "gyoku": string;
+
+    /**
+     * GyokuOptions は選べる書き方の一覧（**フロントに表を書かせない**）。
+     */
+    "gyokuOptions": ikkyoku$0.GyokuOption[] | null;
+
+    /**
+     * HidariUma は馬を左馬で書くか。⚠️ **先後の区別は無い**（盤全体）。
+     */
+    "hidariUma": boolean;
+
+    /**
+     * Style は上の 2 つを**画面にそのまま当てられる形**にしたもの。
+     */
+    "style": PieceStyle;
+
+    /**
      * Note は選んだフォントを焼けなかった理由。**空なら問題なし。**
      * 
      * ⚠️ **焼けなくても同梱で描けるので、エラーにしない**（設計原則3）。
@@ -851,6 +874,48 @@ export interface PieceFontSettings {
     "copyright"?: string;
     "license"?: string;
     "licenseUrl"?: string;
+}
+
+/**
+ * PieceStyle は「王/玉」「馬/左馬」を**画面にそのまま当てられる形**にしたもの。
+ * 
+ * 切り替えの中身は**駒フォントの stylistic set**（`ss01` = 王→玉 /
+ * `ss02` = 馬→左馬。`core/CLAUDE.md`）。⚠️ **`K` と `k` はフォント上で同じグリフ**
+ * なので、盤全体にまとめて当てると先後を分けられない。そのため:
+ * 
+ *   盤（<shogi-board>）        … `gyoku` / `hidari-uma` 属性。駒 1 つずつに当ててくれる
+ *   ikkyoku が自分で描く駒     … 先手用・後手用の 2 つの値を CSS 変数で配る
+ * 
+ * ⚠️ **`font-feature-settings` は個別の値が積み上がらない**（後から当てた宣言が
+ * 丸ごと勝つ）ので、**玉と左馬を 1 つの値にまとめてから**渡す。
+ * ⚠️ **この組み立てをフロントに書かないこと** —— 盤と自前の駒で別々に書くと、
+ * 「盤は玉なのに掴むと王」という**見ないと分からない**食い違いが出る。
+ */
+export interface PieceStyle {
+    /**
+     * BoardGyoku は `<shogi-board>` の `gyoku` 属性に入れる値。
+     * 
+     * ⚠️ **`BoardGyokuOn` が false なら属性そのものを付けないこと**
+     * （付けると値が何であれ「玉を使う」になる）。
+     * ⚠️ **両方のときは空文字**（＝値なし）。`"both"` を渡しても今は同じに描かれる
+     * （知らない値は両方）が、**両方を指す決まった書き方は「値なし」のほう**
+     * （`core/web/README.md` の表）。
+     */
+    "boardGyoku": string;
+    "boardGyokuOn": boolean;
+
+    /**
+     * BoardHidariUma は `hidari-uma` 属性を付けるか（**値は見られない**）。
+     */
+    "boardHidariUma": boolean;
+
+    /**
+     * Black / White は ikkyoku が自分で描く駒に当てる `font-feature-settings`。
+     * 当てるものが無いときは `"normal"`（**空文字にしないこと** —— CSS の
+     * 値として不正で、宣言ごと捨てられる）。
+     */
+    "black": string;
+    "white": string;
 }
 
 /**

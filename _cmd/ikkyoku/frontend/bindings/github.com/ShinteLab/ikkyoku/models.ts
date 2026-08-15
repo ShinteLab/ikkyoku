@@ -15,3 +15,11 @@ export interface EngineColorOption {
      */
     "label": string;
 }
+
+/**
+ * GyokuOption は「王/玉」の選択肢 1 つ（画面に出す）。
+ */
+export interface GyokuOption {
+    "value": string;
+    "label": string;
+}

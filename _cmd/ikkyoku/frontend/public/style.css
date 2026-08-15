@@ -2896,6 +2896,10 @@ html.is-main #app {
   align-items: center;
   justify-content: center;
   font-family: var(--shogi-font, "ShogiSFEN"), serif;
+  /* 王/玉・馬/左馬（2026-08-16）。**掴んだ駒は王にも馬にもなりうる**
+     （盤から掴むので `K`/`k`/`+B`/`+b` がそのまま出る）ので、盤と揃える。
+     ⚠️ **値は Go 側が組み立てたもの**（mainscreen.ts の applyPieceStyle）。 */
+  font-feature-settings: var(--piece-features-black, normal);
   font-size: 34px;
   color: #1a1a1a;
   background: #f3c877;
@@ -2904,6 +2908,9 @@ html.is-main #app {
 }
 
 .drag-ghost.is-white {
+  /* ⚠️ **先後で別の値を当てること。** `K` と `k` はフォント上で同じグリフなので、
+     まとめて当てると「後手だけ玉」が作れない。 */
+  font-feature-settings: var(--piece-features-white, normal);
   transform: rotate(180deg);
 }
 
@@ -3596,7 +3603,12 @@ html.is-main #app {
 }
 
 /* 持ち主が決まっていないことが見て分かるように、駒台の駒とは色を変える。
-   **駒種は常に全部並べる**ので、位置が毎回同じになる。 */
+   **駒種は常に全部並べる**ので、位置が毎回同じになる。
+
+   ⚠️ **王/玉はここに出る**（駒台と違って、この箱には王が並ぶ）。持ち主が
+   未決なので `.stock-chip` から**先手の値を受け継ぐ**——盤へ落とすと
+   先手の駒として置かれる、という既にある規約に合わせてある。
+   **後手の値を当て直さないこと**（先後の既定が 2 通りになる）。 */
 .stock-chip.is-missing {
   position: relative;
   width: 30px;
@@ -3620,6 +3632,11 @@ html.is-main #app {
   align-items: center;
   justify-content: center;
   font-family: var(--shogi-font, "ShogiSFEN"), serif;
+  /* 王/玉・馬/左馬（2026-08-16）。**駒台には王も馬も出てこない**
+     （王は取られないし、成駒は取ると元の駒に戻る）ので、ここで効くのは
+     ⚠️ **「足りない駒」の王だけ**（下記）。それでも当てておくのは、
+     **駒を描くところで規則を分けないため**（増やしたときに拾い忘れる）。 */
+  font-feature-settings: var(--piece-features-black, normal);
   font-size: 22px;
   color: #1a1a1a;
   background: #f3c877;
@@ -3629,6 +3646,7 @@ html.is-main #app {
 }
 
 .stock-chip.is-white {
+  font-feature-settings: var(--piece-features-white, normal);
   transform: rotate(180deg);
 }
 

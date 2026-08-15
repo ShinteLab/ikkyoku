@@ -42,6 +42,7 @@ export type {
     GuideLayout,
     KifuLoad,
     PieceFontSettings,
+    PieceStyle,
     RecognizerStatus,
     StudyState,
     TrainingSendResult,

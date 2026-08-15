@@ -360,3 +360,97 @@ func TestFontPreview(t *testing.T) {
 		t.Error("プレビューしただけで登録された")
 	}
 }
+
+// 王/玉と左馬の設定が保存され、**画面に当てられる形**で返ること。
+//
+// ⚠️ **一番の要点は「盤と、ikkyoku が自分で描く駒で食い違わないこと」。**
+// `K` と `k` はフォント上で同じグリフなので、まとめて当てると先後を分けられない
+// （盤は属性で駒 1 つずつ、自前の駒は先手用・後手用の 2 つの値で当てる）。
+func TestFontPieceStyle(t *testing.T) {
+	s := newTestFonts(t)
+
+	// 既定は王のまま。**属性を付けない**（付けると値が何であれ玉になる）。
+	st := s.State()
+	if st.Gyoku != ikkyoku.GyokuNone || st.HidariUma {
+		t.Errorf("既定が王/馬でない: %+v", st.Style)
+	}
+	if st.Style.BoardGyokuOn || st.Style.BoardHidariUma {
+		t.Errorf("既定なのに属性が付く: %+v", st.Style)
+	}
+	// ⚠️ **当てるものが無くても "normal"**（空文字は CSS の値として不正で、
+	// 宣言ごと捨てられる）。
+	if st.Style.Black != "normal" || st.Style.White != "normal" {
+		t.Errorf("既定の feature が normal でない: %+v", st.Style)
+	}
+	if len(st.GyokuOptions) == 0 {
+		t.Error("選択肢を返していない（フロントに表を書かせないため）")
+	}
+
+	// 後手だけ玉。**先手には当てない。**
+	st, err := s.SetGyoku(ikkyoku.GyokuWhite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.Style.BoardGyokuOn || st.Style.BoardGyoku != ikkyoku.GyokuWhite {
+		t.Errorf("盤に渡す値が違う: %+v", st.Style)
+	}
+	if st.Style.Black != "normal" {
+		t.Errorf("先手にも玉が当たっている: %q", st.Style.Black)
+	}
+	if st.Style.White != `"ss01"` {
+		t.Errorf("後手に玉が当たっていない: %q", st.Style.White)
+	}
+
+	// 両方とも玉。⚠️ **属性の値は空**（＝値なし。両方を指す決まった書き方）。
+	st, err = s.SetGyoku(ikkyoku.GyokuBoth)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.Style.BoardGyokuOn || st.Style.BoardGyoku != "" {
+		t.Errorf("両方のときは値なしで渡すこと: %+v", st.Style)
+	}
+	if st.Style.Black != `"ss01"` || st.Style.White != `"ss01"` {
+		t.Errorf("両方に当たっていない: %+v", st.Style)
+	}
+
+	// 左馬。⚠️ **先後の区別は無い**（盤全体）。
+	st, err = s.SetHidariUma(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.Style.BoardHidariUma {
+		t.Error("左馬の属性が付かない")
+	}
+	// ⚠️ **玉と左馬は 1 つの値にまとめること**（font-feature-settings は
+	// 個別の値が積み上がらず、後から当てた宣言が丸ごと勝つ）。
+	if st.Style.Black != `"ss01", "ss02"` {
+		t.Errorf("玉と左馬がまとまっていない: %q", st.Style.Black)
+	}
+
+	// 王に戻しても左馬は残ること（別の設定なので巻き添えにしない）。
+	st, err = s.SetGyoku(ikkyoku.GyokuNone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.HidariUma || st.Style.Black != `"ss02"` {
+		t.Errorf("玉を戻したら左馬まで消えた: %+v", st.Style)
+	}
+
+	// 保存されていること。
+	if got := s.settings.config(); got.HidariUma != true || got.Gyoku != ikkyoku.GyokuNone {
+		t.Errorf("保存されていない: gyoku=%q hidariUma=%v", got.Gyoku, got.HidariUma)
+	}
+}
+
+// 知らない値は「王のまま」に倒し、**倒した結果をそのまま返す**こと
+// （返した状態を描くだけで、選び直されたことが画面に見える）。
+func TestFontSetGyokuUnknown(t *testing.T) {
+	s := newTestFonts(t)
+	st, err := s.SetGyoku("gyoku")
+	if err != nil {
+		t.Fatalf("断らずに倒すこと: %v", err)
+	}
+	if st.Gyoku != ikkyoku.GyokuNone || st.Style.BoardGyokuOn {
+		t.Errorf("知らない値が通ってしまった: %+v", st.Style)
+	}
+}

@@ -75,6 +75,24 @@ export function Scan(): $CancellablePromise<$models.FontScan> {
 }
 
 /**
+ * SetGyoku は王を玉で書くかを変える（`""` / `"black"` / `"white"` / `"both"`）。
+ * 
+ * ⚠️ **知らない値は「王のまま」に倒す**（`NormalizeGyoku`）。断らないのは、
+ * **どう倒したかが画面にそのまま出る**から（返した `FontState` を描くだけで、
+ * 選び直されたことが見える）。
+ */
+export function SetGyoku(v: string): $CancellablePromise<$models.FontState> {
+    return $Call.ByID(953537289, v);
+}
+
+/**
+ * SetHidariUma は馬を左馬で書くかを変える。⚠️ **先後の区別は無い**（盤全体）。
+ */
+export function SetHidariUma(on: boolean): $CancellablePromise<$models.FontState> {
+    return $Call.ByID(3267147414, on);
+}
+
+/**
  * State は今の設定を返す（設定タブを開いたとき・起動時）。
  */
 export function State(): $CancellablePromise<$models.FontState> {

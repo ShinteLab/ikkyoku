@@ -91,6 +91,23 @@ type Config struct {
 	// **「登録が無いと動かない」ということが無い**ので、既定を差し込まない。
 	PieceFonts []PieceFontEntry `json:"pieceFonts,omitempty"`
 
+	// Gyoku は王を玉で書くか。**先後を選べる**（`GyokuNone` / `Black` / `White` / `Both`）。
+	//
+	// **玉は王将/玉将という駒そのものの呼び分け**（上位者が王）なので、
+	// 片側だけがありうる。⚠️ **左馬と扱いを揃えないこと**（あちらは盤全体）。
+	//
+	// ⚠️ **知らない値は「王のまま」に倒す**（`NormalizeGyoku`）。
+	// `<shogi-board>` の `gyoku` 属性は「値なし・知らない値なら両方」だが、
+	// **あちらは属性が付いている時点で「玉を使う」と言っている**のに対し、
+	// こちらは**使うかどうかも含めて表す欄**なので既定が違う。
+	Gyoku string `json:"gyoku,omitempty"`
+
+	// HidariUma は馬を左馬（馬の左右反転。縁起物の飾り駒の字）で書くか。
+	//
+	// ⚠️ **先後の区別は無い**（盤全体）。左馬は**盤の見た目の選択**なので、
+	// 使うと決めたら両方そうなる（`core/web/README.md`）。
+	HidariUma bool `json:"hidariUma,omitempty"`
+
 	// PieceFont は今使っている駒フォントの登録 ID。**空なら同梱。**
 	//
 	// ⚠️ **登録の中に「使う」印を持たせない**（エンジンの `Enabled` とは違う）。
@@ -145,6 +162,72 @@ func (e PieceFontEntry) DisplayName() string {
 
 // BuiltinPieceFontName は同梱の駒フォントの表示名（`PieceFont` が空のとき）。
 const BuiltinPieceFontName = "同梱（Noto Serif JP）"
+
+// 王を玉で書くかの選択肢。
+//
+// ⚠️ **値は `<shogi-board>` の `gyoku` 属性に合わせてある**（SFEN の手番トークン）。
+// **勝手に別の語彙にしないこと** —— そのまま属性に渡せるのが要点で、
+// 変換表を挟むと片方だけ直したときに黙って食い違う。
+const (
+	// GyokuNone は王のまま（属性を付けない）。**既定。**
+	GyokuNone = ""
+	// GyokuBlack は先手だけ玉。
+	GyokuBlack = "black"
+	// GyokuWhite は後手だけ玉。
+	GyokuWhite = "white"
+	// GyokuBoth は先後とも玉。
+	GyokuBoth = "both"
+)
+
+// GyokuOption は「王/玉」の選択肢 1 つ（画面に出す）。
+type GyokuOption struct {
+	Value string `json:"value"`
+	Label string `json:"label"`
+}
+
+// GyokuOptions は選べる書き方の一覧。
+//
+// ⚠️ **フロントにこの表を書かないこと**（`EngineColors` と同じ）。
+// 値と文言を 2 か所に持つと、増やしたときに片方だけ古くなる。
+var GyokuOptions = []GyokuOption{
+	{Value: GyokuNone, Label: "どちらも王"},
+	{Value: GyokuWhite, Label: "後手だけ玉"},
+	{Value: GyokuBlack, Label: "先手だけ玉"},
+	{Value: GyokuBoth, Label: "どちらも玉"},
+}
+
+// NormalizeGyoku は設定の値を正規化する（**知らない値は「王のまま」**）。
+//
+// ⚠️ **`<shogi-board>` の属性とは既定が違う**（あちらは知らない値なら両方）。
+// 属性は付いている時点で「玉を使う」と言っているが、こちらは**使うかどうかも
+// 含めて表す欄**なので、読めない値を「玉を使う」に倒すと、
+// **設定ファイルの打ち間違いで盤の字が勝手に変わる。**
+func NormalizeGyoku(v string) string {
+	switch v {
+	case GyokuBlack, GyokuWhite, GyokuBoth:
+		return v
+	default:
+		return GyokuNone
+	}
+}
+
+// GyokuFor は片側について、その駒を玉で書くかを返す。
+//
+// ⚠️ **この判定を呼び出し側に書かないこと。** 盤（`<shogi-board>` の属性）と
+// ikkyoku が自分で描く駒（駒台・掴んだ駒の絵）で**別々に書くと食い違う**
+// —— しかも「盤は玉なのに掴むと王」という、見ないと分からない壊れ方をする。
+func GyokuFor(v string, black bool) bool {
+	switch NormalizeGyoku(v) {
+	case GyokuBoth:
+		return true
+	case GyokuBlack:
+		return black
+	case GyokuWhite:
+		return !black
+	default:
+		return false
+	}
+}
 
 // PieceFontFamily は登録 1 つ分の CSS の family 名を返す。
 //

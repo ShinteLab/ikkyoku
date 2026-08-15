@@ -413,3 +413,70 @@ func TestNextPieceFontID(t *testing.T) {
 		t.Errorf("空いている番号を使っていない: %q", got)
 	}
 }
+
+// 王/玉の解決。⚠️ **先後を分けられるのは玉だけ**（左馬は盤全体）。
+func TestGyokuFor(t *testing.T) {
+	for _, tc := range []struct {
+		gyoku                string
+		wantBlack, wantWhite bool
+	}{
+		{GyokuNone, false, false},
+		{GyokuBlack, true, false},
+		{GyokuWhite, false, true},
+		{GyokuBoth, true, true},
+		// ⚠️ **知らない値は「王のまま」。** `<shogi-board>` の属性は
+		// 「知らない値なら両方」だが、あちらは属性が付いている時点で
+		// 「玉を使う」と言っている。こちらは**使うかどうかも含めて表す欄**なので、
+		// 打ち間違いで盤の字が勝手に変わってはいけない。
+		{"gyoku", false, false},
+		{"BLACK", false, false},
+	} {
+		t.Run(tc.gyoku, func(t *testing.T) {
+			if got := GyokuFor(tc.gyoku, true); got != tc.wantBlack {
+				t.Errorf("先手 = %v, want %v", got, tc.wantBlack)
+			}
+			if got := GyokuFor(tc.gyoku, false); got != tc.wantWhite {
+				t.Errorf("後手 = %v, want %v", got, tc.wantWhite)
+			}
+		})
+	}
+}
+
+// 選択肢の値は `<shogi-board>` の `gyoku` 属性の語彙そのままであること。
+//
+// ⚠️ **別の語彙にすると変換表を挟むことになり、片方だけ直したときに黙って食い違う。**
+func TestGyokuOptions(t *testing.T) {
+	seen := map[string]bool{}
+	for _, o := range GyokuOptions {
+		if o.Label == "" {
+			t.Errorf("%q に文言が無い", o.Value)
+		}
+		if seen[o.Value] {
+			t.Errorf("値が重複している: %q", o.Value)
+		}
+		seen[o.Value] = true
+		if got := NormalizeGyoku(o.Value); got != o.Value {
+			t.Errorf("選択肢 %q が正規化で %q に変わる", o.Value, got)
+		}
+	}
+	for _, v := range []string{GyokuNone, GyokuBlack, GyokuWhite, GyokuBoth} {
+		if !seen[v] {
+			t.Errorf("%q が選択肢に無い", v)
+		}
+	}
+}
+
+// 王/玉・左馬の設定が往復すること。
+func TestConfigGyokuRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := SaveConfig(path, Config{Gyoku: GyokuWhite, HidariUma: true}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Gyoku != GyokuWhite || !got.HidariUma {
+		t.Errorf("往復していない: gyoku=%q hidariUma=%v", got.Gyoku, got.HidariUma)
+	}
+}
