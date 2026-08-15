@@ -416,3 +416,110 @@ func TestSetEnginePathDropsOptionSpecs(t *testing.T) {
 		t.Errorf("USI_Hash = %+v, want 値は残り、宣言に無い扱い", o)
 	}
 }
+
+// TestSetEngineMultiPV は**候補手の本数がエンジンごと**であることを固定する
+// （2026-08-15。以前は解析の行に全エンジン共通の欄が 1 つあった）。
+//
+// ⚠️ 見ているのは 3 つ: **設定が別々に残ること**、**上限を宣言しているエンジンで
+// それを超える値を断ること**（`setoption` には応答が返らないので、送ってからでは
+// 気づけない）、そして**設定タブの option の一覧には出さないこと**（入口は
+// 解析タブのカード。**同じ値の編集口を 2 つ持たない**）。
+func TestSetEngineMultiPV(t *testing.T) {
+	list := func() []ikkyoku.EngineEntry {
+		return []ikkyoku.EngineEntry{
+			{ID: "a", Enabled: true, OptionSpecs: []ikkyoku.EngineOption{
+				{Name: ikkyoku.MultiPVOption, Type: "spin", Default: "1", Min: 1, Max: 8,
+					HasMin: true, HasMax: true},
+			}},
+			{ID: "b", Enabled: true},
+		}
+	}
+
+	t.Run("エンジンごとに別々に持てる", func(t *testing.T) {
+		s := newTestSettings(t, list())
+		if _, err := s.SetEngineMultiPV("a", 5); err != nil {
+			t.Fatalf("SetEngineMultiPV: %v", err)
+		}
+		got, err := s.SetEngineMultiPV("b", 1)
+		if err != nil {
+			t.Fatalf("SetEngineMultiPV: %v", err)
+		}
+		if got.Engines[0].MultiPV != 5 || got.Engines[1].MultiPV != 1 {
+			t.Errorf("MultiPV = %d, %d, want 5, 1", got.Engines[0].MultiPV, got.Engines[1].MultiPV)
+		}
+		cfg, err := ikkyoku.LoadConfig(s.path)
+		if err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		if cfg.Engines[0].Options[ikkyoku.MultiPVOption] != "5" {
+			t.Errorf("保存された値 = %+v", cfg.Engines[0].Options)
+		}
+	})
+
+	// ⚠️ **未設定はアプリの既定（3）。エンジンの宣言（たいてい 1）ではない。**
+	// 「次善手を選んだらどう転ぶか」を辿るのが構想の中心なので、
+	// **最善手だけが出ている状態を既定にしない。**
+	t.Run("未設定はアプリの既定", func(t *testing.T) {
+		s := newTestSettings(t, list())
+		got := s.Settings()
+		for i, e := range got.Engines {
+			if e.MultiPV != ikkyoku.DefaultMultiPV {
+				t.Errorf("engines[%d].MultiPV = %d, want %d", i, e.MultiPV, ikkyoku.DefaultMultiPV)
+			}
+		}
+	})
+
+	t.Run("エンジンの上限を超える値は断る", func(t *testing.T) {
+		s := newTestSettings(t, list())
+		got, err := s.SetEngineMultiPV("a", 10) // 宣言は max 8
+		if err == nil {
+			t.Fatal("エラーになるべき")
+		}
+		if got.Engines[0].MultiPV != ikkyoku.DefaultMultiPV {
+			t.Errorf("断ったのに値が入った: %d", got.Engines[0].MultiPV)
+		}
+		// 宣言していないエンジンには上限が無い（宣言が無いだけで、正当な値）。
+		if _, err := s.SetEngineMultiPV("b", 10); err != nil {
+			t.Errorf("宣言の無いエンジンで断られた: %v", err)
+		}
+	})
+
+	t.Run("0 以下は断る", func(t *testing.T) {
+		s := newTestSettings(t, list())
+		if _, err := s.SetEngineMultiPV("a", 0); err == nil {
+			t.Error("エラーになるべき")
+		}
+	})
+
+	// ⚠️ **設定タブの option の一覧には出さない**（入口は解析タブのカード）。
+	t.Run("option の一覧には出さない", func(t *testing.T) {
+		s := newTestSettings(t, list())
+		if _, err := s.SetEngineMultiPV("a", 5); err != nil {
+			t.Fatalf("SetEngineMultiPV: %v", err)
+		}
+		got := s.Settings()
+		if _, ok := optionOf(got, 0, ikkyoku.MultiPVOption); ok {
+			t.Error("MultiPV が option の一覧に出ている（編集口が 2 つになる）")
+		}
+		// 「n 件を変更中」にも数えない（一覧に出ていないものを数に入れない）。
+		if got.Engines[0].OptionCount != 0 {
+			t.Errorf("OptionCount = %d, want 0", got.Engines[0].OptionCount)
+		}
+	})
+
+	// ⚠️ **「全部を既定に戻す」で巻き添えにしない。** あのボタンが並んでいるのは
+	// option の一覧で、そこに MultiPV は出ていない。
+	t.Run("全部を既定に戻しても残る", func(t *testing.T) {
+		s := newTestSettings(t, list())
+		if _, err := s.SetEngineMultiPV("a", 5); err != nil {
+			t.Fatalf("SetEngineMultiPV: %v", err)
+		}
+		got, err := s.ResetEngineOptions("a")
+		if err != nil {
+			t.Fatalf("ResetEngineOptions: %v", err)
+		}
+		if got.Engines[0].MultiPV != 5 {
+			t.Errorf("MultiPV = %d, want 5（巻き添えで戻っている）", got.Engines[0].MultiPV)
+		}
+	})
+}

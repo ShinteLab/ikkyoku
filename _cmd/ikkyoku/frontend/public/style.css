@@ -1365,6 +1365,30 @@ html.is-main #app {
   white-space: nowrap;
 }
 
+/* 候補手の本数（MultiPV。2026-08-15 に解析の行からここへ移した）。
+   **エンジンごとの設定**なので、そのエンジンの見出しに置く。
+
+   ⚠️ **高さを増やさないこと** —— この行の高さは `--analyze-card-h`（実測値）に
+   見込んであり、**増えるとエンジン 2 つでスクロールバーが出る**。だから
+   字も padding も小さく、`line-height: 1` で詰めてある。
+   ⚠️ **文字サイズを変えたら `--analyze-card-h` を測り直すこと。** */
+.analyze-engine-multipv {
+  flex: 0 0 auto;
+  align-self: center;
+  padding: 0 2px;
+  font-size: 11px;
+  line-height: 1;
+  color: #9aa6c0;
+  background: #23262e;
+  border: 1px solid #3a3d47;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.analyze-engine-multipv:hover {
+  color: #f2f3f5;
+}
+
 .analyze-engine-meta {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1380,7 +1404,8 @@ html.is-main #app {
 /* エンジン解析の行（Phase 4）。盤のすぐ下に 1 行だけ。
    **評価値はこの画面の主役の 1 つ**なので、他の行より大きく出す。
    盤をできるだけ大きく見せたいので、行そのものは増やさないこと。 */
-/* 解析の行（解析・連続・秒数・候補・全て解析）。**盤の右の列に入っている**ので、
+/* 解析の行（解析・連続・秒数）。**候補手の本数はここには無い**（2026-08-15。
+   エンジンごとの設定になったので、入口は各カードの見出し）。**盤の右の列に入っている**ので、
    ⚠️ **折り返せるようにしておくこと**（横に一列で並ぶ前提にしない）。 */
 .analyze-row {
   flex: 0 0 auto;

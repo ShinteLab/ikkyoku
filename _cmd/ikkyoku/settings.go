@@ -96,6 +96,11 @@ type EngineSettings struct {
 	Options []EngineOptionSettings `json:"options"`
 	// OptionsKnown は option の宣言を読み込み済みか（「接続を確認」で入る）。
 	OptionsKnown bool `json:"optionsKnown"`
+	// MultiPV は候補手の本数（**解析タブのエンジンの見出しで変える**）。
+	//
+	// ⚠️ **`Options` の一覧には出さない**（編集口を 2 つにしない。`engineOptionSettings`）。
+	// **既定は解決済みで返る**（`ikkyoku.DefaultMultiPV`）。
+	MultiPV int `json:"multiPv"`
 	// Enabled は解析に使うか。**外した登録も残る。**
 	Enabled bool `json:"enabled"`
 	// Color は評価値グラフの折れ線の色（`#rrggbb`）。
@@ -146,10 +151,18 @@ type EngineOptionSettings struct {
 // 並びは**エンジンが宣言した順**、そのあとに**宣言に無い値**（設定ファイルに
 // 手で書いたもの・実行ファイルを差し替えて宣言だけ捨てたもの）を名前順で。
 // ⚠️ **宣言の順を並べ替えないこと**（`EngineInfo.Declared` の注記）。
+// ⚠️ **MultiPV はこの一覧に出さない**（2026-08-15）。**入口は解析タブの
+// エンジンの見出し**（候補手を見ながら増やすものなので）。ここにも欄を置くと
+// **同じ値の編集口が 2 つ**になり、どちらが今の値か分からなくなる。
+// ⚠️ **値そのものは `Options` に入っている**（`EngineEntry.MultiPV`）。
+// 「出さない」だけで「持たない」ではない。
 func engineOptionSettings(e ikkyoku.EngineEntry) []EngineOptionSettings {
 	out := make([]EngineOptionSettings, 0, len(e.OptionSpecs)+len(e.Options))
-	seen := make(map[string]bool, len(e.OptionSpecs))
+	seen := map[string]bool{ikkyoku.MultiPVOption: true}
 	for _, o := range e.OptionSpecs {
+		if o.Name == ikkyoku.MultiPVOption {
+			continue
+		}
 		seen[o.Name] = true
 		value, custom := e.OptionValue(o)
 		out = append(out, EngineOptionSettings{
@@ -177,15 +190,23 @@ func engineOptionSettings(e ikkyoku.EngineEntry) []EngineOptionSettings {
 //
 // i は**一覧の中での位置**（未設定の色を登録順で決めるのに要る）。
 func engineSettings(e ikkyoku.EngineEntry, i int) EngineSettings {
+	opts := engineOptionSettings(e)
+	custom := 0
+	for _, o := range opts {
+		if o.Custom {
+			custom++
+		}
+	}
 	return EngineSettings{
 		ID:           e.ID,
 		Name:         e.DisplayName(),
 		Custom:       e.Name != "",
 		Path:         e.Path,
 		Builtin:      e.Path == "",
-		OptionCount:  len(e.Options),
-		Options:      engineOptionSettings(e),
+		OptionCount:  custom,
+		Options:      opts,
 		OptionsKnown: len(e.OptionSpecs) > 0,
+		MultiPV:      e.MultiPV(),
 		Enabled:      e.Enabled,
 		Color:        e.DisplayColor(i),
 	}
@@ -560,17 +581,71 @@ func checkOptionValue(o ikkyoku.EngineOption, v string) (string, error) {
 	return v, nil
 }
 
+// SetEngineMultiPV は候補手の本数を決める（解析タブのエンジンの見出し）。
+//
+// **入口をそこに置いてあるのが要点**（2026-08-15。以前は解析の行に**全エンジン
+// 共通**の欄が 1 つあった）。本数を変えたくなるのは**候補手を読んでいる最中**で、
+// しかも**どれくらい出すかはエンジンごとに変えたい**（速いエンジンは多めに、
+// 重いエンジンは 1 本、など）。
+//
+// ⚠️ **保存先は `Options["MultiPV"]`**（エンジンが宣言している option そのもの）。
+// 専用の欄を作らないのは、**同じ値の置き場所を 2 つ持たない**ため。
+//
+// ⚠️ **繋ぎ直しは要らない。** これは探索ごとに送る option なので、
+// `AnalyzeService.engineKey`（接続の指紋）からは外してある。
+func (s *SettingsService) SetEngineMultiPV(id string, n int) (AppSettings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if n < 1 {
+		return s.settings(), fmt.Errorf("候補手の本数は 1 以上で指定してください: %d", n)
+	}
+	entry, ok := s.entryLocked(id)
+	if !ok {
+		return s.settings(), fmt.Errorf("そのエンジンの登録が見つかりません")
+	}
+	// エンジンが上限を宣言しているなら、それを超える値は断る（送っても無視されるうえ、
+	// **`setoption` には応答が返らないので画面では気づけない**）。
+	if spec, known := entry.OptionSpec(ikkyoku.MultiPVOption); known && spec.HasMax && n > spec.Max {
+		return s.settings(), fmt.Errorf("このエンジンの候補手は %d 本までです: %d", spec.Max, n)
+	}
+	return s.editEngines(func(list []ikkyoku.EngineEntry) []ikkyoku.EngineEntry {
+		for i := range list {
+			if list[i].ID != id {
+				continue
+			}
+			if list[i].Options == nil {
+				list[i].Options = map[string]string{}
+			}
+			// ⚠️ **既定（`DefaultMultiPV`）と同じでも書き残す。** ほかの option と
+			// 違って、ここでの既定は**エンジンの宣言ではなくアプリの都合**なので、
+			// 消すと「エンジンの既定に従う」ではなく「アプリの既定に戻る」になる。
+			// **選んだ値がそのまま残るほうが素直。**
+			list[i].Options[ikkyoku.MultiPVOption] = strconv.Itoa(n)
+		}
+		return list
+	})
+}
+
 // ResetEngineOptions は設定した値を全部捨てて、エンジンの既定に戻す。
 //
 // **宣言（`OptionSpecs`）は捨てない** —— 入力欄が作れなくなるので、
 // 戻す先が画面から消えてしまう。
+//
+// ⚠️ **候補手の本数（`MultiPV`）も残す。** このボタンが並んでいるのは
+// 設定タブの option の一覧で、**そこに MultiPV は出ていない**（入口は解析タブ）。
+// 出ていないものを巻き添えで戻すと、**押した本人に何が起きたか分からない。**
 func (s *SettingsService) ResetEngineOptions(id string) (AppSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.editEngines(func(list []ikkyoku.EngineEntry) []ikkyoku.EngineEntry {
 		for i := range list {
-			if list[i].ID == id {
-				list[i].Options = nil
+			if list[i].ID != id {
+				continue
+			}
+			keep := list[i].Options[ikkyoku.MultiPVOption]
+			list[i].Options = nil
+			if keep != "" {
+				list[i].Options = map[string]string{ikkyoku.MultiPVOption: keep}
 			}
 		}
 		return list

@@ -65,6 +65,15 @@ export interface AnalyzeEngine {
     "name": string;
 
     /**
+     * MultiPV は候補手を何本出させるか（**このエンジンの設定**）。
+     * 
+     * ⚠️ **エンジンごとに違ってよい**（2026-08-15。以前は解析の行に共通の欄が
+     * 1 つあった）。速いエンジンは多めに、重いエンジンは 1 本、という使い分けが
+     * できないと、**複数を同時に走らせる意味が薄れる**。
+     */
+    "multiPv": number;
+
+    /**
      * Custom は Label を人が付けたか（設定タブの名前欄）。
      * 
      * ⚠️ **名乗った名前を見出しに足すかどうかの判断**（2026-08-15）。
@@ -481,6 +490,14 @@ export interface EngineSettings {
      * OptionsKnown は option の宣言を読み込み済みか（「接続を確認」で入る）。
      */
     "optionsKnown": boolean;
+
+    /**
+     * MultiPV は候補手の本数（**解析タブのエンジンの見出しで変える**）。
+     * 
+     * ⚠️ **`Options` の一覧には出さない**（編集口を 2 つにしない。`engineOptionSettings`）。
+     * **既定は解決済みで返る**（`ikkyoku.DefaultMultiPV`）。
+     */
+    "multiPv": number;
 
     /**
      * Enabled は解析に使うか。**外した登録も残る。**

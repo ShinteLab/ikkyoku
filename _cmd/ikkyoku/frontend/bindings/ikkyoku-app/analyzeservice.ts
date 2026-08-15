@@ -93,9 +93,11 @@ export function Release(): $CancellablePromise<void> {
  * エンジンも生きている）。時間で打ち切っても、それまでに完走した深さの評価値は出る
  * （設計原則3）。
  * 
- * multiPV は候補手を何本出させるか（0/1 なら最善手だけ）。**次善手を辿るのが
- * 構想の中心**なので、ここは畳まずに素通しする。⚠️ **対応していないエンジンでは
- * 無視される**（自作 `engine` が今それ。engine/TODO.md の 1）ので、
+ * ⚠️ **候補手の本数（MultiPV）はここでは受け取らない**（2026-08-15。以前は引数
+ * だった）。**エンジンごとの設定**（`EngineEntry.MultiPV`）を `runOne` が読む ——
+ * 速いエンジンは多めに、重いエンジンは 1 本、という使い分けができないと、
+ * **複数を同時に走らせる意味が薄れる**。⚠️ **対応していないエンジンでは無視される**
+ * （自作 `engine` が今それ。engine/TODO.md の 1）ので、
  * **1 本しか返らないことを異常扱いしないこと。**
  * 
  * ⚠️ **局面が確定していなければエラー。** 手番か駒台の先後が未決だと SFEN が
@@ -104,8 +106,8 @@ export function Release(): $CancellablePromise<void> {
  * ⚠️ **設定で「解析に使う」が 1 つも無ければエラー。** 何も起きないより、
  * 設定を直す先が分かるほうがよい。
  */
-export function Start(seconds: number, multiPV: number): $CancellablePromise<$models.AnalyzeState> {
-    return $Call.ByID(3590958719, seconds, multiPV);
+export function Start(seconds: number): $CancellablePromise<$models.AnalyzeState> {
+    return $Call.ByID(3590958719, seconds);
 }
 
 /**

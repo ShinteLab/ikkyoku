@@ -668,23 +668,11 @@ export function mountMainScreen(root: HTMLElement): void {
                   <option value="0">無制限</option>
                 </select>
               </label>
-              <!-- 候補手の本数（MultiPV。2026-08-11）。**次善手を辿るのが構想の中心**
-                   なので、最善手だけに絞らずここで増やせるようにする。
-
-                   ⚠️ **対応していないエンジンでは無視される**（自作エンジンが今それ）。
-                   1 本しか返らないことを異常扱いしないこと。 -->
-              <label class="analyze-time">
-                <select id="analyze-multipv"
-                        title="候補手を何本出させるか（MultiPV）。対応していないエンジンでは 1 本のままです">
-                  <!-- 既定は**候補 3**（2026-08-12）。「次善手を選んだらどう転ぶか」を
-                       辿るのが構想の中心なので、最善手だけが出ている状態を既定にしない。
-                       ⚠️ 対応していないエンジン（同梱のもの）では 1 本のままになる。 -->
-                  <option value="1">候補 1</option>
-                  <option value="3" selected>候補 3</option>
-                  <option value="5">候補 5</option>
-                  <option value="10">候補 10</option>
-                </select>
-              </label>
+              <!-- ⚠️ **候補手の本数（MultiPV）の欄はここには無い**（2026-08-15 に外した）。
+                   **エンジンごとの設定**になったので、入口は下の**エンジンの見出し**。
+                   全エンジン共通の欄を 1 つ置くと、速いエンジンは多めに・重いエンジンは
+                   1 本、という使い分けができない（複数を同時に走らせる意味が薄れる）。
+                   ⚠️ **ここに戻さないこと**（同じ値の入口が 2 つになる）。 -->
               <span id="analyze-meta" class="note"></span>
               <!-- 押せない理由。**ツールチップだけにしない**（ホバーしないと読めない）。 -->
               <span id="analyze-hint" class="note is-caution" hidden></span>
@@ -1273,7 +1261,6 @@ export function mountMainScreen(root: HTMLElement): void {
   const analyzeRun = root.querySelector<HTMLButtonElement>("#analyze-run")!;
   const analyzeSeconds = root.querySelector<HTMLSelectElement>("#analyze-seconds")!;
   const analyzeContinuous = root.querySelector<HTMLInputElement>("#analyze-continuous")!;
-  const analyzeMultiPV = root.querySelector<HTMLSelectElement>("#analyze-multipv")!;
   const analyzeEnginesBox = root.querySelector<HTMLDivElement>("#analyze-engines")!;
   const analyzeMeta = root.querySelector<HTMLElement>("#analyze-meta")!;
   const analyzeHint = root.querySelector<HTMLElement>("#analyze-hint")!;
@@ -1350,6 +1337,9 @@ export function mountMainScreen(root: HTMLElement): void {
   const engineColors = new Map<string, string>();
   // 設定タブで付けた名前（**色の丸のツールチップ**に出す。色だけでは読めない人が居る）。
   const engineNames = new Map<string, string>();
+  // 候補手の本数（**解析に使うエンジンだけ**）。⚠️ **一覧に確保する高さを決めるのに要る**
+  // ——本数はエンジンごとに違うので、**一番多いもの**に合わせる（`reserveLines`）。
+  const engineMultiPV = new Map<string, number>();
   let engineColorOptions: EngineColorOption[] = [];
   // 設定に無いエンジンの色。**普通は通らない**（一覧に無いものは解析にも出ない）。
   const UNKNOWN_ENGINE_COLOR = "#b8c0d0";
@@ -1514,8 +1504,13 @@ export function mountMainScreen(root: HTMLElement): void {
   //
   // ⚠️ **本数ぶん全部は確保しない**（4 本ぶんで頭打ち）。MultiPV を上げると
   // 候補は何本にもなるので、そのぶん盤の下が伸びる。溢れたら中でスクロールさせる。
+  // ⚠️ **本数はエンジンごとに違う**（2026-08-15）。**一番多いものに合わせる** ——
+  // 少ないほうに合わせると、多いエンジンの候補が枠からはみ出す（あるいは
+  // 出るたびに高さが動く）。⚠️ **エンジンごとに枠の高さを変えないこと** ——
+  // 揃っていないと、候補を縦に読み比べられない。
   const reserveLines = () => {
-    const want = Math.min(Math.max(Number(analyzeMultiPV.value) || 1, 1), 4);
+    const most = Math.max(1, ...engineMultiPV.values());
+    const want = Math.min(Math.max(most, 1), 4);
     // 1 行 28px + 行間 2px（CSS の --analyze-line-h と揃えること）。
     //
     // ⚠️ **:root（documentElement）に入れること**（2026-08-12）。枠の高さ
@@ -1525,7 +1520,8 @@ export function mountMainScreen(root: HTMLElement): void {
     document.documentElement.style.setProperty(
       "--analyze-lines-h", `${want * 28 + (want - 1) * 2}px`);
   };
-  analyzeMultiPV.addEventListener("change", reserveLines);
+  // ⚠️ **取り直すのは `showSettings`**（本数は設定の一部になったので）。
+  // ここでの 1 回は、設定が届く前の初期値。
   reserveLines();
 
   // ---- 勝率バー（盤の上）---------------------------------------------------
@@ -1603,7 +1599,7 @@ export function mountMainScreen(root: HTMLElement): void {
   // **起動を待っているあいだも見出しを出す**（エンジンによっては評価関数の読み込みで
   // 数秒かかる）。何も出ないと、走っていないのか遅いのかが分からない。
   const buildEngineCards = (
-    engines: { id: string; label: string; name: string; custom: boolean }[],
+    engines: { id: string; label: string; name: string; custom: boolean; multiPv: number }[],
   ) => {
     // ⚠️ **選択は解析ごとに捨てる**（勝率バーのエンジンとは扱いが違う）。
     // あちらは「どのエンジンを見たいか」という好みなので残すが、こちらは
@@ -1635,6 +1631,14 @@ export function mountMainScreen(root: HTMLElement): void {
                   title="評価値グラフの折れ線の色を変えます"
                   aria-label="折れ線の色を変える"></button>
           <span class="analyze-engine-name"></span>
+          <!-- 候補手の本数（MultiPV。2026-08-15 にここへ移した）。
+               ⚠️ **エンジンごとの設定**（速いエンジンは多めに、重いエンジンは 1 本）。
+               本数を変えたくなるのは**候補手を読んでいる最中**なので、
+               設定タブまで行かせない（折れ線の色と同じ考え方）。
+               ⚠️ 対応していないエンジンでは 1 本のまま（異常ではない）。 -->
+          <select class="analyze-engine-multipv"
+                  aria-label="候補手の本数"
+                  title="候補手を何本出させるか（MultiPV）。このエンジンの設定として保存します"></select>
           <span class="analyze-engine-meta note"></span>
         </div>
         <ol class="analyze-lines"></ol>
@@ -1660,6 +1664,7 @@ export function mountMainScreen(root: HTMLElement): void {
       entry.meta.textContent = "エンジンを起動しています…";
       const dot = card.querySelector<HTMLButtonElement>(".analyze-engine-color")!;
       dot.addEventListener("click", (ev) => askEngineColor(e.id, ev.clientX, ev.clientY));
+      fillMultiPV(card.querySelector<HTMLSelectElement>(".analyze-engine-multipv")!, e);
       engineCards.set(e.id, entry);
       analyzeEnginesBox.appendChild(card);
     }
@@ -1667,6 +1672,54 @@ export function mountMainScreen(root: HTMLElement): void {
     paintEngineColors();
     // 起動を待つあいだの見た目（中立）に戻す。**押せるかどうかもここで決まる。**
     renderWinRate();
+  };
+
+  // 候補手の本数の選択肢（**1〜10**）。
+  //
+  // ⚠️ **設定ファイルにはこれ以外の値も入りうる**（手で書けば 20 でも通る）ので、
+  // **今の値が一覧に無ければ足す** —— 足さないと `select.value` が空になり、
+  // **選び直すまで画面が嘘をつく**（設定は 20 なのに 1 に見える）。
+  const MULTIPV_CHOICES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+  const fillMultiPV = (sel: HTMLSelectElement, e: { id: string; multiPv: number }) => {
+    const now = Math.max(1, e.multiPv || 1);
+    const values = MULTIPV_CHOICES.includes(now)
+      ? MULTIPV_CHOICES
+      : [...MULTIPV_CHOICES, now].sort((a, b) => a - b);
+    sel.replaceChildren();
+    for (const v of values) {
+      const opt = document.createElement("option");
+      opt.value = String(v);
+      opt.textContent = `候補 ${v}`;
+      sel.appendChild(opt);
+    }
+    sel.value = String(now);
+    sel.addEventListener("change", () => {
+      void setEngineMultiPV(e.id, Number(sel.value) || 1);
+    });
+  };
+
+  // 本数を変えたら**その場で保存し、走っていれば解析し直す。**
+  //
+  // ⚠️ **やり直さないと「選んだのに増えない」**（本数は次の `go` から効くので、
+  // 走っている探索は最後まで今の本数のまま）。深さは失うが、
+  // **候補を増やしたのは今すぐ見たいから**なので、待たせるほうがおかしい。
+  const setEngineMultiPV = async (id: string, n: number) => {
+    try {
+      showSettings(await SettingsService.SetEngineMultiPV(id, n));
+    } catch (err) {
+      // ⚠️ **理由は解析タブに出す**（押したのはこちらの画面。設定タブの行に
+      // 出しても読まれない）。`setEngineColor` と同じ。
+      analyzeStatus.textContent = String(err instanceof Error ? err.message : err);
+      analyzeStatus.hidden = false;
+      return;
+    }
+    if (analyzeRunning) {
+      await startAnalyze();
+    } else {
+      // 走っていないときは、次に解析したときの高さだけ合わせておく。
+      reserveLines();
+    }
   };
 
   // エンジンが名乗った名前を見出しに足す。**設定の名前は消さない**
@@ -2159,10 +2212,8 @@ export function mountMainScreen(root: HTMLElement): void {
     analyzeMeta.textContent = "エンジンを起動しています…";
     reserveLines();
     try {
-      const st = await AnalyzeService.Start(
-        Number(analyzeSeconds.value) || 0,
-        Number(analyzeMultiPV.value) || 1,
-      );
+      // ⚠️ **候補手の本数は渡さない**（エンジンごとの設定を Go 側が読む）。
+      const st = await AnalyzeService.Start(Number(analyzeSeconds.value) || 0);
       analyzeSeq = st.seq;
       analyzedSfen = st.sfen;
       // 参加するエンジンは Go 側が決める（設定で「解析に使う」を付けたもの）。
@@ -3804,10 +3855,19 @@ export function mountMainScreen(root: HTMLElement): void {
     // 既定色の解決も Go 側が済ませてある（`EngineSettings.Color` は常に入っている）。
     engineColors.clear();
     engineNames.clear();
+    engineMultiPV.clear();
     for (const e of s.engines ?? []) {
       engineColors.set(e.id, e.color);
       engineNames.set(e.id, e.name);
+      // ⚠️ **数えるのは「解析に使う」ものだけ**（外した登録の本数で高さを取ると、
+      // 出てこない候補手のぶん盤が小さくなる）。
+      if (e.enabled) {
+        engineMultiPV.set(e.id, e.multiPv);
+      }
     }
+    // ⚠️ **候補手の高さもここで取り直す**（本数は設定の一部になったので、
+    // 変えた結果がそのまま効く）。
+    reserveLines();
     engineColorOptions = s.engineColors ?? [];
     paintEngineColors();
     showEngineList(s.engines ?? []);

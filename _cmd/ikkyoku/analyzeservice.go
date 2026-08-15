@@ -103,6 +103,12 @@ type AnalyzeEngine struct {
 	Label string `json:"label"`
 	// Name はエンジンが名乗った名前（`id name`。まだ繋いでいなければ空）。
 	Name string `json:"name"`
+	// MultiPV は候補手を何本出させるか（**このエンジンの設定**）。
+	//
+	// ⚠️ **エンジンごとに違ってよい**（2026-08-15。以前は解析の行に共通の欄が
+	// 1 つあった）。速いエンジンは多めに、重いエンジンは 1 本、という使い分けが
+	// できないと、**複数を同時に走らせる意味が薄れる**。
+	MultiPV int `json:"multiPv"`
 	// Custom は Label を人が付けたか（設定タブの名前欄）。
 	//
 	// ⚠️ **名乗った名前を見出しに足すかどうかの判断**（2026-08-15）。
@@ -165,9 +171,17 @@ func newSession(e ikkyoku.EngineEntry) *analyze.Session {
 // ⚠️ **options を含めること。** `setoption` は `isready` の前にしか効かないので、
 // **値を変えたら繋ぎ直さないと反映されない**（毎回起こしていた頃は自動で解決して
 // いた）。しかもエンジンは黙って古い値のまま動くので、**画面では気づけない。**
+//
+// ⚠️ **MultiPV だけは外す**（2026-08-15）。あれは**探索ごとに送る option**で
+// （`client.Session.Analyze` が `go` の前に送る）、`isready` を跨ぐ必要が無い。
+// 指紋に入れると、**候補手の本数を変えるたびにエンジンを起こし直す**ことになり、
+// 評価関数の読み込みを毎回払う（解析タブで気軽に変える値なので特に効く）。
 func engineKey(e ikkyoku.EngineEntry) string {
 	names := make([]string, 0, len(e.Options))
 	for k := range e.Options {
+		if k == ikkyoku.MultiPVOption {
+			continue
+		}
 		names = append(names, k)
 	}
 	sort.Strings(names)
@@ -403,9 +417,11 @@ type AnalyzeState struct {
 // エンジンも生きている）。時間で打ち切っても、それまでに完走した深さの評価値は出る
 // （設計原則3）。
 //
-// multiPV は候補手を何本出させるか（0/1 なら最善手だけ）。**次善手を辿るのが
-// 構想の中心**なので、ここは畳まずに素通しする。⚠️ **対応していないエンジンでは
-// 無視される**（自作 `engine` が今それ。engine/TODO.md の 1）ので、
+// ⚠️ **候補手の本数（MultiPV）はここでは受け取らない**（2026-08-15。以前は引数
+// だった）。**エンジンごとの設定**（`EngineEntry.MultiPV`）を `runOne` が読む ——
+// 速いエンジンは多めに、重いエンジンは 1 本、という使い分けができないと、
+// **複数を同時に走らせる意味が薄れる**。⚠️ **対応していないエンジンでは無視される**
+// （自作 `engine` が今それ。engine/TODO.md の 1）ので、
 // **1 本しか返らないことを異常扱いしないこと。**
 //
 // ⚠️ **局面が確定していなければエラー。** 手番か駒台の先後が未決だと SFEN が
@@ -413,7 +429,7 @@ type AnalyzeState struct {
 // 決めてもらう以外に手は無いので、ここは警告ではなくエラーにする。
 // ⚠️ **設定で「解析に使う」が 1 つも無ければエラー。** 何も起きないより、
 // 設定を直す先が分かるほうがよい。
-func (s *AnalyzeService) Start(seconds, multiPV int) (AnalyzeState, error) {
+func (s *AnalyzeService) Start(seconds int) (AnalyzeState, error) {
 	// ⚠️ **根と手順を分けて受け取る。** 組み立て直した 1 つの SFEN を渡すと、
 	// 千日手と連続王手をエンジンが判定できない（`position sfen <根> moves ...`）。
 	target, err := s.study.analyzeTarget()
@@ -444,6 +460,7 @@ func (s *AnalyzeService) Start(seconds, multiPV int) (AnalyzeState, error) {
 			ID:      e.ID,
 			Label:   e.DisplayName(),
 			Name:    s.lastEngine[e.ID],
+			MultiPV: e.MultiPV(),
 			Custom:  e.Name != "",
 			Builtin: e.Path == "",
 		})
@@ -456,8 +473,9 @@ func (s *AnalyzeService) Start(seconds, multiPV int) (AnalyzeState, error) {
 	// ⚠️ **勝率の定数もここで読む。** 設定は解析を始めるたびに読まれるので、
 	// 変えた結果が次の解析にそのまま効く（`setoption` と違って繋ぎ直しは要らない ——
 	// **エンジンに渡す値ではなく、評価値の見せ方だから**）。
+	// ⚠️ **MultiPV はここでは入れない**（エンジンごとに違う。`runOne` が入れる）。
 	opt := analyze.Options{
-		Moves: target.Moves, MultiPV: multiPV,
+		Moves:           target.Moves,
 		PonanzaConstant: s.settings.ponanzaConstant(),
 	}
 	if seconds > 0 {
@@ -494,6 +512,9 @@ func (s *AnalyzeService) runOne(
 	ctx context.Context, seq int, entry ikkyoku.EngineEntry, target analyzeTarget, opt analyze.Options,
 ) {
 	label := entry.DisplayName()
+	// ⚠️ **候補手の本数はエンジンごと**（`opt` は値渡しなので、ここで入れてよい）。
+	// 探索ごとに送る option なので、繋ぎ直しは要らない（`engineKey` の注記）。
+	opt.MultiPV = entry.MultiPV()
 	// 評価値グラフに残すのは**最善手（順位 1）の評価値**。
 	//
 	// ⚠️ **途中経過のたびに書く**（`done` だけにしない）。時間で打ち切っても

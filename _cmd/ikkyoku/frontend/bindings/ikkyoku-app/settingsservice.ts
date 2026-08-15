@@ -81,6 +81,10 @@ export function RemoveEngine(id: string): $CancellablePromise<$models.AppSetting
  * 
  * **宣言（`OptionSpecs`）は捨てない** —— 入力欄が作れなくなるので、
  * 戻す先が画面から消えてしまう。
+ * 
+ * ⚠️ **候補手の本数（`MultiPV`）も残す。** このボタンが並んでいるのは
+ * 設定タブの option の一覧で、**そこに MultiPV は出ていない**（入口は解析タブ）。
+ * 出ていないものを巻き添えで戻すと、**押した本人に何が起きたか分からない。**
  */
 export function ResetEngineOptions(id: string): $CancellablePromise<$models.AppSettings> {
     return $Call.ByID(2207888277, id);
@@ -109,6 +113,24 @@ export function SetEngineColor(id: string, color: string): $CancellablePromise<$
  */
 export function SetEngineEnabled(id: string, enabled: boolean): $CancellablePromise<$models.AppSettings> {
     return $Call.ByID(632833467, id, enabled);
+}
+
+/**
+ * SetEngineMultiPV は候補手の本数を決める（解析タブのエンジンの見出し）。
+ * 
+ * **入口をそこに置いてあるのが要点**（2026-08-15。以前は解析の行に**全エンジン
+ * 共通**の欄が 1 つあった）。本数を変えたくなるのは**候補手を読んでいる最中**で、
+ * しかも**どれくらい出すかはエンジンごとに変えたい**（速いエンジンは多めに、
+ * 重いエンジンは 1 本、など）。
+ * 
+ * ⚠️ **保存先は `Options["MultiPV"]`**（エンジンが宣言している option そのもの）。
+ * 専用の欄を作らないのは、**同じ値の置き場所を 2 つ持たない**ため。
+ * 
+ * ⚠️ **繋ぎ直しは要らない。** これは探索ごとに送る option なので、
+ * `AnalyzeService.engineKey`（接続の指紋）からは外してある。
+ */
+export function SetEngineMultiPV(id: string, n: number): $CancellablePromise<$models.AppSettings> {
+    return $Call.ByID(3386769369, id, n);
 }
 
 /**

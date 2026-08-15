@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 )
 
 // Config は永続化する設定（ディスプレイ番号・領域・保存先）。
@@ -189,6 +191,40 @@ func (e EngineEntry) OptionValue(o EngineOption) (value string, custom bool) {
 		return v, true
 	}
 	return o.Default, false
+}
+
+// MultiPVOption は候補手の本数を決める USI option の名前。
+//
+// **将棋 UI と USI の共通の語彙**（エンジン側もこの名前で宣言する）。
+const MultiPVOption = "MultiPV"
+
+// DefaultMultiPV は候補手の本数の既定（**エンジンの宣言より優先する**）。
+//
+// ⚠️ **1 に戻さないこと**（2026-08-12 に 1 から 3 へ変えた）。「次善手を選んだら
+// どう転ぶか」を辿るのが構想の中心なので、**最善手だけが出ている状態を既定にしない。**
+// エンジンの宣言はたいてい 1 だが、**このアプリの既定はこちら**。
+const DefaultMultiPV = 3
+
+// MultiPV は候補手の本数を返す（設定に無ければ `DefaultMultiPV`）。
+//
+// ⚠️ **置き場所は `Options` の中**（`setoption name MultiPV`）。別の欄を作らないのは、
+// **エンジンが宣言している option そのもの**だから —— 2 か所に持つと、設定タブで
+// 書いた値と解析タブで選んだ値が食い違う。
+//
+// ⚠️ **これは探索ごとに送る option。** `isready` の前にしか効かないものと違って
+// **繋ぎ直しが要らない**ので、`AnalyzeService.engineKey`（接続の指紋）からは
+// 外してある。**指紋に入れると、本数を変えるたびにエンジンを起こし直すことになる。**
+func (e EngineEntry) MultiPV() int {
+	v, ok := e.Options[MultiPVOption]
+	if !ok {
+		return DefaultMultiPV
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil || n < 1 {
+		// 手で書き換えて壊れている。**既定に倒す**（解析できなくしない）。
+		return DefaultMultiPV
+	}
+	return n
 }
 
 // EngineConfig は**旧形式**の単一エンジン設定（`Config.Engine`）。
