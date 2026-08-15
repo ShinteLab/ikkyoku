@@ -683,6 +683,17 @@ export function mountMainScreen(root: HTMLElement): void {
                   <option value="0">無制限</option>
                 </select>
               </label>
+              <!-- 候補手を全部出すか（2026-08-15）。**本数はエンジンごとの設定**だが、
+                   **どれだけ画面に出すかは見え方の話**なので、こちらは全体で 1 つ。
+
+                   ⚠️ **既定は切**（3 件まで。溢れたら枠の中でスクロール）。
+                   候補を増やすと枠がそのぶん縦に伸び、**同じ列にある手順のリストが
+                   そのぶん短くなる**ので、伸ばすのは「今そうしたい」と言ったときだけ。 -->
+              <label class="analyze-continuous"
+                     title="候補手を全部出します（切ると 3 件まで。溢れたぶんは枠の中でスクロール）。本数そのものはエンジンごとの設定です">
+                <input id="analyze-show-all" type="checkbox" />
+                <span>全て表示</span>
+              </label>
               <!-- ⚠️ **候補手の本数（MultiPV）の欄はここには無い**（2026-08-15 に外した）。
                    **エンジンごとの設定**になったので、入口は下の**エンジンの見出し**。
                    全エンジン共通の欄を 1 つ置くと、速いエンジンは多めに・重いエンジンは
@@ -1276,6 +1287,7 @@ export function mountMainScreen(root: HTMLElement): void {
   const analyzeRun = root.querySelector<HTMLButtonElement>("#analyze-run")!;
   const analyzeSeconds = root.querySelector<HTMLSelectElement>("#analyze-seconds")!;
   const analyzeContinuous = root.querySelector<HTMLInputElement>("#analyze-continuous")!;
+  const analyzeShowAll = root.querySelector<HTMLInputElement>("#analyze-show-all")!;
   const analyzeEnginesBox = root.querySelector<HTMLDivElement>("#analyze-engines")!;
   const analyzeMeta = root.querySelector<HTMLElement>("#analyze-meta")!;
   const analyzeHint = root.querySelector<HTMLElement>("#analyze-hint")!;
@@ -1308,6 +1320,9 @@ export function mountMainScreen(root: HTMLElement): void {
     // label は設定タブで付けた名前。**エンジンが名乗る名前とは別に持つ**
     // （同じ exe を option 違いで 2 つ登録していると、名乗る名前では区別が付かない）。
     label: string;
+    // multiPv はこのエンジンの候補手の本数。**一覧の高さを決めるのに要る**
+    // （「全て表示」を切り替えたときに、枠を作り直さずに背を変えるため）。
+    multiPv: number;
     // custom は label を人が付けたか。**名乗った名前を見出しに足すかの判断**
     // （`showEngineName`）。⚠️ **判断は Go 側の値を使うこと** —— 名前を付けたか
     // どうかは設定が持っている事実で、`label === name` かどうかとは別物。
@@ -1511,14 +1526,24 @@ export function mountMainScreen(root: HTMLElement): void {
     analyzeStatus.textContent = "";
   };
 
-  // linesHeight は候補 n 本ぶんの一覧の高さ（px）。
+  // linesPx は候補 n 本ぶんの一覧の高さ（px）。
   //
   // 1 行 28px + 行間 2px（**CSS の `--analyze-line-h` と揃えること**）。
-  // ⚠️ **4 本ぶんで頭打ち**（2026-08-11 から変えていない）。MultiPV を上げると
-  // 候補は何本にもなるので、溢れたぶんは中でスクロールさせる。
-  const LINES_CAP = 4;
+  //
+  // ⚠️ **頭打ちは「全て表示」で変わる**（2026-08-15）:
+  //
+  //   切（既定）… **3 本ぶん**。溢れたぶんは枠の中でスクロール
+  //   入        … **10 本ぶん**（＝選べる本数の上限。事実上「全部出す」）
+  //
+  // **既定を低くしてあるのは、枠が縦に伸びると同じ列の手順のリストが短くなるから。**
+  // 伸ばすのは「今そうしたい」と言ったときだけにする。
+  // ⚠️ **設定に無い本数（手で書いた 20 など）でもここで止まる** —— 止めないと
+  // 枠が画面いっぱいまで伸びて、手順が見えなくなる。
+  const LINES_CAP = 3;
+  const LINES_CAP_ALL = 10;
+  const linesCap = () => (analyzeShowAll.checked ? LINES_CAP_ALL : LINES_CAP);
   const linesPx = (n: number) => {
-    const want = Math.min(Math.max(n || 1, 1), LINES_CAP);
+    const want = Math.min(Math.max(n || 1, 1), linesCap());
     return want * 28 + (want - 1) * 2;
   };
 
@@ -1545,6 +1570,13 @@ export function mountMainScreen(root: HTMLElement): void {
   //
   // ⚠️ **:root（documentElement）に入れること**（2026-08-12）。**カスタム
   // プロパティは下へしか継承しない**ので、枠の要素に入れると読めない側が出る。
+  // ⚠️ **枠全体の頭打ちも「全て表示」で変わる。** 伸ばせるようにしないと、
+  // 候補を全部出しても**枠の側でスクロールするだけ**で、伸ばした意味が無い。
+  // ⚠️ **無制限にはしないこと** —— 同じ列に手順のリストが居るので、
+  // 伸ばし切ると手順が読めない高さまで潰れる。
+  const ENGINES_CAP = 300;
+  const ENGINES_CAP_ALL = 480;
+
   const reserveLines = () => {
     const counts = [...engineMultiPV.values()];
     // 29px = 見出し + 上下の padding（CSS の `--analyze-card-h` の実測値）。
@@ -1552,10 +1584,20 @@ export function mountMainScreen(root: HTMLElement): void {
       .map((n) => linesPx(n) + 29)
       .sort((a, b) => b - a);
     const two = cards.slice(0, 2).reduce((a, b) => a + b, 0) + 8;
+    const cap = analyzeShowAll.checked ? ENGINES_CAP_ALL : ENGINES_CAP;
     const root = document.documentElement.style;
     root.setProperty("--analyze-lines-h", `${linesPx(Math.max(1, ...counts))}px`);
-    root.setProperty("--analyze-engines-h", `${Math.min(two, 300)}px`);
+    root.setProperty("--analyze-engines-h", `${Math.min(two, cap)}px`);
   };
+
+  // 「全て表示」を切り替えたら、**出ている枠も作り直さずに背を変える**
+  // （作り直すと読んでいた候補が消える。色を変えたときと同じ扱い）。
+  analyzeShowAll.addEventListener("change", () => {
+    for (const card of engineCards.values()) {
+      sizeLines(card.lines, card.multiPv);
+    }
+    reserveLines();
+  });
   // ⚠️ **取り直すのは `showSettings`**（本数は設定の一部になったので）。
   // ここでの 1 回は、設定が届く前の初期値。
   reserveLines();
@@ -1714,6 +1756,7 @@ export function mountMainScreen(root: HTMLElement): void {
       `;
       const entry: EngineCard = {
         label: e.label,
+        multiPv: e.multiPv,
         custom: e.custom,
         pending: true,
         startupMs: 0,
@@ -1793,6 +1836,7 @@ export function mountMainScreen(root: HTMLElement): void {
     // ⚠️ **枠全体の取り分は `showSettings` が `reserveLines` で取り直し済み。**
     const card = engineCards.get(id);
     if (card) {
+      card.multiPv = n;
       sizeLines(card.lines, n);
     }
   };
