@@ -785,7 +785,28 @@ export interface FontState {
     "hidariUma": boolean;
 
     /**
-     * Style は上の 2 つを**画面にそのまま当てられる形**にしたもの。
+     * PieceColor は駒の字の色（`#rrggbb`）。**既定は解決済みで返る。**
+     * ⚠️ **フロントに既定値を書かないこと。**
+     */
+    "pieceColor": string;
+
+    /**
+     * PieceOpacity は駒の字の濃さ（0〜1）。**既定は解決済みで返る。**
+     */
+    "pieceOpacity": number;
+
+    /**
+     * DefaultPieceColor は「既定に戻す」で戻る色（**表示と比較のため**）。
+     */
+    "defaultPieceColor": string;
+
+    /**
+     * MinPieceOpacity は薄くできる下限。⚠️ **フロントに書かないこと。**
+     */
+    "minPieceOpacity": number;
+
+    /**
+     * Style は上の設定を**画面にそのまま当てられる形**にしたもの。
      */
     "style": PieceStyle;
 
@@ -916,6 +937,16 @@ export interface PieceStyle {
      */
     "black": string;
     "white": string;
+
+    /**
+     * Ink は駒の字の色（`--shogi-piece-color`）。**濃さ込みの 1 つの値。**
+     * 
+     * ⚠️ **色と濃さを別々に渡さないこと。** 盤の中は SVG なので `fill-opacity`
+     * でも足りるが、**ikkyoku は HTML でも駒を描く**（駒台のチップ・掴んだ駒の絵）。
+     * そちらで濃さを別に当てると element の `opacity` になり、
+     * **駒の背景（木地）ごと透ける。**
+     */
+    "ink": string;
 }
 
 /**

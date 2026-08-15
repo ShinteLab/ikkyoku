@@ -480,3 +480,65 @@ func TestConfigGyokuRoundTrip(t *testing.T) {
 		t.Errorf("往復していない: gyoku=%q hidariUma=%v", got.Gyoku, got.HidariUma)
 	}
 }
+
+// 駒の字の色。⚠️ **色と濃さは 1 つの値にまとめて返すこと** ——
+// 別々に配ると、HTML で駒を描く側は element の opacity を使うことになり
+// **駒の背景（木地）ごと透ける**。
+func TestPieceInk(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		color   string
+		opacity float64
+		want    string
+	}{
+		// そのままの濃さなら 16 進のまま（設定ファイルにも画面にも読みやすい）。
+		{"既定", "", 0, "#1a1a1a"},
+		{"色だけ", "#3b2a1a", 0, "#3b2a1a"},
+		{"薄くする", "#1a1a1a", 0.75, "rgba(26, 26, 26, 0.75)"},
+		{"色と濃さ", "#804000", 0.5, "rgba(128, 64, 0, 0.5)"},
+		{"大文字も読む", "#ABCDEF", 0, "#abcdef"},
+		{"#rgb も読む", "#abc", 0, "#aabbcc"},
+		// ⚠️ **読めない色は既定に戻す**（弾いて空を返さない。駒が消える）。
+		{"読めない色", "まっくろ", 0, "#1a1a1a"},
+		{"# が無い", "1a1a1a", 0, "#1a1a1a"},
+		// ⚠️ **範囲外は丸める。** 0 まで許すと駒が消えて盤が壊れたようにしか
+		// 見えず、戻し方も分からなくなる。
+		{"薄すぎ", "#1a1a1a", 0.01, "rgba(26, 26, 26, 0.2)"},
+		{"濃すぎ", "#1a1a1a", 5, "#1a1a1a"},
+		{"負", "#1a1a1a", -1, "#1a1a1a"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := PieceInk(tc.color, tc.opacity); got != tc.want {
+				t.Errorf("PieceInk(%q, %v) = %q, want %q", tc.color, tc.opacity, got, tc.want)
+			}
+		})
+	}
+}
+
+// 既定は core/web の `--shogi-piece-color` の既定と同じであること。
+//
+// ⚠️ **食い違うと、設定を触っていないのに駒の色が変わる**（ikkyoku が
+// 変数を当てた瞬間に別の色になる）。**向こうを変えたらここも直す。**
+func TestDefaultPieceColorMatchesWeb(t *testing.T) {
+	if DefaultPieceColor != "#1a1a1a" {
+		t.Errorf("core/web の既定と違う: %q", DefaultPieceColor)
+	}
+	if got := PieceInk("", 0); got != DefaultPieceColor {
+		t.Errorf("既定の解決が %q になっている", got)
+	}
+}
+
+// 駒の字の色と濃さが往復すること。
+func TestConfigPieceInkRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := SaveConfig(path, Config{PieceColor: "#3b2a1a", PieceOpacity: 0.7}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.PieceColor != "#3b2a1a" || got.PieceOpacity != 0.7 {
+		t.Errorf("往復していない: color=%q opacity=%v", got.PieceColor, got.PieceOpacity)
+	}
+}

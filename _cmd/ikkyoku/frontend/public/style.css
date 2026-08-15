@@ -1102,6 +1102,28 @@ html.is-main #app {
   font-weight: 400;
 }
 
+/* 駒の字の濃さ（2026-08-16）。⚠️ **数字を隣に出すこと** ——
+   つまみの位置だけでは、戻したいときに元がどこだったか分からない。 */
+.ink-range {
+  width: 110px;
+  padding: 0;
+}
+
+.ink-value {
+  min-width: 34px;
+  font-size: 12px;
+  color: #9aa6c0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 色見本。既定の高さのままだと縦に潰れて色が読めない。 */
+.setting-fields input[type="color"] {
+  width: 44px;
+  height: 26px;
+  padding: 2px;
+  cursor: pointer;
+}
+
 /* 選んだフォントの見本。**実際に焼いた字**を当てて出す（盤に出る字そのもの）。
    ⚠️ **font-family は JS が当てる**（family がプレビューごとに変わるため）。 */
 .font-sample {
@@ -1110,7 +1132,7 @@ html.is-main #app {
   font-size: 30px;
   line-height: 1.3;
   letter-spacing: 2px;
-  color: #1a1a1a;
+  color: var(--shogi-piece-color, #1a1a1a);
   background: #f3c877;
   border: 1px solid #5a3b1a;
   border-radius: 4px;
@@ -2638,6 +2660,9 @@ html.is-main #app {
 /* 今の手番。**盤の駒と同じ系統の色**にして、光っている側が手前か奥かに
    関わらず「そちらが指す番」と読めるようにする。 */
 .turn-mark.is-active {
+  /* ⚠️ **`--shogi-piece-color` を当てないこと**（2026-08-16）。色を揃えたく
+     なるが、**これは駒ではなく手番の印**なので、駒の字を薄くする設定に
+     つられて薄くなると**今どちらの番かが読めなくなる。** */
   color: #1a1a1a;
   background: #ffd479;
   border-color: #b8862b;
@@ -2901,7 +2926,7 @@ html.is-main #app {
      ⚠️ **値は Go 側が組み立てたもの**（mainscreen.ts の applyPieceStyle）。 */
   font-feature-settings: var(--piece-features-black, normal);
   font-size: 34px;
-  color: #1a1a1a;
+  color: var(--shogi-piece-color, #1a1a1a);
   background: #f3c877;
   border: 1px solid #5a3b1a;
   border-radius: 3px;
@@ -3029,7 +3054,11 @@ html.is-main #app {
      `"ShogiSFEN"` を直に書くと**盤の駒とこの駒だけ書体が食い違う**。
      `<shogi-board>` も同じ変数を見る（core/web）。 */
   font-family: var(--shogi-font, "ShogiSFEN"), serif;
-  fill: rgba(26, 26, 26, 0.6);
+  /* 色は盤の駒に合わせる。⚠️ **薄さは別に重ねること**（2026-08-16）——
+     ここが薄いのは「まだ指していない手」だからで、**駒の字の濃さの設定とは
+     別の意味**。設定で濃くしても、この駒だけは盤の駒より薄いままでよい。 */
+  fill: var(--shogi-piece-color, #1a1a1a);
+  opacity: 0.6;
 }
 
 .study-hint-promote {
@@ -3638,7 +3667,7 @@ html.is-main #app {
      **駒を描くところで規則を分けないため**（増やしたときに拾い忘れる）。 */
   font-feature-settings: var(--piece-features-black, normal);
   font-size: 22px;
-  color: #1a1a1a;
+  color: var(--shogi-piece-color, #1a1a1a);
   background: #f3c877;
   border: 1px solid #5a3b1a;
   border-radius: 3px;

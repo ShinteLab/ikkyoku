@@ -78,7 +78,18 @@ type FontState struct {
 	GyokuOptions []ikkyoku.GyokuOption `json:"gyokuOptions"`
 	// HidariUma は馬を左馬で書くか。⚠️ **先後の区別は無い**（盤全体）。
 	HidariUma bool `json:"hidariUma"`
-	// Style は上の 2 つを**画面にそのまま当てられる形**にしたもの。
+
+	// PieceColor は駒の字の色（`#rrggbb`）。**既定は解決済みで返る。**
+	// ⚠️ **フロントに既定値を書かないこと。**
+	PieceColor string `json:"pieceColor"`
+	// PieceOpacity は駒の字の濃さ（0〜1）。**既定は解決済みで返る。**
+	PieceOpacity float64 `json:"pieceOpacity"`
+	// DefaultPieceColor は「既定に戻す」で戻る色（**表示と比較のため**）。
+	DefaultPieceColor string `json:"defaultPieceColor"`
+	// MinPieceOpacity は薄くできる下限。⚠️ **フロントに書かないこと。**
+	MinPieceOpacity float64 `json:"minPieceOpacity"`
+
+	// Style は上の設定を**画面にそのまま当てられる形**にしたもの。
 	Style PieceStyle `json:"style"`
 	// Note は選んだフォントを焼けなかった理由。**空なら問題なし。**
 	//
@@ -118,10 +129,25 @@ type PieceStyle struct {
 	// 値として不正で、宣言ごと捨てられる）。
 	Black string `json:"black"`
 	White string `json:"white"`
+
+	// Ink は駒の字の色（`--shogi-piece-color`）。**濃さ込みの 1 つの値。**
+	//
+	// ⚠️ **色と濃さを別々に渡さないこと。** 盤の中は SVG なので `fill-opacity`
+	// でも足りるが、**ikkyoku は HTML でも駒を描く**（駒台のチップ・掴んだ駒の絵）。
+	// そちらで濃さを別に当てると element の `opacity` になり、
+	// **駒の背景（木地）ごと透ける。**
+	Ink string `json:"ink"`
 }
 
 // pieceStyle は設定から画面に当てる形を組み立てる。
-func pieceStyle(gyoku string, hidariUma bool) PieceStyle {
+func pieceStyle(cfg ikkyoku.Config) PieceStyle {
+	st := pieceGlyphStyle(ikkyoku.NormalizeGyoku(cfg.Gyoku), cfg.HidariUma)
+	st.Ink = ikkyoku.PieceInk(cfg.PieceColor, cfg.PieceOpacity)
+	return st
+}
+
+// pieceGlyphStyle は玉・左馬のぶんだけを組み立てる。
+func pieceGlyphStyle(gyoku string, hidariUma bool) PieceStyle {
 	g := ikkyoku.NormalizeGyoku(gyoku)
 	features := func(black bool) string {
 		var f []string
@@ -219,16 +245,23 @@ func (s *FontService) state(cfg ikkyoku.Config) FontState {
 	for _, e := range list {
 		rows = append(rows, s.row(e))
 	}
-	gyoku := ikkyoku.NormalizeGyoku(cfg.Gyoku)
+	color := ikkyoku.NormalizePieceColor(cfg.PieceColor)
+	if color == "" {
+		color = ikkyoku.DefaultPieceColor
+	}
 	st := FontState{
-		Fonts:        rows,
-		Current:      cfg.PieceFont,
-		BuiltinName:  ikkyoku.BuiltinPieceFontName,
-		Required:     piecefont.Required(),
-		Gyoku:        gyoku,
-		GyokuOptions: ikkyoku.GyokuOptions,
-		HidariUma:    cfg.HidariUma,
-		Style:        pieceStyle(gyoku, cfg.HidariUma),
+		Fonts:             rows,
+		Current:           cfg.PieceFont,
+		BuiltinName:       ikkyoku.BuiltinPieceFontName,
+		Required:          piecefont.Required(),
+		Gyoku:             ikkyoku.NormalizeGyoku(cfg.Gyoku),
+		GyokuOptions:      ikkyoku.GyokuOptions,
+		HidariUma:         cfg.HidariUma,
+		PieceColor:        color,
+		PieceOpacity:      ikkyoku.NormalizePieceOpacity(cfg.PieceOpacity),
+		DefaultPieceColor: ikkyoku.DefaultPieceColor,
+		MinPieceOpacity:   ikkyoku.MinPieceOpacity,
+		Style:             pieceStyle(cfg),
 	}
 	entry, ok := cfg.CurrentPieceFont()
 	if !ok {
@@ -487,6 +520,33 @@ func (s *FontService) Rename(id, name string) (FontState, error) {
 func (s *FontService) SetGyoku(v string) (FontState, error) {
 	cfg, err := s.settings.editConfig(func(cfg *ikkyoku.Config) {
 		cfg.Gyoku = ikkyoku.NormalizeGyoku(v)
+	})
+	return s.state(cfg), err
+}
+
+// SetPieceInk は駒の字の色と濃さを変える。
+//
+// **色と濃さを 1 回で受ける。** 画面では別々の欄だが、
+// **どちらも「駒の字の濃さ」という 1 つの見え方**を決めるので、
+// 設定を書く経路を 2 つに分けない。
+//
+// ⚠️ **範囲外を弾かずに丸める**（`NormalizePieceOpacity` / `NormalizePieceColor`）。
+// 読めない色は既定に戻す。**打ち間違いで駒が消えるより、読める値に丸めるほうがまし**
+// （設計原則3）。丸めた結果はそのまま返るので、**画面に何が起きたかが出る。**
+func (s *FontService) SetPieceInk(color string, opacity float64) (FontState, error) {
+	cfg, err := s.settings.editConfig(func(cfg *ikkyoku.Config) {
+		c := ikkyoku.NormalizePieceColor(color)
+		// ⚠️ **既定と同じ色は書き残さない**（エンジンの option と同じ）。
+		// 書き残すと、既定を変えたときに古い値で固まる。
+		if c == ikkyoku.DefaultPieceColor {
+			c = ""
+		}
+		cfg.PieceColor = c
+		o := ikkyoku.NormalizePieceOpacity(opacity)
+		if o >= ikkyoku.DefaultPieceOpacity {
+			o = 0 // 0 が「未設定」
+		}
+		cfg.PieceOpacity = o
 	})
 	return s.state(cfg), err
 }

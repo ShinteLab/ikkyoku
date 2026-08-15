@@ -286,12 +286,19 @@ function applyPieceStyle(
     boardHidariUma: boolean;
     black: string;
     white: string;
+    ink: string;
   },
   boards: Element[],
 ): void {
   const root = document.documentElement.style;
   root.setProperty("--piece-features-black", style.black);
   root.setProperty("--piece-features-white", style.white);
+  // 駒の字の色。⚠️ **濃さ込みの 1 つの値**（Go 側の `PieceInk` が合成する）。
+  // 盤（core/web の `--shogi-piece-color`）と、ikkyoku が HTML で描く駒
+  // （駒台のチップ・掴んだ駒の絵）の**両方が同じ値を見る** ——
+  // 濃さを別に当てると、HTML 側は element の `opacity` になり
+  // **駒の背景（木地）ごと透ける。**
+  root.setProperty("--shogi-piece-color", style.ink);
   for (const b of boards) {
     // ⚠️ **属性そのものを外すこと。** 値を空にして残すと「値なし」＝
     // **先後とも玉**になる（`core/web/README.md` の表）。
@@ -994,6 +1001,30 @@ export function mountMainScreen(root: HTMLElement): void {
                 <span class="setting-title">馬を左馬にする</span>
               </span>
             </label>
+          </div>
+
+          <!-- 駒の字の色と濃さ（2026-08-16）。**字の強いフォント（太い明朝・毛筆）は
+               少し薄いほうが盤に映える。** 端末のフォントを選べるようにした以上、
+               書体ごとに濃さを合わせたくなる。
+
+               ⚠️ **画面では別々の欄だが、当てるのは 1 つの値**（Go 側が rgba に
+               合成する）。濃さを別に当てると、HTML で描いている駒台のチップは
+               element の opacity になり**木地ごと透ける**。 -->
+          <div class="setting-fields">
+            <label class="field">
+              <span class="field-label">字の色</span>
+              <input id="font-ink-color" type="color"
+                     title="駒の字の色（盤・駒台・掴んだ駒に効きます）" />
+            </label>
+            <label class="field">
+              <span class="field-label">濃さ</span>
+              <input id="font-ink-opacity" class="ink-range" type="range"
+                     min="20" max="100" step="5"
+                     title="駒の字の濃さ。字の強いフォントは少し薄いほうが盤に映えます" />
+              <output id="font-ink-opacity-value" class="ink-value"></output>
+            </label>
+            <button id="font-ink-reset" class="ghost-btn" type="button"
+                    title="字の色と濃さを既定に戻します">既定に戻す</button>
           </div>
 
           <div class="setting-fields">
@@ -4230,6 +4261,10 @@ export function mountMainScreen(root: HTMLElement): void {
   const fontDirs = root.querySelector<HTMLParagraphElement>("#font-dirs")!;
   const fontGyoku = root.querySelector<HTMLSelectElement>("#font-gyoku")!;
   const fontHidariUma = root.querySelector<HTMLInputElement>("#font-hidari-uma")!;
+  const fontInkColor = root.querySelector<HTMLInputElement>("#font-ink-color")!;
+  const fontInkOpacity = root.querySelector<HTMLInputElement>("#font-ink-opacity")!;
+  const fontInkOpacityValue = root.querySelector<HTMLOutputElement>("#font-ink-opacity-value")!;
+  const fontInkReset = root.querySelector<HTMLButtonElement>("#font-ink-reset")!;
 
   // 王/玉・左馬を当てる相手。**2 つの盤の両方**（訂正タブと解析タブ）。
   // ⚠️ **片方だけだと、採った瞬間に字が変わって見える。**
@@ -4378,6 +4413,15 @@ export function mountMainScreen(root: HTMLElement): void {
     // 倒して返ってくるので、選び直されたことが画面に出る）。
     fontGyoku.value = st.gyoku;
     fontHidariUma.checked = st.hidariUma;
+    // 字の色と濃さ。⚠️ **既定も下限も Go 側が解決して返す**ので、
+    // フロントに数値を書かない（丸めた結果もそのまま返るので、画面に出る）。
+    fontInkColor.value = st.pieceColor;
+    fontInkOpacity.min = String(Math.round(st.minPieceOpacity * 100));
+    fontInkOpacity.value = String(Math.round(st.pieceOpacity * 100));
+    fontInkOpacityValue.textContent = `${Math.round(st.pieceOpacity * 100)}%`;
+    // ⚠️ **見本の色をここで当てないこと。** `.font-sample` も CSS で
+    // `--shogi-piece-color` を見ているので、当てると同じ値を 2 経路で書くことになる
+    // （実際に盤へ出る濃さのまま見える、という狙いは CSS 側で満たされている）。
 
     fontList.replaceChildren();
     fontList.appendChild(
@@ -4603,6 +4647,48 @@ export function mountMainScreen(root: HTMLElement): void {
         setFontStatus(`保存できませんでした: ${String(err)}`, "error");
       }
     })();
+  });
+
+  // 字の色と濃さ。**色と濃さを 1 回で送る**（設定を書く経路を 2 つに分けない）。
+  //
+  // ⚠️ **`rgba` の合成をここに書かないこと。** 当てる値を作るのは Go 側
+  // （`ikkyoku.PieceInk`）だけで、**引いている最中の見た目のためだけに
+  // フロントで作り直すと、丸め方が食い違ったときに「離した瞬間に色が飛ぶ」**
+  // という追いにくい壊れ方をする（`Score.Label` / 折れ線の色と同じ理由）。
+  //
+  // 代わりに**送るのを間引く**。引いている最中も反映されるが、
+  // 設定ファイルへの書き込みは止まったときの 1 回で済む。
+  let inkTimer = 0;
+  const saveInk = async (color: string, opacity: number) => {
+    window.clearTimeout(inkTimer);
+    try {
+      showFontState(await FontService.SetPieceInk(color, opacity));
+    } catch (err) {
+      setFontStatus(`保存できませんでした: ${String(err)}`, "error");
+    }
+  };
+  const saveInkSoon = () => {
+    window.clearTimeout(inkTimer);
+    inkTimer = window.setTimeout(() => {
+      void saveInk(fontInkColor.value, Number(fontInkOpacity.value) / 100);
+    }, 150);
+  };
+
+  fontInkOpacity.addEventListener("input", () => {
+    // 数字だけは即座に動かす（**これは合成ではないので Go を待たなくてよい**）。
+    fontInkOpacityValue.textContent = `${fontInkOpacity.value}%`;
+    saveInkSoon();
+  });
+  fontInkColor.addEventListener("input", saveInkSoon);
+  // 離したときは待たずに送る（**間引きの取りこぼしを残さない**）。
+  for (const el of [fontInkOpacity, fontInkColor]) {
+    el.addEventListener("change", () => {
+      void saveInk(fontInkColor.value, Number(fontInkOpacity.value) / 100);
+    });
+  }
+  fontInkReset.addEventListener("click", () => {
+    // ⚠️ **既定の値をここに書かないこと。** 空を送れば Go 側が既定に倒す。
+    void saveInk("", 0);
   });
 
   const showSettings = (s: {

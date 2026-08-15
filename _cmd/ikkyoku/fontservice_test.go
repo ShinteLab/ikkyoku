@@ -454,3 +454,80 @@ func TestFontSetGyokuUnknown(t *testing.T) {
 		t.Errorf("知らない値が通ってしまった: %+v", st.Style)
 	}
 }
+
+// 駒の字の色と濃さ。**画面には 1 つの値で渡す**（`Style.Ink`）。
+func TestFontPieceInk(t *testing.T) {
+	s := newTestFonts(t)
+
+	// 既定。**解決済みで返る**（フロントに既定値を書かせない）。
+	st := s.State()
+	if st.PieceColor != ikkyoku.DefaultPieceColor || st.PieceOpacity != 1 {
+		t.Errorf("既定が解決されていない: color=%q opacity=%v", st.PieceColor, st.PieceOpacity)
+	}
+	if st.Style.Ink != ikkyoku.DefaultPieceColor {
+		t.Errorf("既定の Ink = %q", st.Style.Ink)
+	}
+	if st.DefaultPieceColor == "" || st.MinPieceOpacity <= 0 {
+		t.Errorf("既定と下限を返していない: %+v", st)
+	}
+
+	// 薄くする。⚠️ **色と濃さが 1 つの値にまとまること。**
+	st, err := s.SetPieceInk("#3b2a1a", 0.75)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Style.Ink != "rgba(59, 42, 26, 0.75)" {
+		t.Errorf("Ink = %q", st.Style.Ink)
+	}
+	if st.PieceColor != "#3b2a1a" || st.PieceOpacity != 0.75 {
+		t.Errorf("画面に返す値が違う: color=%q opacity=%v", st.PieceColor, st.PieceOpacity)
+	}
+	if got := s.settings.config(); got.PieceColor != "#3b2a1a" || got.PieceOpacity != 0.75 {
+		t.Errorf("保存されていない: %+v", got)
+	}
+
+	// ⚠️ **既定と同じ値は書き残さない**（既定を変えたときに古い値で固まる）。
+	if _, err := s.SetPieceInk(ikkyoku.DefaultPieceColor, 1); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.settings.config(); got.PieceColor != "" || got.PieceOpacity != 0 {
+		t.Errorf("既定なのに書き残している: color=%q opacity=%v", got.PieceColor, got.PieceOpacity)
+	}
+
+	// ⚠️ **読めない色・範囲外は断らずに丸め、丸めた結果をそのまま返すこと**
+	// （画面に何が起きたかが出る。打ち間違いで駒が消えるより、まし）。
+	st, err = s.SetPieceInk("まっくろ", 0.01)
+	if err != nil {
+		t.Fatalf("断らずに丸めること: %v", err)
+	}
+	if st.PieceColor != ikkyoku.DefaultPieceColor {
+		t.Errorf("読めない色が通った: %q", st.PieceColor)
+	}
+	if st.PieceOpacity != ikkyoku.MinPieceOpacity {
+		t.Errorf("薄すぎる値が通った: %v", st.PieceOpacity)
+	}
+}
+
+// 色を変えても玉・左馬の設定が巻き添えにならないこと（別の設定）。
+func TestFontPieceInkKeepsGlyphStyle(t *testing.T) {
+	s := newTestFonts(t)
+	if _, err := s.SetGyoku(ikkyoku.GyokuWhite); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetHidariUma(true); err != nil {
+		t.Fatal(err)
+	}
+	st, err := s.SetPieceInk("#804000", 0.6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Gyoku != ikkyoku.GyokuWhite || !st.HidariUma {
+		t.Errorf("色を変えたら玉/左馬が消えた: %+v", st.Style)
+	}
+	if st.Style.White != `"ss01", "ss02"` {
+		t.Errorf("feature が崩れた: %q", st.Style.White)
+	}
+	if st.Style.Ink != "rgba(128, 64, 0, 0.6)" {
+		t.Errorf("Ink = %q", st.Style.Ink)
+	}
+}

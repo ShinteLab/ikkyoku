@@ -108,6 +108,23 @@ type Config struct {
 	// 使うと決めたら両方そうなる（`core/web/README.md`）。
 	HidariUma bool `json:"hidariUma,omitempty"`
 
+	// PieceColor は駒の字の色（`#rrggbb`）。**空なら既定**（`DefaultPieceColor`）。
+	//
+	// ⚠️ **既定値の解決は `PieceInk` の 1 か所。** ここに書かないこと
+	// （`PonanzaConstant` / 折れ線の色と同じ）。
+	PieceColor string `json:"pieceColor,omitempty"`
+
+	// PieceOpacity は駒の字の濃さ（0〜1）。**0 なら既定**（＝1.0、そのまま）。
+	//
+	// **字の強いフォント（太い明朝・毛筆）は少し薄いほうが盤に映える。**
+	// 端末のフォントを選べるようにした以上、書体ごとに濃さを合わせたくなる。
+	//
+	// ⚠️ **色と別に持つのは設定ファイルの都合**（色を変えても濃さが消えない）。
+	// **画面に渡すときは 1 つの rgba にまとめる**（`PieceInk`）——
+	// 別々に配ると、HTML で駒を描く側が element の `opacity` を使うことになり
+	// **背景ごと透ける。**
+	PieceOpacity float64 `json:"pieceOpacity,omitempty"`
+
 	// PieceFont は今使っている駒フォントの登録 ID。**空なら同梱。**
 	//
 	// ⚠️ **登録の中に「使う」印を持たせない**（エンジンの `Enabled` とは違う）。
@@ -178,6 +195,87 @@ const (
 	// GyokuBoth は先後とも玉。
 	GyokuBoth = "both"
 )
+
+// 駒の字の色と濃さの既定。
+//
+// **`core/web` の `--shogi-piece-color` の既定と同じ値**（`shogi-board.js`）。
+// ⚠️ **向こうが変わったらここも直すこと**（`CELL` / `MARGIN` と同じ約束）。
+const (
+	DefaultPieceColor   = "#1a1a1a"
+	DefaultPieceOpacity = 1.0
+	// MinPieceOpacity は薄くできる下限。**0 まで許さない**のは、
+	// **駒が消えて盤が壊れたようにしか見えない**から（戻し方も分からなくなる）。
+	MinPieceOpacity = 0.2
+)
+
+// PieceInk は駒の字の色を、**画面にそのまま当てられる 1 つの値**にして返す。
+//
+// ⚠️ **色と濃さを別々に渡さないこと。** `<shogi-board>` の中は SVG なので
+// `fill-opacity` でも足りるが、**ikkyoku は HTML でも駒を描く**（駒台のチップ・
+// 掴んだ駒の絵）。そちらで濃さを別に当てると element の `opacity` になり、
+// **駒の背景（木地）ごと透ける。** alpha 込みの色なら両方で同じものが使える。
+//
+// ⚠️ **既定値の解決もここ 1 か所**（呼び出し側にもフロントにも書かない）。
+func PieceInk(color string, opacity float64) string {
+	r, g, b, ok := parseHexColor(color)
+	if !ok {
+		r, g, b, _ = parseHexColor(DefaultPieceColor)
+	}
+	a := NormalizePieceOpacity(opacity)
+	if a >= 1 {
+		// そのままの濃さなら 16 進で返す（設定ファイルにも画面にも読みやすい）。
+		return fmt.Sprintf("#%02x%02x%02x", r, g, b)
+	}
+	return fmt.Sprintf("rgba(%d, %d, %d, %s)", r, g, b,
+		strconv.FormatFloat(a, 'f', -1, 64))
+}
+
+// NormalizePieceOpacity は濃さを正規化する（**0 は「未設定」＝既定**）。
+//
+// ⚠️ **範囲外を弾かずに丸めること。** 設定ファイルは手で編集する前提でもあり、
+// **打ち間違いで駒が消えるより、読める濃さに丸めるほうがまし**（設計原則3）。
+func NormalizePieceOpacity(v float64) float64 {
+	if v <= 0 {
+		return DefaultPieceOpacity
+	}
+	if v < MinPieceOpacity {
+		return MinPieceOpacity
+	}
+	if v > 1 {
+		return 1
+	}
+	return v
+}
+
+// NormalizePieceColor は色を正規化する（**読めない値は空＝既定**）。
+func NormalizePieceColor(v string) string {
+	r, g, b, ok := parseHexColor(v)
+	if !ok {
+		return ""
+	}
+	return fmt.Sprintf("#%02x%02x%02x", r, g, b)
+}
+
+// parseHexColor は `#rrggbb` を読む（`#rgb` も受ける）。
+func parseHexColor(s string) (r, g, b int, ok bool) {
+	s = strings.TrimSpace(s)
+	if !strings.HasPrefix(s, "#") {
+		return 0, 0, 0, false
+	}
+	h := s[1:]
+	if len(h) == 3 {
+		// #rgb → #rrggbb（<input type="color"> は出さないが、手で書けてしまう）
+		h = string([]byte{h[0], h[0], h[1], h[1], h[2], h[2]})
+	}
+	if len(h) != 6 {
+		return 0, 0, 0, false
+	}
+	v, err := strconv.ParseUint(h, 16, 32)
+	if err != nil {
+		return 0, 0, 0, false
+	}
+	return int(v>>16) & 0xff, int(v>>8) & 0xff, int(v) & 0xff, true
+}
 
 // GyokuOption は「王/玉」の選択肢 1 つ（画面に出す）。
 type GyokuOption struct {

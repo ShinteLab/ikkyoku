@@ -93,6 +93,21 @@ export function SetHidariUma(on: boolean): $CancellablePromise<$models.FontState
 }
 
 /**
+ * SetPieceInk は駒の字の色と濃さを変える。
+ * 
+ * **色と濃さを 1 回で受ける。** 画面では別々の欄だが、
+ * **どちらも「駒の字の濃さ」という 1 つの見え方**を決めるので、
+ * 設定を書く経路を 2 つに分けない。
+ * 
+ * ⚠️ **範囲外を弾かずに丸める**（`NormalizePieceOpacity` / `NormalizePieceColor`）。
+ * 読めない色は既定に戻す。**打ち間違いで駒が消えるより、読める値に丸めるほうがまし**
+ * （設計原則3）。丸めた結果はそのまま返るので、**画面に何が起きたかが出る。**
+ */
+export function SetPieceInk(color: string, opacity: number): $CancellablePromise<$models.FontState> {
+    return $Call.ByID(1255642594, color, opacity);
+}
+
+/**
  * State は今の設定を返す（設定タブを開いたとき・起動時）。
  */
 export function State(): $CancellablePromise<$models.FontState> {
