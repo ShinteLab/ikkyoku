@@ -1293,6 +1293,14 @@ html.is-main #app {
   --analyze-score-w: 100px;
   --analyze-first-w: 124px;
 
+  /* エンジン名の幅（解析タブの見出し。2026-08-15）。
+     ⚠️ **固定なのは、後ろに続く設定（本数・全て表示）を縦に揃えるため。**
+     エンジンを並べて見比べる画面なので、**同じものが同じ x に居ること**が要る。
+     溢れた名前は省略して `title` で読ませる。
+     ⚠️ **広げると、細い列で解析の情報（深さ・ノード数）が入らなくなる** ——
+     一番細い列は 300px で、そこから色の丸・本数・全て表示のぶんが引かれる。 */
+  --analyze-name-w: 116px;
+
   /* **盤の右の列の中で伸び縮みする**（2026-08-12 に盤の下から移した）。
      ⚠️ **エンジン 1 つぶんの高さは必ず確保する**（2026-08-11）。連続モードでは
      1 手指すたびに「消す → 起こす → 結果が届く」を繰り返すので、中身の有無で
@@ -1332,10 +1340,13 @@ html.is-main #app {
   border-radius: 6px;
 }
 
+/* ⚠️ **並ぶものは幅を固定してある**（名前・本数・全て表示。2026-08-15）——
+   エンジンを縦に並べて見比べる画面なので、**同じものが同じ x に居ること**が要る。
+   そのぶん余白は詰めてあり、余りは深さ・ノード数の側が受け持つ。 */
 .analyze-engine-head {
   display: flex;
   align-items: baseline;
-  gap: 10px;
+  gap: 8px;
 }
 
 /* 折れ線の色（2026-08-14）。**押すと変えられる色見本。**
@@ -1367,12 +1378,21 @@ html.is-main #app {
   outline-offset: 1px;
 }
 
-/* エンジン名。**評価値の出所**なので、候補手より先に目に入る位置に置く。 */
+/* エンジン名。**評価値の出所**なので、候補手より先に目に入る位置に置く。
+
+   ⚠️ **幅は固定**（2026-08-15）。名前の長さはエンジンごとに違うので、中身で
+   決めると**後ろに続く設定（本数・全て表示）がカードごとに別の位置に並ぶ**。
+   エンジンを縦に並べて見比べる画面なので、**同じものは同じ x に居ること**が要る。
+   ⚠️ **溢れたら省略する。** 全文は `title`（`showEngineName` が入れている）。 */
 .analyze-engine-name {
+  flex: 0 0 var(--analyze-name-w);
+  max-width: var(--analyze-name-w);
   font-size: 12.5px;
   font-weight: 600;
   color: #9aa6c0;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* 候補手の本数（MultiPV。2026-08-15 に解析の行からここへ移した）。
@@ -1383,7 +1403,10 @@ html.is-main #app {
    字も padding も小さく、`line-height: 1` で詰めてある。
    ⚠️ **文字サイズを変えたら `--analyze-card-h` を測り直すこと。** */
 .analyze-engine-multipv {
+  /* ⚠️ **幅も固定**（2026-08-15）。「候補 1」と「候補 10」で幅が違うと、
+     **その後ろの「全て表示」がカードごとにずれる**（名前を固定した意味が薄れる）。 */
   flex: 0 0 auto;
+  width: 66px;
   align-self: center;
   padding: 0 2px;
   font-size: 11px;
@@ -1429,7 +1452,13 @@ html.is-main #app {
   cursor: pointer;
 }
 
+/* 深さ・ノード数・経過時間。**行の余りを受け持つ**（2026-08-15）。
+   ⚠️ **`flex: 1 1 0` と `min-width: 0` を落とさないこと。** 前に並ぶもの
+   （名前・本数・全て表示）が固定幅になったので、ここが縮まないと
+   **細い列で行がはみ出して、深さもノード数も見えなくなる**。 */
 .analyze-engine-meta {
+  flex: 1 1 0;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
