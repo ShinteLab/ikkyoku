@@ -1399,6 +1399,36 @@ html.is-main #app {
   color: #f2f3f5;
 }
 
+/* 「全て」（2026-08-15）。**見出しの主役はエンジン名**なので、
+   ⚠️ **本数のセレクトより更に控えめにする** —— 添え物なのに大きくて濃いと、
+   名前と候補手より先に目に入る。チェックも既定の大きさだと浮くので詰める。
+   ⚠️ **高さを増やさないこと**（`--analyze-card-h` は実測値。増えると
+   エンジン 2 つでスクロールバーが出る）。 */
+.analyze-engine-all {
+  flex: 0 0 auto;
+  align-self: center;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10.5px;
+  line-height: 1;
+  color: #6f7787;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.analyze-engine-all:hover {
+  color: #9aa6c0;
+}
+
+.analyze-engine-all-input {
+  width: 11px;
+  height: 11px;
+  margin: 0;
+  accent-color: #6ad3ff;
+  cursor: pointer;
+}
+
 .analyze-engine-meta {
   overflow: hidden;
   text-overflow: ellipsis;

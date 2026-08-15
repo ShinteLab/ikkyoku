@@ -2095,12 +2095,16 @@ export function mountMainScreen(root: HTMLElement): void {
     //
     // ⚠️ **接続を使い回したときは 0**（＝払っていない。「速かった」ではない）ので、
     // **0 を「起動 0.0 秒」と書かないこと** —— 意味が 2 通りになって読めなくなる。
+    // **その場合は何も書かない**（2026-08-15。以前は「接続を使い回し」と出していたが、
+    // **2 回目以降は毎回そうなる**ので、常に出ている文字になっていた）。
+    // ⚠️ **区別そのものは捨てない** —— ツールチップには残す。
     if (card.startupMs > 0) {
       parts.push(`起動 ${(card.startupMs / 1000).toFixed(1)} 秒`);
-    } else if (card.reused) {
-      parts.push("接続を使い回し");
     }
     card.meta.textContent = parts.join(" / ");
+    card.meta.title = card.reused
+      ? `${parts.join(" / ")}（繋ぎっぱなしの接続を使い回したので、起動を払っていません）`
+      : parts.join(" / ");
     // ⚠️ **深さが進むと読み筋は伸び、1 手目も変わりうる。** 盤に出している矢印は
     // **今の読み筋の 1 手目**でなければ、光っている行と食い違う。
     studyBoardUI.showHint(selectedMoves()[0] ?? null);
