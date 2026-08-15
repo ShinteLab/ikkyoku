@@ -1544,12 +1544,17 @@ export function mountMainScreen(root: HTMLElement): void {
     return want * 28 + (want - 1) * 2;
   };
 
-  // 「全て表示」を入れているエンジン。**画面だけの状態**（`config.json` には持たない。
-  // 視点・グラフの高さと同じ扱い）。
+  // 「全て表示」の状態（エンジンごと）。**画面だけの状態**（`config.json` には
+  // 持たない。視点・グラフの高さと同じ扱い）。
+  //
+  // ⚠️ **既定は入**（2026-08-15）。**読ませた候補は全部見えているのが素直**で、
+  // 隠すほうが「今そうしたい」と言う操作。だから**入っていないことだけを覚える**
+  // （Map に無い＝入）。
   //
   // ⚠️ **枠は解析のたびに作り直される**ので、**ここで覚えていないと 1 手ごとに
-  // 切に戻る**（勝率バーで選んだエンジンを覚えているのと同じ理由）。
-  const engineShowAll = new Set<string>();
+  // 既定へ戻る**（勝率バーで選んだエンジンを覚えているのと同じ理由）。
+  const engineShowAll = new Map<string, boolean>();
+  const showsAll = (id: string) => engineShowAll.get(id) ?? true;
 
   // sizeLines は**そのエンジンの本数**で一覧の高さを決める（2026-08-15）。
   //
@@ -1559,7 +1564,7 @@ export function mountMainScreen(root: HTMLElement): void {
   // 変わりうるので、届いた数で伸び縮みさせると**そのたびに画面が上下に動く**
   // （連続モードでは 1 手ごとに「消す → 起こす → 結果が届く」を繰り返す）。
   const sizeLines = (card: EngineCard) => {
-    card.lines.style.height = `${linesPx(card.multiPv, engineShowAll.has(card.id))}px`;
+    card.lines.style.height = `${linesPx(card.multiPv, showsAll(card.id))}px`;
   };
 
   // reserveLines は**枠がまだ無いとき**の一覧の高さを決める。
@@ -1575,8 +1580,11 @@ export function mountMainScreen(root: HTMLElement): void {
   // プロパティは下へしか継承しない**ので、枠の要素に入れると読めない側が出る。
   const reserveLines = () => {
     const counts = [...engineMultiPV.values()];
+    // ⚠️ **既定（＝「全て表示」が入）で見積もること。** 枠の CSS の既定値
+    // （`--analyze-card-h` 経由）がこれを読むので、切った状態で見積もると
+    // **初回だけ枠が足りない**。
     document.documentElement.style.setProperty(
-      "--analyze-lines-h", `${linesPx(Math.max(1, ...counts), false)}px`);
+      "--analyze-lines-h", `${linesPx(Math.max(1, ...counts), true)}px`);
   };
 
   // ---- 解析結果と手順の境目（スプリットバー。2026-08-15）--------------------
@@ -1808,7 +1816,7 @@ export function mountMainScreen(root: HTMLElement): void {
           <label class="analyze-engine-all"
                  title="このエンジンの候補手を全部出します（切ると 3 件まで。溢れたぶんは中でスクロール）">
             <input class="analyze-engine-all-input" type="checkbox" />
-            <span>全て</span>
+            <span>全て表示</span>
           </label>
           <span class="analyze-engine-meta note"></span>
         </div>
@@ -1840,13 +1848,9 @@ export function mountMainScreen(root: HTMLElement): void {
       // 「全て表示」。⚠️ **エンジンごと**で、**解析をまたいで残す**
       // （枠は 1 手ごとに作り直されるので、覚えていないと毎回切に戻る）。
       const all = card.querySelector<HTMLInputElement>(".analyze-engine-all-input")!;
-      all.checked = engineShowAll.has(e.id);
+      all.checked = showsAll(e.id);
       all.addEventListener("change", () => {
-        if (all.checked) {
-          engineShowAll.add(e.id);
-        } else {
-          engineShowAll.delete(e.id);
-        }
+        engineShowAll.set(e.id, all.checked);
         // ⚠️ **枠を作り直さないこと**（読んでいた候補が消える）。背だけ変える。
         sizeLines(entry);
       });
