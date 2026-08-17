@@ -597,6 +597,13 @@ export function mountMainScreen(root: HTMLElement): void {
           <span class="field-label">SFEN</span>
           <code id="sfen" class="sfen">-</code>
         </div>
+        <!-- 解析へ渡す SFEN。**後手目線のときだけ出す**（先手目線なら上と同じ）。
+             ⚠️ **黙って回さない** —— 画面に出ている局面と、エンジンが読む局面が
+             上下逆になるので、何が渡るのかは見えていないといけない。 -->
+        <div id="edit-analyze-sfen-row" class="sfen-row" hidden>
+          <span class="field-label" title="撮った画像が後手目線なので、盤・先後・駒台・手番をまとめて反転して渡します">解析へ</span>
+          <code id="edit-analyze-sfen" class="sfen">-</code>
+        </div>
         <!-- 駒台。**訂正中の局面の値**なので先後の割り振りが出る
              (「認識詳細情報」側は認識した時点の推定枚数で「先後不明」のまま)。
              訂正中は盤の脇に駒そのものが並ぶので、こちらは文字の要約。 -->
@@ -1425,6 +1432,10 @@ export function mountMainScreen(root: HTMLElement): void {
   // 持ち駒を落とした）。**送る前に出す**（何が落ちるか分からないまま送らせない）。
   let editNotes: string[] = [];
   let editLoaded = false;
+  // editNearWhite は**撮った画像が後手目線か**（`EditState.nearWhite` の控え）。
+  // ⚠️ **表示視点（`editFlipped`）とは別物。** あちらは盤の絵をどちらから
+  // 眺めるかで、こちらは**局面そのものの向き**（採るときに 180 度回る）。
+  let editNearWhite = false;
   let lastRegion: ShotRegion | null = null;
 
   const syncTrain = () => {
@@ -2826,14 +2837,25 @@ export function mountMainScreen(root: HTMLElement): void {
   // 訂正タブ側の一行。訂正の操作が通らなかった理由と、確定できない理由を出す。
   const editStatus = root.querySelector<HTMLParagraphElement>("#edit-status")!;
 
+  // 解析へ渡す SFEN の行（**後手目線のときだけ出る**）。
+  const editAnalyzeSfenRow = root.querySelector<HTMLElement>("#edit-analyze-sfen-row")!;
+  const editAnalyzeSfen = root.querySelector<HTMLElement>("#edit-analyze-sfen")!;
+
   // 視点のボタン（解析タブ）。**盤のグリッドの右の列**に置いてある
   // （先手の対局者名の下・先手の駒台の上）。
   const studyFlip = root.querySelector<HTMLButtonElement>("#study-flip")!;
 
   // 視点（手前が先手 / 手前が後手）。**表示だけの反転で、局面には効かない。**
   // 切り替えの中身は下の「視点」の節にまとめてある（ここは値の置き場所だけ）。
-  // ⚠️ **訂正タブと解析タブで 1 つの値。** 片方だけ反転させないこと。
-  let flipped = false;
+  //
+  // ⚠️ **タブごとに別の値**（2026-08-18 に 1 つの値から割った）。訂正タブは
+  // **撮ったとおりを描く面**で、解析タブは**撮った画像が後手目線なら 180 度
+  // 回した局面**を持つ。つまり「同じ見た目」にするには 2 つが食い違っている
+  // 必要がある（採るときに `adoptToStudy` が解析タブ側を合わせる）。
+  // **1 つに戻さないこと** —— 戻すと、後手目線で採った瞬間に訂正タブの盤まで
+  // 裏返り、撮った画像と見比べられなくなる。
+  let editFlipped = false;
+  let studyFlipped = false;
   // 解析タブの駒台に最後に描いた中身。**視点を切り替えたときに並べ直すため**に持つ
   // （局面の写しではない —— 駒台の並び順だけがここに依存している）。
   let studyHands: Stock[] = [];
@@ -2954,7 +2976,7 @@ export function mountMainScreen(root: HTMLElement): void {
       // **駒が 180 度回っている側は逆順**（そちら側から読んで同じ並びになる）。
       // ⚠️ **回っているのは「後手」ではなく「奥の側」**なので、視点を反転すると
       // 逆順にする相手も入れ替わる（`black === flipped`）。
-      for (const s of black === flipped ? [...inv].reverse() : inv) {
+      for (const s of black === studyFlipped ? [...inv].reverse() : inv) {
         const n = black ? s.handBlack : s.handWhite;
         if (n <= 0) {
           continue;
@@ -3003,6 +3025,12 @@ export function mountMainScreen(root: HTMLElement): void {
       editStatus.classList.add("is-error");
       return;
     }
+    // ⚠️ **見え方を撮った画像に合わせる。** 後手目線で撮った局面は、解析タブへ
+    // 渡るときに 180 度回っている（＝先後が実際どおりになっている）ので、
+    // **そのまま描くと盤が上下逆に見える**。表示視点を後手にすれば、
+    // 局面は正しいまま、見た目は撮った画像と同じ向きになる。
+    // **あとから解析タブのボタンで自由に戻せる。**
+    setStudyViewpoint(!editNearWhite);
     selectTab(studyTab);
   };
 
@@ -3557,6 +3585,9 @@ export function mountMainScreen(root: HTMLElement): void {
       editLoaded = !!st?.loaded;
       editSfen = st?.labelSfen ?? "";
       editNotes = st?.labelNotes ?? [];
+      // 撮った盤の目線。**採るときに解析タブの見え方を決めるのに使う**
+      // （局面そのものを回すのは Go 側の `adoptPosition`）。
+      editNearWhite = !!st?.nearWhite;
       syncTrain();
       // ⚠️ **ここから解析の状態を触らないこと。** 訂正タブの局面と解析タブの局面は
       // 別物で、繋ぐのは「この局面を解析する」を押したときの 1 回だけ。
@@ -3567,6 +3598,11 @@ export function mountMainScreen(root: HTMLElement): void {
       }
       showBoard(st.boardSfen, true);
       sfenOut.textContent = st.sfen || st.boardSfen || "-";
+      // 後手目線のときだけ「解析へ渡す SFEN」を足す（先手目線なら同じ文字列）。
+      const rotated = st.analyzeSfen && st.analyzeSfen !== st.sfen ? st.analyzeSfen : "";
+      editAnalyzeSfenRow.hidden = rotated === "";
+      editAnalyzeSfen.textContent = rotated || "-";
+      editAnalyzeSfen.title = rotated;
       showEditHand(st.inventory ?? []);
       fillWarnings(boardWarnings, st.warnings ?? []);
     },
@@ -3610,47 +3646,57 @@ export function mountMainScreen(root: HTMLElement): void {
   // （値そのものは `showStudyHand` より前で宣言してある）。
   const boardWithHands = root.querySelector<HTMLElement>("#board-with-hands")!;
   const studyBoardWithHands = root.querySelector<HTMLElement>("#study-board-with-hands")!;
-  const flipButtons = [
-    root.querySelector<HTMLButtonElement>("#edit-flip")!,
-    studyFlip,
-  ];
+  const editFlip = root.querySelector<HTMLButtonElement>("#edit-flip")!;
+
+  // paintFlipButton はボタン 1 つぶんの見た目（文字・ツールチップ・押下状態）。
+  // ⚠️ **2 つのボタンは別々の値を指している**ので、まとめて書き換えないこと。
+  const paintFlipButton = (b: HTMLButtonElement, flip: boolean) => {
+    b.textContent = flip ? "手前: 後手" : "手前: 先手";
+    b.title = flip
+      ? "手前が後手（先手が奥）。押すと手前が先手に戻ります。盤の向きが変わるだけで、局面は変わりません"
+      : "手前が先手（後手が奥）。押すと手前が後手になります。盤の向きが変わるだけで、局面は変わりません";
+    b.setAttribute("aria-pressed", String(flip));
+  };
 
   const applyViewpoint = () => {
-    for (const [el, box] of [
-      [board, boardWithHands],
-      [studyBoard, studyBoardWithHands],
-    ] as const) {
-      el.toggleAttribute("flip", flipped);
-      box.classList.toggle("is-flipped", flipped);
-    }
-    editor.setFlip(flipped);
-    studyBoardUI.setFlip(flipped);
+    board.toggleAttribute("flip", editFlipped);
+    boardWithHands.classList.toggle("is-flipped", editFlipped);
+    editor.setFlip(editFlipped);
+    paintFlipButton(editFlip, editFlipped);
+
+    studyBoard.toggleAttribute("flip", studyFlipped);
+    studyBoardWithHands.classList.toggle("is-flipped", studyFlipped);
+    studyBoardUI.setFlip(studyFlipped);
     // 駒台は「逆順に並べる側」が入れ替わるので並べ直す（訂正タブ側は
     // `editor.setFlip` が自分で並べ直している）。
     showStudyHand(studyHands);
-    for (const b of flipButtons) {
-      b.textContent = flipped ? "手前: 後手" : "手前: 先手";
-      b.title = flipped
-        ? "手前が後手（先手が奥）。押すと手前が先手に戻ります。盤の向きが変わるだけで、局面は変わりません"
-        : "手前が先手（後手が奥）。押すと手前が後手になります。盤の向きが変わるだけで、局面は変わりません";
-      b.setAttribute("aria-pressed", String(flipped));
-    }
+    paintFlipButton(studyFlip, studyFlipped);
   };
 
-  // setViewpoint は視点を決める。**「自分がどちら側か」を渡す**
-  // （新規対局の「あなたの手番」がそのまま入る）。
-  const setViewpoint = (black: boolean) => {
-    if (flipped === !black) {
+  // setStudyViewpoint は**解析タブの**視点を決める。**「自分がどちら側か」を渡す**
+  // （新規対局の「あなたの手番」と、採ったときの「撮った盤の目線」がここに入る）。
+  const setStudyViewpoint = (black: boolean) => {
+    if (studyFlipped === !black) {
       return;
     }
-    flipped = !black;
+    studyFlipped = !black;
     applyViewpoint();
   };
 
-  for (const b of flipButtons) {
-    // 反転中なら「手前が先手」に戻し、そうでなければ「手前が後手」にする。
-    b.addEventListener("click", () => setViewpoint(flipped));
-  }
+  // setEditViewpoint は**訂正タブの**視点。⚠️ **これも表示だけの反転**で、
+  // 「撮った盤の目線」（`EditState.nearWhite`）とは別物 —— あちらは局面そのものの
+  // 向きの話で、こちらは盤の絵をどちらから眺めるかの好み。
+  const setEditViewpoint = (black: boolean) => {
+    if (editFlipped === !black) {
+      return;
+    }
+    editFlipped = !black;
+    applyViewpoint();
+  };
+
+  // 反転中なら「手前が先手」に戻し、そうでなければ「手前が後手」にする。
+  editFlip.addEventListener("click", () => setEditViewpoint(editFlipped));
+  studyFlip.addEventListener("click", () => setStudyViewpoint(studyFlipped));
   // ⚠️ **一度は通すこと。** ボタンの文字（「手前: 先手」）はここで入れているので、
   // 通さないとラベルが空のボタンが出る。
   applyViewpoint();
@@ -4084,7 +4130,7 @@ export function mountMainScreen(root: HTMLElement): void {
         const got = await StudyService.NewGame(newgameHandicap.value);
         // ⚠️ **視点は局面を描く前に決める。** 後から反転すると、盤とグリッドを
         // 二度組み直すことになる（そのぶん 1 マスずれる隙ができる）。
-        setViewpoint(newgameBlack);
+        setStudyViewpoint(newgameBlack);
         // ⚠️ **タブを先に開いてから描く**（棋譜の読み込みと同じ理由。
         // `display: none` の中ではグリッドを測れないし scrollIntoView も効かない）。
         selectTab(studyTab);

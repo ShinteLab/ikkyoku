@@ -165,7 +165,10 @@ type StudyState struct {
 // ここで先手に倒すと、決めていない手番でエンジンが読むことになる（設計原則5）。
 // **これは警告ではなくエラー** —— 決めてもらう以外に手が無い。
 func (s *StudyService) Adopt() (StudyState, error) {
-	p := s.src.clonePosition()
+	// ⚠️ **ここで向きが直る。** 撮った画像が後手目線なら、盤・先後・駒台・手番を
+	// まとめて 180 度回した写しが返る（`PositionService.adoptPosition`）。
+	// 訂正タブ側は撮った向きのままで、**回るのはこの 1 回だけ**。
+	p, rotated := s.src.adoptPosition()
 	if p == nil {
 		return s.State(), fmt.Errorf("まだ局面がありません")
 	}
@@ -188,7 +191,7 @@ func (s *StudyService) Adopt() (StudyState, error) {
 	st := s.state()
 	s.mu.Unlock()
 
-	s.logger.Info("局面を解析タブへ採りました", "sfen", st.SFEN)
+	s.logger.Info("局面を解析タブへ採りました", "sfen", st.SFEN, "rotated", rotated)
 	return st, nil
 }
 
