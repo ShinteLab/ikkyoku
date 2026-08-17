@@ -49,6 +49,12 @@ func FromKIF(text string) (*Study, KIFLoad, error) {
 	if err != nil {
 		return nil, KIFLoad{}, err
 	}
+	// ⚠️ **kifu.Parse は指し手 0 手をエラーにしない**（中継は対局前から
+	// ヘッダだけの棋譜を配信しているため）。こちらは並べる手順が要るので、
+	// 1 手も無ければ貼り間違いとして断る。
+	if len(doc.Moves) == 0 {
+		return nil, KIFLoad{}, fmt.Errorf("棋譜として1手も読み取れませんでした")
+	}
 	start, err := doc.StartSFEN()
 	if err != nil {
 		return nil, KIFLoad{}, err
