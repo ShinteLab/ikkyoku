@@ -271,9 +271,14 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     // 高さを 1px も食わない（盤が小さくならない）。
     // ⚠️ **常に両側に置いて、手番側だけ光らせる。** 手番側にだけ出すと、
     // 切り替えるたびに駒台の中身が動く（出たり消えたりするものを作らない）。
+    // ⚠️ **見出しは「手前 / 奥」**（2026-08-18。以前は「先手 / 後手」）。
+    // 訂正タブは**撮った画像を直す面**なので、後手目線では手前に写っているのが
+    // 後手 —— そこに「先手の駒台」と書いてあると、**画面が嘘をつく**。
+    // 位置なら目線に関わらず必ず正しい。文字は `showHandLabels` が入れる
+    // （**表示視点を反転すると手前と奥が入れ替わる**ので、作るときには決まらない）。
     zone.innerHTML =
       `<span class="turn-mark">${black ? "▲" : "△"}</span>` +
-      `<span class="hand-zone-label">${black ? "先手" : "後手"}の駒台</span>` +
+      `<span class="hand-zone-label"></span>` +
       `<div class="hand-chips"></div>`;
     (black ? handSlots.black : handSlots.white).appendChild(zone);
     return zone;
@@ -289,6 +294,20 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   handSlots.missing.appendChild(missing);
   const missingChips = missing.querySelector<HTMLDivElement>(".missing-chips")!;
 
+  // nearSide は「その駒台が画面の手前にあるか」。**表示視点で入れ替わる**
+  // （盤を裏から眺めると、上向きの駒の駒台が奥へ回る）。
+  const nearSide = (black: boolean) => black !== flipped;
+
+  // showHandLabels は駒台の見出しを位置で言い直す（手前 / 奥）。
+  // ⚠️ **表示視点を切り替えたら呼ぶこと** —— 呼ばないと、入れ替わった駒台に
+  // 前の見出しが残る（**位置で説明しているのに位置と食い違う**）。
+  const showHandLabels = () => {
+    for (const zone of handZones) {
+      const label = zone.querySelector<HTMLElement>(".hand-zone-label")!;
+      label.textContent = `${nearSide(zone.dataset.black === "true") ? "手前" : "奥"}の駒台`;
+    }
+  };
+
   const confirmBtn = panel.querySelector<HTMLButtonElement>("#edit-confirm")!;
   const body = panel.querySelector<HTMLDivElement>("#edit-body")!;
   const handZones = [handZone(true), handZone(false)];
@@ -298,6 +317,9 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   const turnBtns = Array.from(panel.querySelectorAll<HTMLButtonElement>(".turn-btn[data-turn]"));
   const viewBtns = Array.from(panel.querySelectorAll<HTMLButtonElement>(".turn-btn[data-near]"));
   const viewNote = panel.querySelector<HTMLElement>("#edit-view-note")!;
+  // ⚠️ **一度は通すこと。** 駒台の見出し（「手前の駒台」）はここで入れているので、
+  // 通さないと見出しの無い駒台が 2 つ並ぶ。
+  showHandLabels();
 
   let state: EditState | null = null;
   // editable は「局面を読み込んでいるか」。**訂正モードのフラグではない**
@@ -418,7 +440,7 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
       const black = zone.dataset.black === "true";
       const mark = zone.querySelector<HTMLElement>(".turn-mark")!;
       const mine = seenTurn === (black ? TURN_BLACK : TURN_WHITE);
-      const name = black ? "先手" : "後手";
+      const name = nearSide(black) ? "手前" : "奥";
       mark.classList.toggle("is-active", mine);
       mark.title = mine
         ? `この側が指します（${turnLabel}）`
@@ -853,10 +875,14 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
       // 「見た目の位置 → 局面のマス」の読み替えを入れ替える。**先に**やること
       // （このあとの描き直しが dataset を見て突き合わせる）。
       applyFlip();
+      // 見出しは位置で言っているので、入れ替わったら言い直す。
+      showHandLabels();
       if (state?.loaded) {
         paintCells(state);
         // 駒台は逆順にする側が入れ替わるので、両方とも並べ直す。
         renderHands(state.inventory ?? []);
+        // 手番マークのツールチップも「手前 / 奥」で言っている。
+        showTurnMarks(state.seenTurn ?? state.turn, state.turnLabel ?? "");
       }
       // 盤の絵（`flip` 属性）と駒台の置き場所は呼び出し側が切り替える。
       // その結果として箱の大きさが動きうるので、測り直す。
