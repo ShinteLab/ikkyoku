@@ -545,7 +545,7 @@ func (s *AnalyzeService) runOne(
 	}
 	record(res.Progress)
 	s.rememberEngine(entry.ID, res.Engine)
-	s.logger.Info("解析しました",
+	s.logger.Debug("解析しました",
 		"engine", res.Engine, "id", entry.ID, "sfen", target.Root, "depth", res.Depth,
 		"best", res.Bestmove, "nodes", res.Nodes,
 		"elapsedMs", res.ElapsedMS, "startupMs", res.StartupMS, "reused", res.Reused,
