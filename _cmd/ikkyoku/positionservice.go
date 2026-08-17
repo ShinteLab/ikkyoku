@@ -29,6 +29,16 @@ type PositionService struct {
 	// origin は読み込んだときの盤面 SFEN。**Reset で戻す先**であり、
 	// 「認識結果から変えたか」の判定にも使う。
 	origin string
+	// nearWhite は**撮った画像が後手目線だった**か（＝手前に写っているのが後手）。
+	//
+	// ⚠️ **表示視点（盤の絵を裏から眺める `flip` 属性）とは別物。** あちらは
+	// 見え方の好みで SFEN は 1 文字も変わらないが、こちらは**盤面そのものが
+	// 上下逆に写っていた**という事実で、解析へ渡すときに 180 度回すことになる。
+	//
+	// ⚠️ **これを立てても訂正タブの盤は反転しない**（訂正は「見えているものを
+	// 直す」作業で、学習ラベルも画素と一致していなければならない）。回すのは
+	// `adoptPosition` の 1 か所だけ。
+	nearWhite bool
 }
 
 func NewPositionService(logger *slog.Logger) *PositionService {
@@ -64,9 +74,31 @@ type EditState struct {
 	// LabelNotes は LabelSFEN を組み立てるために妥協した点（手番を先手にした・
 	// 先後未決の持ち駒を落とした）。**送る前にユーザーへ出す**（黙って捨てない）。
 	LabelNotes []string `json:"labelNotes"`
-	// Turn は 0=不明 / 1=先手番 / 2=後手番。
+	// AnalyzeSFEN は**解析タブへ渡す**局面の SFEN。
+	//
+	// ⚠️ **後手目線（NearWhite）のときは SFEN と違う** —— 盤・先後・駒台・手番を
+	// まとめて 180 度回したものになる。**画面に出しているのは撮った向きの SFEN**
+	// なので、渡る先が違うことをユーザーに見せるためにこちらも返す。
+	// **先手目線なら SFEN と同じ**（違いが出たときだけ画面に出す）。
+	AnalyzeSFEN string `json:"analyzeSfen"`
+	// NearWhite は**撮った画像が後手目線**か（手前に写っているのが後手）。
+	//
+	// ⚠️ **盤の絵は反転しない。** 反転するのは解析へ渡す局面だけで、
+	// 訂正タブは撮ったとおりを描き続ける（学習ラベルは画素と一致していること）。
+	NearWhite bool `json:"nearWhite"`
+	// Turn は 0=不明 / 1=先手番 / 2=後手番。**対局としての先後**であって、
+	// 画面の上下ではない（`NearWhite` のときは手前が後手番になる）。
 	Turn      int    `json:"turn"`
 	TurnLabel string `json:"turnLabel"`
+	// SeenTurn は**見た目の手番**（0=不明 / 1=上向きの駒の側 / 2=逆向きの側）。
+	//
+	// 駒台の角の ▲/△ をどちら側で光らせるかがこれで決まる。後手目線なら
+	// `Turn` とは逆になる（手前に写っているのが後手なので）。
+	//
+	// ⚠️ **`Turn` からフロントで組み立て直さないこと** —— 目線との掛け合わせなので、
+	// 2 か所で計算すると片方だけ裏返る。⚠️ **こちらを解析や表示に使わないこと**
+	// （出すべきは対局としての先後＝`Turn`）。
+	SeenTurn int `json:"seenTurn"`
 	// MoveNumber は手数。0 は不明。
 	MoveNumber int `json:"moveNumber"`
 	// Cells は 81 マス（SFEN 記述順。rank*9+file）。
@@ -173,15 +205,65 @@ func (s *PositionService) FlipSide(rank, file int) (EditState, error) {
 // SetTurn は手番を決める（0=不明 / 1=先手番 / 2=後手番）。
 //
 // **盤面からは決まらないので、ここが人間の入口。**
+//
+// ⚠️ **受け取るのは「対局としての先後」**（画面の上下ではない）。撮った画像が
+// 後手目線なら、手前に写っている側が後手なので、**見た目の手番とは逆になる**。
+// `Position` は撮った向きのまま（＝見た目）で揃えてあるので、ここで翻訳する。
+// **翻訳はこのファイルの中だけ**にすること（散らすと必ずどこかで裏返る）。
 func (s *PositionService) SetTurn(turn int) (EditState, error) {
 	return s.edit(func(p *position.Position) error {
 		switch turn {
 		case int(position.TurnUnknown), int(position.TurnBlack), int(position.TurnWhite):
-			p.Turn = position.Turn(turn)
+			p.Turn = s.asSeenTurn(position.Turn(turn))
 			return nil
 		}
 		return fmt.Errorf("手番の値が不正です: %d", turn)
 	})
+}
+
+// SetViewpoint は**撮った画像がどちら目線か**を決める（true なら手前が後手）。
+//
+// ⚠️ **盤は 1 マスも動かさない。** 直す対象は撮った画像そのものなので、
+// ここで盤面や先後を書き換えると、学習ラベルが画素と一致しなくなる。
+// 効くのは「解析へ渡すときに回すかどうか」と、**手番の見え方**だけ。
+//
+// ⚠️ **手番は変えない**（目線と手番は独立した 2 つの事実）。`Position` が持って
+// いるのは見た目の手番なので、目線が変わったら**そちらを入れ替えて**、
+// 画面に出る「対局としての手番」を保つ。
+func (s *PositionService) SetViewpoint(nearWhite bool) (EditState, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.nearWhite == nearWhite {
+		return s.state(), nil
+	}
+	s.nearWhite = nearWhite
+	if s.pos != nil {
+		s.pos.Turn = flipTurn(s.pos.Turn)
+	}
+	return s.state(), nil
+}
+
+// asSeenTurn は「対局としての手番」を**見た目の手番**に直す（後手目線なら入れ替え）。
+// gameTurn はその逆。⚠️ **どちらも入れ替えるだけなので中身は同じ**だが、
+// 呼ぶ側でどちら向きの変換かが読めるように名前を分けてある。
+func (s *PositionService) asSeenTurn(t position.Turn) position.Turn {
+	if s.nearWhite {
+		return flipTurn(t)
+	}
+	return t
+}
+
+func (s *PositionService) gameTurn(t position.Turn) position.Turn { return s.asSeenTurn(t) }
+
+// flipTurn は手番を入れ替える。**未決は未決のまま**（決めていないことを決めない）。
+func flipTurn(t position.Turn) position.Turn {
+	switch t {
+	case position.TurnBlack:
+		return position.TurnWhite
+	case position.TurnWhite:
+		return position.TurnBlack
+	}
+	return position.TurnUnknown
 }
 
 // SetMoveNumber は手数を決める（0 は不明）。
@@ -205,7 +287,8 @@ func (s *PositionService) SetHand(piece int, black bool, n int) (EditState, erro
 	return s.edit(func(p *position.Position) error { return p.SetHand(piece, black, n) })
 }
 
-// clonePosition は今の局面の**写し**を返す（StudyService 用）。まだ何も読んで
+// adoptPosition は**対局としての正しい向きに直した写し**を返す（StudyService 用）。
+// 2 つめの戻り値は回したか（＝撮った画像が後手目線だったか）。まだ何も読んで
 // いなければ nil。
 //
 // ⚠️ **写しであることが要点。** 解析タブは確定した局面を根に持つので、採ったあとに
@@ -214,13 +297,19 @@ func (s *PositionService) SetHand(piece int, black bool, n int) (EditState, erro
 //
 // **確定しているかの判定はここでしない。** それは受け取る側（StudyService.Adopt）の
 // 話で、こちらは未決のままの局面も普通に持ち続ける（訂正の途中は未決で当たり前）。
-func (s *PositionService) clonePosition() *position.Position {
+//
+// ⚠️ **回すのはここだけ。** 撮った局面も、訂正中の盤も、suteme へ送るラベルも
+// 画像の向きのまま置いておく（CLAUDE.md「反転するのはエンジンへ渡す境界だけ」）。
+func (s *PositionService) adoptPosition() (*position.Position, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.pos == nil {
-		return nil
+		return nil, false
 	}
-	return s.pos.Clone()
+	if !s.nearWhite {
+		return s.pos.Clone(), false
+	}
+	return s.pos.Rotate180(), true
 }
 
 // edit は 1 操作を適用して新しい状態を返す共通処理。
@@ -242,6 +331,7 @@ func (s *PositionService) state() EditState {
 		return EditState{
 			Cells: []EditCell{}, Inventory: []position.Stock{},
 			Warnings: []string{}, LabelNotes: []string{},
+			NearWhite: s.nearWhite,
 		}
 	}
 	cells := make([]EditCell, 0, 81)
@@ -256,6 +346,13 @@ func (s *PositionService) state() EditState {
 		}
 	}
 	full, _ := s.pos.SFEN() // 手番が未決なら空のまま返す(エラーは状態そのもの)
+	// 解析へ渡すのは**対局としての向きに直した**局面（後手目線なら 180 度回す）。
+	// 先手目線なら full と同じ文字列になる。
+	analyzeSFEN := full
+	if s.nearWhite && full != "" {
+		analyzeSFEN, _ = s.pos.Rotate180().SFEN()
+	}
+	turn := s.gameTurn(s.pos.Turn)
 	label, labelNotes := s.pos.LabelSFEN()
 	if labelNotes == nil {
 		labelNotes = []string{}
@@ -266,13 +363,17 @@ func (s *PositionService) state() EditState {
 	}
 	board := s.pos.BoardSFEN()
 	return EditState{
-		Loaded:     true,
-		BoardSFEN:  board,
-		SFEN:       full,
-		LabelSFEN:  label,
-		LabelNotes: labelNotes,
-		Turn:       int(s.pos.Turn),
-		TurnLabel:  s.pos.Turn.String(),
+		Loaded:      true,
+		BoardSFEN:   board,
+		SFEN:        full,
+		LabelSFEN:   label,
+		LabelNotes:  labelNotes,
+		AnalyzeSFEN: analyzeSFEN,
+		NearWhite:   s.nearWhite,
+		Turn:        int(turn),
+		TurnLabel:   turn.String(),
+		// 見た目の手番（Position が持っているのはこちら）。
+		SeenTurn:   int(s.pos.Turn),
 		MoveNumber: s.pos.MoveNumber,
 		Cells:      cells,
 		Inventory:  s.pos.Inventory(),

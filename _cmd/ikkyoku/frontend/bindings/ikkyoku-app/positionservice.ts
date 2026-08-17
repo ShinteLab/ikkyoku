@@ -113,9 +113,29 @@ export function SetMoveNumber(n: number): $CancellablePromise<$models.EditState>
  * SetTurn は手番を決める（0=不明 / 1=先手番 / 2=後手番）。
  * 
  * **盤面からは決まらないので、ここが人間の入口。**
+ * 
+ * ⚠️ **受け取るのは「対局としての先後」**（画面の上下ではない）。撮った画像が
+ * 後手目線なら、手前に写っている側が後手なので、**見た目の手番とは逆になる**。
+ * `Position` は撮った向きのまま（＝見た目）で揃えてあるので、ここで翻訳する。
+ * **翻訳はこのファイルの中だけ**にすること（散らすと必ずどこかで裏返る）。
  */
 export function SetTurn(turn: number): $CancellablePromise<$models.EditState> {
     return $Call.ByID(690227125, turn);
+}
+
+/**
+ * SetViewpoint は**撮った画像がどちら目線か**を決める（true なら手前が後手）。
+ * 
+ * ⚠️ **盤は 1 マスも動かさない。** 直す対象は撮った画像そのものなので、
+ * ここで盤面や先後を書き換えると、学習ラベルが画素と一致しなくなる。
+ * 効くのは「解析へ渡すときに回すかどうか」と、**手番の見え方**だけ。
+ * 
+ * ⚠️ **手番は変えない**（目線と手番は独立した 2 つの事実）。`Position` が持って
+ * いるのは見た目の手番なので、目線が変わったら**そちらを入れ替えて**、
+ * 画面に出る「対局としての手番」を保つ。
+ */
+export function SetViewpoint(nearWhite: boolean): $CancellablePromise<$models.EditState> {
+    return $Call.ByID(3028064279, nearWhite);
 }
 
 /**

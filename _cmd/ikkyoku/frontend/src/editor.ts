@@ -233,6 +233,20 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     </div>
     <div id="edit-body" class="edit-body">
       <div class="edit-meta">
+        <!-- 目線（2026-08-18）。**撮った画像がどちら側から写したものか。**
+             ⚠️ **盤の絵は 1 マスも動かない。** 訂正は「見えているものを直す」作業で、
+             学習ラベルも画素と一致していなければならない。効くのは
+             **解析へ渡す局面を 180 度回すかどうか**だけ。
+             ⚠️ **すぐ上の「手前: 先手」（表示視点）とは別物** —— あちらは盤の絵を
+             どちらから眺めるかの好みで、SFEN は 1 文字も変わらない。 -->
+        <span class="field-label">目線</span>
+        <div class="turn-group" role="group" aria-label="撮った盤の目線">
+          <button class="turn-btn" type="button" data-near="black">先手</button>
+          <button class="turn-btn" type="button" data-near="white">後手</button>
+        </div>
+        <!-- ⚠️ **後手目線のときだけ出す。** 解析へ渡すものが画面と違うので、
+             黙って回さない（「解析に投げる SFEN は逆になる」）。 -->
+        <span id="edit-view-note" class="note is-caution" hidden>解析へは上下を反転して渡します</span>
         <span class="field-label">手番</span>
         <div class="turn-group" role="group" aria-label="手番">
           <button class="turn-btn" type="button" data-turn="1">先手番</button>
@@ -279,7 +293,11 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   const body = panel.querySelector<HTMLDivElement>("#edit-body")!;
   const handZones = [handZone(true), handZone(false)];
   const moveNum = panel.querySelector<HTMLInputElement>("#edit-movenum")!;
-  const turnBtns = Array.from(panel.querySelectorAll<HTMLButtonElement>(".turn-btn"));
+  // ⚠️ **`[data-turn]` で絞ること。** 目線のボタンも見た目を揃えるために
+  // `.turn-btn` を着ているので、絞らないと目線を押すたびに手番が変わる。
+  const turnBtns = Array.from(panel.querySelectorAll<HTMLButtonElement>(".turn-btn[data-turn]"));
+  const viewBtns = Array.from(panel.querySelectorAll<HTMLButtonElement>(".turn-btn[data-near]"));
+  const viewNote = panel.querySelector<HTMLElement>("#edit-view-note")!;
 
   let state: EditState | null = null;
   // editable は「局面を読み込んでいるか」。**訂正モードのフラグではない**
@@ -340,10 +358,19 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     for (const b of turnBtns) {
       b.classList.toggle("is-active", Number(b.dataset.turn) === next.turn);
     }
+    for (const b of viewBtns) {
+      b.classList.toggle("is-active", (b.dataset.near === "white") === !!next.nearWhite);
+    }
+    viewNote.hidden = !next.nearWhite;
     // ⚠️ **手番の値は 1 つ（`EditState.turn`）。** ボタンとマークは同じ値を
     // 2 か所に描くだけで、**更新経路もここ 1 本**にする（片方だけ更新する道を
     // 作ると、どちらが本当の手番か分からなくなる）。
-    showTurnMarks(next.turn);
+    //
+    // ⚠️ **マークに渡すのは `seenTurn`（見た目の手番）。** ▲/△ は
+    // **上向きに写っている側**に付いているので、後手目線では `turn` と逆になる
+    // （後手番なら、上向きに見えている手前の側が指す）。
+    // **`turn` を渡さないこと** —— 後手目線のときだけ光る側が入れ替わる。
+    showTurnMarks(next.seenTurn ?? next.turn, next.turnLabel ?? "");
     if (document.activeElement !== moveNum) {
       moveNum.value = String(next.moveNumber ?? 0);
     }
@@ -379,18 +406,25 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   // そのときは**どちらも光らせない** —— 先手に倒すと、決めていない手番が
   // 決まったように見える。**理由はツールチップに出す**（光っていない駒台が
   // 2 つ並んでいるだけでは、未決なのか壊れているのか分からない）。
-  function showTurnMarks(turn: number) {
+  //
+  // ⚠️ **駒台の名前（▲先手 / △後手）は「見たとおり」のまま。** 後手目線なら
+  // そこに写っているのは実際には後手の駒だが、**訂正タブは撮った画像を直す面**
+  // なので、盤の駒も駒台も見えているとおりに呼ぶ（学習ラベルもこの向き）。
+  // ⚠️ **そのぶんツールチップで側の名前を言わないこと** —— 「▲側が指す」のに
+  // 「後手番」を選んでいる、という組み合わせが後手目線では普通に起きるので、
+  // **「この側が指します」と手番の名前を並べて出す**（どちらも本当）。
+  function showTurnMarks(seenTurn: number, turnLabel: string) {
     for (const zone of handZones) {
       const black = zone.dataset.black === "true";
       const mark = zone.querySelector<HTMLElement>(".turn-mark")!;
-      const mine = turn === (black ? TURN_BLACK : TURN_WHITE);
+      const mine = seenTurn === (black ? TURN_BLACK : TURN_WHITE);
       const name = black ? "先手" : "後手";
       mark.classList.toggle("is-active", mine);
       mark.title = mine
-        ? `${name}番です`
-        : turn === TURN_UNKNOWN
+        ? `この側が指します（${turnLabel}）`
+        : seenTurn === TURN_UNKNOWN
           ? `${name}の駒台（手番はまだ決まっていません）`
-          : `${name}の駒台（今は${black ? "後手" : "先手"}番）`;
+          : `${name}の駒台（今は反対側の番・${turnLabel}）`;
     }
   }
 
@@ -781,6 +815,12 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
         return;
       }
       void apply(() => PositionService.SetTurn(turn));
+    });
+  }
+
+  for (const b of viewBtns) {
+    b.addEventListener("click", () => {
+      void apply(() => PositionService.SetViewpoint(b.dataset.near === "white"));
     });
   }
 
