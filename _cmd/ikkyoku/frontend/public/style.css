@@ -3654,6 +3654,19 @@ html.is-main #app {
   opacity: 0.3;
 }
 
+/* 掴んだまま連続で置く状態(2026-08-18)。**クリックで掴んだ駒。**
+   ⚠️ **掴んでいることが画面に出ていること** —— カーソルにも駒の絵が付いてくるが、
+   どの駒種を掴んだのかはここでしか分からない。色は青(掴む・指せるの合図。
+   赤は「捨てる/危険」に使っている)。
+   ⚠️ **is-spare より後に書くこと** —— 足りている駒を掴んだときに、
+   薄いままだと掴んだのか分からない。 */
+.stock-chip.is-missing.is-armed {
+  opacity: 1;
+  border-style: solid;
+  border-color: #5ea0ff;
+  box-shadow: 0 0 0 2px rgba(94, 160, 255, 0.55);
+}
+
 .stock-chip {
   /* 枚数バッジ（.stock-count）を角に置くための基準。 */
   position: relative;

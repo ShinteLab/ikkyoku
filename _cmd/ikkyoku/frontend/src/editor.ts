@@ -14,7 +14,9 @@
 // 操作はドラッグ＆ドロップが主:
 //
 //   足りない駒 → 盤   置く（先手の駒として置く。右クリックで後手に）
-//   盤 → 盤           動かす（移動先の駒は置き換わる。取るのではない）
+//   足りない駒をクリック  掴む。**盤を押すたびに置く**（掴んだまま。Esc で離す）
+//   盤 → 盤外        外す（**どこにも落とさなければ捨てる**。先後は決めない）
+//   盤 → 盤           動かす（**移動先に駒があれば入れ替わる**。取るのではない）
 //   盤 → 駒台         外して、その側の持ち駒にする（**外すのと先後を決めるのが 1 操作**）
 //   駒台 → 盤         打つ（その側の駒台にある駒だけ）
 //   盤 → 足りない駒   先後を決めずに外す（**認識が作った余計な駒を消す操作**）
@@ -227,7 +229,8 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
       <button id="edit-confirm" class="ghost-btn is-primary" type="button">この局面を解析する</button>
       <span class="edit-hint">
         盤 ⇄ 駒台をドラッグ（外すと同時に持ち主が決まる） /
-        「足りない駒」から盤へドラッグして置く /
+        <strong>「足りない駒」をクリックすると掴んだまま連続で置ける</strong>（Esc で離す） /
+        盤の外へ放ると外れる /
         右クリックで先後と成・不成を切り替え
       </span>
     </div>
@@ -334,6 +337,9 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   // （駒台は局面の一部、足りない駒は訂正タブ専用の置き場）。
   const syncLoaded = () => {
     editable = !!state?.loaded;
+    if (!editable && armed) {
+      setArmed(null);
+    }
     confirmBtn.disabled = !editable;
     confirmBtn.title = editable
       ? "この局面を解析タブへ渡します（あとから訂正タブに戻って直せます）"
@@ -399,6 +405,14 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     const inv = next.inventory ?? [];
     renderMissing(inv);
     renderHands(inv);
+    // ⚠️ **残りが尽きたら離す。** 足りている駒も置けるのは変えていないが
+    // （設計原則3・4）、**掴みっぱなしのまま押し続けて駒が増え続ける**のは事故。
+    // もう 1 枚要るなら押し直せばよい。
+    if (armed && (inv.find((x) => x.piece === armed?.piece)?.unassigned ?? 0) <= 0) {
+      setArmed(null);
+    }
+    // チップは作り直されているので、掴んでいる印を付け直す。
+    paintArmed();
     // onState が盤の sfen 属性を書き換える（= <shogi-board> が SVG を描き直す）ので、
     // グリッドの位置合わせはそのあと。
     onState(next);
@@ -482,6 +496,7 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
       row.title =
         s.unassigned > 0
           ? `${s.name} ${s.unassigned}枚（どちらの駒台か未決）。` +
+            `クリックすると掴んだままになり、盤を押すたびに置けます（Esc で離す）。` +
             `駒台へドラッグすると持ち主が決まり、盤へドラッグすると先手の駒として置きます`
           : `${s.name}は足りています。それでも盤にも駒台にも置けます` +
             `（置くと多すぎる警告が出ます）`;
@@ -577,7 +592,39 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   //
   // ⚠️ **`pointerId` を必ず見ること。** 途中で別のポインタ（2 本目の指・
   // ペンとマウス）が上がっても、掴んでいるものを取り違えないため。
-  let drag: { data: Drag; src: HTMLElement; pointerId: number } | null = null;
+  //
+  // ⚠️ **`moved` が「ドラッグかクリックか」を分ける**（2026-08-18）。押した場所から
+  // `DRAG_SLOP` 動くまではクリックのつもりとして扱う（＝掴んだまま連続で置く操作の
+  // 入口）。**離した時点でしか決まらない**ので、ゴーストも `is-dragging` も
+  // 動き始めてから出す（クリックのたびに駒の絵がちらつかないように）。
+  let drag: {
+    data: Drag;
+    src: HTMLElement;
+    pointerId: number;
+    x0: number;
+    y0: number;
+    mark: string;
+    black: boolean;
+    moved: boolean;
+  } | null = null;
+
+  // クリックとドラッグを分ける距離。**手数で分けないこと** —— 押したまま
+  // 数 px 揺れるのは普通なので、そこで拾うと連続配置が始められない。
+  const DRAG_SLOP = 4;
+
+  // ---- 掴んだまま連続で置く（2026-08-18）------------------------------------
+  //
+  // **「足りない駒」をクリックすると掴んだ状態になり、盤のマスを押すたびに置く。**
+  // 歩が 5 枚足りないときにドラッグを 5 回やるのが一番だるかった。掴みっぱなしなら
+  // **「掴みに戻る」手間が消える**（行き先は毎回違うマスなので、一括では置けない）。
+  //
+  // ⚠️ **ドラッグは今までどおり残すこと。** 1 枚だけ動かすならドラッグのほうが速い。
+  // ⚠️ **掴んでいることが画面に出ていること**（チップの強調 + カーソルに付いてくる
+  // 駒の絵）—— モードは見えていないと「なぜ駒が増えるのか」が分からなくなる。
+  let armed: { piece: number; letter: string } | null = null;
+  // 最後に見たポインタの位置（掴んだ瞬間にゴーストを出す場所）。
+  let lastX = 0;
+  let lastY = 0;
 
   const clearOver = () => {
     for (const c of cells) {
@@ -614,10 +661,12 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     }
     // 既定のテキスト選択・画像ドラッグを止める（**ネイティブ DnD の入口を塞ぐ**）。
     e.preventDefault();
-    drag = { data, src, pointerId: e.pointerId };
-    src.classList.add("is-dragging");
-    makeGhost(mark, black);
-    moveGhost(e.clientX, e.clientY);
+    // ⚠️ **ここではまだ「掴んだ」ことにしない**（クリックかもしれない）。
+    // ゴーストと `is-dragging` は `DRAG_SLOP` 動いてから出す。
+    drag = {
+      data, src, pointerId: e.pointerId,
+      x0: e.clientX, y0: e.clientY, mark, black, moved: false,
+    };
     // ⚠️ **捕まえておくこと。** 盤の外・ウィンドウの外まで引くのが普通の操作なので、
     // 取らないと途中で追従が切れる（**離した瞬間を取りこぼすと掴んだまま残る**）。
     try {
@@ -630,53 +679,177 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   // endDrag は掴んでいる状態を畳む。**落としたときも、やめたときも通る。**
   function endDrag() {
     drag?.src.classList.remove("is-dragging");
+    const keepGhost = !!armed && !drag?.moved;
     drag = null;
-    dropGhost();
+    // ⚠️ **掴んだままのときはゴーストを消さないこと**（クリックのたびに
+    // 駒の絵が消えて出ると、掴んでいるのかどうかが読めない）。
+    if (!keepGhost) {
+      dropGhost();
+    }
     clearOver();
+  }
+
+  // setArmed は掴んでいるものを決める（null で離す）。
+  //
+  // ⚠️ **見た目もここで 1 か所にまとめる**（チップの強調とカーソルの駒の絵）。
+  // 散らすと、離したのに絵だけ残るような食い違いが起きる。
+  function setArmed(next: { piece: number; letter: string } | null) {
+    armed = next;
+    dropGhost();
+    paintArmed();
+    if (!armed) {
+      clearOver();
+    }
+    if (armed) {
+      // 掴んだ駒は**先手の駒として**置く（「足りない駒」からのドラッグと同じ規約）。
+      makeGhost(armed.letter, true);
+      moveGhost(lastX, lastY);
+    }
+  }
+
+  // paintArmed はチップの強調を付け直す。
+  // ⚠️ **描き直しのたびに呼ぶこと**（`renderMissing` がチップを作り直すので、
+  // 呼ばないと掴んでいるのに強調だけ消える）。
+  function paintArmed() {
+    for (const chip of missingChips.querySelectorAll<HTMLElement>(".stock-chip")) {
+      chip.classList.toggle("is-armed", !!armed && Number(chip.dataset.piece) === armed.piece);
+    }
+  }
+
+  // toggleArmed は「足りない駒」のクリック。**同じ駒をもう一度押したら離す。**
+  function toggleArmed(piece: number) {
+    if (!editable) {
+      return;
+    }
+    if (armed?.piece === piece) {
+      setArmed(null);
+      return;
+    }
+    const s = state?.inventory?.find((x) => x.piece === piece);
+    if (!s) {
+      return;
+    }
+    setArmed({ piece, letter: s.letter });
+  }
+
+  // dropArmedAt は掴んでいるものを、その座標の落とし先へ置く。
+  //
+  // ⚠️ **落とし先はドラッグと同じ経路を通すこと**（`dropOnCell` / zone の handler）。
+  // クリック用に別の分岐を書くと、ドラッグと結果が食い違う。
+  function dropArmedAt(x: number, y: number) {
+    if (!armed || !editable) {
+      return;
+    }
+    const data: Drag = { from: "stock", piece: armed.piece, black: true };
+    const t = targetAt(x, y);
+    if (t.cell) {
+      dropOnCell(t.cell, data);
+      return;
+    }
+    if (t.zone) {
+      const p = t.zone.handler(data);
+      if (p) {
+        void apply(() => p);
+        return;
+      }
+    }
+    // 盤でも駒台でもないところを押した = 置くのをやめる（掴んだものを戻す）。
+    setArmed(null);
   }
 
   // 捕まえた（`setPointerCapture`）あとも window までは上がってくるので、
   // 移動と離しは 1 か所で受ける。**掴む側の要素ごとに書かないこと。**
   window.addEventListener("pointermove", (e) => {
+    // 掴んでいるものの絵はカーソルに付いてくる。**掴んでいない間も位置は覚える**
+    // （チップを押した瞬間に、その場所へゴーストを出すため）。
+    lastX = e.clientX;
+    lastY = e.clientY;
+    if (armed && !drag) {
+      moveGhost(e.clientX, e.clientY);
+      // 押したらどこへ入るかを光らせる（ドラッグ中と同じ見え方に揃える）。
+      const t = targetAt(e.clientX, e.clientY);
+      clearOver();
+      (t.cell ?? t.zone?.el)?.classList.add("is-over");
+      return;
+    }
     if (!drag || e.pointerId !== drag.pointerId) {
       return;
+    }
+    if (!drag.moved) {
+      if (Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) < DRAG_SLOP) {
+        return; // まだクリックかもしれない
+      }
+      drag.moved = true;
+      // ⚠️ **引き始めたら掴んでいたものは離す。** 2 つ同時に持っていることに
+      // なると、落とした駒がどちらなのか分からなくなる。
+      setArmed(null);
+      drag.src.classList.add("is-dragging");
+      makeGhost(drag.mark, drag.black);
     }
     moveGhost(e.clientX, e.clientY);
     const t = targetAt(e.clientX, e.clientY);
     clearOver();
-    (t.cell ?? t.zone?.el)?.classList.add("is-over");
+    // ⚠️ **落とし先が無いときは「足りない駒」を光らせる。** 盤外へ捨てると
+    // そこへ入る（`discard`）ので、**行き先が見えていないと消えたように見える**。
+    (t.cell ?? t.zone?.el ?? (discardable(drag.data) ? missing : null))?.classList.add("is-over");
   });
 
   window.addEventListener("pointerup", (e) => {
+    lastX = e.clientX;
+    lastY = e.clientY;
     if (!drag || e.pointerId !== drag.pointerId) {
+      // 掴んだものを置く経路。**空マスを押したときはここに来る**
+      // （空マスではドラッグが始まらないので `drag` が無い）。
+      dropArmedAt(e.clientX, e.clientY);
       return;
     }
     const data = drag.data;
+    const moved = drag.moved;
     // ⚠️ **先に畳んでから落とす。** 落とし先の判定に `elementFromPoint` を使うので、
     // ゴーストが残っていると自分を拾う。
     endDrag();
+    if (!moved) {
+      // ここまで来たら**クリック**。「足りない駒」なら掴む/離す、
+      // それ以外なら（掴んでいれば）そこへ置く。
+      if (data.from === "stock") {
+        toggleArmed(data.piece);
+      } else {
+        dropArmedAt(e.clientX, e.clientY);
+      }
+      return;
+    }
     const t = targetAt(e.clientX, e.clientY);
     if (t.cell) {
       dropOnCell(t.cell, data);
       return;
     }
-    const p = t.zone?.handler(data);
+    // ⚠️ **落とし先が無ければ「盤外に捨てる」**（2026-08-18）。以前は何も
+    // 起きなかったので、駒を消すのに**「足りない駒」の枠までドラッグする**
+    // 必要があった —— 消すのは訂正で一番よく使う操作（認識は余計な駒を作る）
+    // なので、放り出す動作でできるほうが速い。**行き先は「足りない駒」と同じ**
+    // （先後を決めずに外すだけ）なので、間違えても掴み直せば戻る。
+    const p = t.zone ? t.zone.handler(data) : discard(data);
     if (p) {
       void apply(() => p);
     }
   });
 
-  // 掴んだまま取り消せること。**盤の外で離す = 何もしない**は `targetAt` が
-  // 空を返すので自然にそうなるが、Esc とポインタの中断も同じ入口へ寄せる。
+  // 掴んだまま取り消せること。**盤外で離すのは「捨てる」**なので、
+  // 取り消したいときは Esc（とポインタの中断）。同じ入口へ寄せてある。
   window.addEventListener("pointercancel", (e) => {
     if (drag && e.pointerId === drag.pointerId) {
       endDrag();
     }
   });
   window.addEventListener("keydown", (e) => {
-    if (drag && e.key === "Escape") {
+    if (e.key !== "Escape") {
+      return;
+    }
+    if (drag) {
       endDrag();
     }
+    // 掴んだままの状態も Esc で離す（**やめる手段を 1 つに揃える**）。
+    setArmed(null);
   });
 
   // dropOnCell は盤のマスへ落としたときの振り分け。
@@ -722,6 +895,13 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   // この 4 通りしかないので、1 つの操作で回したほうが「どっちがどっちだったか」を
   // 覚えずに済む。認識は**駒の向きも "+" も外す**ので、どちらも同じ頻度で要る。
   grid.addEventListener("contextmenu", (e) => {
+    // ⚠️ **掴んでいるあいだは「離す」だけ**（マスは回さない）。掴んだまま
+    // 右クリックしたときにマスまで回ると、何が起きたのか読めない。
+    if (armed) {
+      e.preventDefault();
+      setArmed(null);
+      return;
+    }
     const el = (e.target as HTMLElement)?.closest<HTMLElement>(".edit-cell");
     if (!editable || !el || el.classList.contains("is-empty")) {
       return;
@@ -746,7 +926,11 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
       chip.textContent ?? "", true);
   });
 
-  makeDropZone(missing, (data) => {
+  // discard は「足りない駒」へ戻す操作。**枠に落としても、盤外へ放り出しても同じ。**
+  //
+  // ⚠️ **2 か所で別々に書かないこと** —— 枠と盤外で結果が違うと、消したつもりの
+  // 駒がどこへ行ったのか分からなくなる。
+  function discard(data: Drag) {
     // 盤から: 先後を決めずに外す。駒台から: 持ち主を未決に戻す。
     if (data.from === "cell") {
       return PositionService.Remove(data.rank, data.file);
@@ -755,7 +939,15 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
       return setHandDelta(data.piece, data.black, -1);
     }
     return null;
-  });
+  }
+
+  // discardable は「盤外へ放ると変化があるか」。**足りない駒から掴んだものは
+  // 既にそこに居る**ので、放っても何も起きない（光らせもしない）。
+  function discardable(data: Drag) {
+    return data.from !== "stock";
+  }
+
+  makeDropZone(missing, discard);
 
   // 駒台（先手・後手）。**外すのと先後を決めるのが 1 操作**になるドロップ先。
   for (const zone of handZones) {
