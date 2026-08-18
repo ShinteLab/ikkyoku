@@ -118,8 +118,12 @@ func TestMove(t *testing.T) {
 	}
 }
 
-// 移動先に駒があれば置き換える（取るのではない。訂正なので）。
-func TestMoveOverwrites(t *testing.T) {
+// 移動先に駒があれば**入れ替える**（2026-08-18。以前は上書きしていた）。
+//
+// ⚠️ **駒が 1 枚も消えないことが要点。** 訂正で起きるのは「2 つのマスの駒を
+// 取り違えている」なので、すげ替えが 1 操作で済むのが速い。上書きに戻すと、
+// **退かす駒を先に避けておかないと駒が黙って消える。**
+func TestMoveSwaps(t *testing.T) {
 	p, err := FromBoardSFEN(initialBoard)
 	if err != nil {
 		t.Fatal(err)
@@ -127,12 +131,34 @@ func TestMoveOverwrites(t *testing.T) {
 	if err := p.Move(8, 0, 8, 1); err != nil { // 先手の香を桂の上へ
 		t.Fatal(err)
 	}
+	// 香と桂が入れ替わっただけ＝在庫は動かない。
 	inv := p.Inventory()
-	if s := stockOf(inv, sfen.Knight); s.Rest != 1 {
-		t.Errorf("桂の残り = %d, want 1（1 枚消えた）", s.Rest)
+	if s := stockOf(inv, sfen.Knight); s.Rest != 0 {
+		t.Errorf("桂の残り = %d, want 0（消えていないこと）", s.Rest)
 	}
 	if s := stockOf(inv, sfen.Lance); s.Rest != 0 {
 		t.Errorf("香の残り = %d, want 0", s.Rest)
+	}
+	// 位置がそのまま入れ替わっていること。
+	if c, _ := p.Board.At(8, 0); c.Mark() != "N" {
+		t.Errorf("9九 = %q, want \"N\"（桂が来ているはず）", c.Mark())
+	}
+	if c, _ := p.Board.At(8, 1); c.Mark() != "L" {
+		t.Errorf("8九 = %q, want \"L\"", c.Mark())
+	}
+}
+
+// 空マスへ動かしたら、移動元は空になる（入れ替えの相手が空マスなだけ）。
+func TestMoveToEmptyLeavesEmpty(t *testing.T) {
+	p, err := FromBoardSFEN(initialBoard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Move(6, 0, 5, 0); err != nil {
+		t.Fatal(err)
+	}
+	if c, _ := p.Board.At(6, 0); !c.IsEmpty() {
+		t.Errorf("移動元が空になっていない: %q", c.Mark())
 	}
 }
 

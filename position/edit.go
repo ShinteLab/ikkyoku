@@ -104,8 +104,16 @@ func (p *Position) Remove(rank, file int) error {
 }
 
 // Move は駒をマスからマスへ移す。**盤の中でのドラッグ＆ドロップ。**
-// 移動先に駒があれば上書きする（取るのではなく、置き換え。訂正なので）。
 // 空マスからの移動は何もしない（error）。
+//
+// ⚠️ **移動先に駒があれば入れ替える**（2026-08-18。以前は上書きしていた）。
+// 訂正では「2 つのマスの駒を取り違えている」——認識が近い駒を隣どうしで
+// 入れ違えた——のが普通に起きるので、**すげ替えが 1 操作で済む**ほうが速い。
+// 上書きだと、退かす駒を先にどこかへ避ける手間が要る。
+//
+// ⚠️ **取るのではない。** 消えた駒は駒台にも行かない（駒数は変わらない）。
+// **消したいなら盤の外へ放る**（`Remove`）——「動かす」と「消す」を
+// 1 つの操作に混ぜると、上書きで駒が黙って消える。
 func (p *Position) Move(fromRank, fromFile, toRank, toFile int) error {
 	c, err := p.Board.At(fromRank, fromFile)
 	if err != nil {
@@ -117,10 +125,15 @@ func (p *Position) Move(fromRank, fromFile, toRank, toFile int) error {
 	if fromRank == toRank && fromFile == toFile {
 		return nil
 	}
+	// 移動先の駒（空マスなら空のまま）を移動元へ戻す＝入れ替え。
+	dst, err := p.Board.At(toRank, toFile)
+	if err != nil {
+		return err
+	}
 	if err := p.Board.Set(toRank, toFile, c); err != nil {
 		return err
 	}
-	return p.Board.Set(fromRank, fromFile, Cell{})
+	return p.Board.Set(fromRank, fromFile, dst)
 }
 
 // ToHand は盤の駒を駒台へ移す。**盤 → 駒台のドラッグ＆ドロップ。**

@@ -152,6 +152,8 @@ func (s *PositionService) Reset() (EditState, error) {
 }
 
 // Move は盤の中で駒を動かす（盤 → 盤のドラッグ＆ドロップ）。
+//
+// ⚠️ **移動先に駒があれば入れ替える**（取るのではない。`position.Move` を読むこと）。
 func (s *PositionService) Move(fromRank, fromFile, toRank, toFile int) (EditState, error) {
 	return s.edit(func(p *position.Position) error {
 		return p.Move(fromRank, fromFile, toRank, toFile)
