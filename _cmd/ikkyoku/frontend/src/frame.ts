@@ -15,9 +15,12 @@ import { FiCamera, FiChevronDown, FiCrop, FiX } from "react-icons/fi";
 import { CaptureService } from "../bindings/ikkyoku-app";
 import { iconMarkup } from "./icon";
 
-// capture:done のうち、枠が使う部分だけ。認識結果はメイン画面の担当なので見ない
-// (CaptureResult の全体は mainscreen.ts に定義がある)。
-interface CaptureDone {
+// capture:shot のうち、枠が使う部分だけ。認識結果はメイン画面の担当なので見ない
+// (CaptureShot / CaptureResult の全体は Go 側 captureservice.go にある)。
+//
+// ⚠️ **枠が見るのは capture:shot であって capture:done ではない**(2026-08-18)。
+// 認識には数秒かかるので、done を待つと「撮影中…」のまま止まって見える。
+interface CaptureShot {
   thumbnail: string; // data:image/png;base64,... の等倍サムネイル
 }
 
@@ -297,10 +300,15 @@ export function mountFrame(root: HTMLElement): void {
   });
 
   // **エフェクトの起点はイベント 1 本にする。**「撮る」ボタンとホットキー(Alt+S)は
-  // どちらも Go 側の CaptureService.Capture() に入り、成功すると capture:done が
+  // どちらも Go 側の CaptureService.Capture() に入り、撮れると capture:shot が
   // 全ウィンドウへ飛ぶ(captureservice.go)。ボタン側の await でも光らせると、
   // クリック時だけ二重に光る(イベントの到着は await の解決と前後する)。
-  Events.On("capture:done", (event: { data: CaptureDone }) => {
+  //
+  // ⚠️ **capture:done を待たないこと**(2026-08-18 に分けた)。あちらは**認識まで
+  // 終わってから**飛ぶので、待つと合図が数秒遅れ、そのあいだ「撮影中…」が出たままになる
+  // ——「今この 1 枚が撮れた」を伝えるのが合図の役目なので、遅れると意味が無い。
+  // 認識の進み具合はメイン画面の担当(枠は撮る道具であって、結果を出す面ではない)。
+  Events.On("capture:shot", (event: { data: CaptureShot }) => {
     // 開いたまま撮られていたら畳む。その 1 枚には写り込んでいるが、続けて撮る
     // 2 枚目には写らない(ホットキーは止められないので、これが唯一できる手当て)。
     setMenuOpen(false);
@@ -359,7 +367,10 @@ export function mountFrame(root: HTMLElement): void {
       captureBtn.disabled = true;
       // 押した直後の反応は文字だけにする。**撮り終える前に光らせてはいけない**
       // (ツールバーは領域外なので写らないが、ガイド枠の線の色は撮影中に変わると
-      // 境界の見え方が変わる。合図は撮り終えてから capture:done で出す)。
+      // 境界の見え方が変わる。合図は撮り終えてから capture:shot で出す)。
+      //
+      // ⚠️ この文字が出ているのは**撮り終えるまで**(認識のあいだではない)。
+      // capture:shot が「撮りました」で上書きするので、実際にはほぼ一瞬しか見えない。
       window.clearTimeout(flashTimer);
       title.textContent = "撮影中…";
       try {
@@ -368,8 +379,10 @@ export function mountFrame(root: HTMLElement): void {
         showError(String(err));
       } finally {
         // 再生中なら押せるようにしない(解除は playFlyout のタイマーがやる)。
-        // capture:done の到着が await の解決と前後するため、無条件に戻すと
+        // capture:shot の到着が await の解決と前後するため、無条件に戻すと
         // アニメ中にボタンが生き返り、写り込みの窓が開く。
+        // ⚠️ **await が解けるのは認識まで終わってから**なので、普通はここに来る頃には
+        // エフェクトは終わっている(押せる状態に戻すのは playFlyout のタイマーの仕事)。
         captureBtn.disabled = flyout.classList.contains("is-playing");
       }
     })();
