@@ -16,6 +16,8 @@ import (
 const (
 	gwlExStyle      = ^uintptr(19) // GWL_EXSTYLE (-20)
 	wsExTransparent = 0x00000020   // WS_EX_TRANSPARENT
+	wsExLayered     = 0x00080000   // WS_EX_LAYERED
+	lwaAlpha        = 0x00000002   // LWA_ALPHA
 
 	vkLButton = 0x01
 	vkRButton = 0x02
@@ -29,6 +31,8 @@ var (
 	procSetWindowLongPtr = user32.NewProc("SetWindowLongPtrW")
 	procGetWindowLong    = user32.NewProc("GetWindowLongW")
 	procSetWindowLong    = user32.NewProc("SetWindowLongW")
+
+	procSetLayeredWindowAttributes = user32.NewProc("SetLayeredWindowAttributes")
 
 	procGetCursorPos     = user32.NewProc("GetCursorPos")
 	procGetAsyncKeyState = user32.NewProc("GetAsyncKeyState")
@@ -51,19 +55,33 @@ func setWindowLong(h windows.HWND, index, value uintptr) {
 	procSetWindowLong.Call(uintptr(h), index, value)
 }
 
-// setMouseTransparent は HWND の WS_EX_TRANSPARENT を付け外しする。
+// setMouseTransparent は HWND を「マウスに対して透明」にする／戻す。
 //
-// **これが「後ろを操作できる」の実体。** WS_EX_TRANSPARENT が付いたウィンドウは
-// WindowFromPoint に拾われなくなるので、その上のクリックもホイールも
-// **そのまま後ろのウィンドウへ届く**。子ウィンドウ（WebView2 が持っている）も
-// 親を経由してしか探されないので、まとめて素通しになる。
+// **これが「後ろを操作できる」の実体。**
 //
-// ⚠️ **WS_EX_LAYERED は足さないこと。** 枠は WebView2 の合成で透過しており
-// （BackgroundTypeTransparent）、layered を後付けすると描画経路が変わる。
-// 素通しに要るのは TRANSPARENT のほうだけで、WindowFromPoint はこれだけを見る。
+// ⚠️ **`WS_EX_TRANSPARENT` だけでは効かない。3 つ揃って初めて素通しになる**
+// （2026-08-19 に実機で確かめた。**一度 TRANSPARENT だけで実装して全く効かなかった**）:
+//
+//  1. `WS_EX_TRANSPARENT`
+//  2. `WS_EX_LAYERED`
+//  3. `SetLayeredWindowAttributes`（ヒットテスト領域の更新。**呼ばないと反映されない**）
+//
+// TRANSPARENT だけだと、拡張スタイルは確かに変わるのに**クリックは枠が取る**。
+// 枠の中身を描いている **WebView2 は別プロセスの子ウィンドウ**
+// （`Chrome_WidgetWin_1` など）で、そちらがマウスを受け取ってしまうため。
+// ⚠️ **子ウィンドウ側に TRANSPARENT を付けて回っても直らない**（これも試した）。
+// Wails 自身の `setIgnoreMouseEvents` も LAYERED を一緒に付けている。
+//
+// ⚠️ **ChildWindowFromPointEx(CWP_SKIPTRANSPARENT) で確かめないこと。**
+// あれは「TRANSPARENT だけで素通しになる」と答えるが、**実際のクリックの
+// 行き先とは食い違う**（実測）。確かめるなら実際にクリックして
+// `GetForegroundWindow` を見ること。
 //
 // ⚠️ **付けっぱなしにしない。** 付いているあいだはツールバーも押せなくなるので、
 // 呼ぶ側（captureservice.go の watchCursor）がカーソルの位置で付け外しする。
+// 戻すときは **LAYERED も一緒に外して元の姿に戻す** —— 枠は WebView2 の合成で
+// 透過している（`BackgroundTypeTransparent` = `WS_EX_NOREDIRECTIONBITMAP`）ので、
+// 素通しでないあいだまで layered を残す理由が無い。
 func setMouseTransparent(hwnd unsafe.Pointer, on bool) error {
 	if hwnd == nil {
 		return fmt.Errorf("ikkyoku-app: ネイティブウィンドウハンドルがありません")
@@ -73,9 +91,9 @@ func setMouseTransparent(hwnd unsafe.Pointer, on bool) error {
 	cur := windowLong(h, gwlExStyle)
 	next := cur
 	if on {
-		next |= wsExTransparent
+		next |= wsExTransparent | wsExLayered
 	} else {
-		next &^= wsExTransparent
+		next &^= wsExTransparent | wsExLayered
 	}
 	if next == cur {
 		return nil
@@ -86,8 +104,17 @@ func setMouseTransparent(hwnd unsafe.Pointer, on bool) error {
 	// SetWindowLongPtrW は「元の値」を返すので、0 が成功なのか失敗なのかを
 	// 戻り値だけでは決められない（GetLastError を消してから読む作法が要る）。
 	// **読み直して確かめるほうが確実。**
-	if got := windowLong(h, gwlExStyle); got&wsExTransparent != next&wsExTransparent {
-		return fmt.Errorf("ikkyoku-app: 拡張スタイルを変更できませんでした(WS_EX_TRANSPARENT)")
+	if got := windowLong(h, gwlExStyle); got&(wsExTransparent|wsExLayered) != next&(wsExTransparent|wsExLayered) {
+		return fmt.Errorf("ikkyoku-app: 拡張スタイルを変更できませんでした(WS_EX_TRANSPARENT|WS_EX_LAYERED)")
+	}
+
+	if on {
+		// ⚠️ **これを落とすと素通しにならない。** layered ウィンドウのヒットテスト
+		// 領域はスタイルを変えただけでは更新されない（Wails 自身も同じ理由で
+		// この呼び出しを持っている）。alpha 255 = 見た目は変えない。
+		if ret, _, callErr := procSetLayeredWindowAttributes.Call(uintptr(h), 0, 255, lwaAlpha); ret == 0 {
+			return fmt.Errorf("ikkyoku-app: SetLayeredWindowAttributes に失敗しました: %w", callErr)
+		}
 	}
 	return nil
 }
