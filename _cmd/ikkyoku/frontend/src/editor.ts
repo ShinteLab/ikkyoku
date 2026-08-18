@@ -74,15 +74,6 @@ export interface EditorHandle {
   // 中では null が返る）。タブで隠している以上、開いたときに測り直さないと
   // グリッドが出ないか、前回の大きさのまま残って**1 マスずれたところを編集する**。
   relayout(): void;
-  // setFlip は視点（手前が先手 / 手前が後手）を切り替える。
-  //
-  // ⚠️ **表示だけの反転。局面には一切効かない。** ここで `PositionService` を
-  // 呼ばないこと —— 盤の絵を裏から見ているだけなので、SFEN も先後も手番も変わらない
-  // （変えると、撮った画像と局面がねじれて学習データに嘘が入る）。
-  //
-  // ⚠️ **見え方とモデルが反対になる**ので、重ねるグリッドは
-  // 「見た目の位置 → 局面のマス」を読み替える（`applyFlip`）。
-  setFlip(flip: boolean): void;
 }
 
 export interface EditorOptions {
@@ -94,6 +85,12 @@ export interface EditorOptions {
   handSlots: { black: HTMLElement; white: HTMLElement; missing: HTMLElement };
   // panel は訂正ツールバーを置く場所。
   panel: HTMLElement;
+  // viewHost は「目線」のボタンを置く場所（**盤のすぐ下**）。
+  //
+  // ⚠️ **手番と同じ行に並べないこと**（2026-08-18 に `.edit-meta` から出した）。
+  // 「目線」と「手番」は**別の事実**（どちら側から写したか / どちらが指す番か）
+  // なのに、同じ見た目のボタンが隣り合っていると同じものの選択肢に見える。
+  viewHost: HTMLElement;
   // resetButton は「認識結果に戻す」。**訂正した内容を捨てる操作**なので、盤の近くの
   // ツールバーではなく右上に離してある(押し間違い対策)。置き場所は呼び出し側が持つ。
   resetButton: HTMLButtonElement;
@@ -111,7 +108,8 @@ export interface EditorOptions {
 }
 
 export function mountEditor(opts: EditorOptions): EditorHandle {
-  const { stage, panel, handSlots, resetButton: resetBtn, onState, onConfirm, onError } = opts;
+  const { stage, panel, viewHost, handSlots, resetButton: resetBtn, onState, onConfirm, onError } =
+    opts;
 
   // ---- 盤に重ねるグリッド -------------------------------------------------
   //
@@ -139,7 +137,15 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   }
   stage.appendChild(grid);
 
-  // ---- 視点（表示だけの反転） ---------------------------------------------
+  // ---- 視点（**訂正タブでは反転しない**。2026-08-18） ---------------------
+  //
+  // ⚠️ **訂正タブに視点の切り替えは無い。** 訂正は**撮った画像と見比べて直す**作業
+  // なので、盤は**撮ったとおり**（上向きに写っている側が手前）で固定する。裏から
+  // 眺める選択肢があると、**すぐ下の「目線」と混同する**（あちらは局面そのものの
+  // 向きの話）。反転が要るのは解析タブのほうで、そちらには残してある。
+  //
+  // 読み替えの仕掛け（`applyFlip` / `nearSide`）は**そのまま残す** —— 駒台の見出しや
+  // 駒の向きがこれを見ており、`flipped` が動かないだけで意味は変わらない。
   //
   // ⚠️ **局面には一切効かない。** 反転するのは `<shogi-board>` の絵（`flip` 属性）と
   // 駒台の置き場所だけで、`PositionService` が持つ盤・先後・手番・SFEN は動かない。
@@ -154,7 +160,7 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   // ⚠️ **反転すると座標の表示も変わる**（筋が左から 1・2・…、段が下から一・二・…
   // なので **左下が 1一**）。ツールチップ（`cellLabel`）は dataset の局面座標から
   // 作っているので、読み替えさえ正しければ自動で付いてくる。
-  let flipped = false;
+  const flipped = false;
   const applyFlip = () => {
     for (let i = 0; i < cells.length; i++) {
       const vr = Math.floor(i / 9);
@@ -163,6 +169,10 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
       cells[i].dataset.file = String(flipped ? 8 - vf : vf);
     }
   };
+  // ⚠️ **一度は通すこと。** 今は `flipped` が動かないので結果は「見た目の順のまま」に
+  // なるが、**読み替えの入口をここ 1 か所に保っておく**（グリッドの DOM の順と
+  // 局面のマスを結ぶのはこの関数だけ、という前提を崩さない）。
+  applyFlip();
 
   // グリッドの位置の基準は「箱」であることを、CSS 任せにせずここでも保証する。
   // **CSS が効いていないと基準がページ全体になり、グリッドが丸ごとずれる**
@@ -236,20 +246,6 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     </div>
     <div id="edit-body" class="edit-body">
       <div class="edit-meta">
-        <!-- 目線（2026-08-18）。**撮った画像がどちら側から写したものか。**
-             ⚠️ **盤の絵は 1 マスも動かない。** 訂正は「見えているものを直す」作業で、
-             学習ラベルも画素と一致していなければならない。効くのは
-             **解析へ渡す局面を 180 度回すかどうか**だけ。
-             ⚠️ **すぐ上の「手前: 先手」（表示視点）とは別物** —— あちらは盤の絵を
-             どちらから眺めるかの好みで、SFEN は 1 文字も変わらない。 -->
-        <span class="field-label">目線</span>
-        <div class="turn-group" role="group" aria-label="撮った盤の目線">
-          <button class="turn-btn" type="button" data-near="black">先手</button>
-          <button class="turn-btn" type="button" data-near="white">後手</button>
-        </div>
-        <!-- ⚠️ **後手目線のときだけ出す。** 解析へ渡すものが画面と違うので、
-             黙って回さない（「解析に投げる SFEN は逆になる」）。 -->
-        <span id="edit-view-note" class="note is-caution" hidden>解析へは上下を反転して渡します</span>
         <span class="field-label">手番</span>
         <div class="turn-group" role="group" aria-label="手番">
           <button class="turn-btn" type="button" data-turn="1">先手番</button>
@@ -262,6 +258,21 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
         <span class="note">盤面からは決まりません</span>
       </div>
     </div>
+  `;
+
+  // 目線（2026-08-18 に手番の行から盤の下へ出した）。**撮った画像がどちら側から
+  // 写したものか。**
+  //
+  // ⚠️ **盤の絵は 1 マスも動かない。** 訂正は「見えているものを直す」作業で、
+  // 学習ラベルも画素と一致していなければならない。効くのは
+  // **解析へ渡す局面を 180 度回すかどうか**だけ。
+  //
+  // ⚠️ **手番と並べないこと。** 別の事実なのに、同じ見た目のボタンが隣り合うと
+  // 同じものの選択肢に見える（実際に紛らわしかった）。**盤の下に 1 つだけ**置き、
+  // **押すたびに入れ替わる**形にする（状態は 2 つしかないので選択肢を並べなくてよい）。
+  viewHost.innerHTML = `
+    <button id="edit-near" class="ghost-btn" type="button"></button>
+    <span id="edit-view-note" class="note is-caution" hidden>解析へは上下を反転して渡します</span>
   `;
 
   // 駒台は盤の脇（後手=左上 / 先手=右下）に置く。**訂正ツールバーの中ではない。**
@@ -315,13 +326,22 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   const body = panel.querySelector<HTMLDivElement>("#edit-body")!;
   const handZones = [handZone(true), handZone(false)];
   const moveNum = panel.querySelector<HTMLInputElement>("#edit-movenum")!;
-  // ⚠️ **`[data-turn]` で絞ること。** 目線のボタンも見た目を揃えるために
-  // `.turn-btn` を着ているので、絞らないと目線を押すたびに手番が変わる。
   const turnBtns = Array.from(panel.querySelectorAll<HTMLButtonElement>(".turn-btn[data-turn]"));
-  const viewBtns = Array.from(panel.querySelectorAll<HTMLButtonElement>(".turn-btn[data-near]"));
-  const viewNote = panel.querySelector<HTMLElement>("#edit-view-note")!;
-  // ⚠️ **一度は通すこと。** 駒台の見出し（「手前の駒台」）はここで入れているので、
-  // 通さないと見出しの無い駒台が 2 つ並ぶ。
+  const nearBtn = viewHost.querySelector<HTMLButtonElement>("#edit-near")!;
+  // ⚠️ **後手目線のときだけ出す。** 解析へ渡すものが画面と違うので、黙って回さない。
+  const viewNote = viewHost.querySelector<HTMLElement>("#edit-view-note")!;
+  // 目線のボタン 1 つぶんの見た目。**文字がそのまま今の状態**で、押すと反対になる
+  // （何が起きるかはツールチップが言う）。
+  const paintNearButton = (nearWhite: boolean) => {
+    nearBtn.textContent = nearWhite ? "目線: 後手" : "目線: 先手";
+    nearBtn.title = nearWhite
+      ? "撮った画像は後手目線（後手が手前に写っている）。押すと先手目線に戻ります。盤は変わらず、解析へ渡すときに上下を反転します"
+      : "撮った画像は先手目線（先手が手前に写っている）。押すと後手目線になります。盤は変わりません";
+    nearBtn.setAttribute("aria-pressed", String(nearWhite));
+  };
+  // ⚠️ **一度は通すこと。** 駒台の見出し（「手前の駒台」）と目線のボタンの文字は
+  // ここで入れているので、通さないと見出しの無い駒台と空のボタンが出る。
+  paintNearButton(false);
   showHandLabels();
 
   let state: EditState | null = null;
@@ -386,9 +406,7 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     for (const b of turnBtns) {
       b.classList.toggle("is-active", Number(b.dataset.turn) === next.turn);
     }
-    for (const b of viewBtns) {
-      b.classList.toggle("is-active", (b.dataset.near === "white") === !!next.nearWhite);
-    }
+    paintNearButton(!!next.nearWhite);
     viewNote.hidden = !next.nearWhite;
     // ⚠️ **手番の値は 1 つ（`EditState.turn`）。** ボタンとマークは同じ値を
     // 2 か所に描くだけで、**更新経路もここ 1 本**にする（片方だけ更新する道を
@@ -1036,11 +1054,12 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     });
   }
 
-  for (const b of viewBtns) {
-    b.addEventListener("click", () => {
-      void apply(() => PositionService.SetViewpoint(b.dataset.near === "white"));
-    });
-  }
+  // ⚠️ **今の値は `state` から読む**（自前で覚えない）。返ってくる `EditState` が
+  // 唯一の値で、2 か所に持つと食い違う。
+  nearBtn.addEventListener("click", () => {
+    const next = !state?.nearWhite;
+    void apply(() => PositionService.SetViewpoint(next));
+  });
 
   moveNum.addEventListener("change", () => {
     const n = Number(moveNum.value);
@@ -1063,26 +1082,5 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
       onState(null);
     },
     relayout: layoutGrid,
-    setFlip(next: boolean) {
-      if (next === flipped) {
-        return;
-      }
-      flipped = next;
-      // 「見た目の位置 → 局面のマス」の読み替えを入れ替える。**先に**やること
-      // （このあとの描き直しが dataset を見て突き合わせる）。
-      applyFlip();
-      // 見出しは位置で言っているので、入れ替わったら言い直す。
-      showHandLabels();
-      if (state?.loaded) {
-        paintCells(state);
-        // 駒台は逆順にする側が入れ替わるので、両方とも並べ直す。
-        renderHands(state.inventory ?? []);
-        // 手番マークのツールチップも「手前 / 奥」で言っている。
-        showTurnMarks(state.seenTurn ?? state.turn, state.turnLabel ?? "");
-      }
-      // 盤の絵（`flip` 属性）と駒台の置き場所は呼び出し側が切り替える。
-      // その結果として箱の大きさが動きうるので、測り直す。
-      layoutGrid();
-    },
   };
 }
