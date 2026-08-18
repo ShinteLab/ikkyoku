@@ -199,7 +199,11 @@ func TestStudyServicePlayWithoutPosition(t *testing.T) {
 	}
 }
 
-// 棋譜を貼り付けると、指し手が全て反映された状態になること。
+// 棋譜を貼り付けると指し手が全て載り、**見ているのは開始局面**であること。
+//
+// ⚠️ **最終手に置かないこと**（2026-08-18 に変えた）。棋譜を読むのは
+// 「この対局を初手から解析する」ためで、連続解析の始点は**今見ている手**なので、
+// 最終手に置くと押す前に必ず戻る操作が要る。
 func TestStudyServiceLoadKifu(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	s := NewStudyService(logger, NewPositionService(logger))
@@ -214,15 +218,31 @@ func TestStudyServiceLoadKifu(t *testing.T) {
 		t.Errorf("止まった理由が出ている: %s", load.Note)
 	}
 	st := load.State
-	if !st.Loaded || st.Ply != 4 || len(st.Nodes) != 4 {
-		t.Fatalf("最終手まで反映されていません: %+v", st)
+	if !st.Loaded || len(st.Nodes) != 4 || len(st.Line) != 5 {
+		t.Fatalf("指し手が全て載っていません: %+v", st)
 	}
-	// **解析に渡せる形になっていること**（根 + 手順）。
+	// ⚠️ **見ているのは開始局面**（手順は 1 手も消えていない）。
+	if st.Ply != 0 || st.CurrentID != 0 {
+		t.Fatalf("開始局面を見ていません: ply=%d current=%d", st.Ply, st.CurrentID)
+	}
+	// **解析に渡すのも開始局面**（根そのもの。手順は付かない）。
 	target, err := s.analyzeTarget()
 	if err != nil {
 		t.Fatalf("analyzeTarget: %v", err)
 	}
-	if len(target.Moves) != 4 || target.Root == target.Current {
+	if len(target.Moves) != 0 || target.Root != target.Current {
+		t.Errorf("解析対象が開始局面になっていません: %+v", target)
+	}
+	// **最終手まで辿れること**（載っているものは全部指せる形で残っている）。
+	last := st.Line[len(st.Line)-1]
+	if _, err := s.GoTo(last); err != nil {
+		t.Fatalf("GoTo: %v", err)
+	}
+	target, err = s.analyzeTarget()
+	if err != nil {
+		t.Fatalf("analyzeTarget: %v", err)
+	}
+	if len(target.Moves) != 4 {
 		t.Errorf("解析対象が手順を持っていません: %+v", target)
 	}
 	// **採り直しと同じで、根ごと入れ替わること。**
@@ -268,8 +288,9 @@ func TestStudyServiceLoadKifuURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadKifuURL: %v", err)
 	}
-	if load.State.Ply != 2 {
-		t.Fatalf("最終手まで反映されていません: %+v", load.State)
+	// **指し手は全て載り、見ているのは開始局面**（貼り付けと同じ）。
+	if len(load.State.Nodes) != 2 || load.State.Ply != 0 {
+		t.Fatalf("指し手が全て載っていないか、開始局面を見ていません: %+v", load.State)
 	}
 	// 対局者が化けていないこと（＝文字コードを取り違えていないこと）。
 	if !strings.Contains(load.Summary, "先手太郎") {
@@ -381,6 +402,13 @@ func TestStudyServiceReloadKifuKeepsEvals(t *testing.T) {
 	}
 	if s.State().SourceURL == "" {
 		t.Fatal("取得元が記録されていません（再読み込みのボタンが出ない）")
+	}
+	// ⚠️ **最終手まで進めておく**（読み込んだ直後は開始局面を見ている）。
+	// 「伸びた先まで進む」のは**最後の手を見ていたとき**の話なので、
+	// 中継を追っている状態をここで作る。
+	line := s.State().Line
+	if _, err := s.GoTo(line[len(line)-1]); err != nil {
+		t.Fatalf("GoTo: %v", err)
 	}
 	// 2 手目まで解析した、という状態を作る。
 	target, err := s.analyzeTarget()
@@ -516,7 +544,7 @@ func TestStudyServiceReloadKifuKeepsMovesOnError(t *testing.T) {
 	if err == nil {
 		t.Fatal("棋譜でない中身でエラーになりませんでした")
 	}
-	if load.State.Ply != 2 || len(load.State.Nodes) != 2 {
+	if len(load.State.Nodes) != 2 || len(load.State.Line) != 3 {
 		t.Errorf("失敗したのに手順が壊れています: %+v", load.State)
 	}
 }

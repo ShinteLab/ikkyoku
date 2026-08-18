@@ -853,7 +853,10 @@ export function mountMainScreen(root: HTMLElement): void {
                  中身で判断しないこと（欄はいつでも書き換えられるので、
                  **今の手順がどこから来たか**とは別物になる）。 -->
             <div class="study-move-head">
-              <span class="field-label">手順</span>
+              <!-- ⚠️ **十字キーの上下で辿れることは title でしか言っていない**
+                   （2026-08-18）。行に文字を足すと、そのぶん手順のリストが
+                   短くなる（この列は縦の取り合いが厳しい）。 -->
+              <span class="field-label" title="↑ で1手戻る／↓ で1手進む">手順</span>
               <!-- 取り直しは**「手順」の真横**（2026-08-15。以前は右側の
                    ghost-btn だった）。⚠️ **取り直す相手は「その手順」**なので、
                    見出しの隣に置いて位置で対象を示す（連続解析のボタンを
@@ -3054,6 +3057,58 @@ export function mountMainScreen(root: HTMLElement): void {
     engineOf,
   });
 
+  // ---- 十字キーの上下で手順を辿る（2026-08-18）----------------------------
+  //
+  // **↑ で 1 手戻り、↓ で 1 手進む。** 手順リストの上下の並びと同じ向きなので、
+  // 押した方向とカーソルの動く向きが一致する。**盤の右のリストを押すのと同じ操作**
+  // （`GoTo`）で、**手順は 1 手も消えない。**
+  //
+  // ⚠️ **どこを押していても効く**（リストにフォーカスを当てさせない）。手を辿る
+  // ときに見ているのは**盤**なので、先にリストを掴ませるのは 1 手多い。
+  // そのぶん**横取りしてはいけない相手**を並べて外してある（下記）。
+  const studyStep = (e: KeyboardEvent) => {
+    const delta = e.key === "ArrowUp" ? -1 : e.key === "ArrowDown" ? 1 : 0;
+    if (!delta) {
+      return;
+    }
+    // ⚠️ **解析タブに居るときだけ。** 訂正タブにも盤があるので、
+    // タブを見ずに動かすと**見えていない盤の局面が変わる**。
+    if (!studyTab.classList.contains("is-active")) {
+      return;
+    }
+    // ⚠️ **修飾キー付きは触らない**（ブラウザや OS 側の操作なので横取りしない）。
+    if (e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) {
+      return;
+    }
+    // ⚠️ **連続解析が走っているあいだは動かさない**（2026-08-14 の幕と同じ理由）。
+    // あちらが 1 手ずつ局面を動かしているので、横から動かすと**自分の操作と
+    // 連続解析が同じ局面を取り合う**。幕はポインタしか塞げない。
+    if (batchActive()) {
+      return;
+    }
+    // ⚠️ **小さなダイアログが開いているあいだも動かさない**（成る/成らず・
+    // 手順を消す・手順を追加）。局面が変われば `study.ts` が黙って閉じるので、
+    // **聞かれている最中に盤が進んで、答えが別の手に効く**ように見える。
+    if (document.querySelector(".popup-menu")) {
+      return;
+    }
+    // ⚠️ **上下キーを本来の意味で使う相手から奪わないこと。** 数値欄・選択・
+    // テキスト欄と、**3 本のスプリットバー**（`role="separator"`。上下キーで
+    // 大きさを変える）がそれで、奪うと**掴んでいるつもりの操作が盤を動かす**。
+    const el = e.target as HTMLElement | null;
+    const tag = el?.tagName ?? "";
+    if (
+      tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" ||
+      el?.isContentEditable || el?.closest('[role="separator"]')
+    ) {
+      return;
+    }
+    // ⚠️ **ここまで来たら既定の動作は止める**（パネルが縦にスクロールする）。
+    e.preventDefault();
+    studyBoardUI.step(delta);
+  };
+  document.addEventListener("keydown", studyStep);
+
   // 再読み込み（2026-08-13）。**URL の側を正**にして手順を最新にする。
   //
   // ⚠️ **残す/捨てるの判断は Go 側**（`StudyService.ReloadKifu`）。手順の
@@ -4177,8 +4232,10 @@ export function mountMainScreen(root: HTMLElement): void {
       const got = await load();
       // ⚠️ **タブを先に開いてから描くこと。** 手順のリストは「今見ている手」を
       // scrollIntoView で見せるが、`display: none` の中では効かない。
-      // 逆順にすると、100 手の棋譜を読んでもリストが先頭のまま出る
-      // （最終手まで進んでいるのに、そこが見えない）。
+      // 逆順にすると、見ている手がどこにあるか分からないまま出る。
+      // ⚠️ **読み込んだ直後に見ているのは開始局面**（2026-08-18。
+      // `StudyService.LoadKifu`）。**先へ進めないこと** —— 連続解析は
+      // 今見ている手から走るので、初手から解析できる位置に置いてある。
       selectTab(studyTab);
       showStudy(got.state);
       // ⚠️ **note が空でないことをエラー扱いしないこと。** 途中で止まっても

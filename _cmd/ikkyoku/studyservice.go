@@ -216,8 +216,15 @@ type KifuLoad struct {
 // **`PositionService` は触らない** —— 撮った局面を消してしまうと、
 // 貼り付けたのが誤りだったときに戻る先が無くなる。
 //
-// **指し手が全て反映された状態**（最終手まで進めた局面）で返す。戻って見たければ
-// 手順のリストから辿れる。
+// **指し手は全て載せるが、見ているのは開始局面**（2026-08-18）。手順はそのまま
+// 手順のリストから辿れる。⚠️ **最終手に置かないこと** —— 棋譜を読むのは
+// 「この対局を初手から解析する」ためで、連続解析の始点も**今見ている手**なので、
+// 最終手に置くと**押す前に必ず開始局面まで戻る操作が要る**（先まで見たいなら
+// 手順リストか評価値グラフで飛べばよい）。
+//
+// ⚠️ **そのぶん `ReloadKifu` は伸びた先へ進まない**（あちらの「最後の手を見ていたら
+// 進める」の条件から外れる）。中継を追うなら**一度最終手を見ておくこと**で、
+// これは「見ている位置を保つ」という取り直しの規約どおり。
 func (s *StudyService) LoadKifu(text string) (KifuLoad, error) {
 	study, load, err := position.FromKIF(text)
 	if err != nil {
@@ -227,6 +234,9 @@ func (s *StudyService) LoadKifu(text string) (KifuLoad, error) {
 	s.mu.Lock()
 	// **根ごと入れ替える**（Adopt と同じ）。前の手順と解析結果は別の局面の話になる。
 	s.study = study
+	// **見るのは開始局面**（`FromKIF` は最終手まで進めた状態で返す）。
+	// ⚠️ **手順は 1 手も消さない** —— `GoTo` は見る位置を動かすだけ。
+	_ = s.study.GoTo(0)
 	// **対局者はここでだけ埋まる**（勝率バーの左右に出す）。
 	s.game = load.Game
 	// ⚠️ **取得元は捨てる。** 貼り付けた棋譜には取り直す先が無い。
@@ -545,6 +555,30 @@ func (s *StudyService) Branch(id int) (StudyState, error) {
 		return s.state(), fmt.Errorf("まだ局面がありません")
 	}
 	if err := s.study.Branch(id); err != nil {
+		return s.state(), err
+	}
+	return s.state(), nil
+}
+
+// Promote はその手を**分かれ道の続き（本線）に選ぶ**（手順リストの右クリック →
+// 「本線にする」。2026-08-18）。**`Branch` の裏返し。**
+//
+// エンジンの読み筋を 2 本足すと**どちらも同格の候補**として並ぶ（続きが決まって
+// いない状態）。そこから「この続きを辿る」と決めるのがこれで、選んだ手は
+// **同じ深さで続く 1 本**になり、残りは枝として 1 段下がる。
+//
+// ⚠️ **手順は 1 手も消えない。見ている局面も動かない**（`Branch` と同じ）。
+// **評価値も捨てない** —— 節点はそのままで、どれを続きとするかが変わるだけ。
+//
+// ⚠️ **続きが既に決まっているなら断る**（`position.Study.Promote`）。
+// 選び直すときは**先に「分岐にする」で外す。**
+func (s *StudyService) Promote(id int) (StudyState, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.study == nil {
+		return s.state(), fmt.Errorf("まだ局面がありません")
+	}
+	if err := s.study.Promote(id); err != nil {
 		return s.state(), err
 	}
 	return s.state(), nil
