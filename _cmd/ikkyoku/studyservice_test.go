@@ -404,10 +404,10 @@ func TestStudyServiceReloadKifuKeepsEvals(t *testing.T) {
 		t.Fatal("取得元が記録されていません（再読み込みのボタンが出ない）")
 	}
 	// ⚠️ **最終手まで進めておく**（読み込んだ直後は開始局面を見ている）。
-	// 「伸びた先まで進む」のは**最後の手を見ていたとき**の話なので、
 	// 中継を追っている状態をここで作る。
 	line := s.State().Line
-	if _, err := s.GoTo(line[len(line)-1]); err != nil {
+	last := line[len(line)-1]
+	if _, err := s.GoTo(last); err != nil {
 		t.Fatalf("GoTo: %v", err)
 	}
 	// 2 手目まで解析した、という状態を作る。
@@ -429,8 +429,15 @@ func TestStudyServiceReloadKifuKeepsEvals(t *testing.T) {
 	if load.Note != "" {
 		t.Errorf("食い違っていないのに差し替えの断りが出ています: %s", load.Note)
 	}
-	if load.State.Ply != 4 || len(load.State.Nodes) != 4 {
-		t.Fatalf("最新の手順まで進んでいません: %+v", load.State)
+	if len(load.State.Nodes) != 4 {
+		t.Fatalf("最新の手順が載っていません: %+v", load.State.Nodes)
+	}
+	// ⚠️ **見ている位置は動かさないこと**（2026-08-19）。**最後の手を見ていても
+	// 伸びた先へは進まない** —— どこを見ているかはユーザーが選んだ状態で、
+	// 取り直しは「URL の側を正にする」操作でしかない。
+	if load.State.CurrentID != last || load.State.Ply != 2 {
+		t.Errorf("取り直しで選択が動いています: cur=%d ply=%d (want cur=%d ply=2)",
+			load.State.CurrentID, load.State.Ply, last)
 	}
 	// **解析結果はそのまま**（3 点とも残っていること）。
 	g := s.Evals()
@@ -508,6 +515,42 @@ func TestStudyServiceReloadKifuReplacesDivergedMoves(t *testing.T) {
 	}
 	if n := len(s.Evals().Series[0].Points); n != 3 {
 		t.Errorf("枝の評価値が消えました: %d点", n)
+	}
+}
+
+// 枝を見ている最中に取り直しても、**選択がそこから動かない**こと（2026-08-19）。
+//
+// ⚠️ **これが壊れていた。** 「最後の手を見ていたか」を深さ
+// （`Ply() >= len(MainLine())`）だけで見ていたので、**枝は本譜より深くなり得る**
+// ぶん「最後の手」と誤判定され、**本譜の終わりへ飛ばされていた**。
+func TestStudyServiceReloadKifuKeepsBranchSelection(t *testing.T) {
+	body := kifuHead + "   1 ７六歩(77)\n   2 ３四歩(33)\n   3 ２六歩(27)\n"
+	srv := kifuServer(t, &body)
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	s := NewStudyService(logger, NewPositionService(logger))
+	if _, err := s.LoadKifuURL(srv.URL + "/live.kif"); err != nil {
+		t.Fatalf("LoadKifuURL: %v", err)
+	}
+	// 1 手目まで戻って別の手を指す（＝**本譜より深い枝**に居る状態）。
+	if _, err := s.GoTo(s.State().Line[1]); err != nil {
+		t.Fatalf("GoTo: %v", err)
+	}
+	for _, mv := range []string{"8c8d", "2g2f"} {
+		if _, err := s.Play(mv); err != nil {
+			t.Fatalf("Play(%s): %v", mv, err)
+		}
+	}
+	at := s.State().CurrentID
+
+	// 中継が 1 手進んだ。
+	body = kifuHead + "   1 ７六歩(77)\n   2 ３四歩(33)\n   3 ２六歩(27)\n   4 ８四歩(83)\n"
+	load, err := s.ReloadKifu()
+	if err != nil {
+		t.Fatalf("ReloadKifu: %v", err)
+	}
+	if load.State.CurrentID != at {
+		t.Errorf("枝を見ていたのに選択が動きました: cur=%d (want %d)", load.State.CurrentID, at)
 	}
 }
 
