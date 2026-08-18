@@ -229,7 +229,7 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
       <button id="edit-confirm" class="ghost-btn is-primary" type="button">この局面を解析する</button>
       <span class="edit-hint">
         盤 ⇄ 駒台をドラッグ（外すと同時に持ち主が決まる） /
-        <strong>「足りない駒」をクリックすると掴んだまま連続で置ける</strong>（Esc で離す） /
+        <strong>「足りない駒」をクリックすると掴んだまま連続で置ける</strong>（残り 0 でも置ける。Esc で離す） /
         盤の外へ放ると外れる /
         右クリックで先後と成・不成を切り替え
       </span>
@@ -405,13 +405,14 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     const inv = next.inventory ?? [];
     renderMissing(inv);
     renderHands(inv);
-    // ⚠️ **残りが尽きたら離す。** 足りている駒も置けるのは変えていないが
-    // （設計原則3・4）、**掴みっぱなしのまま押し続けて駒が増え続ける**のは事故。
-    // もう 1 枚要るなら押し直せばよい。
-    if (armed && (inv.find((x) => x.piece === armed?.piece)?.unassigned ?? 0) <= 0) {
-      setArmed(null);
-    }
     // チップは作り直されているので、掴んでいる印を付け直す。
+    //
+    // ⚠️ **残りが 0 になっても離さないこと**（2026-08-18 に一度入れて戻した）。
+    // 「足りない駒」の数が正しいのは**認識が完璧なときだけ**で、先に駒台を
+    // 埋めてから盤を直すと**残り 0 のまま盤に足したい**場面が普通に来る。
+    // そこで勝手に離れると、1 枚置くたびに掴み直すことになって使えない
+    // （`Place` が在庫を見ないのと同じ話。設計原則3・4）。
+    // **離すのは人が離したときだけ。**
     paintArmed();
     // onState が盤の sfen 属性を書き換える（= <shogi-board> が SVG を描き直す）ので、
     // グリッドの位置合わせはそのあと。
@@ -717,6 +718,9 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   }
 
   // toggleArmed は「足りない駒」のクリック。**同じ駒をもう一度押したら離す。**
+  //
+  // ⚠️ **残り枚数で掴めるかを決めないこと。** 足りている駒でも掴める
+  // （そうしないと、余計な駒を外す前に正しい駒を置けずに詰む）。
   function toggleArmed(piece: number) {
     if (!editable) {
       return;
