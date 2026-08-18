@@ -89,6 +89,25 @@ type Node struct {
 	// ⚠️ **`Play` を通るのは盤の操作だけではない**（`FromKIF` も 1 手ずつ指す）ので、
 	// **`Play` に印を付ける実装にしないこと。**
 	Hand bool `json:"hand,omitempty"`
+	// Chosen は**この手を「本線」に選んだか**（手順リストの「本線にする」。2026-08-18）。
+	//
+	// 変化の中の分かれ道は既定でどれも同格（全部 1 段下げて並ぶ）なので、
+	// **「この続きを辿る」と決めた 1 本**を指すのにこれが要る。⚠️ **`Main` とは
+	// 別物** —— あちらは**根から本譜を辿って届くか**で、こちらは
+	// **親が続きに選んだか**（変化の中でも立つ）。
+	//
+	// ⚠️ **画面では「分岐にする」を出す条件にも使う**（本線を選び直すには、
+	// 先に今の本線を外す必要がある）。
+	Chosen bool `json:"chosen,omitempty"`
+	// CanPromote は**この手を「本線にする」ことができるか**（2026-08-18）。
+	//
+	// 立つのは**親の続きがまだ決まっていない分かれ道の子**だけ ——
+	// ⚠️ **本線が既にあるなら立たない**（選び直すには先に「分岐にする」で外す）。
+	// ⚠️ **分岐の直後の手だけ**（その先の手は、親から見れば 1 本道なので選ぶも何も無い）。
+	//
+	// ⚠️ **フロントで同じ判定を書かないこと。** 「続きが決まっているか」は
+	// 木の形（`kids[0]` と印）で決まるので、**画面に出ている字下げからは読めない。**
+	CanPromote bool `json:"canPromote,omitempty"`
 	// Main は**本譜か**（根から `kids[0]` だけを辿って届く手）。
 	//
 	// ⚠️ **「親の最初の子」ではない**（2026-08-13 に意味を変えた）。枝の中の
@@ -115,6 +134,16 @@ type treeNode struct {
 	// `kids[0]`＝本譜**になる。本譜の先端から試しに指した手がまさにそれで、
 	// **「これは自分の検討で、対局の手ではない」と言う手段が無かった。**
 	variation bool
+	// chosen は**この手を続き（本線）に選んだ**という印（「本線にする」。2026-08-18）。
+	//
+	// ⚠️ **`variation` の裏返しではない。** あちらは**本譜から外す**印で、
+	// こちらは**変化の中の分かれ道で、どれを続きとして辿るか**を決める印。
+	// 変化の中の分かれ道は既定でどれも同格（`Nodes` が全部 1 段下げる）なので、
+	// **選んだ 1 本を「同じ深さで続く」側に置く**のにこれが要る。
+	//
+	// ⚠️ **`kids[0]` であることだけでは表せない** —— あちらは「先に足した」以上の
+	// 意味を持たないと決めてある（先に足したほうを上位に見せない）。
+	chosen bool
 	// kids は子。**kids[0] が本譜側**（`Graft` はここへ据え直す）。
 	kids []*treeNode
 }
@@ -239,7 +268,7 @@ func (s *Study) Nodes() []Node {
 			// ⚠️ **`kids[0]` を後ろへ回さないこと** —— 下げただけで順番まで
 			// 変わると、**画面のどこへ動いたのか目で追えない。**
 			for _, k := range n.kids {
-				out = append(out, k.node(depth+1, false))
+				out = append(out, k.node(depth+1, false).promotable(len(n.kids) > 1))
 				walk(k, depth+1, head)
 			}
 		case mode == main:
@@ -250,6 +279,26 @@ func (s *Study) Nodes() []Node {
 			}
 			out = append(out, n.kids[0].node(depth, true))
 			walk(n.kids[0], depth, main)
+		case len(n.kids) > 1 && n.kids[0].chosen:
+			// **続きに選んだ手がある**（「本線にする」。2026-08-18）。
+			// **本譜と同じ形にする** —— 枝を先に 1 段下げて出し、選んだ続きは
+			// **続きの深さのまま**伸ばす。⚠️ **同じ深さに並べないこと** ——
+			// 並べると選んだ 1 本が他の候補と見分けられず、選んだ意味が消える。
+			//
+			// ⚠️ **続きの深さは「1 本しか無かったときと同じ」**にする ——
+			// 頭（`head`）の続きは 1 本でも下げる規則なので、そこだけ +1。
+			// ここを `depth` に固定すると、**選んだ瞬間に頭とその続きが同じ深さ**に
+			// なって、どこから始まる変化なのか読めなくなる。
+			d := depth
+			if mode == head {
+				d++
+			}
+			for _, k := range n.kids[1:] {
+				out = append(out, k.node(d+1, false))
+				walk(k, d+1, head)
+			}
+			out = append(out, n.kids[0].node(d, false))
+			walk(n.kids[0], d, cont)
 		case mode == head || len(n.kids) > 1:
 			// ⚠️ **頭の子は 1 本でも下げる／分かれ道は全部そろえて下げる**（上記）。
 			//
@@ -266,7 +315,9 @@ func (s *Study) Nodes() []Node {
 				next = head
 			}
 			for _, k := range n.kids {
-				out = append(out, k.node(depth+1, false))
+				// **どれも同格**（続きがまだ決まっていない）ので、
+				// **どれでも「本線にする」で選べる**。
+				out = append(out, k.node(depth+1, false).promotable(len(n.kids) > 1))
 				walk(k, depth+1, next)
 			}
 		default:
@@ -287,9 +338,20 @@ func (n *treeNode) node(depth int, main bool) Node {
 	return Node{
 		ID: n.id, Parent: parent, Number: n.number,
 		USI: n.usi, Text: n.text, Depth: depth, Main: main,
+		Chosen:  n.chosen,
 		Sources: append([]string(nil), n.sources...),
 		Hand:    n.hand,
 	}
+}
+
+// promotable は「本線にする」で選べる手に印を付ける（`Nodes` の中だけで使う）。
+//
+// ⚠️ **付けるのは「親の続きがまだ決まっていない分かれ道の子」だけ。**
+// 判定を `Nodes` の中に置いてあるのは、**そこが「続きが決まっているか」を
+// 既に知っている唯一の場所**だから（表示の分岐がそのまま条件になる）。
+func (n Node) promotable(ok bool) Node {
+	n.CanPromote = ok
+	return n
 }
 
 // Line は今の経路（根 → 今の節点 → そこから本譜側へ辿った先）の節点 id を返す。
@@ -668,7 +730,75 @@ func (s *Study) Branch(id int) error {
 		return fmt.Errorf("ikkyoku/position: その手はありません: %d", id)
 	}
 	n.variation = true
+	// ⚠️ **「本線にする」で選んだ印も落とすこと**（2026-08-18）。落とさないと
+	// **選び直せない** —— `Promote` は「続きがまだ決まっていない」ときだけ通すので、
+	// 外す手段が無いと最初に選んだ 1 本で固まる。**これが唯一の外し方。**
+	n.chosen = false
 	return nil
+}
+
+// Promote はその手を**分かれ道の続き（本線）に選ぶ**（手順リストの「本線にする」。
+// 2026-08-18）。**`Branch` の裏返し。**
+//
+// エンジンの読み筋を 2 本足すと、**どちらも同格の候補**として並ぶ（続きが
+// 決まっていない状態。**それ自体は正しい** —— 先に足したほうを上位に見せない）。
+// そこから**「この続きを辿る」と決める**のがこの操作で、選んだ手は
+// **同じ深さで続く 1 本**になり、残りは枝として 1 段下がる。
+//
+// ⚠️ **手順は 1 手も消えない。見ている局面も動かない**（`DropFrom` と混同しない）。
+// 評価値も捨てない（節点はそのままで、**どれを続きとするかが変わるだけ**）。
+//
+// ⚠️ **続きが既に決まっているなら断る**（本譜の続きがある場合も含む）。
+// 選び直すときは**先に今の続きを「分岐にする」で外す** —— 黙って
+// 押しのけると、**どれが本線だったのか分からないまま入れ替わる。**
+//
+// ⚠️ **分かれ道の直後の手だけ**（その先の手は、親から見れば 1 本道なので選べない）。
+func (s *Study) Promote(id int) error {
+	n, ok := s.index[id]
+	if !ok || n.parent == nil {
+		return fmt.Errorf("ikkyoku/position: その手はありません: %d", id)
+	}
+	p := n.parent
+	if len(p.kids) < 2 {
+		return fmt.Errorf("ikkyoku/position: 分かれ道ではありません: %d", id)
+	}
+	if !openFork(p) {
+		return fmt.Errorf("ikkyoku/position: もう本線が決まっています: %d", id)
+	}
+	// **先頭へ移す**（`Line` も連続解析もここを辿る）。
+	promote(p, n)
+	// ⚠️ **本譜側の印も落とすこと** —— 親が本譜なら、この手から先が本譜に戻る
+	//（`Branch` で下げた手をもう一度本譜に戻す、という道でもある）。
+	n.variation = false
+	n.chosen = true
+	return nil
+}
+
+// openFork は**その分かれ道の続きがまだ決まっていないか**（`Promote` の可否）。
+//
+// ⚠️ **`Nodes` の「全部 1 段下げる」場合と揃えてあること。** 食い違うと、
+// **画面では同格に並んでいるのにメニューに出ない**（あるいはその逆）になる。
+func openFork(p *treeNode) bool {
+	if len(p.kids) < 2 {
+		return false
+	}
+	if onMainLine(p) {
+		// 本譜の上なら、**`kids[0]` がそのまま続き**（「分岐にする」で外れていれば空く）。
+		return p.kids[0].variation
+	}
+	// 変化の中は**選んだ手があるときだけ**続きが決まっている。
+	return !p.kids[0].chosen
+}
+
+// onMainLine は根から本譜（`kids[0]` かつ「分岐にする」で下げていない）を
+// 辿って届く節点か。
+func onMainLine(n *treeNode) bool {
+	for ; n.parent != nil; n = n.parent {
+		if n.variation || n.parent.kids[0] != n {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Study) DropFrom(id int) ([]int, error) {

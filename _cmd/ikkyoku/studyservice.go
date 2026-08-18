@@ -560,6 +560,30 @@ func (s *StudyService) Branch(id int) (StudyState, error) {
 	return s.state(), nil
 }
 
+// Promote はその手を**分かれ道の続き（本線）に選ぶ**（手順リストの右クリック →
+// 「本線にする」。2026-08-18）。**`Branch` の裏返し。**
+//
+// エンジンの読み筋を 2 本足すと**どちらも同格の候補**として並ぶ（続きが決まって
+// いない状態）。そこから「この続きを辿る」と決めるのがこれで、選んだ手は
+// **同じ深さで続く 1 本**になり、残りは枝として 1 段下がる。
+//
+// ⚠️ **手順は 1 手も消えない。見ている局面も動かない**（`Branch` と同じ）。
+// **評価値も捨てない** —— 節点はそのままで、どれを続きとするかが変わるだけ。
+//
+// ⚠️ **続きが既に決まっているなら断る**（`position.Study.Promote`）。
+// 選び直すときは**先に「分岐にする」で外す。**
+func (s *StudyService) Promote(id int) (StudyState, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.study == nil {
+		return s.state(), fmt.Errorf("まだ局面がありません")
+	}
+	if err := s.study.Promote(id); err != nil {
+		return s.state(), err
+	}
+	return s.state(), nil
+}
+
 // DropFrom はその手**とその先（子孫の枝も全部）**を消す（**手順リストの右クリック**）。
 //
 // ⚠️ **「1手戻す」は無くなった**（2026-08-13）。**消す量を手そのもので指す**形に

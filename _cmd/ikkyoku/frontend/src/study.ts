@@ -739,14 +739,26 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
   // ⚠️ **`danger` にしないこと** —— 赤くするのは「押したら消える」ボタンだけで、
   // メニューの段で赤いと**確認が出ることに気づかず身構える**。
   const askMoveMenu = (
-    x: number, y: number, id: number, label: string, count: number, main: boolean,
+    x: number, y: number, id: number, label: string, count: number,
+    o: { main: boolean; chosen: boolean; canPromote: boolean },
   ) => {
     closeAsk();
     const items: PopupItem[] = [];
-    // 「分岐にする」は**本譜の手にだけ出す**（枝は既に分岐なので、押しても
-    // 何も起きない項目が並ぶだけ）。⚠️ **確認は挟まない** —— 何も消えないし、
-    // もう一度指すか棋譜を取り直せば戻る。
-    if (main) {
+    // 「本線にする」は**続きがまだ決まっていない分かれ道の子にだけ出す**
+    // （2026-08-18）。⚠️ **出す条件は Go 側が付けた印**（`Node.canPromote`）で、
+    // **画面の字下げから判断しないこと** —— 続きが決まっているかは木の形で決まる。
+    // ⚠️ **確認は挟まない**（「分岐にする」と同じ。何も消えないし、外せば戻る）。
+    if (o.canPromote) {
+      items.push({
+        label: "本線にする",
+        onPick: () => void run(() => StudyService.Promote(id)),
+      });
+    }
+    // 「分岐にする」は**本譜の手**と**本線に選んだ手**に出す（枝は既に分岐なので、
+    // 押しても何も起きない項目が並ぶだけ）。⚠️ **選んだ手にも出すこと** ——
+    // **これが唯一の外し方**で、無いと最初に選んだ 1 本で固まる。
+    // ⚠️ **確認は挟まない** —— 何も消えないし、もう一度指すか棋譜を取り直せば戻る。
+    if (o.main || o.chosen) {
       items.push({
         label: "分岐にする",
         onPick: () => void run(() => StudyService.Branch(id)),
@@ -787,9 +799,14 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
       return false;
     }).length;
     const label = chip.querySelector<HTMLElement>(".move-text")?.textContent ?? "この手";
-    // 「分岐にする」を出すかどうか（本譜の手だけ）。
-    const main = (state.nodes ?? []).some((n) => n.id === id && n.main);
-    askMoveMenu(e.clientX, e.clientY, id, label, count, main);
+    // どの項目を出すかは**その手の印**で決まる（本譜か・本線に選んだか・選べるか）。
+    // ⚠️ **判定は Go 側**（`Node`）。フロントで木の形を読み直さないこと。
+    const me = (state.nodes ?? []).find((n) => n.id === id);
+    askMoveMenu(e.clientX, e.clientY, id, label, count, {
+      main: !!me?.main,
+      chosen: !!me?.chosen,
+      canPromote: !!me?.canPromote,
+    });
   });
 
   // play は移動先が決まったときに 1 手指す。

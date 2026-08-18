@@ -827,3 +827,189 @@ func TestStudyBranch(t *testing.T) {
 		}
 	})
 }
+
+// 分かれ道の続き（本線）を選べること（「本線にする」。2026-08-18）。
+//
+// ⚠️ **エンジンの読み筋を 2 本足すと、どちらも同格の候補として並ぶ**
+// （続きが決まっていない）。**それ自体は正しい**ので、そこから
+// 「この続きを辿る」と決める操作がこれ。**`Branch` の裏返し。**
+func TestStudyPromote(t *testing.T) {
+	nodeOf := func(s *position.Study, id int) (position.Node, bool) {
+		for _, n := range s.Nodes() {
+			if n.ID == id {
+				return n, true
+			}
+		}
+		return position.Node{}, false
+	}
+	// forked は「変化の中で分かれ道を作った」木を返す（画面で起きるのと同じ形）。
+	//
+	//	7g7f 3c3d ── 2g2f（本譜）
+	//	           └ 6g6f（変化の頭）── 8c8d / 4c4d ← ここが分かれ道
+	forked := func(t *testing.T) (s *position.Study, at, a, b int) {
+		t.Helper()
+		s = position.NewStudy(hirate(t))
+		for _, mv := range []string{"7g7f", "3c3d", "2g2f"} {
+			if err := s.Play(mv); err != nil {
+				t.Fatalf("Play %s: %v", mv, err)
+			}
+		}
+		if err := s.GoTo(2); err != nil { // 3c3d まで戻る
+			t.Fatalf("GoTo: %v", err)
+		}
+		// 変化の頭（本譜の 2g2f とは別の手）とその先の 2 本。
+		if _, _, note := s.AddLine([]string{"6g6f", "8c8d"}, "e1"); note != "" {
+			t.Fatalf("AddLine: %s", note)
+		}
+		if _, _, note := s.AddLine([]string{"6g6f", "4c4d"}, "e2"); note != "" {
+			t.Fatalf("AddLine: %s", note)
+		}
+		for _, n := range s.Nodes() {
+			switch n.USI {
+			case "6g6f":
+				at = n.ID
+			case "8c8d":
+				a = n.ID
+			case "4c4d":
+				b = n.ID
+			}
+		}
+		if at == 0 || a == 0 || b == 0 {
+			t.Fatalf("木が組めていません: %+v", s.Nodes())
+		}
+		return s, at, a, b
+	}
+
+	// ⚠️ **選ぶ前はどちらも同格**（同じ深さに並ぶ）で、**どちらも選べる**。
+	t.Run("選ぶ前はどちらも同格", func(t *testing.T) {
+		s, _, a, b := forked(t)
+		na, _ := nodeOf(s, a)
+		nb, _ := nodeOf(s, b)
+		if na.Depth != nb.Depth {
+			t.Errorf("候補の深さが違います: %d / %d", na.Depth, nb.Depth)
+		}
+		if !na.CanPromote || !nb.CanPromote {
+			t.Errorf("どちらも選べるべき: %+v %+v", na, nb)
+		}
+	})
+
+	// **選んだ手が続きになり、残りは 1 段下がること**（本譜と同じ形）。
+	t.Run("選んだ手が続きになる", func(t *testing.T) {
+		s, at, a, b := forked(t)
+		if err := s.Promote(a); err != nil {
+			t.Fatalf("Promote: %v", err)
+		}
+		na, _ := nodeOf(s, a)
+		nb, _ := nodeOf(s, b)
+		if !na.Chosen {
+			t.Error("選んだ印が付いていません")
+		}
+		if na.Depth >= nb.Depth {
+			t.Errorf("選んだ手が続きになっていません: 選=%d 枝=%d", na.Depth, nb.Depth)
+		}
+		// ⚠️ **今の経路（`Line`）もそちらを辿ること**（十字キーも連続解析もここを見る）。
+		if err := s.GoTo(at); err != nil {
+			t.Fatalf("GoTo: %v", err)
+		}
+		line := s.Line()
+		if line[len(line)-1] != a {
+			t.Errorf("経路が選んだ続きを辿っていません: %v", line)
+		}
+	})
+
+	// ⚠️ **手も局面も評価値の拠り所（節点の id）も動かないこと。**
+	t.Run("手も局面も動かない", func(t *testing.T) {
+		s, _, a, _ := forked(t)
+		at, ply, n := s.CurrentID(), s.Ply(), len(s.Nodes())
+		if err := s.Promote(a); err != nil {
+			t.Fatalf("Promote: %v", err)
+		}
+		if len(s.Nodes()) != n {
+			t.Errorf("手数が変わりました: %d -> %d", n, len(s.Nodes()))
+		}
+		if s.CurrentID() != at || s.Ply() != ply {
+			t.Errorf("局面が動きました: id=%d ply=%d", s.CurrentID(), s.Ply())
+		}
+	})
+
+	// ⚠️ **もう本線があるなら断る**（黙って押しのけない）。
+	t.Run("本線があるなら断る", func(t *testing.T) {
+		s, _, a, b := forked(t)
+		if err := s.Promote(a); err != nil {
+			t.Fatalf("Promote: %v", err)
+		}
+		if err := s.Promote(b); err == nil {
+			t.Error("もう本線があるのに通りました")
+		}
+		if n, _ := nodeOf(s, b); n.CanPromote {
+			t.Error("選べないのに CanPromote が立っています")
+		}
+		// **外せば選び直せること**（`Branch` が唯一の外し方）。
+		if err := s.Branch(a); err != nil {
+			t.Fatalf("Branch: %v", err)
+		}
+		if err := s.Promote(b); err != nil {
+			t.Errorf("外したのに選び直せません: %v", err)
+		}
+	})
+
+	// ⚠️ **本譜の続きがあるあいだは、その枝を本線にできない**（同上）。
+	t.Run("本譜の続きがあるなら断る", func(t *testing.T) {
+		s := position.NewStudy(hirate(t))
+		if err := s.Play("7g7f"); err != nil {
+			t.Fatalf("Play: %v", err)
+		}
+		main := s.CurrentID()
+		if err := s.GoTo(0); err != nil {
+			t.Fatalf("GoTo: %v", err)
+		}
+		if _, _, note := s.AddLine([]string{"2g2f"}, "e1"); note != "" {
+			t.Fatalf("AddLine: %s", note)
+		}
+		var side int
+		for _, n := range s.Nodes() {
+			if n.USI == "2g2f" {
+				side = n.ID
+			}
+		}
+		if err := s.Promote(side); err == nil {
+			t.Error("本譜の続きがあるのに通りました")
+		}
+		// **「分岐にする」で本譜を外せば、こちらを本譜に据えられる。**
+		if err := s.Branch(main); err != nil {
+			t.Fatalf("Branch: %v", err)
+		}
+		if err := s.Promote(side); err != nil {
+			t.Fatalf("Promote: %v", err)
+		}
+		if n, _ := nodeOf(s, side); !n.Main {
+			t.Error("本譜に戻っていません")
+		}
+	})
+
+	// ⚠️ **分かれ道の直後の手だけ**（その先は親から見れば 1 本道）。
+	t.Run("分かれ道でなければ断る", func(t *testing.T) {
+		s, _, a, _ := forked(t)
+		if err := s.Promote(a); err != nil {
+			t.Fatalf("Promote: %v", err)
+		}
+		// a の先（1 本道）は選べない。
+		var deep int
+		for _, n := range s.Nodes() {
+			if n.Parent == a {
+				deep = n.ID
+			}
+		}
+		if deep != 0 {
+			if err := s.Promote(deep); err == nil {
+				t.Error("分かれ道でないのに通りました")
+			}
+		}
+		if err := s.Promote(999); err == nil {
+			t.Error("知らない id はエラーになるべき")
+		}
+		if err := s.Promote(0); err == nil {
+			t.Error("根はエラーになるべき")
+		}
+	})
+}
