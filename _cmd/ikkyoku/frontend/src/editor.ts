@@ -85,6 +85,11 @@ export interface EditorOptions {
   handSlots: { black: HTMLElement; white: HTMLElement; missing: HTMLElement };
   // panel は訂正ツールバーを置く場所。
   panel: HTMLElement;
+  // confirmHost は「この局面を解析する」を置く場所（**一番下**）。
+  //
+  // ⚠️ **手番より上に戻さないこと**（2026-08-18 に移した）。**手番を決めないと
+  // 解析できない**のに、その手番より上にボタンがあるのは順序として逆。
+  confirmHost: HTMLElement;
   // viewHost は「目線」のボタンを置く場所（**盤のすぐ下**）。
   //
   // ⚠️ **手番と同じ行に並べないこと**（2026-08-18 に `.edit-meta` から出した）。
@@ -108,8 +113,17 @@ export interface EditorOptions {
 }
 
 export function mountEditor(opts: EditorOptions): EditorHandle {
-  const { stage, panel, viewHost, handSlots, resetButton: resetBtn, onState, onConfirm, onError } =
-    opts;
+  const {
+    stage,
+    panel,
+    viewHost,
+    confirmHost,
+    handSlots,
+    resetButton: resetBtn,
+    onState,
+    onConfirm,
+    onError,
+  } = opts;
 
   // ---- 盤に重ねるグリッド -------------------------------------------------
   //
@@ -233,17 +247,16 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   window.addEventListener("resize", layoutGrid);
 
   // ⚠️ **「訂正する」のトグルは置かない。** 訂正タブに居ること自体が訂正モード。
-  // ここに要るのは出口（＝確定して解析タブへ渡す）だけ。
+  //
+  // ⚠️ **出口（「この局面を解析する」）はここではなく `confirmHost`**（2026-08-18 に
+  // panel の先頭から一番下へ移した）。**手番を決めないと解析できない**のに、
+  // その手番より上にボタンがあるのは順序として逆だった。下の並びを崩さないこと:
+  //
+  //     手番・手数 → SFEN → 訂正データを送信 → この局面を解析する
+  //
+  // （SFEN は手番が決まって初めて組み上がり、送信はその SFEN を送り、
+  //   解析はそこまでが済んで初めて押せる。**上から順に効く**）。
   panel.innerHTML = `
-    <div class="edit-bar">
-      <button id="edit-confirm" class="ghost-btn is-primary" type="button">この局面を解析する</button>
-      <span class="edit-hint">
-        盤 ⇄ 駒台をドラッグ（外すと同時に持ち主が決まる） /
-        <strong>「足りない駒」をクリックすると掴んだまま連続で置ける</strong>（残り 0 でも置ける。Esc で離す） /
-        盤の外へ放ると外れる /
-        右クリックで先後と成・不成を切り替え
-      </span>
-    </div>
     <div id="edit-body" class="edit-body">
       <div class="edit-meta">
         <span class="field-label">手番</span>
@@ -258,6 +271,17 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
         <span class="note">盤面からは決まりません</span>
       </div>
     </div>
+  `;
+
+  // 出口（＝確定して解析タブへ渡す）と、盤の操作の説明。**一番下**（上の ⚠️）。
+  confirmHost.innerHTML = `
+    <button id="edit-confirm" class="ghost-btn is-primary" type="button">この局面を解析する</button>
+    <span class="edit-hint">
+      盤 ⇄ 駒台をドラッグ（外すと同時に持ち主が決まる） /
+      <strong>「足りない駒」をクリックすると掴んだまま連続で置ける</strong>（残り 0 でも置ける。Esc で離す） /
+      盤の外へ放ると外れる /
+      右クリックで先後と成・不成を切り替え
+    </span>
   `;
 
   // 目線（2026-08-18 に手番の行から盤の下へ出した）。**撮った画像がどちら側から
@@ -323,7 +347,7 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     }
   };
 
-  const confirmBtn = panel.querySelector<HTMLButtonElement>("#edit-confirm")!;
+  const confirmBtn = confirmHost.querySelector<HTMLButtonElement>("#edit-confirm")!;
   const body = panel.querySelector<HTMLDivElement>("#edit-body")!;
   const handZones = [handZone(true), handZone(false)];
   const moveNum = panel.querySelector<HTMLInputElement>("#edit-movenum")!;

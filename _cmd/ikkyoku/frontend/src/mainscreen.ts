@@ -641,22 +641,16 @@ export function mountMainScreen(root: HTMLElement): void {
           </div>
         </details>
 
+        <!-- ⚠️ **この並びを崩さないこと**（2026-08-18 に並べ替えた）:
+             **手番・手数 → SFEN → 訂正データを送信 → この局面を解析する。**
+
+             上から順に効く。**SFEN は手番が決まって初めて組み上がり**、
+             送信はその SFEN を送り、解析はそこまでが済んで初めて通る。
+             以前は「この局面を解析する」が一番上（手番より上）にあり、
+             **手番を入れないと押せないボタンが、その手番より上にある**という
+             順序になっていた。 -->
         <div id="editor" class="editor"></div>
         <p id="edit-status" class="status" role="status" aria-live="polite"></p>
-        <!-- 訂正した局面を suteme の学習データとして送る。設定で有効にしていない
-             ときは行ごと出さない。**押したときだけ送る**(自動送信はしない)。
-
-             ⚠️ **確定を待たない。** 送るのは labelSfen（未確定でも持ち駒を
-             落とさない画像ラベル用の SFEN）なので、手番や駒台の先後が決まって
-             いなくても学習の役には立つ（設計原則3）。何が落ちるかは note に出る。 -->
-        <div id="train-row" class="train-row" hidden>
-          <button id="train-send" class="ghost-btn" type="button"
-                  title="この画像と訂正した盤面を、suteme の学習データとして登録します">訂正データを送信</button>
-          <!-- 送る SFEN のために妥協した点(手番が未決・先後未決の持ち駒)。
-               **送る前に出す**(何が落ちるか分からないまま送らせない)。 -->
-          <span id="train-note" class="note is-caution"></span>
-          <span id="train-send-status" class="note"></span>
-        </div>
         <!-- ⚠️ **「解析へ渡す SFEN」の行と「駒台」の行はここに戻さないこと**
              （2026-08-18 に外した）。
 
@@ -673,6 +667,24 @@ export function mountMainScreen(root: HTMLElement): void {
                局面が上下逆になるので、**何も言わずに回さない**。全文は title に出す。 -->
           <span id="sfen-note" class="note is-caution" hidden>（解析へは反転して送信）</span>
         </div>
+        <!-- 訂正した局面を suteme の学習データとして送る。設定で有効にしていない
+             ときは行ごと出さない。**押したときだけ送る**(自動送信はしない)。
+
+             ⚠️ **確定を待たない。** 送るのは labelSfen（未確定でも持ち駒を
+             落とさない画像ラベル用の SFEN）なので、手番や駒台の先後が決まって
+             いなくても学習の役には立つ（設計原則3）。何が落ちるかは note に出る。
+             ⚠️ **だから「この局面を解析する」より上**（手番に依らない操作を、
+             手番が決まって初めて押せるボタンの下に置かない）。 -->
+        <div id="train-row" class="train-row" hidden>
+          <button id="train-send" class="ghost-btn" type="button"
+                  title="この画像と訂正した盤面を、suteme の学習データとして登録します">訂正データを送信</button>
+          <!-- 送る SFEN のために妥協した点(手番が未決・先後未決の持ち駒)。
+               **送る前に出す**(何が落ちるか分からないまま送らせない)。 -->
+          <span id="train-note" class="note is-caution"></span>
+          <span id="train-send-status" class="note"></span>
+        </div>
+        <!-- 訂正タブの唯一の出口。中身は editor.ts が入れる（ボタンと操作の説明）。 -->
+        <div id="edit-confirm-row" class="edit-bar"></div>
       </div>
 
       <!-- 解析タブ。**確定した局面の面。** 訂正タブとは別の局面を持つ
@@ -3693,6 +3705,7 @@ export function mountMainScreen(root: HTMLElement): void {
     resetButton: root.querySelector<HTMLButtonElement>("#edit-reset")!,
     panel: root.querySelector<HTMLElement>("#editor")!,
     viewHost: root.querySelector<HTMLElement>("#edit-view-row")!,
+    confirmHost: root.querySelector<HTMLElement>("#edit-confirm-row")!,
     onState: (st) => {
       // suteme に送るのは **LabelSFEN**（画像のラベルとしての SFEN）。
       //
