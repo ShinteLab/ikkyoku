@@ -511,12 +511,11 @@ export function mountMainScreen(root: HTMLElement): void {
              盤から遠い右上に離し、赤くしてある。 -->
         <div class="board-head">
           <ul id="board-warnings" class="warnings is-compact" hidden></ul>
-          <!-- 視点（2026-08-13）。**表示だけの反転で、局面には一切効かない。**
-               ⚠️ **ここで盤面や先後を書き換えないこと** —— 撮った画像と盤面が
-               一致していることが訂正の前提で、学習データのラベルも画素と
-               一致していなければならない（CLAUDE.md「取り込みも訂正も反転しない」）。
-               ⚠️ **解析タブと同じ 1 つの値**（どちらで切り替えても両方が変わる）。 -->
-          <button id="edit-flip" class="ghost-btn" type="button"></button>
+          <!-- ⚠️ **表示視点（反転）のボタンはここに戻さないこと**（2026-08-18 に外した）。
+               訂正は**撮った画像と見比べて直す**作業なので、盤は撮ったとおりで固定する。
+               裏から眺める選択肢があると、盤の下の「目線」と混同する
+               （あちらは**局面そのものの向き**の話で、押すと解析へ渡す局面が回る）。
+               反転が要るのは解析タブのほうで、そちらには残してある。 -->
           <button id="edit-reset" class="danger-btn" type="button" hidden
                   title="訂正を捨てて、認識したときの盤面に戻します">認識結果に戻す</button>
         </div>
@@ -558,6 +557,16 @@ export function mountMainScreen(root: HTMLElement): void {
           </div>
           <p id="board-placeholder" class="board-placeholder">まだ撮っていません。</p>
         </div>
+        <!-- 目線（2026-08-18 に手番の行から盤の下へ出した）。中身は editor.ts が入れる。
+             **撮った画像がどちら側から写したものか**で、⚠️ **盤は 1 マスも動かない**
+             （効くのは解析へ渡すときに 180 度回すかどうかだけ）。
+
+             ⚠️ **手番の行に戻さないこと。** 「目線」と「手番」は別の事実なのに、
+             同じ見た目のボタンが隣り合っていると同じものの選択肢に見える。
+             ⚠️ **盤のすぐ下に置くこと** —— 言っているのは「この盤がどちら向きか」なので、
+             盤から離すと何に対する設定なのか分からなくなる。 -->
+        <div id="edit-view-row" class="edit-view-row"></div>
+
         <!-- 認識詳細情報（旧デバッグタブ）。**盤の下・「この局面を解析する」の上**
              （2026-08-18。盤の上＝警告のすぐ下から移した）。
 
@@ -1495,7 +1504,7 @@ export function mountMainScreen(root: HTMLElement): void {
   let editNotes: string[] = [];
   let editLoaded = false;
   // editNearWhite は**撮った画像が後手目線か**（`EditState.nearWhite` の控え）。
-  // ⚠️ **表示視点（`editFlipped`）とは別物。** あちらは盤の絵をどちらから
+  // ⚠️ **解析タブの表示視点（`studyFlipped`）とは別物。** あちらは盤の絵をどちらから
   // 眺めるかで、こちらは**局面そのものの向き**（採るときに 180 度回る）。
   let editNearWhite = false;
   let lastRegion: ShotRegion | null = null;
@@ -2910,13 +2919,12 @@ export function mountMainScreen(root: HTMLElement): void {
   // 視点（手前が先手 / 手前が後手）。**表示だけの反転で、局面には効かない。**
   // 切り替えの中身は下の「視点」の節にまとめてある（ここは値の置き場所だけ）。
   //
-  // ⚠️ **タブごとに別の値**（2026-08-18 に 1 つの値から割った）。訂正タブは
-  // **撮ったとおりを描く面**で、解析タブは**撮った画像が後手目線なら 180 度
-  // 回した局面**を持つ。つまり「同じ見た目」にするには 2 つが食い違っている
-  // 必要がある（採るときに `adoptToStudy` が解析タブ側を合わせる）。
-  // **1 つに戻さないこと** —— 戻すと、後手目線で採った瞬間に訂正タブの盤まで
-  // 裏返り、撮った画像と見比べられなくなる。
-  let editFlipped = false;
+  // ⚠️ **持っているのは解析タブのぶんだけ**（2026-08-18）。訂正タブは
+  // **撮ったとおりを描く面**なので反転しない（ボタンごと外した）。解析タブは
+  // 撮った画像が後手目線なら**180 度回した局面**を持つので、撮った見え方に
+  // 揃えるにはこちらを反転する（採るときに `adoptToStudy` が合わせる）。
+  // ⚠️ **訂正タブにも反転を戻さないこと** —— 戻すと、後手目線で採った瞬間に
+  // どちらを裏返すのかが 2 通りになり、撮った画像と見比べられなくなる。
   let studyFlipped = false;
   // 解析タブの駒台に最後に描いた中身。**視点を切り替えたときに並べ直すため**に持つ
   // （局面の写しではない —— 駒台の並び順だけがここに依存している）。
@@ -3690,6 +3698,7 @@ export function mountMainScreen(root: HTMLElement): void {
     },
     resetButton: root.querySelector<HTMLButtonElement>("#edit-reset")!,
     panel: root.querySelector<HTMLElement>("#editor")!,
+    viewHost: root.querySelector<HTMLElement>("#edit-view-row")!,
     onState: (st) => {
       // suteme に送るのは **LabelSFEN**（画像のラベルとしての SFEN）。
       //
@@ -3759,12 +3768,9 @@ export function mountMainScreen(root: HTMLElement): void {
   // ⚠️ **訂正タブと解析タブで 1 つの値。** 片方だけ反転していると、
   // 採った局面が上下逆に出てきて何が起きたのか分からなくなる
   // （値そのものは `showStudyHand` より前で宣言してある）。
-  const boardWithHands = root.querySelector<HTMLElement>("#board-with-hands")!;
   const studyBoardWithHands = root.querySelector<HTMLElement>("#study-board-with-hands")!;
-  const editFlip = root.querySelector<HTMLButtonElement>("#edit-flip")!;
 
   // paintFlipButton はボタン 1 つぶんの見た目（文字・ツールチップ・押下状態）。
-  // ⚠️ **2 つのボタンは別々の値を指している**ので、まとめて書き換えないこと。
   const paintFlipButton = (b: HTMLButtonElement, flip: boolean) => {
     b.textContent = flip ? "手前: 後手" : "手前: 先手";
     b.title = flip
@@ -3773,17 +3779,13 @@ export function mountMainScreen(root: HTMLElement): void {
     b.setAttribute("aria-pressed", String(flip));
   };
 
+  // ⚠️ **訂正タブは反転しない**（2026-08-18 にボタンごと外した）。ここに
+  // `board.toggleAttribute("flip", ...)` を戻さないこと —— 盤は撮ったとおりで固定する。
   const applyViewpoint = () => {
-    board.toggleAttribute("flip", editFlipped);
-    boardWithHands.classList.toggle("is-flipped", editFlipped);
-    editor.setFlip(editFlipped);
-    paintFlipButton(editFlip, editFlipped);
-
     studyBoard.toggleAttribute("flip", studyFlipped);
     studyBoardWithHands.classList.toggle("is-flipped", studyFlipped);
     studyBoardUI.setFlip(studyFlipped);
-    // 駒台は「逆順に並べる側」が入れ替わるので並べ直す（訂正タブ側は
-    // `editor.setFlip` が自分で並べ直している）。
+    // 駒台は「逆順に並べる側」が入れ替わるので並べ直す。
     showStudyHand(studyHands);
     paintFlipButton(studyFlip, studyFlipped);
   };
@@ -3798,19 +3800,7 @@ export function mountMainScreen(root: HTMLElement): void {
     applyViewpoint();
   };
 
-  // setEditViewpoint は**訂正タブの**視点。⚠️ **これも表示だけの反転**で、
-  // 「撮った盤の目線」（`EditState.nearWhite`）とは別物 —— あちらは局面そのものの
-  // 向きの話で、こちらは盤の絵をどちらから眺めるかの好み。
-  const setEditViewpoint = (black: boolean) => {
-    if (editFlipped === !black) {
-      return;
-    }
-    editFlipped = !black;
-    applyViewpoint();
-  };
-
   // 反転中なら「手前が先手」に戻し、そうでなければ「手前が後手」にする。
-  editFlip.addEventListener("click", () => setEditViewpoint(editFlipped));
   studyFlip.addEventListener("click", () => setStudyViewpoint(studyFlipped));
   // ⚠️ **一度は通すこと。** ボタンの文字（「手前: 先手」）はここで入れているので、
   // 通さないとラベルが空のボタンが出る。
