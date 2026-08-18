@@ -83,6 +83,21 @@ import type { Stock } from "../bindings/github.com/ShinteLab/ikkyoku/position/mo
 // ここで別に定義すると矩形の意味がずれても気づけない)。
 import type { Debug } from "../bindings/github.com/ShinteLab/suteme";
 
+// 「撮れた」ことだけを伝えるイベントのペイロード（Go 側 CaptureShot / `capture:shot`）。
+//
+// ⚠️ **認識結果は載っていない**（まだ走っている）。撮ってから認識が終わるまでは
+// 数秒あるので、そこを 1 つのイベントにまとめると**待っているあいだ画面が
+// 前の 1 枚のまま**になる。**続きは capture:done が丸ごと持ってくる。**
+//
+// **bindings から取れない**（メソッドの戻り値ではないため）。CaptureResult と同じで、
+// **Go 側を変えたらここも直すこと。**
+interface CaptureShot {
+  path: string;
+  width: number;
+  height: number;
+  thumbnail: string;
+}
+
 interface CaptureResult {
   path: string;
   width: number;
@@ -3652,7 +3667,7 @@ export function mountMainScreen(root: HTMLElement): void {
         fillWarnings(boardWarnings, []);
         return;
       }
-      showBoard(st.boardSfen, true);
+      showBoard(st.boardSfen, "shot");
       sfenOut.textContent = st.sfen || st.boardSfen || "-";
       // 後手目線のときだけ「解析へ渡す SFEN」を足す（先手目線なら同じ文字列）。
       const rotated = st.analyzeSfen && st.analyzeSfen !== st.sfen ? st.analyzeSfen : "";
@@ -3789,16 +3804,23 @@ export function mountMainScreen(root: HTMLElement): void {
 
   // sfen が空なら盤を隠して理由を出す。撮る前と「撮ったが認識できなかった」は別物なので
   // 文言を分ける(認識失敗はキャプチャの失敗ではない。設計原則3)。
-  const showBoard = (sfen: string, captured: boolean) => {
+  // 盤が無いときに何と書くかは 3 通りある。⚠️ **「まだ撮っていません」と
+  // 「認識しています」を混ぜないこと** —— 撮った直後の数秒は盤が無いのが正常で、
+  // そこに「まだ撮っていません」と出ると**撮れていないように見える**
+  // （撮り直しを誘発する。今どの 1 枚の話なのかが読めなくなる）。
+  const showBoard = (sfen: string, phase: "none" | "shot" | "busy") => {
     // 盤ごと箱(.board-stage)を隠す。箱は正方形の場所取りをしているので、
     // 中身が無いまま残すと空白が居座る。
     boardStage.hidden = !sfen;
     if (!sfen) {
       board.hidden = true;
       placeholder.hidden = false;
-      placeholder.textContent = captured
-        ? "盤面を認識できませんでした。画像は保存されています。"
-        : "まだ撮っていません。";
+      placeholder.textContent =
+        phase === "busy"
+          ? "盤面を認識しています…"
+          : phase === "shot"
+            ? "盤面を認識できませんでした。画像は保存されています。"
+            : "まだ撮っていません。";
       return;
     }
     board.setAttribute("sfen", sfen);
@@ -4027,6 +4049,71 @@ export function mountMainScreen(root: HTMLElement): void {
     })();
   });
 
+  // 撮れた時点で呼ぶ（`capture:shot`）。**認識はまだ走っている。**
+  //
+  // ⚠️ **撮ることと認識することを 1 つの表示に混ぜないこと**（2026-08-18 に分けた）。
+  // 認識は数秒かかるので、`capture:done` まで何も変えないでいると
+  // **前の 1 枚が盤に出たまま**になり、枠には「撮影中…」が出続ける ——
+  // **今どの画像の話なのかが画面から読めない**（撮れているのかどうかも分からない）。
+  //
+  // ここでやるのは「新しい 1 枚に入れ替えて、認識の結果だけを待つ状態にする」こと:
+  // 撮った画像を出し、前の認識結果と前の解析を捨て、訂正タブを開いて「認識中」と出す。
+  // **結果が来たら showResult がそのまま上書きする。**
+  const showShot = (taken: CaptureShot) => {
+    status.textContent = `保存しました: ${taken.path} / 盤面を認識しています…`;
+    status.classList.remove("is-error", "is-warn");
+    showPath(taken.path);
+
+    // 撮り直したら解析タブは空に戻す。**前の局面の盤と評価値を残さない**
+    // （新しい認識結果の裏で生き残っていると、どちらが今の話か分からなくなる）。
+    // ⚠️ **撮れた時点で捨てること** —— 認識を待つあいだ古い評価値が残っていると、
+    // 撮った 1 枚に対する評価に見える。
+    if (analyzeRunning) {
+      void AnalyzeService.Stop();
+    }
+    void (async () => {
+      try {
+        showStudy(await StudyService.Clear());
+      } catch {
+        /* 消せなくても撮影は成功している（設計原則3）。次の Adopt で入れ替わる。 */
+      }
+    })();
+
+    // 前の 1 枚の認識結果を消す。**残すと、新しい画像の隣に古い駒台と古い警告が並ぶ。**
+    editor.clear();
+    showBoard("", "busy");
+    sfenOut.textContent = "-";
+    showConfidence(0, "");
+    showRegion(null);
+    showPredictor(null);
+    showHand({});
+    showWarnings([]);
+    drawOverlay(null);
+    markDebug("");
+    trainSendStatus.textContent = "";
+    trainSendStatus.classList.remove("is-error");
+
+    // 撮った画像。**まだ盤面領域が分からないので切り取らずに全体を出す**
+    // （領域は認識が出すもの。届いたら showResult が同じ画像を切り取って出し直す）。
+    if (taken.thumbnail) {
+      thumbnail.src = taken.thumbnail;
+      shot.hidden = false;
+    }
+    lastRegion = null;
+    hasShot = !!taken.thumbnail;
+    if (hasShot) {
+      showCaptureRefImage(taken.thumbnail, null, taken.path);
+    }
+    syncCaptureRef();
+    syncTrain();
+
+    // **撮ったら訂正タブへ移る。** 行き先は認識の成否に依らないので、
+    // 待たせるならその面で待たせる（結果が出てから移ると、待っているあいだ
+    // どこを見ていればよいのか分からない）。盤が取れなかったときだけ、
+    // showResult が理由の出ている入力タブへ戻す。
+    selectTab(editTab);
+  };
+
   const showResult = (result: CaptureResult) => {
     // 認識できなくてもキャプチャは成功している(設計原則3: 段階的に劣化する)。
     // 保存できたことと、認識できたかどうかを分けて出す。
@@ -4040,18 +4127,9 @@ export function mountMainScreen(root: HTMLElement): void {
     }
 
     showPath(result.path);
-    // 撮り直したら解析タブは空に戻す。**前の局面の盤と評価値を残さない**
-    // （新しい認識結果の裏で生き残っていると、どちらが今の話か分からなくなる）。
-    if (analyzeRunning) {
-      void AnalyzeService.Stop();
-    }
-    void (async () => {
-      try {
-        showStudy(await StudyService.Clear());
-      } catch {
-        /* 消せなくても撮影は成功している（設計原則3）。次の Adopt で入れ替わる。 */
-      }
-    })();
+    // ⚠️ **解析タブを空に戻すのは showShot（撮れた時点）でやってある。**
+    // ここでもう一度やらないこと —— 認識を待つあいだだけ古い評価値が残る、
+    // という中途半端な状態を作らないための順序。
     // 盤・SFEN・駒台・警告は訂正 UI 側(EditState)が描く。**認識結果をここで直接
     // 描かない**(訂正した内容が撮り直すまで残る、という食い違いを作らないため)。
     // 認識できていれば読み込んで訂正を始められる状態にし、駄目なら空に戻す。
@@ -4062,7 +4140,7 @@ export function mountMainScreen(root: HTMLElement): void {
       void editor.load(result.sfen).then(() => selectTab(editTab));
     } else {
       editor.clear();
-      showBoard("", true);
+      showBoard("", "shot");
       sfenOut.textContent = "-";
       selectTab(inputTab);
     }
@@ -4076,9 +4154,6 @@ export function mountMainScreen(root: HTMLElement): void {
       thumbnail.src = result.thumbnail;
       shot.hidden = false;
     }
-    // 前の 1 枚の送信結果を残さない（別の画像の話になるため）。
-    trainSendStatus.textContent = "";
-    trainSendStatus.classList.remove("is-error");
     // 盤面矩形。**保存した PNG の座標系に直して覚える**
     // （認識はメモリ上の画像の座標系で答えるが、PNG は原点 (0,0) に正規化される。
     //  今は常に一致するはずだが、ずれると学習サンプルの切り出しが黙って 1 マスずれる）。
@@ -5432,6 +5507,12 @@ export function mountMainScreen(root: HTMLElement): void {
 
   // ホットキー(Go側の GlobalShortcut)や枠のツールバーからのキャプチャは、この画面が
   // フォーカスされていなくても発生する。結果は Wails イベントで受け取って UI に反映する。
+  // ⚠️ **キャプチャのイベントは 2 段**（2026-08-18 に分けた）。撮れた時点で
+  // `capture:shot`、認識まで終わってから `capture:done`。**片方だけを見ないこと** ——
+  // shot だけでは結果が出ず、done だけでは認識のあいだ前の 1 枚が残る。
+  Events.On("capture:shot", (event: { data: CaptureShot }) => {
+    showShot(event.data);
+  });
   Events.On("capture:done", (event: { data: CaptureResult }) => {
     showResult(event.data);
   });

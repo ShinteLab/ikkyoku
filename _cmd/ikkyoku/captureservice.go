@@ -407,6 +407,23 @@ func (s *CaptureService) Layout() GuideLayout {
 	return GuideLayout{BorderPx: guideBorderPx, ToolbarPx: toolbarHeightPx}
 }
 
+// CaptureShot は「撮れた」ことだけを伝えるイベントのペイロード（`capture:shot`）。
+//
+// ⚠️ **撮ることと認識することは別の話**（2026-08-18 に分けた）。認識は数秒かかるので、
+// 撮り終えてから `capture:done` まで待つと、その間ずっと枠に「撮影中…」が出たままになり、
+// **いつ撮れた 1 枚なのかが画面から読めない**（撮り直したのか、まだ撮っていないのかも
+// 分からない）。撮れた時点でこれを流し、枠は**そこでシャッターの合図を出し**、
+// メイン画面は**撮った画像を出して「認識中…」に変わる**。
+//
+// 認識結果は載せない（まだ無い）。**中身は CaptureResult の「撮れた」ぶんだけ**で、
+// 続きは `capture:done` が丸ごと持ってくる。
+type CaptureShot struct {
+	Path      string `json:"path"`
+	Width     int    `json:"width"`
+	Height    int    `json:"height"`
+	Thumbnail string `json:"thumbnail"` // data:image/png;base64,... のサムネイル(等倍)
+}
+
 // CaptureResult はフロントに返すキャプチャ結果。
 //
 // 盤面の認識結果も含むが、**認識できなくてもキャプチャは成功**として返す
@@ -489,6 +506,23 @@ func (s *CaptureService) Capture() (CaptureResult, error) {
 	}
 	s.logger.Info("キャプチャしました", "path", path, "width", b.Dx(), "height", b.Dy())
 
+	// **撮れたことを先に知らせる。** 認識(下)は数秒かかるので、ここで一度切らないと
+	// 枠は「撮影中…」のまま止まって見え、メイン画面は前の 1 枚を出したままになる。
+	// 撮った時点で合図とメイン画面の表示を済ませ、認識は「認識中…」として続きを待たせる。
+	//
+	// ⚠️ **メイン画面を出すのもここ**(以前は認識まで終えてから出していた)。
+	// 撮った直後に前に出るので、**今どの 1 枚の話をしているか**が画面から読める。
+	// 撮影そのものは既に終わっているので、前に出たメイン画面が写り込むことはない。
+	if s.app != nil {
+		s.app.Event.Emit("capture:shot", CaptureShot{
+			Path:      path,
+			Width:     b.Dx(),
+			Height:    b.Dy(),
+			Thumbnail: thumb,
+		})
+	}
+	s.revealMain()
+
 	// 盤面の認識。**ここで失敗してもキャプチャは成功として返す。**
 	// PNG は既に保存できており、撮った 1 局面を失わないことのほうが大事
 	// (設計原則3。認識失敗はキャプチャの失敗ではない)。
@@ -512,12 +546,11 @@ func (s *CaptureService) Capture() (CaptureResult, error) {
 			// 撮り溜めたログから「いつから外し始めたか」を追えるようにしておく。
 			"detail", board.Debug.String())
 	}
+	// 認識まで含めた結果。**メイン画面は既に出ている**(上の capture:shot)ので、
+	// ここでやることは「認識中…」を結果で置き換えることだけ。
 	if s.app != nil {
 		s.app.Event.Emit("capture:done", result)
 	}
-	// 撮れたらメイン画面を出してアクティブにする。イベントを先に出しておくことで、
-	// 前面に来た時点でメイン画面が最新の結果を持っている状態になる。
-	s.revealMain()
 	return result, nil
 }
 
