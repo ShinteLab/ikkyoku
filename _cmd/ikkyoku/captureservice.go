@@ -312,6 +312,7 @@ func (s *CaptureService) HideFrame() {
 	}
 	s.revealMain()
 	s.wins.frame.Hide()
+	s.emitFrameVisible()
 }
 
 // ShowMain はメイン画面を出して前面に持ってくる。枠のメニューから呼ばれる。
@@ -387,18 +388,40 @@ func (s *CaptureService) requireFrame() error {
 		return fmt.Errorf("ikkyoku-app: ウィンドウが初期化されていません")
 	}
 	if !s.wins.frame.IsVisible() {
-		return fmt.Errorf("ガイド枠が出ていません。入力タブの「枠を表示」から出して、撮りたい盤面に合わせてください")
+		return fmt.Errorf("ガイド枠が出ていません。タイトルバーの「枠を表示」から出して、撮りたい盤面に合わせてください")
 	}
 	return nil
 }
 
-// ShowFrame は隠した枠を出し直す。メイン画面のボタンから呼ばれる。
+// ShowFrame は隠した枠を出し直す。メイン画面のタイトルバーのボタンから呼ばれる。
 func (s *CaptureService) ShowFrame() {
 	if s.wins == nil || s.wins.frame == nil {
 		return
 	}
 	s.wins.frame.Show()
 	s.wins.frame.Focus()
+	s.emitFrameVisible()
+}
+
+// FrameVisible は枠が今出ているか。**タイトルバーのトグルの初期状態**に使う
+// (起動した時点で出ていることがある —— 設定「起動時に盤面を探す」)。
+func (s *CaptureService) FrameVisible() bool {
+	return s.wins != nil && s.wins.frame != nil && s.wins.frame.IsVisible()
+}
+
+// emitFrameVisible は枠の出入りをメイン画面へ知らせる(`frame:visible`)。
+//
+// **枠を隠す口はメイン画面の外にある**(枠のツールバーの ✕)ので、押した結果を
+// メイン画面が自分では知れない。知らせないと、**枠が隠れているのにトグルが
+// 「出ています」のまま**になり、押せないボタンだけが残る。
+//
+// ⚠️ **`captureWithoutSelf` からは呼ばない。** あちらは探すあいだ枠を一瞬隠して
+// すぐ戻すだけで、**ユーザーから見た状態は変わっていない**(知らせるとトグルが明滅する)。
+func (s *CaptureService) emitFrameVisible() {
+	if s.app == nil {
+		return
+	}
+	s.app.Event.Emit("frame:visible", s.FrameVisible())
 }
 
 // Layout は枠ウィンドウが描くべき寸法を返す。フロントは起動時にこれを呼び、
