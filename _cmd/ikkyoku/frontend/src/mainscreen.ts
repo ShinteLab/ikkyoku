@@ -657,23 +657,21 @@ export function mountMainScreen(root: HTMLElement): void {
           <span id="train-note" class="note is-caution"></span>
           <span id="train-send-status" class="note"></span>
         </div>
+        <!-- ⚠️ **「解析へ渡す SFEN」の行と「駒台」の行はここに戻さないこと**
+             （2026-08-18 に外した）。
+
+             駒台は**盤の脇に駒そのものが並んでいる**ので、文字の要約は同じことを
+             2 度言っているだけだった。解析へ渡す SFEN は、**後手目線のときだけ
+             行が増えて下がずれる**うえ、丸ごと読みたい場面がほとんど無い。
+
+             ⚠️ **黙って回さない、という約束は残す** —— 後手目線のときは
+             SFEN の後ろに「（解析へは反転して送信）」と添える（下の #sfen-note）。 -->
         <div class="sfen-row">
           <span class="field-label">SFEN</span>
           <code id="sfen" class="sfen">-</code>
-        </div>
-        <!-- 解析へ渡す SFEN。**後手目線のときだけ出す**（先手目線なら上と同じ）。
-             ⚠️ **黙って回さない** —— 画面に出ている局面と、エンジンが読む局面が
-             上下逆になるので、何が渡るのかは見えていないといけない。 -->
-        <div id="edit-analyze-sfen-row" class="sfen-row" hidden>
-          <span class="field-label" title="撮った画像が後手目線なので、盤・先後・駒台・手番をまとめて反転して渡します">解析へ</span>
-          <code id="edit-analyze-sfen" class="sfen">-</code>
-        </div>
-        <!-- 駒台。**訂正中の局面の値**なので先後の割り振りが出る
-             (「認識詳細情報」側は認識した時点の推定枚数で「先後不明」のまま)。
-             訂正中は盤の脇に駒そのものが並ぶので、こちらは文字の要約。 -->
-        <div id="board-hand-row" class="hand-row" hidden>
-          <span class="field-label">駒台</span>
-          <span id="board-hand" class="hand"></span>
+          <!-- ⚠️ **後手目線のときだけ出す。** 画面に出ている局面と、エンジンが読む
+               局面が上下逆になるので、**何も言わずに回さない**。全文は title に出す。 -->
+          <span id="sfen-note" class="note is-caution" hidden>（解析へは反転して送信）</span>
         </div>
       </div>
 
@@ -1238,6 +1236,8 @@ export function mountMainScreen(root: HTMLElement): void {
   const board = root.querySelector<HTMLElement>("#board")!;
   const placeholder = root.querySelector<HTMLParagraphElement>("#board-placeholder")!;
   const sfenOut = root.querySelector<HTMLElement>("#sfen")!;
+  // 「解析へは反転して送信」。**後手目線のときだけ出す**（SFEN の後ろに添える）。
+  const sfenNote = root.querySelector<HTMLElement>("#sfen-note")!;
   const confidenceRow = root.querySelector<HTMLDivElement>("#confidence-row")!;
   const confidenceOut = root.querySelector<HTMLElement>("#confidence")!;
   // 駒台と警告は両方のタブに出るが、**出所が違う**。
@@ -1250,8 +1250,6 @@ export function mountMainScreen(root: HTMLElement): void {
   const handRow = root.querySelector<HTMLDivElement>("#hand-row")!;
   const handOut = root.querySelector<HTMLElement>("#hand")!;
   const warnings = root.querySelector<HTMLUListElement>("#warnings")!;
-  const boardHandRow = root.querySelector<HTMLDivElement>("#board-hand-row")!;
-  const boardHandOut = root.querySelector<HTMLElement>("#board-hand")!;
   const boardWarnings = root.querySelector<HTMLUListElement>("#board-warnings")!;
   const status = root.querySelector<HTMLParagraphElement>("#status")!;
   const shot = root.querySelector<HTMLDivElement>("#shot")!;
@@ -2908,10 +2906,6 @@ export function mountMainScreen(root: HTMLElement): void {
   // 訂正タブ側の一行。訂正の操作が通らなかった理由と、確定できない理由を出す。
   const editStatus = root.querySelector<HTMLParagraphElement>("#edit-status")!;
 
-  // 解析へ渡す SFEN の行（**後手目線のときだけ出る**）。
-  const editAnalyzeSfenRow = root.querySelector<HTMLElement>("#edit-analyze-sfen-row")!;
-  const editAnalyzeSfen = root.querySelector<HTMLElement>("#edit-analyze-sfen")!;
-
   // 視点のボタン（解析タブ）。**盤のグリッドの右の列**に置いてある
   // （先手の対局者名の下・先手の駒台の上）。
   const studyFlip = root.querySelector<HTMLButtonElement>("#study-flip")!;
@@ -3716,18 +3710,16 @@ export function mountMainScreen(root: HTMLElement): void {
       // ⚠️ **ここから解析の状態を触らないこと。** 訂正タブの局面と解析タブの局面は
       // 別物で、繋ぐのは「この局面を解析する」を押したときの 1 回だけ。
       if (!st?.loaded) {
-        boardHandRow.hidden = true;
+        showSfenNote("");
         fillWarnings(boardWarnings, []);
         return;
       }
       showBoard(st.boardSfen, "shot");
       sfenOut.textContent = st.sfen || st.boardSfen || "-";
-      // 後手目線のときだけ「解析へ渡す SFEN」を足す（先手目線なら同じ文字列）。
-      const rotated = st.analyzeSfen && st.analyzeSfen !== st.sfen ? st.analyzeSfen : "";
-      editAnalyzeSfenRow.hidden = rotated === "";
-      editAnalyzeSfen.textContent = rotated || "-";
-      editAnalyzeSfen.title = rotated;
-      showEditHand(st.inventory ?? []);
+      // 後手目線のときだけ「解析へは反転して送信」と添える（先手目線なら同じ文字列）。
+      // ⚠️ **行を増やさない** —— 増やすと出たり消えたりするたびに下のボタンがずれて、
+      // 押しづらくなる（実際にそうなっていた）。全文は title で読める。
+      showSfenNote(st.analyzeSfen && st.analyzeSfen !== st.sfen ? st.analyzeSfen : "");
       fillWarnings(boardWarnings, st.warnings ?? []);
     },
     onConfirm: () => {
@@ -3806,35 +3798,17 @@ export function mountMainScreen(root: HTMLElement): void {
   // 通さないとラベルが空のボタンが出る。
   applyViewpoint();
 
-  // 盤面タブの駒台。**訂正中の局面の値**で、先後の割り振りと**未決のぶん**まで出す
-  // (「認識詳細情報」側は認識した時点の推定枚数のまま)。
+  // SFEN の後ろの注記。**後手目線のときだけ出す**（引数は解析へ渡す SFEN。空なら消す）。
   //
-  // 未決が残っているあいだは局面が確定しない(SFEN が組み上がらない)ので、
-  // **訂正モードを開いていなくても見えるようにしておく**。
-  const showEditHand = (inv: Stock[]) => {
-    const fmt = (pick: (s: Stock) => number) =>
-      inv
-        .filter((s) => pick(s) > 0)
-        .map((s) => `${s.name}${pick(s)}`)
-        .join(" ");
-    const black = fmt((s) => s.handBlack);
-    const white = fmt((s) => s.handWhite);
-    const rest = fmt((s) => s.unassigned);
-
-    const parts: string[] = [];
-    if (black) {
-      parts.push(`先手 ${black}`);
-    }
-    if (white) {
-      parts.push(`後手 ${white}`);
-    }
-    if (rest) {
-      parts.push(`先後未決 ${rest}`);
-    }
-    boardHandOut.textContent = parts.join(" / ");
-    boardHandOut.classList.toggle("is-unassigned", !!rest);
-    boardHandRow.hidden = parts.length === 0;
+  // ⚠️ **行を増やさないこと**（2026-08-18 に「解析へ」の行から変えた）。後手目線の
+  // ときだけ行が増えると、**出たり消えたりするたびに下のボタンが上下にずれて押しづらい**。
+  // ⚠️ **黙って回さない、という約束は残す** —— 画面の局面とエンジンが読む局面が
+  // 上下逆になるので、**何が渡るのかは見えていること**（全文は title）。
+  const showSfenNote = (analyzeSfen: string) => {
+    sfenNote.hidden = analyzeSfen === "";
+    sfenNote.title = analyzeSfen ? `解析へ渡す SFEN: ${analyzeSfen}` : "";
   };
+
 
   // sfen が空なら盤を隠して理由を出す。撮る前と「撮ったが認識できなかった」は別物なので
   // 文言を分ける(認識失敗はキャプチャの失敗ではない。設計原則3)。
