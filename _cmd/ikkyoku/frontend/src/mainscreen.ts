@@ -497,72 +497,6 @@ export function mountMainScreen(root: HTMLElement): void {
           </div>
           <p id="kifu-status" class="status" role="status" aria-live="polite" hidden></p>
         </div>
-
-        <!-- 認識詳細情報（旧デバッグタブ → 訂正タブ → **入力タブの一番下**。2026-08-18）。
-             **「撮った 1 枚がどう読まれたか」の記録**なので、置き場所は**撮った面**。
-
-             ⚠️ **訂正タブに戻さないこと**（2026-08-18 に移した）。あちらは
-             **盤が主役**で、盤の上に積む行は短く保つ決まり —— 開くと盤が下へ押され、
-             そのためだけに訂正タブをスクロールさせていた。訂正しながら見たいのは
-             **原本の画像**のほうで、それは盤の左に出しっぱなしにしてある（.capture-ref）。
-
-             ⚠️ **中身は認識した時点の記録**（CaptureResult）。訂正タブの警告や
-             盤の脇の駒台（EditState）とは**別の値**で、訂正しても変わらない。
-             同じ見出しが 2 か所に出るが、**読む目的が違う**ので片方を消さないこと
-             （訂正タブ＝今の局面を直すための情報、ここ＝認識がどれくらい外したかの記録）。
-
-             ⚠️ **中は「撮った画像 → 認識の情報」の順**（2026-08-18 に入れ替えた）。
-             最初に見るのは**撮れているかどうか**で、確信度や推論器はそれを見たあとの
-             話。畳んだ状態から開いて、まず画像が目に入るのが正しい。 -->
-        <details id="debug-details" class="debug-details">
-          <summary id="debug-summary">認識詳細情報</summary>
-          <div class="debug-body">
-            <div class="debug-shot">
-              <div class="debug-shot-head">
-                <span class="field-label">撮った画像</span>
-                <button id="shot-path" class="path-btn" type="button" hidden>
-                  <span class="path-name"></span>${iconMarkup(FiCopy)}
-                </button>
-                <button id="shot-copy-image" class="path-btn is-icon-only" type="button" hidden
-                        aria-label="画像をコピー"
-                        title="画像そのものをクリップボードにコピー">${iconMarkup(FiImage)}</button>
-                <label class="overlay-toggle">
-                  <input id="overlay-toggle" type="checkbox" checked />
-                  認識の重ね表示
-                </label>
-              </div>
-              <div id="shot" class="shot" hidden>
-                <img id="thumbnail" class="thumbnail" alt="直近のキャプチャ" />
-                <svg id="overlay" class="overlay" preserveAspectRatio="none" aria-hidden="true"></svg>
-              </div>
-            </div>
-
-            <div class="debug-row">
-              <button id="reload-btn" class="ghost-btn" type="button"
-                      title="学習データを更新したあとに押すと、認識器を読み込み直します">認識器を再読み込み</button>
-              <p id="recognizer" class="recognizer"></p>
-            </div>
-
-            <div id="confidence-row" class="hand-row" hidden>
-              <span class="field-label">検出</span>
-              <span id="confidence" class="note"></span>
-            </div>
-            <div id="region-row" class="hand-row" hidden>
-              <span class="field-label">盤面</span>
-              <span id="region" class="note"></span>
-            </div>
-            <div id="predictor-row" class="hand-row" hidden>
-              <span class="field-label">推論器</span>
-              <span id="predictor" class="note"></span>
-            </div>
-            <div id="hand-row" class="hand-row" hidden>
-              <span class="field-label">駒台</span>
-              <span id="hand" class="hand"></span>
-              <span class="note">先後不明</span>
-            </div>
-            <ul id="warnings" class="warnings" hidden></ul>
-          </div>
-        </details>
       </div>
 
       <!-- 訂正タブ。**認識の誤りを直す面。ここに居ること自体が訂正モード**
@@ -658,6 +592,75 @@ export function mountMainScreen(root: HTMLElement): void {
           <span class="field-label">駒台</span>
           <span id="board-hand" class="hand"></span>
         </div>
+
+        <!-- 認識詳細情報（旧デバッグタブ）。**訂正タブの一番下**（2026-08-18。
+             それまでは盤の上＝警告のすぐ下に置いていた）。
+
+             ⚠️ **盤より上へ戻さないこと。** 開くと**盤が下へ押される**ので、
+             見たいときに盤が視界から消える（そのために訂正タブをスクロールさせていた）。
+             下に置けば、開いても**盤は動かず、下に伸びるだけ**。
+
+             ⚠️ **中身は認識した時点の記録**（CaptureResult）。盤の上の警告や
+             盤の脇の駒台（EditState）とは**別の値**で、訂正しても変わらない。
+             同じ見出しが 1 つの画面に 2 度出るが、**読む目的が違う**ので片方を消さないこと
+             （上＝今の局面を直すための情報、ここ＝認識がどれくらい外したかの記録）。
+
+             ⚠️ **中は「撮った画像 → 認識の情報」の順**（2026-08-18 に入れ替えた）。
+             最初に見るのは**撮れているかどうか**で、確信度や推論器はそれを見たあとの
+             話。畳んだ状態から開いて、まず画像が目に入るのが正しい。
+
+             ⚠️ **撮った画像（.capture-ref）はこの折りたたみの外**（盤の左）。
+             訂正は「原本を見ながら直す」作業なので、**畳んだら消えるところに
+             原本を置かない**（中にも画像はあるが、あちらは重ね表示つきの記録）。 -->
+        <details id="debug-details" class="debug-details">
+          <summary id="debug-summary">認識詳細情報</summary>
+          <div class="debug-body">
+            <div class="debug-shot">
+              <div class="debug-shot-head">
+                <span class="field-label">撮った画像</span>
+                <button id="shot-path" class="path-btn" type="button" hidden>
+                  <span class="path-name"></span>${iconMarkup(FiCopy)}
+                </button>
+                <button id="shot-copy-image" class="path-btn is-icon-only" type="button" hidden
+                        aria-label="画像をコピー"
+                        title="画像そのものをクリップボードにコピー">${iconMarkup(FiImage)}</button>
+                <label class="overlay-toggle">
+                  <input id="overlay-toggle" type="checkbox" checked />
+                  認識の重ね表示
+                </label>
+              </div>
+              <div id="shot" class="shot" hidden>
+                <img id="thumbnail" class="thumbnail" alt="直近のキャプチャ" />
+                <svg id="overlay" class="overlay" preserveAspectRatio="none" aria-hidden="true"></svg>
+              </div>
+            </div>
+
+            <div class="debug-row">
+              <button id="reload-btn" class="ghost-btn" type="button"
+                      title="学習データを更新したあとに押すと、認識器を読み込み直します">認識器を再読み込み</button>
+              <p id="recognizer" class="recognizer"></p>
+            </div>
+
+            <div id="confidence-row" class="hand-row" hidden>
+              <span class="field-label">検出</span>
+              <span id="confidence" class="note"></span>
+            </div>
+            <div id="region-row" class="hand-row" hidden>
+              <span class="field-label">盤面</span>
+              <span id="region" class="note"></span>
+            </div>
+            <div id="predictor-row" class="hand-row" hidden>
+              <span class="field-label">推論器</span>
+              <span id="predictor" class="note"></span>
+            </div>
+            <div id="hand-row" class="hand-row" hidden>
+              <span class="field-label">駒台</span>
+              <span id="hand" class="hand"></span>
+              <span class="note">先後不明</span>
+            </div>
+            <ul id="warnings" class="warnings" hidden></ul>
+          </div>
+        </details>
       </div>
 
       <!-- 解析タブ。**確定した局面の面。** 訂正タブとは別の局面を持つ
@@ -1272,8 +1275,8 @@ export function mountMainScreen(root: HTMLElement): void {
   const inputTab = tabs[0].tab;
   const editTab = tabs[1].tab;
   const studyTab = tabs[2].tab;
-  // 認識詳細情報（旧デバッグタブ）。**入力タブの一番下の折りたたみ**（2026-08-18。
-  // 2026-08-11 から訂正タブに置いていた）。**撮った 1 枚の記録なので、撮った面に置く。**
+  // 認識詳細情報（旧デバッグタブ）。**訂正タブの一番下の折りたたみ**
+  // （2026-08-18 に盤の上から下へ移した。開いても盤が動かない位置）。
   const debugDetails = root.querySelector<HTMLDetailsElement>("#debug-details")!;
   const debugSummary = root.querySelector<HTMLElement>("#debug-summary")!;
 
@@ -1356,27 +1359,23 @@ export function mountMainScreen(root: HTMLElement): void {
   //
   // ⚠️ **勝手に開かない。** 訂正のあいだ盤の上に積む行は短く保ちたいので、
   // 開くかどうかはユーザーが決める（警告そのものは上の board-head にも出ている）。
-  // ⚠️ **タブにも点を出す**（2026-08-18）。「認識詳細情報」を入力タブへ移したので、
-  // **見出しの点だけでは撮った直後に見えない**（撮ると訂正タブへ移るため）。
-  // タブ側の印は 2026-08-11 に使わなくなっていたが、CSS は残してあった（`.tab.has-warn`）。
-  // ⚠️ **勝手に開かない・勝手にタブを移らないことは変えない。**
+  // 警告・エラー・信頼度の低下は、畳んでいるあいだ見えない。**見出しに点を出すだけ**で
+  // 「開くべきものがある」ことを伝える（開けば消える）。⚠️ **勝手に開かないこと。**
   const markDebug = (level: "" | "warn" | "error") => {
-    for (const el of [debugSummary, inputTab]) {
-      el.classList.remove("has-warn", "has-error");
-    }
+    debugSummary.classList.remove("has-warn", "has-error");
     if (debugDetails.open || level === "") {
       return;
     }
-    const cls = level === "error" ? "has-error" : "has-warn";
-    debugSummary.classList.add(cls);
-    inputTab.classList.add(cls);
+    debugSummary.classList.add(level === "error" ? "has-error" : "has-warn");
   };
   debugDetails.addEventListener("toggle", () => {
     if (debugDetails.open) {
-      for (const el of [debugSummary, inputTab]) {
-        el.classList.remove("has-warn", "has-error");
-      }
+      debugSummary.classList.remove("has-warn", "has-error");
     }
+    // ⚠️ **盤より下にあるので開いても盤は動かない**が、訂正タブはスクロールするので
+    // 測り直しは残す（**大きさが変わりうる場面を 1 つでも落とすと、駒の見た目と
+    // クリック領域がずれる**）。
+    editor.relayout();
   });
 
   // <shogi-board> は core/web の Web Component。Go 側が core の embed から
