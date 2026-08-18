@@ -359,9 +359,27 @@ export function mountMainScreen(root: HTMLElement): void {
           <button id="tab-settings" class="tab" type="button"
                   role="tab" aria-selected="false" aria-controls="panel-settings">設定</button>
         </div>
-        <!-- ⚠️ **ここに「枠を表示」も撮り方の案内も戻さないこと**（2026-08-10 に外した）。
-             枠は「撮るときだけ使う道具」で、入力の口はこれから増える
-             （SFEN / KIF / 画像ファイル）。取り込みの話は入力タブに寄せる。 -->
+        <!-- 枠を出すトグル（2026-08-18 に入力タブから上げた）。
+             ⚠️ **タイトルバーに置いてあるのが要点。** 枠は**どのタブに居ても
+             出したくなる**（撮ってから訂正・解析と進んだあと、もう一度撮る）ので、
+             入力タブの中にあると**そのたびにタブを行き来する**ことになる。
+
+             ⚠️ **出ているあいだは押せない。** 状態は 2 つ（出ている / 隠れている）で、
+             このボタンが出せるのは片方向だけ —— **隠すのは枠の側の ✕** なので、
+             ここを押して隠せるようにすると**出口が 2 つ**になる。
+             押せないことと aria-pressed で「もう出ている」を示す。
+
+             ⚠️ **状態は Go 側が知らせる**（frame:visible イベント）。枠の ✕ で隠したことは
+             メイン画面からは分からないので、自前で覚えると**隠れているのに
+             「出ています」のまま**になる。
+
+             ⚠️ **no-drag に戻すこと**（ツールバー全体が移動ハンドル）。
+             ⚠️ **「盤に合わせる」は置かない**（2026-08-18 に入力タブのものも消した）。
+             枠の側のツールバーに □ があり、**合わせる相手は枠**なので、
+             枠が出ていない状態から押す操作ではない。 -->
+        <div class="toolbar-actions">
+          <button id="frame-toggle" class="toolbar-btn" type="button" aria-pressed="false"></button>
+        </div>
 
         <!-- ウィンドウ操作。**OS のタイトルバーを外した代わり**なので、右端に置いて
              最小化 → 最大化 → 閉じる の順（Windows のタイトルバーと同じ並び）。
@@ -424,20 +442,22 @@ export function mountMainScreen(root: HTMLElement): void {
           <p id="newgame-status" class="status" role="status" aria-live="polite" hidden></p>
         </div>
 
+        <!-- ⚠️ **ボタンはここに戻さないこと**（2026-08-18）。枠を出すのは
+             **タイトルバーのトグル**、盤に合わせるのは**枠のツールバーの □**。
+             どちらも「枠を出してから枠に対してやること」なので、
+             入力タブに置くとタブを行き来することになる。ここに残すのは案内だけ。 -->
         <div class="setting-group">
           <span class="setting-title">画面から撮る</span>
           <span class="setting-note">
-            「枠を表示」でガイド枠を出し、中継の盤面に合わせてから、
-            枠のツールバーのカメラを押します。
+            タイトルバーの<strong>「枠を表示」</strong>でガイド枠を出し、
+            中継の盤面に合わせてから、枠のツールバーのカメラを押します
+            （枠の □ で盤に合わせられます）。
             撮ると<strong>訂正タブ</strong>が開きます。
             <strong>枠が出ていないあいだは撮れません</strong>
             （どこを撮るのかが画面に見えていない状態で撮らないため）。
+            撮った画像のファイル名は<strong>訂正タブの「認識詳細情報」</strong>に出ます
+            （押すとフルパスをコピーできます）。
           </span>
-          <div class="setting-fields">
-            <button id="input-show-frame" class="ghost-btn" type="button">枠を表示</button>
-            <button id="input-fit" class="ghost-btn" type="button"
-                    title="画面から盤を探して、ガイド枠を合わせます">盤に合わせる</button>
-          </div>
         </div>
         <p id="status" class="status" role="status" aria-live="polite">
           ガイド枠を盤面に合わせて撮影してください。
@@ -4060,7 +4080,11 @@ export function mountMainScreen(root: HTMLElement): void {
   // 撮った画像を出し、前の認識結果と前の解析を捨て、訂正タブを開いて「認識中」と出す。
   // **結果が来たら showResult がそのまま上書きする。**
   const showShot = (taken: CaptureShot) => {
-    status.textContent = `保存しました: ${taken.path} / 盤面を認識しています…`;
+    // ⚠️ **ここにフルパスを出さない**（2026-08-18 に外した）。パスは長くて 1 行を
+    // 埋めるうえ、**この行はもう見えていない**（撮ると訂正タブへ移る）。
+    // 撮った画像の置き場所は**訂正タブの「認識詳細情報」**が持っている
+    // （ファイル名 + 押すとフルパスをコピー）。**2 か所に出さないこと。**
+    status.textContent = `撮りました（${taken.width}x${taken.height}）。盤面を認識しています…`;
     status.classList.remove("is-error", "is-warn");
     showPath(taken.path);
 
@@ -4117,12 +4141,13 @@ export function mountMainScreen(root: HTMLElement): void {
   const showResult = (result: CaptureResult) => {
     // 認識できなくてもキャプチャは成功している(設計原則3: 段階的に劣化する)。
     // 保存できたことと、認識できたかどうかを分けて出す。
+    // ⚠️ **フルパスは出さない**（showShot の ⚠️ と同じ。置き場所は「認識詳細情報」）。
     if (result.recognizeError) {
-      status.textContent = `保存しました: ${result.path} / 盤面は認識できませんでした: ${result.recognizeError}`;
+      status.textContent = `撮りました（${result.width}x${result.height}）。盤面は認識できませんでした: ${result.recognizeError}`;
       status.classList.add("is-warn");
       status.classList.remove("is-error");
     } else {
-      status.textContent = `保存しました: ${result.path} (${result.width}x${result.height})`;
+      status.textContent = `撮りました（${result.width}x${result.height}）。盤面を認識しました。`;
       status.classList.remove("is-error", "is-warn");
     }
 
@@ -4197,34 +4222,41 @@ export function mountMainScreen(root: HTMLElement): void {
   };
 
   // 枠を出す唯一の入口（**起動時は出ていない**。閉じても隠れるだけなので出し直せる）。
-  // ⚠️ **入力タブに置いてあるのが要点。** 枠を出すのは「画面から撮る」ための操作で、
-  // 入力の口の 1 つでしかない。ツールバーに置くと常設の機能に見える。
-  root.querySelector<HTMLButtonElement>("#input-show-frame")!.addEventListener("click", () => {
+  //
+  // ⚠️ **タイトルバーに置いてある**（2026-08-18 に入力タブから上げた）。枠は
+  // どのタブに居ても出したくなるもので、入力タブの中にあると**そのたびに
+  // タブを行き来する**ことになる。
+  //
+  // ⚠️ **出ているあいだは押せない。** 隠すのは枠の側の ✕ で、ここには戻さない
+  // （出口が 2 つになる）。⚠️ **状態は Go 側が知らせる**（`frame:visible`）——
+  // 枠の ✕ で隠したことはメイン画面からは分からないので、自前で覚えると
+  // **隠れているのに「出ています」のまま**になる。
+  const frameToggle = root.querySelector<HTMLButtonElement>("#frame-toggle")!;
+  const showFrameState = (visible: boolean) => {
+    frameToggle.disabled = visible;
+    frameToggle.setAttribute("aria-pressed", String(visible));
+    frameToggle.textContent = visible ? "枠は表示中" : "枠を表示";
+    frameToggle.title = visible
+      ? "ガイド枠は出ています（隠すのは枠の ✕。位置は覚えているので出し直せます）"
+      : "ガイド枠を出します（撮りたい盤面に合わせてから、枠のカメラで撮ります）";
+  };
+  showFrameState(false);
+  frameToggle.addEventListener("click", () => {
     void CaptureService.ShowFrame();
   });
-
-  // 枠のツールバーの □ と同じ操作。**枠を出してからでないと合わせる先が無い**ので、
-  // 先に出しておく（HideFrame と違い ShowFrame は出ていれば何もしない）。
-  const inputFit = root.querySelector<HTMLButtonElement>("#input-fit")!;
-  inputFit.addEventListener("click", () => {
-    void (async () => {
-      inputFit.disabled = true;
-      status.textContent = "盤を探しています…";
-      status.classList.remove("is-error", "is-warn");
-      try {
-        await CaptureService.ShowFrame();
-        const r = await CaptureService.FitFrame();
-        status.textContent = r.message;
-        // 見つからないのはエラーではない（設計原則3）。枠は 1px も動いていない。
-        status.classList.toggle("is-warn", !r.fitted);
-      } catch (err) {
-        status.textContent = `盤を探せませんでした: ${String(err instanceof Error ? err.message : err)}`;
-        status.classList.add("is-error");
-      } finally {
-        inputFit.disabled = false;
-      }
-    })();
+  // 枠の出入り。**押した結果もここで受ける**（ShowFrame が Go 側から知らせる）ので、
+  // 押したときに自分で状態を書き換えない（2 か所に持つと食い違う）。
+  Events.On("frame:visible", (event: { data: boolean }) => {
+    showFrameState(event.data);
   });
+  // 起動した時点で出ていることがある（設定「起動時に盤面を探す」）。
+  void (async () => {
+    try {
+      showFrameState(await CaptureService.FrameVisible());
+    } catch {
+      /* 取れなくても「隠れている」で始めれば押せる（設計原則3）。 */
+    }
+  })();
 
   // 新しく対局を始める（2026-08-13）。**3 つめの入力の口で、行き先は解析タブ。**
   //

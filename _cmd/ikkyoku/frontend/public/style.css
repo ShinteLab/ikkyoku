@@ -526,6 +526,49 @@ html.is-main #app {
   -webkit-user-select: none;
 }
 
+/* ---- タイトルバーの操作（枠を表示） ---------------------------------------
+   2026-08-18 に入力タブから上げた。枠は**どのタブに居ても出したくなる**もので、
+   入力タブの中にあると、撮り直すたびにタブを行き来することになる。
+
+   ⚠️ **no-drag に戻すこと**（ツールバー全体が移動ハンドル）。戻し忘れると
+   押した瞬間にウィンドウのドラッグとして扱われ、**クリックが効かなくなる**。 */
+.toolbar-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  --wails-draggable: no-drag;
+}
+
+.toolbar-btn {
+  padding: 4px 12px;
+  font-size: 12px;
+  color: #9aa6c0;
+  background: #23262e;
+  border: 1px solid #3a3d47;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.toolbar-btn:hover:not(:disabled) {
+  color: #f2f3f5;
+  background: #3a3d47;
+}
+
+/* 枠が出ているあいだ。**押せないが、消さない** —— 消すと「出ている」ことが
+   画面から読めなくなる（隠すのは枠の側の ✕ なので、こちらは状態表示を兼ねる）。
+   ⚠️ **薄くしすぎないこと**（読めないと、何のボタンだったのか分からなくなる）。 */
+.toolbar-btn:disabled {
+  color: #6f7891;
+  cursor: default;
+}
+
+.toolbar-btn[aria-pressed="true"] {
+  color: #8fbcff;
+  background: #1d2735;
+  border-color: #2f4a6b;
+}
+
 /* ---- ウィンドウ操作(Frameless の代償) ------------------------------------
    OS のタイトルバーを外した代わりの最小化・最大化・閉じる。右端に、
    Windows のタイトルバーと同じ並びで置く。 */

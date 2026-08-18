@@ -77,6 +77,14 @@ export function FitFrame(): $CancellablePromise<$models.FitResult> {
 }
 
 /**
+ * FrameVisible は枠が今出ているか。**タイトルバーのトグルの初期状態**に使う
+ * (起動した時点で出ていることがある —— 設定「起動時に盤面を探す」)。
+ */
+export function FrameVisible(): $CancellablePromise<boolean> {
+    return $Call.ByID(3608586286);
+}
+
+/**
  * HideFrame は枠を隠す。フロント(ツールバーの✕)と Alt+F4 の両方から呼ばれる。
  * 
  * 閉じずに隠すだけなのは、枠が「見せるための UI」ではなく「撮る領域の定義」だから。
@@ -162,7 +170,7 @@ export function RepairMain(): $CancellablePromise<void> {
 }
 
 /**
- * ShowFrame は隠した枠を出し直す。メイン画面のボタンから呼ばれる。
+ * ShowFrame は隠した枠を出し直す。メイン画面のタイトルバーのボタンから呼ばれる。
  */
 export function ShowFrame(): $CancellablePromise<void> {
     return $Call.ByID(3510559659);
