@@ -289,10 +289,48 @@ func (p *Position) LabelSFEN() (string, []string) {
 // 途中で壊れるので、**エラーとして扱わないこと**（設計原則3）。
 //
 // 盤面の検証は core/sfen（自前で書かない）。ここが足すのは**駒台まで数えた枚数**の
-// 超過だけで、これは盤面だけを見る Inspect には出せない
-// （SetHand は逆算した合計を超える指定も通すので、その行き先がこの警告）。
+// 話で、これは盤面だけを見る Inspect には出せない:
+//
+//   - 超過 … 「盤上 + 駒台」で初めて上限を超えたぶん（`handWarnings`）
+//   - 不足 … 盤にも駒台にも無い駒（`missingWarnings`。＝訂正 UI の「足りない駒」）
 func (p *Position) Warnings() []string {
-	return append(p.Board.Inspect(sfen.CheckAll).Messages(), p.handWarnings()...)
+	out := p.Board.Inspect(sfen.CheckAll).Messages()
+	out = append(out, p.handWarnings()...)
+	return append(out, p.missingWarnings()...)
+}
+
+// missingWarnings は**盤にも駒台にも無い駒**の警告を返す（訂正 UI の「足りない駒」）。
+//
+// 駒数保存則からすると、それらは**どちらかの駒台にあるはず**なのに置き場所が
+// 決まっていない状態で、**そのあいだ局面は確定しない**（`SFEN()` が組み上がらない）。
+// 過剰だけを言って不足を黙っていると、**何をすれば確定するのかが警告からは読めない**。
+//
+// ⚠️ **`HandsFixed` のときは言わない。** 駒台が書いてある局面（KIF・完全形 SFEN から
+// 読んだもの）では逆算しないので未決が存在せず、**駒落ちは盤にも駒台にも無い駒が
+// あって正常**（言うと毎回警告が出る）。
+//
+// ⚠️ **玉は数えない。** 駒台に載らないので「足りない」は盤の枚数の話になり、
+// それは core/sfen の CheckKing が既に言っている（二重に言わない）。
+func (p *Position) missingWarnings() []string {
+	if p.HandsFixed {
+		return nil
+	}
+	info := p.Board.Inspect(sfen.CheckSyntax)
+	var out []string
+	for _, base := range inventoryOrder {
+		if base == sfen.King {
+			continue
+		}
+		onBoard := info.Black[base] + info.White[base]
+		limit := sfen.PieceLimit(base)
+		b, w := p.assigned(base)
+		// 過剰（rest < 0）や、駒台へ割り振り済みのぶんはここでは言わない。
+		if missing := limit - onBoard - b - w; missing > 0 {
+			out = append(out, fmt.Sprintf("%sが %d枚足りません(上限 %d枚。盤上 %d枚・駒台 %d枚)",
+				sfen.Name(base), missing, limit, onBoard, b+w))
+		}
+	}
+	return out
 }
 
 // handWarnings は「盤上 + 駒台」が上限を超えた駒種の警告を返す。
