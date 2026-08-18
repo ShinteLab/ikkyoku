@@ -497,42 +497,46 @@ export function mountMainScreen(root: HTMLElement): void {
           </div>
           <p id="kifu-status" class="status" role="status" aria-live="polite" hidden></p>
         </div>
-      </div>
 
-      <!-- 訂正タブ。**認識の誤りを直す面。ここに居ること自体が訂正モード**
-           （2026-08-10。以前は盤面タブ 1 枚の中でトグルしていた）。
-           出口は「この局面を解析する」だけで、押すと解析タブへ写しが渡る。 -->
-      <div id="panel-edit" class="panel" role="tabpanel" aria-labelledby="tab-edit">
-        <!-- 上段。左に警告、右に「認識結果に戻す」。
-             局面として成立していない点は**盤より上に出す**(訂正しながら見るものなので、
-             盤の下だと見落とすし、件数で下の行が動く)。中身は**今の局面**(EditState)の
-             値で、「認識詳細情報」側の同じ見出しとは別物(あちらは認識した時点の記録)。
-             やり直しのボタンは**訂正した内容を捨てる操作**なので、押し間違えないよう
-             盤から遠い右上に離し、赤くしてある。 -->
-        <div class="board-head">
-          <ul id="board-warnings" class="warnings is-compact" hidden></ul>
-          <!-- 視点（2026-08-13）。**表示だけの反転で、局面には一切効かない。**
-               ⚠️ **ここで盤面や先後を書き換えないこと** —— 撮った画像と盤面が
-               一致していることが訂正の前提で、学習データのラベルも画素と
-               一致していなければならない（CLAUDE.md「取り込みも訂正も反転しない」）。
-               ⚠️ **解析タブと同じ 1 つの値**（どちらで切り替えても両方が変わる）。 -->
-          <button id="edit-flip" class="ghost-btn" type="button"></button>
-          <button id="edit-reset" class="danger-btn" type="button" hidden
-                  title="訂正を捨てて、認識したときの盤面に戻します">認識結果に戻す</button>
-        </div>
+        <!-- 認識詳細情報（旧デバッグタブ → 訂正タブ → **入力タブの一番下**。2026-08-18）。
+             **「撮った 1 枚がどう読まれたか」の記録**なので、置き場所は**撮った面**。
 
-        <!-- 認識詳細情報（旧デバッグタブ。2026-08-11 にタブから畳んでここへ移した）。
-             **「どれくらい外したか」を見る面**で、訂正しながら開く。訂正の作業と
-             同じ画面にあるほうが行き来が要らないので、独立したタブではなく
-             **既定で閉じた折りたたみ**にしてある。
+             ⚠️ **訂正タブに戻さないこと**（2026-08-18 に移した）。あちらは
+             **盤が主役**で、盤の上に積む行は短く保つ決まり —— 開くと盤が下へ押され、
+             そのためだけに訂正タブをスクロールさせていた。訂正しながら見たいのは
+             **原本の画像**のほうで、それは盤の左に出しっぱなしにしてある（.capture-ref）。
 
-             ⚠️ **中身は認識した時点の記録**（CaptureResult）。すぐ上の警告や盤の脇の
-             駒台（EditState）とは**別の値**で、訂正しても変わらない。同じ見出しが
-             1 つの画面に 2 度出ることになるが、**読む目的が違う**ので片方を消さないこと
-             （上＝今の局面を直すための情報、ここ＝認識がどれくらい外したかの記録）。 -->
+             ⚠️ **中身は認識した時点の記録**（CaptureResult）。訂正タブの警告や
+             盤の脇の駒台（EditState）とは**別の値**で、訂正しても変わらない。
+             同じ見出しが 2 か所に出るが、**読む目的が違う**ので片方を消さないこと
+             （訂正タブ＝今の局面を直すための情報、ここ＝認識がどれくらい外したかの記録）。
+
+             ⚠️ **中は「撮った画像 → 認識の情報」の順**（2026-08-18 に入れ替えた）。
+             最初に見るのは**撮れているかどうか**で、確信度や推論器はそれを見たあとの
+             話。畳んだ状態から開いて、まず画像が目に入るのが正しい。 -->
         <details id="debug-details" class="debug-details">
           <summary id="debug-summary">認識詳細情報</summary>
           <div class="debug-body">
+            <div class="debug-shot">
+              <div class="debug-shot-head">
+                <span class="field-label">撮った画像</span>
+                <button id="shot-path" class="path-btn" type="button" hidden>
+                  <span class="path-name"></span>${iconMarkup(FiCopy)}
+                </button>
+                <button id="shot-copy-image" class="path-btn is-icon-only" type="button" hidden
+                        aria-label="画像をコピー"
+                        title="画像そのものをクリップボードにコピー">${iconMarkup(FiImage)}</button>
+                <label class="overlay-toggle">
+                  <input id="overlay-toggle" type="checkbox" checked />
+                  認識の重ね表示
+                </label>
+              </div>
+              <div id="shot" class="shot" hidden>
+                <img id="thumbnail" class="thumbnail" alt="直近のキャプチャ" />
+                <svg id="overlay" class="overlay" preserveAspectRatio="none" aria-hidden="true"></svg>
+              </div>
+            </div>
+
             <div class="debug-row">
               <button id="reload-btn" class="ghost-btn" type="button"
                       title="学習データを更新したあとに押すと、認識器を読み込み直します">認識器を再読み込み</button>
@@ -557,28 +561,31 @@ export function mountMainScreen(root: HTMLElement): void {
               <span class="note">先後不明</span>
             </div>
             <ul id="warnings" class="warnings" hidden></ul>
-
-            <div class="debug-shot">
-              <div class="debug-shot-head">
-                <span class="field-label">撮った画像</span>
-                <button id="shot-path" class="path-btn" type="button" hidden>
-                  <span class="path-name"></span>${iconMarkup(FiCopy)}
-                </button>
-                <button id="shot-copy-image" class="path-btn is-icon-only" type="button" hidden
-                        aria-label="画像をコピー"
-                        title="画像そのものをクリップボードにコピー">${iconMarkup(FiImage)}</button>
-                <label class="overlay-toggle">
-                  <input id="overlay-toggle" type="checkbox" checked />
-                  認識の重ね表示
-                </label>
-              </div>
-              <div id="shot" class="shot" hidden>
-                <img id="thumbnail" class="thumbnail" alt="直近のキャプチャ" />
-                <svg id="overlay" class="overlay" preserveAspectRatio="none" aria-hidden="true"></svg>
-              </div>
-            </div>
           </div>
         </details>
+      </div>
+
+      <!-- 訂正タブ。**認識の誤りを直す面。ここに居ること自体が訂正モード**
+           （2026-08-10。以前は盤面タブ 1 枚の中でトグルしていた）。
+           出口は「この局面を解析する」だけで、押すと解析タブへ写しが渡る。 -->
+      <div id="panel-edit" class="panel" role="tabpanel" aria-labelledby="tab-edit">
+        <!-- 上段。左に警告、右に「認識結果に戻す」。
+             局面として成立していない点は**盤より上に出す**(訂正しながら見るものなので、
+             盤の下だと見落とすし、件数で下の行が動く)。中身は**今の局面**(EditState)の
+             値で、「認識詳細情報」側の同じ見出しとは別物(あちらは認識した時点の記録)。
+             やり直しのボタンは**訂正した内容を捨てる操作**なので、押し間違えないよう
+             盤から遠い右上に離し、赤くしてある。 -->
+        <div class="board-head">
+          <ul id="board-warnings" class="warnings is-compact" hidden></ul>
+          <!-- 視点（2026-08-13）。**表示だけの反転で、局面には一切効かない。**
+               ⚠️ **ここで盤面や先後を書き換えないこと** —— 撮った画像と盤面が
+               一致していることが訂正の前提で、学習データのラベルも画素と
+               一致していなければならない（CLAUDE.md「取り込みも訂正も反転しない」）。
+               ⚠️ **解析タブと同じ 1 つの値**（どちらで切り替えても両方が変わる）。 -->
+          <button id="edit-flip" class="ghost-btn" type="button"></button>
+          <button id="edit-reset" class="danger-btn" type="button" hidden
+                  title="訂正を捨てて、認識したときの盤面に戻します">認識結果に戻す</button>
+        </div>
 
         <div class="board-area">
           <!-- 撮った画像。**訂正中だけ盤の左に出す**(確定したら畳む)。
@@ -1265,7 +1272,8 @@ export function mountMainScreen(root: HTMLElement): void {
   const inputTab = tabs[0].tab;
   const editTab = tabs[1].tab;
   const studyTab = tabs[2].tab;
-  // 認識詳細情報（旧デバッグタブ）。**訂正タブの中の折りたたみ**（2026-08-11）。
+  // 認識詳細情報（旧デバッグタブ）。**入力タブの一番下の折りたたみ**（2026-08-18。
+  // 2026-08-11 から訂正タブに置いていた）。**撮った 1 枚の記録なので、撮った面に置く。**
   const debugDetails = root.querySelector<HTMLDetailsElement>("#debug-details")!;
   const debugSummary = root.querySelector<HTMLElement>("#debug-summary")!;
 
@@ -1348,20 +1356,27 @@ export function mountMainScreen(root: HTMLElement): void {
   //
   // ⚠️ **勝手に開かない。** 訂正のあいだ盤の上に積む行は短く保ちたいので、
   // 開くかどうかはユーザーが決める（警告そのものは上の board-head にも出ている）。
+  // ⚠️ **タブにも点を出す**（2026-08-18）。「認識詳細情報」を入力タブへ移したので、
+  // **見出しの点だけでは撮った直後に見えない**（撮ると訂正タブへ移るため）。
+  // タブ側の印は 2026-08-11 に使わなくなっていたが、CSS は残してあった（`.tab.has-warn`）。
+  // ⚠️ **勝手に開かない・勝手にタブを移らないことは変えない。**
   const markDebug = (level: "" | "warn" | "error") => {
-    debugSummary.classList.remove("has-warn", "has-error");
+    for (const el of [debugSummary, inputTab]) {
+      el.classList.remove("has-warn", "has-error");
+    }
     if (debugDetails.open || level === "") {
       return;
     }
-    debugSummary.classList.add(level === "error" ? "has-error" : "has-warn");
+    const cls = level === "error" ? "has-error" : "has-warn";
+    debugSummary.classList.add(cls);
+    inputTab.classList.add(cls);
   };
   debugDetails.addEventListener("toggle", () => {
     if (debugDetails.open) {
-      debugSummary.classList.remove("has-warn", "has-error");
+      for (const el of [debugSummary, inputTab]) {
+        el.classList.remove("has-warn", "has-error");
+      }
     }
-    // 開閉で盤が上下に動く。**大きさが変わりうる場面を 1 つでも落とすと、
-    // 駒の見た目とクリック領域がずれる**ので、ここでも測り直す。
-    editor.relayout();
   });
 
   // <shogi-board> は core/web の Web Component。Go 側が core の embed から
