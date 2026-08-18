@@ -274,6 +274,56 @@ func TestStudyAddLine(t *testing.T) {
 	}
 }
 
+// エンジンが足した読み筋は**頭の 1 手だけが 1 段下がり、続きは更に下がる**こと
+// （2026-08-18）。**畳めば「＋」で 1 手にまとまる形。**
+//
+// ⚠️ **続きの無いところへ足しても、読み筋がそのまま今の線として伸びないこと。**
+// 伸びると**畳む場所が無く、15 手の読み筋がそのまま手順に並ぶ。**
+func TestStudyAddLineIsFoldable(t *testing.T) {
+	s := position.NewStudy(hirate(t))
+	if err := s.Play("7g7f"); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	// **本譜の先端**（続きがまだ無い）に読み筋を足す。
+	first, added, note := s.AddLine([]string{"3c3d", "2g2f", "8c8d"}, "e1")
+	if note != "" || added != 3 {
+		t.Fatalf("足せていません: added=%d note=%s", added, note)
+	}
+	var head position.Node
+	deeper := 0
+	for _, n := range s.Nodes() {
+		if n.ID == first {
+			head = n
+		}
+	}
+	for _, n := range s.Nodes() {
+		if n.ID != first && n.Number > head.Number && n.Depth > head.Depth {
+			deeper++
+		}
+	}
+	// **頭は 1 段下がる**（本譜の続きではない）。
+	if head.Depth != 1 || head.Main {
+		t.Errorf("読み筋の頭が本譜の続きになっています: %+v", head)
+	}
+	// ⚠️ **続きは更に下がること**（＝頭が畳める節点になる）。
+	if deeper != 2 {
+		t.Errorf("続きが頭にぶら下がっていません（畳めない）: %+v", s.Nodes())
+	}
+	// ⚠️ **本譜は伸びないこと**（実際に現れた指し手ではない）。
+	if got := s.MainLine(); len(got) != 1 {
+		t.Errorf("MainLine = %v, want 7g7f だけ", got)
+	}
+	// **続きに選べば、そこから先は普通の続きになる。**
+	if err := s.Promote(first); err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+	for _, n := range s.Nodes() {
+		if n.ID == first && (n.Depth != 0 || !n.Main) {
+			t.Errorf("本線にしても続きになっていません: %+v", n)
+		}
+	}
+}
+
 // ⚠️ **候補が本譜と同じ手なら枝を増やさず、食い違うところまで辿ってから枝にする。**
 // これが分岐の肝で、崩すと同じ手順が何本も並ぶ。
 func TestStudyAddLineFollowsExisting(t *testing.T) {

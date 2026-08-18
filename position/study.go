@@ -268,7 +268,7 @@ func (s *Study) Nodes() []Node {
 			// ⚠️ **`kids[0]` を後ろへ回さないこと** —— 下げただけで順番まで
 			// 変わると、**画面のどこへ動いたのか目で追えない。**
 			for _, k := range n.kids {
-				out = append(out, k.node(depth+1, false).promotable(len(n.kids) > 1))
+				out = append(out, k.node(depth+1, false).promotable(true))
 				walk(k, depth+1, head)
 			}
 		case mode == main:
@@ -315,11 +315,24 @@ func (s *Study) Nodes() []Node {
 				next = head
 			}
 			for _, k := range n.kids {
-				// **どれも同格**（続きがまだ決まっていない）ので、
-				// **どれでも「本線にする」で選べる**。
-				out = append(out, k.node(depth+1, false).promotable(len(n.kids) > 1))
-				walk(k, depth+1, next)
+				// ⚠️ **変化の頭は 1 本でも「頭」として歩くこと**（2026-08-18）。
+				// そうしないと**その続きが同じ深さで伸びて畳めない**
+				// （エンジンの読み筋 15 手がそのまま並ぶ）。
+				m := next
+				if k.variation {
+					m = head
+				}
+				// **続きがまだ決まっていないなら「本線にする」で選べる。**
+				// 分かれ道ならどれも同格、1 本でも**変化の頭なら続きではない**。
+				out = append(out, k.node(depth+1, false).promotable(len(n.kids) > 1 || k.variation))
+				walk(k, depth+1, m)
 			}
+		case n.kids[0].variation:
+			// **1 本しか無いが、それは「変化の頭」**（エンジンが足した手・
+			// 「分岐にする」で下げた手）。⚠️ **同じ深さで伸ばさないこと** ——
+			// 続きではないうえ、**畳む場所が無くなる**（足した読み筋がそのまま並ぶ）。
+			out = append(out, n.kids[0].node(depth+1, false).promotable(true))
+			walk(n.kids[0], depth+1, head)
 		default:
 			// 1 本道の続き。下げる意味が無い。
 			out = append(out, n.kids[0].node(depth, false))
@@ -494,6 +507,16 @@ func (s *Study) AddLine(moves []string, source string) (int, int, string) {
 			added++
 			if first == 0 {
 				first = next.id
+				// ⚠️ **最初の 1 手は「変化の頭」にする**（2026-08-18）。
+				// **エンジンが読んだだけの手は、その線の続きではない** ——
+				// 印を立てないと、続きの無いところへ足したときに
+				// **読み筋 15 手がそのまま今の線として伸びる**（畳む場所も無い）。
+				// 頭にしておけば**1 手だけが 1 段下がって「＋」で畳める。**
+				//
+				// ⚠️ **本譜の先端に足したときも同じ** —— `MainLine` はそこで
+				// 止まる（**実際に現れた指し手ではない**ので、それが正しい）。
+				// 続きとして辿ると決めたら「本線にする」（`Promote`）。
+				next.variation = true
 			}
 		}
 		at = next
@@ -758,13 +781,13 @@ func (s *Study) Promote(id int) error {
 	if !ok || n.parent == nil {
 		return fmt.Errorf("ikkyoku/position: その手はありません: %d", id)
 	}
-	p := n.parent
-	if len(p.kids) < 2 {
-		return fmt.Errorf("ikkyoku/position: 分かれ道ではありません: %d", id)
-	}
-	if !openFork(p) {
+	// ⚠️ **断るのは「続きがもう決まっている」ときだけ**（`openFork`）。
+	// **1 本しか無くても、それが変化の頭なら選べる** —— 読み筋を 1 本だけ
+	// 足したときがそれ。**`len(kids) >= 2` を条件にしないこと。**
+	if !openFork(n.parent) {
 		return fmt.Errorf("ikkyoku/position: もう本線が決まっています: %d", id)
 	}
+	p := n.parent
 	// **先頭へ移す**（`Line` も連続解析もここを辿る）。
 	promote(p, n)
 	// ⚠️ **本譜側の印も落とすこと** —— 親が本譜なら、この手から先が本譜に戻る
@@ -779,14 +802,24 @@ func (s *Study) Promote(id int) error {
 // ⚠️ **`Nodes` の「全部 1 段下げる」場合と揃えてあること。** 食い違うと、
 // **画面では同格に並んでいるのにメニューに出ない**（あるいはその逆）になる。
 func openFork(p *treeNode) bool {
-	if len(p.kids) < 2 {
+	if len(p.kids) == 0 {
 		return false
 	}
-	if onMainLine(p) {
-		// 本譜の上なら、**`kids[0]` がそのまま続き**（「分岐にする」で外れていれば空く）。
-		return p.kids[0].variation
+	// **先頭が変化の頭なら続きは空いている**（エンジンが足した手・「分岐にする」で
+	// 下げた手）。⚠️ **1 本しか無くても空いている** —— 読み筋を 1 本だけ足した
+	// ときがそれで、**それを続きに選べないと「本線にする」が使えない。**
+	if p.kids[0].variation {
+		return true
 	}
-	// 変化の中は**選んだ手があるときだけ**続きが決まっている。
+	if onMainLine(p) {
+		// 本譜の上なら、`kids[0]` がそのまま続き。
+		return false
+	}
+	if len(p.kids) == 1 {
+		// 変化の中の 1 本道。**それが続きそのもの**なので選ぶまでもない。
+		return false
+	}
+	// 変化の中の分かれ道は**選んだ手があるときだけ**続きが決まっている。
 	return !p.kids[0].chosen
 }
 

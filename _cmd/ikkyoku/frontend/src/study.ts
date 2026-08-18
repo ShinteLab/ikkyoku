@@ -75,15 +75,16 @@ export interface StudyBoardHandle {
   // ⚠️ **渡すのは USI**（`Line.moves[0]`）。座標は**今の局面の合法手**から
   // 引き当てるので、**呼び出し側で USI を解釈しないこと。**
   showHint(usi: string | null): void;
-  // foldForkAt は「その手が分かれ道の 1 本なら、分かれた手をまとめて畳む」。
+  // foldAdded は足したばかりの読み筋を畳む（**その手 1 行 +「＋」の形にする**）。
   //
   // **読み筋を足した直後に呼ぶ**（`AddLine` が返した最初の節点）。⚠️ 読み筋は
-  // 15 手ぶら下がることがあるので、畳まないと**もう 1 本の候補が画面の外**に出て、
-  // **その手で何を指したのかを見比べられない**（分岐を見る意味が薄れる）。
+  // 15 手ぶら下がることがあるので、**足したぶんがそのまま並ぶと手順が読めない**
+  // （もう 1 本の候補は画面の外に出て、**その手で何を指したのかを見比べられない**）。
   //
-  // ⚠️ **分かれていない（1 本しかない）ときは畳まないこと** —— 足したばかりの
-  // 読み筋がいきなり消えると、何が起きたのか分からない。
-  foldForkAt(id: number): void;
+  // ⚠️ **畳むのは足した手だけ**（2026-08-18 に「分かれた手をまとめて畳む」から
+  // 変えた）。**他の候補まで畳み直さないこと** —— 開いて読んでいる最中に
+  // 別の候補を足すと、**読んでいたほうが黙って閉じる。**
+  foldAdded(id: number): void;
   // ⚠️ **「1手戻す」は無くなった**（2026-08-13。分岐を入れる前段）。手順を短く
   // するのは**手順リストの右クリック**だけで、消える範囲は「押した手とその先」。
   // `Undo` は「今どこを見ているか」に依存していて、戻って見ている最中に押すと
@@ -949,27 +950,14 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
       layoutGrid();
       paint();
     },
-    foldForkAt(id: number) {
+    foldAdded(id: number) {
       if (!state?.loaded || id <= 0) {
         return;
       }
-      const rows = state.nodes ?? [];
-      const me = rows.find((n) => n.id === id);
-      if (!me) {
-        return;
-      }
-      const upDepth = me.parent === 0 ? 0 : rows.find((n) => n.id === me.parent)?.depth ?? 0;
-      // 兄弟＝同じ親から**下がって**出ている手（本譜の続きは同じ深さなので入らない）。
-      const sibs = rows.filter((n) => n.parent === me.parent && n.depth > upDepth);
-      if (sibs.length < 2) {
-        return;
-      }
-      for (const sib of sibs) {
-        // 続きを持つものだけ畳む（1 手だけの枝は畳んでも何も変わらない）。
-        if (rows.some((n) => n.parent === sib.id)) {
-          collapsed.add(sib.id);
-        }
-      }
+      // ⚠️ **畳むのは見た目だけ**（Go は呼ばない。手順も局面も変わらない）。
+      // 足した手は「変化の頭」なので、続きは 1 段深い ——
+      // **畳めばその 1 手だけが残って「＋」が付く**（`hasBranch` / `hidden`）。
+      collapsed.add(id);
       renderMoves();
     },
     setFlip(next: boolean) {

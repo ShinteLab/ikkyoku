@@ -3010,27 +3010,37 @@ html.is-main #app {
 
    ⚠️ **色は青にしないこと。** 青は「今こちらが掴んでいる駒／指せる位置」の色で、
    こちらは**エンジンが読んだだけの手**（押しても指さない）。同じ色にすると、
-   矢印の先を押せば指せるように見える。 */
+   矢印の先を押せば指せるように見える。
+
+   ⚠️ **琥珀色から緑にした**（2026-08-18）。盤（木地）も駒台も駒の枠も
+   **黄土色〜橙の側**なので、琥珀では**盤に溶けて見えなかった**。緑は盤の色から
+   一番遠いので、薄く重ねても輪郭が立つ。⚠️ **赤にもしないこと** ——
+   赤は「消える範囲」（`.is-doomed`）の色。 */
 .study-hint {
   position: absolute;
   pointer-events: none;
   overflow: visible;
+
+  /* ⚠️ **色の出どころはここ 1 つ。** 線・矢じり・移動元・打ち先・「成」が
+     同じ色でないと**1 つの手として読めない**ので、片方だけ変えられないように
+     まとめてある（濃さだけを各所で変える）。 */
+  --study-hint-ink: 26 176 88;
 }
 
 .study-hint-line {
-  stroke: rgba(255, 176, 64, 0.92);
+  stroke: rgb(var(--study-hint-ink) / 0.95);
   stroke-width: 0.14;
   stroke-linecap: round;
 }
 
 .study-hint-head {
-  fill: rgba(255, 176, 64, 0.92);
+  fill: rgb(var(--study-hint-ink) / 0.95);
 }
 
 /* 移動元。「この駒が動く」の印なので、塗らずに枠だけ（駒が読めなくなる）。 */
 .study-hint-from {
-  fill: rgba(255, 176, 64, 0.14);
-  stroke: rgba(255, 176, 64, 0.9);
+  fill: rgb(var(--study-hint-ink) / 0.16);
+  stroke: rgb(var(--study-hint-ink) / 0.92);
   stroke-width: 0.05;
 }
 
@@ -3038,8 +3048,8 @@ html.is-main #app {
    矢印を引く相手が居ない）。枠は移動元と同じ見た目にして、「エンジンが言っている
    のはここ」を揃える。 */
 .study-hint-drop {
-  fill: rgba(255, 176, 64, 0.18);
-  stroke: rgba(255, 176, 64, 0.95);
+  fill: rgb(var(--study-hint-ink) / 0.2);
+  stroke: rgb(var(--study-hint-ink) / 0.95);
   stroke-width: 0.05;
 }
 
@@ -3061,8 +3071,10 @@ html.is-main #app {
   opacity: 0.6;
 }
 
+/* 「成」。⚠️ **暗い縁取りが付いているぶん、明るめにすること**
+   （矢印と同じ濃さだと縁に潰れて読めない）。 */
 .study-hint-promote {
-  fill: #ffb040;
+  fill: rgb(58 214 122);
   font-weight: 700;
   paint-order: stroke;
   stroke: rgba(18, 20, 24, 0.85);
