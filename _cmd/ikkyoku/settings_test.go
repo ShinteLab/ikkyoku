@@ -523,3 +523,42 @@ func TestSetEngineMultiPV(t *testing.T) {
 		}
 	})
 }
+
+// TestSetClickThrough は「枠の内側で後ろの画面を操作する」を固定する。
+//
+// ⚠️ **一番の要点は「保存されたうえで、その場で効くこと」。** これは
+// 中継を触りたくなったその瞬間に切り替える設定なので、次の起動まで待たせない
+// （「起動時に盤面を探す」とはそこが違う）。効かせる相手は枠の HWND を持っている
+// `CaptureService` なので、間にフックが 1 本入っている。
+func TestSetClickThrough(t *testing.T) {
+	s := newTestSettings(t, nil)
+	var got []bool
+	s.onClickThrough = func(v bool) { got = append(got, v) }
+
+	st, err := s.SetClickThrough(true)
+	if err != nil {
+		t.Fatalf("SetClickThrough: %v", err)
+	}
+	if !st.ClickThrough {
+		t.Errorf("ClickThrough = false, want true")
+	}
+	if len(got) != 1 || !got[0] {
+		t.Errorf("フックの呼ばれ方 = %v, want [true]", got)
+	}
+
+	// **切ったことも設定ファイルに残ること**（キーが消えると、手で編集する側から
+	// 存在に気づけない。FitOnStartup と同じ扱い）。
+	if _, err := s.SetClickThrough(false); err != nil {
+		t.Fatalf("SetClickThrough(false): %v", err)
+	}
+	cfg, err := ikkyoku.LoadConfig(s.path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.ClickThrough {
+		t.Errorf("保存された ClickThrough = true, want false")
+	}
+	if len(got) != 2 || got[1] {
+		t.Errorf("フックの呼ばれ方 = %v, want [true false]", got)
+	}
+}

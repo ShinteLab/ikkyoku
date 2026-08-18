@@ -129,6 +129,11 @@ export interface AppSettings {
     "fitOnStartup": boolean;
 
     /**
+     * ClickThrough はガイド枠の内側のクリックを後ろの画面へ素通しするか（Windows のみ）。
+     */
+    "clickThrough": boolean;
+
+    /**
      * Training は訂正した局面を suteme へ登録する設定。
      */
     "training": TrainingSettings;

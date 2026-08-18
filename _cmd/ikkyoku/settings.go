@@ -27,6 +27,8 @@ import (
 type AppSettings struct {
 	// FitOnStartup は起動時に盤面を探してガイド枠を合わせるか。
 	FitOnStartup bool `json:"fitOnStartup"`
+	// ClickThrough はガイド枠の内側のクリックを後ろの画面へ素通しするか（Windows のみ）。
+	ClickThrough bool `json:"clickThrough"`
 	// Training は訂正した局面を suteme へ登録する設定。
 	Training TrainingSettings `json:"training"`
 	// Engines は登録した USI エンジンの一覧（登録順）。
@@ -225,6 +227,11 @@ type SettingsService struct {
 	logger *slog.Logger
 	app    *application.App
 
+	// onClickThrough は「枠の内側で後ろの画面を操作する」を切り替えたときに呼ぶ。
+	// 実体は `CaptureService.applyClickThrough`（枠の HWND を触るのはあちらの仕事）。
+	// ⚠️ **SettingsService から枠を直に触らないこと**（ウィンドウを持っていない）。
+	onClickThrough func(bool)
+
 	mu   sync.Mutex
 	path string
 	cfg  ikkyoku.Config
@@ -274,6 +281,7 @@ func (s *SettingsService) settings() AppSettings {
 	}
 	return AppSettings{
 		FitOnStartup:    s.cfg.FitOnStartup,
+		ClickThrough:    s.cfg.ClickThrough,
 		Training:        trainingSettings(s.cfg.Training),
 		Engines:         engines,
 		EngineColors:    ikkyoku.EngineColors,
@@ -897,6 +905,26 @@ func (s *SettingsService) SetFitOnStartup(v bool) (AppSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.save(func(cfg *ikkyoku.Config) { cfg.FitOnStartup = v })
+}
+
+// SetClickThrough は「枠の内側で後ろの画面を操作する」を切り替えて保存し、**その場で効かせる。**
+//
+// 起動時まで待たせないのは、これが**中継を触りたくなったその瞬間に切り替える**設定だから
+// （「起動時に盤面を探す」とはそこが違う）。
+//
+// ⚠️ **保存できたときだけ効かせること。** 先に効かせると、保存に失敗したときに
+// 「画面のチェックは外れているのに枠は素通しのまま」になる。
+func (s *SettingsService) SetClickThrough(v bool) (AppSettings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st, err := s.save(func(cfg *ikkyoku.Config) { cfg.ClickThrough = v })
+	if err != nil {
+		return st, err
+	}
+	if s.onClickThrough != nil {
+		s.onClickThrough(v)
+	}
+	return st, nil
 }
 
 // save は設定を 1 項目書き換えて保存する共通処理。**ロックを取った状態で呼ぶこと。**

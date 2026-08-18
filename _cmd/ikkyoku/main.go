@@ -112,6 +112,11 @@ func main() {
 	wins.mainGeom.attach(main)
 	captureSvc.bind(app, wins)
 	settingsSvc.bind(app)
+	// 枠の素通し（設定「枠の内側で後ろの画面を操作する」）。
+	// **枠の HWND を触るのは CaptureService** なので、設定タブからの切り替えは
+	// ここで繋いだこのフックを通る（SettingsService はウィンドウを持っていない）。
+	settingsSvc.onClickThrough = captureSvc.applyClickThrough
+	captureSvc.applyClickThrough(cfg.ClickThrough)
 	analyzeSvc.bind(app)
 
 	// 終了の入口は 2 つ（メイン画面を閉じる / 枠のメニューの「終了」）。

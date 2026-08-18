@@ -1042,6 +1042,27 @@ export function mountMainScreen(root: HTMLElement): void {
             </span>
           </span>
         </label>
+        <!-- 枠の内側で後ろの画面を操作する（2026-08-19）。
+
+             枠は中継の「上」に重ねる最前面のウィンドウなので、合わせたあとは
+             **その下にある中継のシークバーや再生ボタンが押せない**（押すには
+             枠をどかすしかなく、どかすと位置合わせがやり直しになる）。
+
+             ⚠️ **素通しになるのは「撮る範囲の内側」だけ。** ツールバーと縁は
+             押せるまま残す —— 枠ごと素通しにすると、この設定を切るまで
+             枠を動かすことも撮ることもできなくなる。 -->
+        <label class="setting">
+          <input id="click-through" type="checkbox" />
+          <span class="setting-body">
+            <span class="setting-title">枠の内側で後ろの画面を操作する</span>
+            <span class="setting-note">
+              ガイド枠の内側（撮る範囲）のクリックとホイールを、後ろにある中継の画面へ
+              そのまま通します。枠をどかさずにシークや再生ができます。
+              ツールバーと枠の縁は今までどおり押せます（移動・リサイズ・撮影）。
+              Windows のみ。
+            </span>
+          </span>
+        </label>
         <p id="settings-status" class="status" role="status" aria-live="polite"></p>
 
         <!-- 駒の字（2026-08-16）。**端末に入っているフォントから駒の字を焼いて使う。**
@@ -4453,6 +4474,7 @@ export function mountMainScreen(root: HTMLElement): void {
   // 分かりにくいため。保存に失敗したら画面の値を元に戻す(画面の状態と設定ファイルを
   // 食い違わせない)。テキスト欄は change(確定時)で拾うので、1 文字ごとには書かない。
   const fitOnStartup = root.querySelector<HTMLInputElement>("#fit-on-startup")!;
+  const clickThrough = root.querySelector<HTMLInputElement>("#click-through")!;
   const settingsStatus = root.querySelector<HTMLParagraphElement>("#settings-status")!;
   const settingsPath = root.querySelector<HTMLElement>("#settings-path")!;
   const trainEnabledInput = root.querySelector<HTMLInputElement>("#train-enabled")!;
@@ -4921,6 +4943,7 @@ export function mountMainScreen(root: HTMLElement): void {
 
   const showSettings = (s: {
     fitOnStartup: boolean;
+    clickThrough: boolean;
     path: string;
     training: { enabled: boolean; host: string; port: number; token: string; target: string };
     engines: EngineSettings[] | null;
@@ -4929,6 +4952,7 @@ export function mountMainScreen(root: HTMLElement): void {
     ponanzaConstant: number;
   }) => {
     fitOnStartup.checked = s.fitOnStartup;
+    clickThrough.checked = s.clickThrough;
     // ⚠️ **既定値の解決は Go 側**（`analyze.PonanzaConstantOr`）。返ってきた値を
     // そのまま入れるだけにすること（フロントに既定を書くと 2 か所に散る）。
     ponanzaConstant.value = String(s.ponanzaConstant);
@@ -5517,6 +5541,28 @@ export function mountMainScreen(root: HTMLElement): void {
         settingsStatus.classList.add("is-error");
       } finally {
         fitOnStartup.disabled = false;
+      }
+    })();
+  });
+
+  // 枠の内側の素通し。**切り替えたその場で効く**（起動時に盤面を探す、とはそこが違う）。
+  clickThrough.addEventListener("change", () => {
+    void (async () => {
+      const want = clickThrough.checked;
+      clickThrough.disabled = true;
+      settingsStatus.textContent = "";
+      settingsStatus.classList.remove("is-error");
+      try {
+        showSettings(await SettingsService.SetClickThrough(want));
+        settingsStatus.textContent = want
+          ? "ガイド枠の内側をクリックすると、後ろの画面に届きます。ツールバーと枠の縁はそのまま押せます。"
+          : "ガイド枠の内側のクリックは後ろへ通しません。";
+      } catch (err) {
+        clickThrough.checked = !want;
+        settingsStatus.textContent = `設定を保存できませんでした: ${String(err)}`;
+        settingsStatus.classList.add("is-error");
+      } finally {
+        clickThrough.disabled = false;
       }
     })();
   });

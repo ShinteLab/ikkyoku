@@ -105,6 +105,19 @@ export function SetAnalyzeSeconds(v: number): $CancellablePromise<$models.AppSet
 }
 
 /**
+ * SetClickThrough は「枠の内側で後ろの画面を操作する」を切り替えて保存し、**その場で効かせる。**
+ * 
+ * 起動時まで待たせないのは、これが**中継を触りたくなったその瞬間に切り替える**設定だから
+ * （「起動時に盤面を探す」とはそこが違う）。
+ * 
+ * ⚠️ **保存できたときだけ効かせること。** 先に効かせると、保存に失敗したときに
+ * 「画面のチェックは外れているのに枠は素通しのまま」になる。
+ */
+export function SetClickThrough(v: boolean): $CancellablePromise<$models.AppSettings> {
+    return $Call.ByID(731904781, v);
+}
+
+/**
  * SetEngineColor は評価値グラフの折れ線の色を決める（空にすると既定色に戻る）。
  * 
  * **入口は解析タブのエンジンの見出し**（候補手を出しているところ）。設定タブでは

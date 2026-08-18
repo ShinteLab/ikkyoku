@@ -145,3 +145,40 @@ func TestWithFitMargin(t *testing.T) {
 		})
 	}
 }
+
+// TestInsideClickThrough は**素通しにする範囲**を固定する。
+//
+// ⚠️ **撮る範囲そのものにしないこと。** Wails のリサイズ判定は
+// 「クライアント領域の端 5px（角は +10px）」で、ガイド枠（2px）より内側まで
+// 食い込む。そこまで素通しにすると**左右と下の縁から枠をリサイズできなくなり、
+// 素通しを切るまで大きさを変えられない**。
+//
+// DPI が上がると詰める幅も物理ピクセルで広がること（CSS px 指定なので）も見ている。
+func TestInsideClickThrough(t *testing.T) {
+	region := ikkyoku.Region{X: 100, Y: 200, Width: 400, Height: 300}
+
+	tests := []struct {
+		name  string
+		scale float64
+		x, y  int
+		want  bool
+	}{
+		{"真ん中は素通し", 1.0, 300, 350, true},
+		{"左の縁は押せる(リサイズを潰さない)", 1.0, 104, 350, false},
+		{"右の縁は押せる", 1.0, 495, 350, false},
+		{"下の縁は押せる", 1.0, 300, 495, false},
+		{"上の縁は押せる", 1.0, 300, 204, false},
+		{"内側へ入れば素通し", 1.0, 111, 350, true},
+		{"範囲の外は押せる(ツールバー側)", 1.0, 300, 100, false},
+		// 150% では詰める幅も 15px になるので、等倍なら素通しだった点が縁に入る。
+		{"150%では詰め幅も広がる", 1.5, 111, 350, false},
+		{"150%でも内側は素通し", 1.5, 130, 350, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := insideClickThrough(region, tt.scale, tt.x, tt.y); got != tt.want {
+				t.Errorf("insideClickThrough(%d,%d) = %v, want %v", tt.x, tt.y, got, tt.want)
+			}
+		})
+	}
+}

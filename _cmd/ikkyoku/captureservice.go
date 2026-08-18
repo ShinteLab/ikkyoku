@@ -51,6 +51,21 @@ const (
 // ことになるが、盤が 1px 欠けるだけで実害は無い(枠が写り込む方を避ける)。
 const framelessBottomPaddingPx = 1
 
+// clickThroughInsetPx は素通しにする範囲を、撮る領域から内側へ詰める幅(CSS px)。
+// clickThroughPoll はカーソルの位置を見に行く間隔。
+//
+// ⚠️ **撮る領域をそのまま素通しにしないこと。** Wails のリサイズ判定は
+// 「クライアント領域の端 5px(角は +10px)」で、**ガイド枠(2px)より内側まで食い込む**。
+// そこを素通しにすると、**左右と下の縁から枠をリサイズできなくなる**。
+// 詰めたぶんは「押しても後ろへ抜けない細い縁」になるだけで、実害が無い。
+//
+// 間隔は 50ms。素通しのあいだ枠はマウスの動きを受け取れない(イベントが来ない)ので、
+// **戻すきっかけを作れるのはポーリングだけ**。設定が入のときしか回さない。
+const (
+	clickThroughInsetPx = 10
+	clickThroughPoll    = 50 * time.Millisecond
+)
+
 // fitMinBoardPx は自動フィットで受け入れる盤の最小の一辺(物理px)。
 //
 // 9 マスに割ると 1 マス 10px。これ以下の矩形に枠を合わせると、盤ではない何かを
@@ -159,6 +174,15 @@ type CaptureService struct {
 	// recognizerStatus は直近の読み込み結果。表示のためだけに 3.5MB を
 	// 読み直さなくて済むよう覚えておく。
 	recognizerStatus RecognizerStatus
+
+	// clickThrough は設定「枠の内側で後ろの画面を操作する」（`ikkyoku.Config.ClickThrough`）。
+	clickThrough bool
+	// clickStop は素通しの見張り（watchCursor）を止めるチャネル。
+	// **入のあいだだけ goroutine が居る。**
+	clickStop chan struct{}
+	// mouseThrough は今 WS_EX_TRANSPARENT を立てているか。
+	// **設定そのものではない**（設定が入でも、カーソルがツールバーの上に居るあいだは false）。
+	mouseThrough bool
 }
 
 func NewCaptureService(logger *slog.Logger, recognizerDir string) *CaptureService {
@@ -424,6 +448,122 @@ func (s *CaptureService) emitFrameVisible() {
 		return
 	}
 	s.app.Event.Emit("frame:visible", s.FrameVisible())
+}
+
+// applyClickThrough は設定「枠の内側で後ろの画面を操作する」を反映する。
+// **起動時（main.go）と、設定タブで切り替えたとき（SettingsService.SetClickThrough）**
+// の 2 か所から呼ばれる。
+//
+// 入なら見張りの goroutine を 1 つ起こし、切ったら止めて素通しを解く。
+// ⚠️ **切ったときに必ず解くこと。** 解き忘れると、**設定を切ったのに枠が
+// 押せないまま**になり、画面からは理由が分からない。
+func (s *CaptureService) applyClickThrough(on bool) {
+	s.mu.Lock()
+	if s.clickThrough == on {
+		s.mu.Unlock()
+		return
+	}
+	s.clickThrough = on
+	stop := s.clickStop
+	s.clickStop = nil
+	if on {
+		ch := make(chan struct{})
+		s.clickStop = ch
+		s.mu.Unlock()
+		s.logger.Info("枠の内側を素通しにします")
+		go s.watchCursor(ch)
+		return
+	}
+	s.mu.Unlock()
+	if stop != nil {
+		close(stop)
+	}
+	s.setMouseThrough(false)
+	s.logger.Info("枠の素通しをやめます")
+}
+
+// watchCursor はカーソルが「撮る範囲の内側」に居るあいだだけ枠を素通しにする。
+//
+// **枠ごと素通しにしない**のがこの見張りの理由そのもの。WS_EX_TRANSPARENT は
+// ウィンドウ単位でしか付けられないので、ツールバー（撮る・□・✕・ドラッグ移動）を
+// 押せるまま残すには、**カーソルがどこに居るかで付け外しするしかない**。
+//
+// ⚠️ **素通しにしているあいだ、枠にはマウスのイベントが 1 つも来ない。**
+// だから「カーソルがツールバーへ戻ってきた」を知る手段がポーリング以外に無い。
+// 回すのは設定が入のあいだだけ（50ms）。
+func (s *CaptureService) watchCursor(stop chan struct{}) {
+	t := time.NewTicker(clickThroughPoll)
+	defer t.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-t.C:
+			s.stepCursor()
+		}
+	}
+}
+
+// stepCursor は 1 回ぶんの判定。
+func (s *CaptureService) stepCursor() {
+	if s.wins == nil || s.wins.frame == nil || !s.wins.frame.IsVisible() {
+		// 枠が出ていないあいだは素通しにする相手が居ない。**必ず解いておく**
+		// （出し直したときに、カーソルがツールバーの上でも押せない状態から始まらないように）。
+		s.setMouseThrough(false)
+		return
+	}
+	// ⚠️ **押している最中は切り替えない。** ドラッグ移動もリサイズもボタンを
+	// 押したまま動かす操作なので、途中で素通しになると掴んだまま外れる。
+	if mouseButtonDown() {
+		return
+	}
+	x, y, ok := cursorPos()
+	if !ok {
+		return
+	}
+	region, scale, err := s.captureRegion()
+	if err != nil {
+		s.setMouseThrough(false)
+		return
+	}
+	s.setMouseThrough(insideClickThrough(region, scale, x, y))
+}
+
+// insideClickThrough はその点が「素通しにしてよい範囲」に入っているか。
+//
+// 撮る範囲そのものではなく、**内側へ clickThroughInsetPx だけ詰めた範囲**。
+// 詰めないと Wails のリサイズ判定（クライアント領域の端 5px）と重なり、
+// **左右と下の縁から枠をリサイズできなくなる**。
+func insideClickThrough(region ikkyoku.Region, scale float64, x, y int) bool {
+	inset := scaleUp(clickThroughInsetPx, scale)
+	return x >= region.X+inset && x < region.X+region.Width-inset &&
+		y >= region.Y+inset && y < region.Y+region.Height-inset
+}
+
+// setMouseThrough は枠の WS_EX_TRANSPARENT を実際に付け外しする。
+// **変化したときだけ Win32 を呼ぶ**（50ms ごとに叩かないため）。
+func (s *CaptureService) setMouseThrough(on bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if on && !s.clickThrough {
+		// 切った直後に見張りの最後の 1 回が滑り込むことがある。**入れ直さない。**
+		return
+	}
+	if s.mouseThrough == on {
+		return
+	}
+	if s.wins == nil || s.wins.frame == nil {
+		return
+	}
+	hwnd := s.wins.frame.NativeWindow()
+	if hwnd == nil {
+		return
+	}
+	if err := setMouseTransparent(hwnd, on); err != nil {
+		s.logger.Warn("枠の素通しを切り替えられませんでした", "on", on, "error", err)
+		return
+	}
+	s.mouseThrough = on
 }
 
 // Layout は枠ウィンドウが描くべき寸法を返す。フロントは起動時にこれを呼び、
