@@ -538,87 +538,9 @@ export function mountMainScreen(root: HTMLElement): void {
                「認識がどれくらい外したか」の情報なので「認識詳細情報」に残す
                (盤面タブの基準は「局面を読む・直す・動かすのに要るか」)。
                もとの画像は「認識詳細情報」と**同じ CaptureResult.thumbnail**。 -->
-          <!-- 盤の左の列。**撮った画像と「認識詳細情報」が縦に並ぶ。**
-               ⚠️ **幅はここが持つ**（capture-ref ではない）。中身の大きさで
-               決まると、画像の読み込みが終わった瞬間に**盤が横へ動いて
-               重ねたグリッドだけ取り残される**（そのとき layoutGrid は呼ばれない）。 -->
-          <div class="edit-side">
-            <div id="capture-ref" class="capture-ref" hidden>
-              <img id="capture-ref-img" class="capture-ref-img" alt="訂正のもとになった画像" />
-            </div>
-          <!-- 認識詳細情報（旧デバッグタブ）。**撮った画像の下**（2026-08-18。
-               盤の上 → 訂正タブの一番下 → ここ）。
-
-               ⚠️ **盤より上へ戻さないこと。** 開くと**盤が下へ押される**ので、
-               中を見たいときに盤が視界から消える。**左の列に置けば盤は動かない**
-               （盤の左はもともと遊んでいる —— 盤は 560px より大きくならない）。
-
-               ⚠️ **capture-ref の中ではなく、隣**（同じ列の下）。あちらは
-               **画像が無ければ丸ごと隠れる**ので、中に入れると
-               **撮る前に「認識器を再読み込み」に手が届かなくなる**。
-
-               ⚠️ **中身は認識した時点の記録**（CaptureResult）。盤の上の警告や
-               盤の脇の駒台（EditState）とは**別の値**で、訂正しても変わらない。
-               同じ見出しが 1 つの画面に 2 度出るが、**読む目的が違う**ので
-               片方を消さないこと（上＝今の局面を直すための情報、
-               ここ＝認識がどれくらい外したかの記録）。
-
-               ⚠️ **中は「撮った画像 → 認識の情報」の順**（2026-08-18 に入れ替えた）。
-               最初に見るのは**撮れているかどうか**で、確信度や推論器はそれを見た
-               あとの話。畳んだ状態から開いて、まず画像が目に入るのが正しい。
-
-               ⚠️ **すぐ上の capture-ref と役割が違う。** あちらは
-               **盤面領域で切り取った原本**（畳めない・訂正しながら見比べるもの）、
-               こちらは**重ね表示つきの認識の記録**（畳める）。**両方要る。** -->
-          <details id="debug-details" class="debug-details">
-            <summary id="debug-summary">認識詳細情報</summary>
-            <div class="debug-body">
-              <div class="debug-shot">
-                <div class="debug-shot-head">
-                  <span class="field-label">撮った画像</span>
-                  <button id="shot-path" class="path-btn" type="button" hidden>
-                    <span class="path-name"></span>${iconMarkup(FiCopy)}
-                  </button>
-                  <button id="shot-copy-image" class="path-btn is-icon-only" type="button" hidden
-                          aria-label="画像をコピー"
-                          title="画像そのものをクリップボードにコピー">${iconMarkup(FiImage)}</button>
-                  <label class="overlay-toggle">
-                    <input id="overlay-toggle" type="checkbox" checked />
-                    認識の重ね表示
-                  </label>
-                </div>
-                <div id="shot" class="shot" hidden>
-                  <img id="thumbnail" class="thumbnail" alt="直近のキャプチャ" />
-                  <svg id="overlay" class="overlay" preserveAspectRatio="none" aria-hidden="true"></svg>
-                </div>
-              </div>
-
-              <div class="debug-row">
-                <button id="reload-btn" class="ghost-btn" type="button"
-                        title="学習データを更新したあとに押すと、認識器を読み込み直します">認識器を再読み込み</button>
-                <p id="recognizer" class="recognizer"></p>
-              </div>
-
-              <div id="confidence-row" class="hand-row" hidden>
-                <span class="field-label">検出</span>
-                <span id="confidence" class="note"></span>
-              </div>
-              <div id="region-row" class="hand-row" hidden>
-                <span class="field-label">盤面</span>
-                <span id="region" class="note"></span>
-              </div>
-              <div id="predictor-row" class="hand-row" hidden>
-                <span class="field-label">推論器</span>
-                <span id="predictor" class="note"></span>
-              </div>
-              <div id="hand-row" class="hand-row" hidden>
-                <span class="field-label">駒台</span>
-                <span id="hand" class="hand"></span>
-                <span class="note">先後不明</span>
-              </div>
-              <ul id="warnings" class="warnings" hidden></ul>
-            </div>
-          </details>
+          <div id="capture-ref" class="capture-ref" hidden>
+            <img id="capture-ref-img" class="capture-ref-img" alt="訂正のもとになった画像" />
+          </div>
           </div>
           <!-- 盤と駒台の配置。**後手の駒台は盤の左上、先手の駒台は右下**
                (実際の将棋盤と同じ並び)。訂正モードのときだけ出る。 -->
@@ -637,6 +559,80 @@ export function mountMainScreen(root: HTMLElement): void {
           </div>
           <p id="board-placeholder" class="board-placeholder">まだ撮っていません。</p>
         </div>
+        <!-- 認識詳細情報（旧デバッグタブ）。**盤の下・「この局面を解析する」の上**
+             （2026-08-18。盤の上＝警告のすぐ下から移した）。
+
+             ⚠️ **盤より上へ戻さないこと。** 開くと**盤が下へ押される**ので、
+             中を見たいときに**盤が視界から消える**（そのために訂正タブを
+             スクロールさせていた）。下なら**盤は動かず、下に伸びるだけ**。
+
+             ⚠️ **幅は「撮った画像 + 盤」の全体**（盤の左の列に押し込まない）。
+             中身は横に長い行（推論器のパス・警告の文）と等倍のサムネイルなので、
+             半分の幅では折り返しと縦スクロールだらけになる。
+
+             ⚠️ **中身は認識した時点の記録**（CaptureResult）。盤の上の警告や
+             盤の脇の駒台（EditState）とは**別の値**で、訂正しても変わらない。
+             同じ見出しが 1 つの画面に 2 度出るが、**読む目的が違う**ので
+             片方を消さないこと（上＝今の局面を直すための情報、
+             ここ＝認識がどれくらい外したかの記録）。
+
+             ⚠️ **中は「撮った画像 → 認識の情報」の順**（2026-08-18 に入れ替えた）。
+             最初に見るのは**撮れているかどうか**で、確信度や推論器はそれを見た
+             あとの話。畳んだ状態から開いて、まず画像が目に入るのが正しい。
+
+             ⚠️ **撮った画像（.capture-ref）はこの折りたたみの外**（盤の左）。
+             訂正は「原本を見ながら直す」作業なので、**畳んだら消えるところに
+             原本を置かない**（中にも画像はあるが、あちらは重ね表示つきの記録）。 -->
+        <details id="debug-details" class="debug-details">
+          <summary id="debug-summary">認識詳細情報</summary>
+          <div class="debug-body">
+            <div class="debug-shot">
+              <div class="debug-shot-head">
+                <span class="field-label">撮った画像</span>
+                <button id="shot-path" class="path-btn" type="button" hidden>
+                  <span class="path-name"></span>${iconMarkup(FiCopy)}
+                </button>
+                <button id="shot-copy-image" class="path-btn is-icon-only" type="button" hidden
+                        aria-label="画像をコピー"
+                        title="画像そのものをクリップボードにコピー">${iconMarkup(FiImage)}</button>
+                <label class="overlay-toggle">
+                  <input id="overlay-toggle" type="checkbox" checked />
+                  認識の重ね表示
+                </label>
+              </div>
+              <div id="shot" class="shot" hidden>
+                <img id="thumbnail" class="thumbnail" alt="直近のキャプチャ" />
+                <svg id="overlay" class="overlay" preserveAspectRatio="none" aria-hidden="true"></svg>
+              </div>
+            </div>
+
+            <div class="debug-row">
+              <button id="reload-btn" class="ghost-btn" type="button"
+                      title="学習データを更新したあとに押すと、認識器を読み込み直します">認識器を再読み込み</button>
+              <p id="recognizer" class="recognizer"></p>
+            </div>
+
+            <div id="confidence-row" class="hand-row" hidden>
+              <span class="field-label">検出</span>
+              <span id="confidence" class="note"></span>
+            </div>
+            <div id="region-row" class="hand-row" hidden>
+              <span class="field-label">盤面</span>
+              <span id="region" class="note"></span>
+            </div>
+            <div id="predictor-row" class="hand-row" hidden>
+              <span class="field-label">推論器</span>
+              <span id="predictor" class="note"></span>
+            </div>
+            <div id="hand-row" class="hand-row" hidden>
+              <span class="field-label">駒台</span>
+              <span id="hand" class="hand"></span>
+              <span class="note">先後不明</span>
+            </div>
+            <ul id="warnings" class="warnings" hidden></ul>
+          </div>
+        </details>
+
         <div id="editor" class="editor"></div>
         <p id="edit-status" class="status" role="status" aria-live="polite"></p>
         <!-- 訂正した局面を suteme の学習データとして送る。設定で有効にしていない
@@ -1285,7 +1281,7 @@ export function mountMainScreen(root: HTMLElement): void {
   const inputTab = tabs[0].tab;
   const editTab = tabs[1].tab;
   const studyTab = tabs[2].tab;
-  // 認識詳細情報（旧デバッグタブ）。**訂正タブの盤の左、撮った画像の下**
+  // 認識詳細情報（旧デバッグタブ）。**盤の下・「この局面を解析する」の上**
   // （2026-08-18 に盤の上から移した。開いても盤が動かない位置）。
   const debugDetails = root.querySelector<HTMLDetailsElement>("#debug-details")!;
   const debugSummary = root.querySelector<HTMLElement>("#debug-summary")!;
