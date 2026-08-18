@@ -52,6 +52,19 @@ export interface StudyBoardHandle {
   // ⚠️ **見え方とモデルが反対になる**ので、重ねるグリッドは
   // 「見た目の位置 → 局面のマス」を読み替える。
   setFlip(flip: boolean): void;
+  // step は**今の手順を 1 手進む / 戻る**（十字キーの上下。2026-08-18）。
+  // `-1` で戻り、`+1` で進む。
+  //
+  // ⚠️ **辿るのは「今の経路」**（`StudyState.line`）で、**画面に並んでいる行の
+  // 順ではない**。リストには枝も一緒に並んでいるので、行の順で動かすと
+  // **上下キーを押しただけで別の枝へ移る**（盤の局面が飛ぶ）。枝へ移るのは
+  // 手順リストを押す操作。
+  //
+  // ⚠️ **端では何もしない**（開始局面より前・経路の終わりより先）。回り込ませると
+  // 押しっぱなしで一周してしまい、どこに居るのか分からなくなる。
+  //
+  // ⚠️ **手順は 1 手も消さない**（`GoTo` と同じ。見る位置を動かすだけ）。
+  step(delta: number): void;
   // showHint は候補手を盤の上に重ねて出す（**移動元 → 移動先の矢印**。打ちは
   // 打つ駒を打ち先に薄く置く）。`null` で消す。
   //
@@ -953,6 +966,23 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
       applyFlip();
       layoutGrid();
       paint();
+    },
+    step(delta: number) {
+      if (!state?.loaded || !delta) {
+        return;
+      }
+      // **今の経路の中での位置**（`line` は根から今の枝の終わりまで通っている）。
+      const line = state.line ?? [];
+      const at = line.indexOf(state.currentId ?? 0);
+      if (at < 0) {
+        return;
+      }
+      const to = line[at + (delta < 0 ? -1 : 1)];
+      // ⚠️ **端では何もしない**（`undefined` は「その先が無い」）。
+      if (to === undefined) {
+        return;
+      }
+      void run(() => StudyService.GoTo(to));
     },
     showHint(usi: string | null) {
       const next = usi || null;
