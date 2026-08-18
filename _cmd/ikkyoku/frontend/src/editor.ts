@@ -270,10 +270,11 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   // ⚠️ **手番と並べないこと。** 別の事実なのに、同じ見た目のボタンが隣り合うと
   // 同じものの選択肢に見える（実際に紛らわしかった）。**盤の下に 1 つだけ**置き、
   // **押すたびに入れ替わる**形にする（状態は 2 つしかないので選択肢を並べなくてよい）。
-  viewHost.innerHTML = `
-    <button id="edit-near" class="ghost-btn" type="button"></button>
-    <span id="edit-view-note" class="note is-caution" hidden>解析へは上下を反転して渡します</span>
-  `;
+  //
+  // ⚠️ **ボタンの横に注記を出さないこと**（2026-08-18 に外した）。後手目線のときだけ
+  // 文字が増えると、**出たり消えたりするたびにボタンの位置がずれて押しづらい**。
+  // 「解析へは反転して送信」は**SFEN の後ろ**に添えてある（mainscreen の #sfen-note）。
+  viewHost.innerHTML = `<button id="edit-near" class="ghost-btn" type="button"></button>`;
 
   // 駒台は盤の脇（後手=左上 / 先手=右下）に置く。**訂正ツールバーの中ではない。**
   // 盤との位置関係そのものが「どちらの駒台か」の説明になるので、離さないこと。
@@ -328,8 +329,6 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   const moveNum = panel.querySelector<HTMLInputElement>("#edit-movenum")!;
   const turnBtns = Array.from(panel.querySelectorAll<HTMLButtonElement>(".turn-btn[data-turn]"));
   const nearBtn = viewHost.querySelector<HTMLButtonElement>("#edit-near")!;
-  // ⚠️ **後手目線のときだけ出す。** 解析へ渡すものが画面と違うので、黙って回さない。
-  const viewNote = viewHost.querySelector<HTMLElement>("#edit-view-note")!;
   // 目線のボタン 1 つぶんの見た目。**文字がそのまま今の状態**で、押すと反対になる
   // （何が起きるかはツールチップが言う）。
   const paintNearButton = (nearWhite: boolean) => {
@@ -407,7 +406,6 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
       b.classList.toggle("is-active", Number(b.dataset.turn) === next.turn);
     }
     paintNearButton(!!next.nearWhite);
-    viewNote.hidden = !next.nearWhite;
     // ⚠️ **手番の値は 1 つ（`EditState.turn`）。** ボタンとマークは同じ値を
     // 2 か所に描くだけで、**更新経路もここ 1 本**にする（片方だけ更新する道を
     // 作ると、どちらが本当の手番か分からなくなる）。

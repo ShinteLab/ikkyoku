@@ -2861,6 +2861,15 @@ html.is-main #app {
   word-break: break-all;
 }
 
+/* SFEN の後ろの「（解析へは反転して送信）」（2026-08-18）。
+   ⚠️ **行を増やさないこと** —— 後手目線のときだけ行が増えると、出たり消えたり
+   するたびに下のボタンが上下にずれて押しづらい。**縮ませない**（SFEN が長いと
+   こちらが潰れる）。 */
+#sfen-note {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 .hand {
   font-size: 13px;
   color: #c7cbd4;
