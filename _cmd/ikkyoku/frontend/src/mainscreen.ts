@@ -541,7 +541,6 @@ export function mountMainScreen(root: HTMLElement): void {
           <div id="capture-ref" class="capture-ref" hidden>
             <img id="capture-ref-img" class="capture-ref-img" alt="訂正のもとになった画像" />
           </div>
-          </div>
           <!-- 盤と駒台の配置。**後手の駒台は盤の左上、先手の駒台は右下**
                (実際の将棋盤と同じ並び)。訂正モードのときだけ出る。 -->
           <div id="board-with-hands" class="board-with-hands">
