@@ -550,23 +550,34 @@ html.is-main #app {
   cursor: pointer;
 }
 
-.toolbar-btn:hover:not(:disabled) {
+/* アイコンのボタン。**文字が無いぶん、意味は aria-label / title が持つ**
+   (frame.ts の .frame-btn.is-icon と同じ作り)。 */
+.toolbar-btn.is-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.toolbar-btn:hover {
   color: #f2f3f5;
   background: #3a3d47;
 }
 
-/* 枠が出ているあいだ。**押せないが、消さない** —— 消すと「出ている」ことが
-   画面から読めなくなる（隠すのは枠の側の ✕ なので、こちらは状態表示を兼ねる）。
-   ⚠️ **薄くしすぎないこと**（読めないと、何のボタンだったのか分からなくなる）。 */
-.toolbar-btn:disabled {
-  color: #6f7891;
-  cursor: default;
-}
-
+/* 枠が出ている状態。**押すと隠れる**(トグル)。
+   ⚠️ **絵は変わらないので、今どちらなのかはこの色だけが伝える。**
+   薄い差にしないこと —— 読めないと、押すまでどちらなのか分からない。 */
 .toolbar-btn[aria-pressed="true"] {
   color: #8fbcff;
   background: #1d2735;
   border-color: #2f4a6b;
+}
+
+.toolbar-btn[aria-pressed="true"]:hover {
+  color: #cfe2ff;
+  background: #26364b;
 }
 
 /* ---- ウィンドウ操作(Frameless の代償) ------------------------------------

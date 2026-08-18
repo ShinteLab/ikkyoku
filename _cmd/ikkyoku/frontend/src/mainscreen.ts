@@ -51,6 +51,7 @@ import {
   FiChevronUp,
   FiCopy,
   FiImage,
+  FiMaximize,
   FiMinus,
   FiRefreshCw,
   FiSquare,
@@ -364,10 +365,13 @@ export function mountMainScreen(root: HTMLElement): void {
              出したくなる**（撮ってから訂正・解析と進んだあと、もう一度撮る）ので、
              入力タブの中にあると**そのたびにタブを行き来する**ことになる。
 
-             ⚠️ **出ているあいだは押せない。** 状態は 2 つ（出ている / 隠れている）で、
-             このボタンが出せるのは片方向だけ —— **隠すのは枠の側の ✕** なので、
-             ここを押して隠せるようにすると**出口が 2 つ**になる。
-             押せないことと aria-pressed で「もう出ている」を示す。
+             ⚠️ **押すたびに出す/隠すが入れ替わる**（2026-08-18）。枠の ✕ でも
+             隠せるが、**出す口と同じ場所で戻せるのが素直** —— 枠が中継の裏に
+             回っているときや別モニタにあるときは、✕ を押しに行くほうが遠い。
+
+             ⚠️ **今どちらなのかが見えていること**（aria-pressed + 色）。
+             アイコンだけなので、**状態が読めないと押すまで分からない**。
+             意味は aria-label / title が持つ（⚠️ **どちらも状態で書き換えること**）。
 
              ⚠️ **状態は Go 側が知らせる**（frame:visible イベント）。枠の ✕ で隠したことは
              メイン画面からは分からないので、自前で覚えると**隠れているのに
@@ -378,7 +382,8 @@ export function mountMainScreen(root: HTMLElement): void {
              枠の側のツールバーに □ があり、**合わせる相手は枠**なので、
              枠が出ていない状態から押す操作ではない。 -->
         <div class="toolbar-actions">
-          <button id="frame-toggle" class="toolbar-btn" type="button" aria-pressed="false"></button>
+          <button id="frame-toggle" class="toolbar-btn is-icon" type="button"
+                  aria-pressed="false">${iconMarkup(FiMaximize)}</button>
         </div>
 
         <!-- ウィンドウ操作。**OS のタイトルバーを外した代わり**なので、右端に置いて
@@ -4227,25 +4232,41 @@ export function mountMainScreen(root: HTMLElement): void {
   // どのタブに居ても出したくなるもので、入力タブの中にあると**そのたびに
   // タブを行き来する**ことになる。
   //
-  // ⚠️ **出ているあいだは押せない。** 隠すのは枠の側の ✕ で、ここには戻さない
-  // （出口が 2 つになる）。⚠️ **状態は Go 側が知らせる**（`frame:visible`）——
-  // 枠の ✕ で隠したことはメイン画面からは分からないので、自前で覚えると
-  // **隠れているのに「出ています」のまま**になる。
+  // ⚠️ **押すたびに出す/隠すが入れ替わる**（2026-08-18）。枠の ✕ でも隠せるが、
+  // **出した口と同じ場所で戻せるのが素直** —— 枠が中継の裏や別モニタにあるとき、
+  // ✕ を押しに行くほうが遠い。⚠️ **どちらの経路で隠しても状態は 1 つ**
+  // （`frame:visible`）なので、2 つあっても食い違わない。
+  //
+  // ⚠️ **アイコンなので、意味は aria-label / title が持つ。** どちらも**状態で
+  // 書き換えること** —— 絵が同じままなので、文字が変わらないと今どちらなのかが
+  // 読めない（見た目の区別は `aria-pressed` の色が持つ）。
+  //
+  // ⚠️ **状態は Go 側が知らせる**（`frame:visible`）—— 枠の ✕ で隠したことは
+  // メイン画面からは分からないので、自前で覚えると**隠れているのに
+  // 「出ています」のまま**になる。
   const frameToggle = root.querySelector<HTMLButtonElement>("#frame-toggle")!;
+  let frameVisible = false;
   const showFrameState = (visible: boolean) => {
-    frameToggle.disabled = visible;
+    frameVisible = visible;
     frameToggle.setAttribute("aria-pressed", String(visible));
-    frameToggle.textContent = visible ? "枠は表示中" : "枠を表示";
+    const label = visible ? "ガイド枠を隠す" : "ガイド枠を表示";
+    frameToggle.setAttribute("aria-label", label);
     frameToggle.title = visible
-      ? "ガイド枠は出ています（隠すのは枠の ✕。位置は覚えているので出し直せます）"
-      : "ガイド枠を出します（撮りたい盤面に合わせてから、枠のカメラで撮ります）";
+      ? "ガイド枠を隠します（位置は覚えているので、出し直せば同じ領域に戻ります）"
+      : "ガイド枠を表示します（撮りたい盤面に合わせてから、枠のカメラで撮ります）";
   };
   showFrameState(false);
   frameToggle.addEventListener("click", () => {
-    void CaptureService.ShowFrame();
+    // ⚠️ **ここで状態を書き換えない。** 反映するのは `frame:visible` を受けたときだけ
+    // （2 か所に持つと食い違う）。隠す経路が枠の ✕ にもあるので、なおさら。
+    if (frameVisible) {
+      void CaptureService.HideFrame();
+    } else {
+      void CaptureService.ShowFrame();
+    }
   });
-  // 枠の出入り。**押した結果もここで受ける**（ShowFrame が Go 側から知らせる）ので、
-  // 押したときに自分で状態を書き換えない（2 か所に持つと食い違う）。
+  // 枠の出入り。**押した結果もここで受ける**（ShowFrame / HideFrame が Go 側から
+  // 知らせる）ので、押したときに自分で状態を書き換えない。
   Events.On("frame:visible", (event: { data: boolean }) => {
     showFrameState(event.data);
   });
