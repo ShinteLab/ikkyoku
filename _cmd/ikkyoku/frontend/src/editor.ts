@@ -14,6 +14,7 @@
 // 操作はドラッグ＆ドロップが主:
 //
 //   足りない駒 → 盤   置く（先手の駒として置く。右クリックで後手に）
+//   盤 → 盤外        外す（**どこにも落とさなければ捨てる**。先後は決めない）
 //   盤 → 盤           動かす（移動先の駒は置き換わる。取るのではない）
 //   盤 → 駒台         外して、その側の持ち駒にする（**外すのと先後を決めるのが 1 操作**）
 //   駒台 → 盤         打つ（その側の駒台にある駒だけ）
@@ -227,7 +228,7 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
       <button id="edit-confirm" class="ghost-btn is-primary" type="button">この局面を解析する</button>
       <span class="edit-hint">
         盤 ⇄ 駒台をドラッグ（外すと同時に持ち主が決まる） /
-        「足りない駒」から盤へドラッグして置く /
+        <strong>盤の外へ放ると外れる</strong>（「足りない駒」に戻る） /
         右クリックで先後と成・不成を切り替え
       </span>
     </div>
@@ -644,7 +645,9 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     moveGhost(e.clientX, e.clientY);
     const t = targetAt(e.clientX, e.clientY);
     clearOver();
-    (t.cell ?? t.zone?.el)?.classList.add("is-over");
+    // ⚠️ **落とし先が無いときは「足りない駒」を光らせる。** 盤外へ捨てると
+    // そこへ入る（`discard`）ので、**行き先が見えていないと消えたように見える**。
+    (t.cell ?? t.zone?.el ?? (discardable(drag.data) ? missing : null))?.classList.add("is-over");
   });
 
   window.addEventListener("pointerup", (e) => {
@@ -660,14 +663,19 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
       dropOnCell(t.cell, data);
       return;
     }
-    const p = t.zone?.handler(data);
+    // ⚠️ **落とし先が無ければ「盤外に捨てる」**（2026-08-18）。以前は何も
+    // 起きなかったので、駒を消すのに**「足りない駒」の枠までドラッグする**
+    // 必要があった —— 消すのは訂正で一番よく使う操作（認識は余計な駒を作る）
+    // なので、放り出す動作でできるほうが速い。**行き先は「足りない駒」と同じ**
+    // （先後を決めずに外すだけ）なので、間違えても掴み直せば戻る。
+    const p = t.zone ? t.zone.handler(data) : discard(data);
     if (p) {
       void apply(() => p);
     }
   });
 
-  // 掴んだまま取り消せること。**盤の外で離す = 何もしない**は `targetAt` が
-  // 空を返すので自然にそうなるが、Esc とポインタの中断も同じ入口へ寄せる。
+  // 掴んだまま取り消せること。**盤外で離すのは「捨てる」**なので、
+  // 取り消したいときは Esc（とポインタの中断）。同じ入口へ寄せてある。
   window.addEventListener("pointercancel", (e) => {
     if (drag && e.pointerId === drag.pointerId) {
       endDrag();
@@ -746,7 +754,11 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
       chip.textContent ?? "", true);
   });
 
-  makeDropZone(missing, (data) => {
+  // discard は「足りない駒」へ戻す操作。**枠に落としても、盤外へ放り出しても同じ。**
+  //
+  // ⚠️ **2 か所で別々に書かないこと** —— 枠と盤外で結果が違うと、消したつもりの
+  // 駒がどこへ行ったのか分からなくなる。
+  function discard(data: Drag) {
     // 盤から: 先後を決めずに外す。駒台から: 持ち主を未決に戻す。
     if (data.from === "cell") {
       return PositionService.Remove(data.rank, data.file);
@@ -755,7 +767,15 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
       return setHandDelta(data.piece, data.black, -1);
     }
     return null;
-  });
+  }
+
+  // discardable は「盤外へ放ると変化があるか」。**足りない駒から掴んだものは
+  // 既にそこに居る**ので、放っても何も起きない（光らせもしない）。
+  function discardable(data: Drag) {
+    return data.from !== "stock";
+  }
+
+  makeDropZone(missing, discard);
 
   // 駒台（先手・後手）。**外すのと先後を決めるのが 1 操作**になるドロップ先。
   for (const zone of handZones) {
