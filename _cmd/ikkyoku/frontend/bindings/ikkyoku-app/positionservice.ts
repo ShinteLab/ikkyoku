@@ -60,6 +60,8 @@ export function Load(boardSFEN: string): $CancellablePromise<$models.EditState> 
 
 /**
  * Move は盤の中で駒を動かす（盤 → 盤のドラッグ＆ドロップ）。
+ * 
+ * ⚠️ **移動先に駒があれば入れ替える**（取るのではない。`position.Move` を読むこと）。
  */
 export function Move(fromRank: number, fromFile: number, toRank: number, toFile: number): $CancellablePromise<$models.EditState> {
     return $Call.ByID(3103626707, fromRank, fromFile, toRank, toFile);
