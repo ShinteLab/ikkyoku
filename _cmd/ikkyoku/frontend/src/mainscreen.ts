@@ -3152,11 +3152,12 @@ export function mountMainScreen(root: HTMLElement): void {
     try {
       const got = await StudyService.AddLine(engineId, moves);
       showStudy(got.state);
-      // ⚠️ **分かれ道になったら、分かれた手をまとめて畳む**（2026-08-13）。
-      // 読み筋は 15 手ぶら下がることがあるので、畳まないと**もう 1 本の候補が
-      // 画面の外**に出て、**その手で何を指したのかを見比べられない**。
-      // （分かれていないときは何もしない —— 足したものは見せる）
-      studyBoardUI.foldForkAt(got.firstId);
+      // ⚠️ **足した読み筋はその場で畳む**（2026-08-18。以前は「分かれ道に
+      // なったときだけ」だった）。読み筋は 15 手ぶら下がることがあるので、
+      // **開いたまま積むと手順が読めない** —— 足した手 1 行 +「＋」にして、
+      // **候補どうしを隣り合わせて比べられる形**にする。
+      // ⚠️ **他の候補は畳み直さないこと**（開いて読んでいる最中に閉じる）。
+      studyBoardUI.foldAdded(got.firstId);
       // ⚠️ **1 手も増えないことがある**（候補が本譜と同じ手順のとき）。
       // **それは失敗ではない**ので、そう分かる文言にする。
       studyMoveStatus.textContent = got.added > 0
