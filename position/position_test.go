@@ -233,6 +233,63 @@ func TestWarnings(t *testing.T) {
 	}
 }
 
+// 「足りない駒」も警告に出す（2026-08-18）。
+//
+// **過剰だけを言って不足を黙っていると、何をすれば確定するのかが警告から読めない。**
+// 盤にも駒台にも無い駒は、駒数保存則からするとどちらかの駒台にあるはずで、
+// **そのあいだ局面は確定しない**（SFEN が組み上がらない）。
+func TestMissingWarnings(t *testing.T) {
+	p, err := FromBoardSFEN(initialBoard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 先手の歩を 1 枚外す → 盤上 17 枚。駒台に載せるまでは「足りない」。
+	if err := p.Board.Set(6, 0, Cell{}); err != nil {
+		t.Fatal(err)
+	}
+	if !hasWarning(p.Warnings(), "歩が 1枚足りません") {
+		t.Errorf("足りない駒が警告に出ていません: %v", p.Warnings())
+	}
+	// 駒台に割り振れば足りている（＝置き場所が決まった）。
+	if err := p.SetHand(sfen.Pawn, true, 1); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Warnings()) != 0 {
+		t.Errorf("駒台に割り振ったのに警告が残りました: %v", p.Warnings())
+	}
+
+	// ⚠️ **過剰と二重に言わない。** 盤上が上限を超えているぶんは core/sfen の担当で、
+	// こちらは「足りない」だけを言う。
+	over, err := FromBoardSFEN(initialBoard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lance, err := NewCell(sfen.Lance, true, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := over.Board.Set(4, 4, lance); err != nil {
+		t.Fatal(err)
+	}
+	if hasWarning(over.Warnings(), "香が") && hasWarning(over.Warnings(), "足りません") {
+		t.Errorf("過剰な駒を「足りない」と言っています: %v", over.Warnings())
+	}
+
+	// ⚠️ **駒台が書いてある局面（駒落ち）では言わない。** 盤にも駒台にも無い駒が
+	// あって正常なので、言うと毎回警告が出る。
+	// 二枚落ち（上手の飛車・角が盤にも駒台にも無い）。
+	fixed, err := FromFullSFEN("lnsgkgsnl/9/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL w - 1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range fixed.Warnings() {
+		if strings.Contains(w, "足りません") {
+			t.Errorf("駒台が書いてある局面で不足を言っています: %v", fixed.Warnings())
+			break
+		}
+	}
+}
+
 func TestClone(t *testing.T) {
 	p, err := FromBoardSFEN("lnsgkgsnl/1r5b1/1ppppppp1/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL")
 	if err != nil {

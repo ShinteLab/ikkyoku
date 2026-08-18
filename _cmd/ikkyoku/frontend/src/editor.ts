@@ -331,11 +331,16 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   const nearBtn = viewHost.querySelector<HTMLButtonElement>("#edit-near")!;
   // 目線のボタン 1 つぶんの見た目。**文字がそのまま今の状態**で、押すと反対になる
   // （何が起きるかはツールチップが言う）。
+  //
+  // ⚠️ **「目線: 先手」ではなく「手前: 先手」**（2026-08-18）。「目線」だと
+  // **盤が反転すると思われる** —— この盤は 1 マスも動かない。言っているのは
+  // **「手前に写っているのはどちらの駒か」という、撮った画像についての事実**なので、
+  // 位置で書く。
   const paintNearButton = (nearWhite: boolean) => {
-    nearBtn.textContent = nearWhite ? "目線: 後手" : "目線: 先手";
+    nearBtn.textContent = nearWhite ? "手前: 後手" : "手前: 先手";
     nearBtn.title = nearWhite
-      ? "撮った画像は後手目線（後手が手前に写っている）。押すと先手目線に戻ります。盤は変わらず、解析へ渡すときに上下を反転します"
-      : "撮った画像は先手目線（先手が手前に写っている）。押すと後手目線になります。盤は変わりません";
+      ? "撮った画像は手前が後手。押すと「手前が先手」に戻ります。盤は変わらず、解析へ渡すときに上下を反転します"
+      : "撮った画像は手前が先手。押すと「手前が後手」になります。盤は変わりません（解析へ渡すときだけ反転します）";
     nearBtn.setAttribute("aria-pressed", String(nearWhite));
   };
   // ⚠️ **一度は通すこと。** 駒台の見出し（「手前の駒台」）と目線のボタンの文字は
