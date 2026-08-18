@@ -4177,8 +4177,10 @@ export function mountMainScreen(root: HTMLElement): void {
       const got = await load();
       // ⚠️ **タブを先に開いてから描くこと。** 手順のリストは「今見ている手」を
       // scrollIntoView で見せるが、`display: none` の中では効かない。
-      // 逆順にすると、100 手の棋譜を読んでもリストが先頭のまま出る
-      // （最終手まで進んでいるのに、そこが見えない）。
+      // 逆順にすると、見ている手がどこにあるか分からないまま出る。
+      // ⚠️ **読み込んだ直後に見ているのは開始局面**（2026-08-18。
+      // `StudyService.LoadKifu`）。**先へ進めないこと** —— 連続解析は
+      // 今見ている手から走るので、初手から解析できる位置に置いてある。
       selectTab(studyTab);
       showStudy(got.state);
       // ⚠️ **note が空でないことをエラー扱いしないこと。** 途中で止まっても
