@@ -2458,6 +2458,12 @@ html.is-main #app {
   color: #ff7a7a;
 }
 
+/* 盤の縁の判定データが無い状態。認識は動くので赤にはしないが、
+   盤の位置が 1マス滑っても信頼度 100% で通るので黙って落とさない。 */
+.recognizer.is-warn {
+  color: #ffc46b;
+}
+
 .status {
   flex: 0 0 auto;
   margin: 0;

@@ -102,6 +102,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `LoadSFEN(img image.Image, opts ...Option) (string, error)` | 盤面文字列だけでよいとき。`Recognize` の薄い皮 |
 | `LoadPredictor(dir string) (Predictor, error)` | dir から駒種推論器を読む（下記） |
 | `SetPredictor(p Predictor)` | 以後の認識が使う推論器を差し替える。`nil` で既定探索に戻る |
+| `LoadStripData(path string) ([]StripSample, error)` / `NewStripJudge` | 盤の縁の帯の判定器を読む（下記） |
+| `SetStripJudge(j *StripJudge)` | 以後の検出が使う帯の判定器。⚠️ **`nil` は「使わない」**。既定探索に戻すのは `ResetStripJudge` |
 
 **`ValidatePieces` / `PieceValidation` は無くなった。** 検証は `Recognize` に統合され、
 `Result.Warnings()`（日本語メッセージ）/ `Result.Violations`（種類つき）/ `Result.HandTotal` で取る。
@@ -126,6 +128,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 包み直さないこと**（チェックの種類は `core/sfen` の語彙で、包むと二重定義になる）。
 
 ### ⚠️ 学習データの置き場所は ikkyoku が決める
+
+⚠️ **`SutemeDataDir` から読むものは 2 つある。**
+
+| ファイル | 読む先 | 無いとどうなるか |
+|---|---|---|
+| `training_data_v6.bin` / `model_v6.json` | `recognize.UsePredictorFrom` → `suteme.SetPredictor` | 駒種が読めない（致命的）|
+| `strip_data_v1.bin` | `recognize.UseStripJudgeFrom` → `suteme.SetStripJudge` | **盤の位置が 1マス滑ったまま信頼度 100% で返る**（下記）|
 
 `LoadSFEN` は駒種推論器を必要とし、`suteme` は既定で
 **カレントディレクトリ → 実行ファイルのディレクトリ**の順に
@@ -155,6 +164,39 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   というループにアプリの再起動を挟まないため
 - 起動時に先に読み込んでおく（撮った瞬間に 3.5MB の読み込みで待たされないように）。
   表示のためだけに読み直さないよう、状態取得は `CaptureService.Recognizer`（読み込まない）に分けてある
+
+#### 盤の縁の帯の判定器（`strip_data_v1.bin`）を落とさないこと
+
+**片方だけ配線していて実際に事故った**（2026-08-22）。`SutemeDataDir` は
+駒種推論器にしか繋がっておらず、帯の判定器は `suteme` 既定の探索
+（カレント → 実行ファイルの隣）に落ちていた。ikkyoku はどちらでもないので、
+**駒種は最新の学習データ・盤の位置合わせは学習前**という状態で動いていた。
+
+効くのは**盤の外枠線が画像の外に出ているキャプチャ**。枠が盤の縁ぴったり
+（あるいは内側）だと、検出した窓が 1マス滑っても格子線には乗るので
+`ValidateBoard` では見分けが付かない。`suteme` がこれを直す唯一の手立てが
+帯の判定器（`unslipByJudge`）で、**判定器が無ければ何もしない**。
+
+実測（`captures/20260822-095350.png`、1203x961。盤の下端 y=968 が画像の外）:
+
+| | 検出した外枠 | 信頼度 |
+|---|---|---|
+| 判定器 なし | `(223, 32)-(974,875)` | **1.00**（1マス上へ滑っている）|
+| 判定器 あり | `(223,125)-(974,968)` | 1.00 |
+
+同じ画像を `suteme-training`（カレントが `suteme` のリポジトリ＝判定器を拾える）で
+開くと盤が合う、という食い違いがこれ。**ズレの原因を撮り方や認識器に求める前に、
+まず帯の判定器が読めているかを見ること**（メイン画面の「認識器」の行に出る）。
+
+- **帯の判定器は駒種推論器が読めなくても読む。** 盤の位置を合わせるだけなら
+  駒種は要らない（ガイド枠の自動フィット `recognize.DetectRegion` がそれ）
+- **読めなかったときに `suteme.SetStripJudge(nil)` を呼ばないこと。**
+  あれは「判定器を使わない」の意味で、`SetPredictor(nil)` のように既定探索へ
+  戻るのとは逆。既定探索まで止まる
+- 状態は `RecognizerStatus.StripSamples` / `StripError` で別に持つ。
+  **`Ready` / `Error` にまとめない** —— まとめると帯データを置き忘れているのに
+  「認識器: OK」と出て気づけない。画面では警告色（`.recognizer.is-warn`）で出す
+- 回帰テストは `recognize/predictor_test.go`
 
 ### 分かっていること（設計に効く）
 

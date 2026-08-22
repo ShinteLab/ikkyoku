@@ -62,8 +62,9 @@ export interface CellDebug {
     "category": CellCategory;
 
     /**
-     * OrientBy は向きの決め方。既定（分類器の幅プロファイル）では ""、
-     * 分類器の確信度が足りず回転照合で決め直したときだけ "match"。
+     * OrientBy は向きの決め方。回転照合で決めたなら "match"、
+     * 照合できず分類器の幅プロファイルに落ちたときは ""。
+     * 推論器が `OrientationMatcher` を実装していれば通常は "match" になる。
      */
     "orient_by"?: string;
 

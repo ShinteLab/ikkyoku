@@ -76,6 +76,7 @@ import type {
   FontChoice,
   FontState,
   KifuLoad,
+  RecognizerStatus,
   StudyState,
 } from "../bindings/ikkyoku-app/models";
 import type { EngineColorOption } from "../bindings/github.com/ShinteLab/ikkyoku/models";
@@ -4429,7 +4430,11 @@ export function mountMainScreen(root: HTMLElement): void {
 
   // 学習データを育てながら使うための入口。suteme は一度読んだ推論器をキャッシュするので、
   // データを更新してもこれを押すまで(あるいは再起動するまで)反映されない。
-  const showRecognizer = (st: { source: string; ready: boolean; error: string }) => {
+  //
+  // **読むものは 2 つ**(駒種推論器と盤の縁の帯の判定器)。帯の判定器が無くても認識は
+  // 動くのでエラーにはしないが、**黙って落とすと盤の位置が 1マス滑ったまま
+  // 信頼度 100% で返る**ので警告として出す。
+  const showRecognizer = (st: RecognizerStatus) => {
     configuredDir = st.source ?? "";
     if (st.error) {
       recognizer.textContent = `認識器を読み込めません: ${st.error}`;
@@ -4443,6 +4448,15 @@ export function mountMainScreen(root: HTMLElement): void {
       recognizer.textContent = "認識器: suteme の既定の場所を探します";
     }
     recognizer.className = "recognizer";
+    if (st.stripError) {
+      // 盤の外枠線が画像の外に出ているキャプチャで効く判定器。これが無いと、
+      // 1マス滑った枠が信頼度 100% のまま通る(見分ける手立てが他に無い)。
+      recognizer.textContent +=
+        "（⚠ 盤の縁の判定データ strip_data_v1.bin が読めません: 盤の位置が 1マス滑ることがあります）";
+      recognizer.className = "recognizer is-warn";
+    } else if (st.stripSamples) {
+      recognizer.textContent += `（盤の縁 ${st.stripSamples} 本）`;
+    }
   };
 
   const reload = async () => {

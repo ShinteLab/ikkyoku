@@ -137,12 +137,22 @@ type GuideLayout struct {
 	ToolbarPx int `json:"toolbarPx"`
 }
 
-// RecognizerStatus は駒種推論器(suteme)の読み込み状況。
+// RecognizerStatus は suteme のデータ(SutemeDataDir)の読み込み状況。
+//
+// **駒種推論器と帯の判定器を別々に持つ。** 前者は無ければ駒種が読めない(致命的)が、
+// 後者は無くても検出は動く(1マス滑りを直せなくなるだけ)。ひとつの Ready / Error に
+// まとめると、帯データを置き忘れているのに「認識器: OK」と出て気づけない。
 type RecognizerStatus struct {
 	// Source は読み込み元。設定で指定していなければ空(suteme 既定の探索に任せる)。
 	Source string `json:"source"`
 	Ready  bool   `json:"ready"`
 	Error  string `json:"error"`
+
+	// StripSamples は盤の縁の帯の判定器のサンプル数。0 なら読めていない。
+	StripSamples int `json:"stripSamples"`
+	// StripError は帯の判定器が読めなかった理由。**Error とは別**で、
+	// これが埋まっていても認識自体は動く(盤の位置が 1マス滑ることがある)。
+	StripError string `json:"stripError"`
 }
 
 // CaptureService は Wails にバインドする、GUI からのキャプチャ操作。
@@ -212,16 +222,34 @@ func (s *CaptureService) Recognizer() RecognizerStatus {
 	return s.recognizerStatus
 }
 
+// loadRecognizer は SutemeDataDir から suteme のデータを読む。
+//
+// ⚠️ **読むものは 2 つ**(駒種推論器と盤の縁の帯の判定器)。片方だけ配線すると、
+// 駒種は最新の学習データなのに盤の位置合わせは学習前、というちぐはぐな状態になる。
+// recognize/predictor.go の先頭の注意書きも参照。
 func (s *CaptureService) loadRecognizer() RecognizerStatus {
 	if s.recognizerDir == "" {
 		// suteme 既定の探索に任せる。ここではキャッシュを捨てるだけで、
 		// 実際に読めるかどうかは最初のキャプチャのときに分かる。
 		recognize.UseDefaultPredictor()
-		s.logger.Info("駒種推論器は suteme の既定探索に任せます")
+		recognize.UseDefaultStripJudge()
+		s.logger.Info("suteme のデータは既定探索に任せます")
 		return RecognizerStatus{}
 	}
 
 	st := RecognizerStatus{Source: s.recognizerDir}
+
+	// 帯の判定器は**推論器が読めなくても読む**。盤の位置を合わせるだけなら
+	// 駒種推論器は要らない(ガイド枠の自動フィット recognize.DetectRegion がそれ)。
+	if n, err := recognize.UseStripJudgeFrom(s.recognizerDir); err != nil {
+		st.StripError = err.Error()
+		s.logger.Warn("盤の縁の帯の判定器を読み込めませんでした(盤の位置が 1マス滑ることがあります)",
+			"dir", s.recognizerDir, "error", err)
+	} else {
+		st.StripSamples = n
+		s.logger.Info("盤の縁の帯の判定器を読み込みました", "dir", s.recognizerDir, "samples", n)
+	}
+
 	if err := recognize.UsePredictorFrom(s.recognizerDir); err != nil {
 		st.Error = err.Error()
 		s.logger.Warn("駒種推論器を読み込めませんでした", "dir", s.recognizerDir, "error", err)

@@ -986,7 +986,11 @@ export interface PieceStyle {
 }
 
 /**
- * RecognizerStatus は駒種推論器(suteme)の読み込み状況。
+ * RecognizerStatus は suteme のデータ(SutemeDataDir)の読み込み状況。
+ * 
+ * **駒種推論器と帯の判定器を別々に持つ。** 前者は無ければ駒種が読めない(致命的)が、
+ * 後者は無くても検出は動く(1マス滑りを直せなくなるだけ)。ひとつの Ready / Error に
+ * まとめると、帯データを置き忘れているのに「認識器: OK」と出て気づけない。
  */
 export interface RecognizerStatus {
     /**
@@ -995,6 +999,17 @@ export interface RecognizerStatus {
     "source": string;
     "ready": boolean;
     "error": string;
+
+    /**
+     * StripSamples は盤の縁の帯の判定器のサンプル数。0 なら読めていない。
+     */
+    "stripSamples": number;
+
+    /**
+     * StripError は帯の判定器が読めなかった理由。**Error とは別**で、
+     * これが埋まっていても認識自体は動く(盤の位置が 1マス滑ることがある)。
+     */
+    "stripError": string;
 }
 
 /**
