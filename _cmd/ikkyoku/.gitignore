@@ -2,6 +2,7 @@
 bin
 frontend/dist
 frontend/node_modules
+frontend/bindings
 build/linux/appimage/build
 build/windows/nsis/MicrosoftEdgeWebview2Setup.exe
 # ios / android / docker は対象外(削除済み。update build-assets が再生成した場合に備えて無視する)
