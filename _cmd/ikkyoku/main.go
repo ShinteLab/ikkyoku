@@ -57,7 +57,7 @@ func main() {
 
 	settingsSvc := NewSettingsService(logger)
 	cfg := settingsSvc.config()
-	captureSvc := NewCaptureService(logger, cfg.SutemeDataDir)
+	captureSvc := NewCaptureService(logger, cfg.SutemeDataDir, cfg.SutemeSourceOr())
 	positionSvc := NewPositionService(logger)
 	trainingSvc := NewTrainingService(logger, settingsSvc)
 	// 「駒の字」（設定タブ）。端末に入っているフォントから駒の字を焼く。
@@ -116,6 +116,8 @@ func main() {
 	// **枠の HWND を触るのは CaptureService** なので、設定タブからの切り替えは
 	// ここで繋いだこのフックを通る（SettingsService はウィンドウを持っていない）。
 	settingsSvc.onClickThrough = captureSvc.applyClickThrough
+	settingsSvc.onSutemeSource = captureSvc.applyRecognizerSource
+	settingsSvc.onSutemeDataDir = captureSvc.applyRecognizerDir
 	captureSvc.applyClickThrough(cfg.ClickThrough)
 	analyzeSvc.bind(app)
 

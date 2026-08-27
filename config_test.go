@@ -542,3 +542,25 @@ func TestConfigPieceInkRoundTrip(t *testing.T) {
 		t.Errorf("往復していない: color=%q opacity=%v", got.PieceColor, got.PieceOpacity)
 	}
 }
+
+// SutemeSourceOr は**空・未知の値を auto に倒す**(設定ファイルは手で編集する前提で、
+// 綴り間違いでアプリが認識できなくなるより既定へ倒す)。
+func TestConfigSutemeSourceOr(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{"", SutemeSourceAuto},
+		{"auto", SutemeSourceAuto},
+		{"dir", SutemeSourceDir},
+		{"embed", SutemeSourceEmbed},
+		{"EMBED", SutemeSourceAuto},
+		{"でたらめ", SutemeSourceAuto},
+	}
+	for _, tt := range tests {
+		c := Config{SutemeSource: tt.in}
+		if got := c.SutemeSourceOr(); got != tt.want {
+			t.Errorf("Config{SutemeSource: %q}.SutemeSourceOr() = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}

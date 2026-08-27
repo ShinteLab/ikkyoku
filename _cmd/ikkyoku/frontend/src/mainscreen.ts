@@ -1064,6 +1064,43 @@ export function mountMainScreen(root: HTMLElement): void {
             </span>
           </span>
         </label>
+        <!-- 認識器の読み込み元（2026-08-27）。
+
+             **exe 1 つで配れる形と、学習データを育てながら使う形の両方が要る。**
+             配布ビルド（-tags embedmodel）は認識器を焼き込んであるので、
+             suteme のリポジトリが無い環境でもそのまま動く。開発中は
+             ディレクトリを指しておけば、データを更新した結果がすぐ反映される。
+
+             ⚠️ **「自動」はディレクトリ優先。** 焼き込みは固定したデータなので、
+             ここが焼き込みへ倒れると**学習データを更新しても反映されない**という
+             最も気づきにくい事故になる（Go 側 resolveRecognizerSource）。 -->
+        <div class="setting-group">
+          <div class="setting is-block">
+            <span class="setting-body">
+              <span class="setting-title">認識器の読み込み元</span>
+              <span class="setting-note">
+                盤面認識に使う suteme の学習データをどこから読むかです。
+                切り替えるとその場で読み直します。
+              </span>
+            </span>
+          </div>
+          <div class="setting-fields">
+            <label class="field">
+              <span class="field-label">読み込み元</span>
+              <select id="suteme-source">
+                <option value="auto">自動（ディレクトリ優先）</option>
+                <option value="dir">学習データのディレクトリ</option>
+                <option value="embed">このアプリに焼き込んだデータ</option>
+              </select>
+            </label>
+            <label class="field is-wide">
+              <span class="field-label">ディレクトリ</span>
+              <input id="suteme-data-dir" type="text" spellcheck="false"
+                     placeholder="(空なら suteme 既定の探索)" />
+            </label>
+          </div>
+          <p id="suteme-source-note" class="setting-note"></p>
+        </div>
         <p id="settings-status" class="status" role="status" aria-live="polite"></p>
 
         <!-- 駒の字（2026-08-16）。**端末に入っているフォントから駒の字を焼いて使う。**
@@ -4438,7 +4475,10 @@ export function mountMainScreen(root: HTMLElement): void {
   // 動くのでエラーにはしないが、**黙って落とすと盤の位置が 1マス滑ったまま
   // 信頼度 100% で返る**ので警告として出す。
   const showRecognizer = (st: RecognizerStatus) => {
-    configuredDir = st.source ?? "";
+    // ⚠️ **ディレクトリから読んだときだけ突き合わせの相手にする。**
+    // 焼き込み（mode === "embed"）の source は出所のラベルであってパスではないので、
+    // これを入れると `showPredictor` が毎回「※設定と別の場所」を出す。
+    configuredDir = st.mode === "dir" ? (st.source ?? "") : "";
     if (st.error) {
       recognizer.textContent = `認識器を読み込めません: ${st.error}`;
       recognizer.className = "recognizer is-error";
@@ -4448,7 +4488,10 @@ export function mountMainScreen(root: HTMLElement): void {
     if (st.ready) {
       recognizer.textContent = `認識器: ${st.source}`;
     } else {
-      recognizer.textContent = "認識器: suteme の既定の場所を探します";
+      recognizer.textContent =
+        st.mode === "embed"
+          ? "認識器: 焼き込んだデータを読み込めませんでした"
+          : "認識器: suteme の既定の場所を探します";
     }
     recognizer.className = "recognizer";
     if (st.stripError) {
@@ -4492,6 +4535,11 @@ export function mountMainScreen(root: HTMLElement): void {
   // 食い違わせない)。テキスト欄は change(確定時)で拾うので、1 文字ごとには書かない。
   const fitOnStartup = root.querySelector<HTMLInputElement>("#fit-on-startup")!;
   const clickThrough = root.querySelector<HTMLInputElement>("#click-through")!;
+  // 認識器の読み込み元。**「焼き込みがあるビルドか」は Go が返す**
+  // （`sutemeEmbedAvailable`）。⚠️ **フロントで判定できない**（バイナリの中身の話）。
+  const sutemeSource = root.querySelector<HTMLSelectElement>("#suteme-source")!;
+  const sutemeDataDir = root.querySelector<HTMLInputElement>("#suteme-data-dir")!;
+  const sutemeSourceNote = root.querySelector<HTMLParagraphElement>("#suteme-source-note")!;
   const settingsStatus = root.querySelector<HTMLParagraphElement>("#settings-status")!;
   const settingsPath = root.querySelector<HTMLElement>("#settings-path")!;
   const trainEnabledInput = root.querySelector<HTMLInputElement>("#train-enabled")!;
@@ -4958,6 +5006,46 @@ export function mountMainScreen(root: HTMLElement): void {
     void saveInk("", 0);
   });
 
+  // 認識器の読み込み元を画面に映す。
+  //
+  // ⚠️ **既定の解決（空なら auto）は Go 側**（`Config.SutemeSourceOr`）。
+  // 返ってきた値をそのまま入れるだけにすること。
+  const showSutemeSource = (s: {
+    sutemeSource: string;
+    sutemeDataDir: string;
+    sutemeEmbedAvailable: boolean;
+    sutemeEmbedSource: string;
+  }) => {
+    sutemeSource.value = s.sutemeSource;
+    sutemeDataDir.value = s.sutemeDataDir;
+    const embedOption = sutemeSource.querySelector<HTMLOptionElement>('option[value="embed"]')!;
+    // 焼き込みの無いビルドでは選ばせない。**選択肢ごと消さない** ——
+    // 設定ファイルが "embed" のまま開かれることがあり、消すと選択が勝手に変わる。
+    embedOption.disabled = !s.sutemeEmbedAvailable;
+    embedOption.textContent = s.sutemeEmbedAvailable
+      ? `このアプリに焼き込んだデータ（${s.sutemeEmbedSource || "出所不明"}）`
+      : "このアプリに焼き込んだデータ（このビルドには入っていません）";
+    // ディレクトリ欄は「焼き込みだけを使う」ときも残す（戻すときに打ち直させない）。
+    sutemeDataDir.disabled = false;
+    if (!s.sutemeEmbedAvailable && s.sutemeSource === "embed") {
+      sutemeSourceNote.textContent =
+        "このビルドには認識器が焼き込まれていないため、ディレクトリから読みます。";
+    } else if (s.sutemeSource === "embed") {
+      sutemeSourceNote.textContent =
+        "アプリに焼き込んだデータを使います。suteme のリポジトリが無くても動きます。";
+    } else if (s.sutemeSource === "dir") {
+      sutemeSourceNote.textContent = s.sutemeDataDir
+        ? "指定したディレクトリから読みます。データを更新したら「認識器を読み込み直す」で反映されます。"
+        : "ディレクトリが空なので、suteme 既定の探索（カレント → 実行ファイルの隣）に任せます。";
+    } else {
+      sutemeSourceNote.textContent = s.sutemeDataDir
+        ? "ディレクトリを指定してあるので、そちらから読みます。"
+        : s.sutemeEmbedAvailable
+          ? "ディレクトリが空なので、アプリに焼き込んだデータを使います。"
+          : "ディレクトリが空で焼き込みも無いため、suteme 既定の探索に任せます。";
+    }
+  };
+
   const showSettings = (s: {
     fitOnStartup: boolean;
     clickThrough: boolean;
@@ -4967,9 +5055,14 @@ export function mountMainScreen(root: HTMLElement): void {
     engineColors: EngineColorOption[] | null;
     analyzeSeconds: number;
     ponanzaConstant: number;
+    sutemeSource: string;
+    sutemeDataDir: string;
+    sutemeEmbedAvailable: boolean;
+    sutemeEmbedSource: string;
   }) => {
     fitOnStartup.checked = s.fitOnStartup;
     clickThrough.checked = s.clickThrough;
+    showSutemeSource(s);
     // ⚠️ **既定値の解決は Go 側**（`analyze.PonanzaConstantOr`）。返ってきた値を
     // そのまま入れるだけにすること（フロントに既定を書くと 2 か所に散る）。
     ponanzaConstant.value = String(s.ponanzaConstant);
@@ -5580,6 +5673,61 @@ export function mountMainScreen(root: HTMLElement): void {
         settingsStatus.classList.add("is-error");
       } finally {
         clickThrough.disabled = false;
+      }
+    })();
+  });
+
+  // 認識器の読み込み元。**切り替えたその場で読み直す**（Go 側が ReloadRecognizer を呼ぶ）。
+  // 読み直した結果は撮影タブの「認識器: …」に出るので、ここでも取り直して映す。
+  const reloadRecognizerView = async () => {
+    try {
+      showRecognizer(await CaptureService.Recognizer());
+    } catch {
+      // 表示の更新に失敗しても設定の保存は済んでいる。黙って諦める。
+    }
+  };
+
+  sutemeSource.addEventListener("change", () => {
+    void (async () => {
+      const want = sutemeSource.value;
+      sutemeSource.disabled = true;
+      settingsStatus.textContent = "";
+      settingsStatus.classList.remove("is-error");
+      try {
+        showSettings(await SettingsService.SetSutemeSource(want));
+        await reloadRecognizerView();
+        settingsStatus.textContent = "認識器を読み込み直しました。";
+      } catch (err) {
+        settingsStatus.textContent = `設定を保存できませんでした: ${String(err)}`;
+        settingsStatus.classList.add("is-error");
+        try {
+          showSettings(await SettingsService.Settings());
+        } catch {
+          // 読み直せないなら画面はそのまま。
+        }
+      } finally {
+        sutemeSource.disabled = false;
+      }
+    })();
+  });
+
+  // ⚠️ **change（確定時）で拾う。** パスを 1 文字打つたびに読み込み直すと、
+  // 20MB 級の学習データを何度も読むことになる。
+  sutemeDataDir.addEventListener("change", () => {
+    void (async () => {
+      const want = sutemeDataDir.value;
+      sutemeDataDir.disabled = true;
+      settingsStatus.textContent = "";
+      settingsStatus.classList.remove("is-error");
+      try {
+        showSettings(await SettingsService.SetSutemeDataDir(want));
+        await reloadRecognizerView();
+        settingsStatus.textContent = "認識器を読み込み直しました。";
+      } catch (err) {
+        settingsStatus.textContent = `設定を保存できませんでした: ${String(err)}`;
+        settingsStatus.classList.add("is-error");
+      } finally {
+        sutemeDataDir.disabled = false;
       }
     })();
   });

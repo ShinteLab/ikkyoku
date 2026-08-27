@@ -152,8 +152,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 （`os.UserConfigDir()/ikkyoku/config.json`。**JSON なのでパスはスラッシュ区切りで書く**）
 
-`SutemeDataDir` が空なら `suteme` 既定の探索に任せる。配布時にデータを同梱するなら
-そちらの経路になる。
+`SutemeDataDir` が空なら `suteme` 既定の探索に任せる。**配布するときは
+「バイナリに焼き込む」経路を使う**（次節）。
 
 - **ファイルのシンボリックリンクで代用しようとしないこと。** Windows では管理者権限
   （または開発者モード）が要る。ジャンクションはディレクトリ専用で、`suteme` が探すのは
@@ -197,6 +197,72 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   **`Ready` / `Error` にまとめない** —— まとめると帯データを置き忘れているのに
   「認識器: OK」と出て気づけない。画面では警告色（`.recognizer.is-warn`）で出す
 - 回帰テストは `recognize/predictor_test.go`
+
+### 認識器の読み込み元は 3 通り（**焼き込み / ディレクトリ / 既定探索**）
+
+**exe 1 つで配れる形と、学習データを育てながら使う形の両方が要る。** 前節のとおり
+開発中はディレクトリを指すのが正しいが、**配る相手の環境に `suteme` のリポジトリは無い。**
+「exe の隣に .bin を 2 つ置いてください」は説明のいる運用なので、
+**配布ビルドは認識器をバイナリに焼き込む**（`-tags embedmodel`）。
+
+| 設定 `sutemeSource` | 読み込み元 |
+|---|---|
+| `"auto"`（既定。空も同じ）| `SutemeDataDir` があればそちら → 無ければ焼き込み → それも無ければ `suteme` 既定探索 |
+| `"dir"` | `SutemeDataDir`（焼き込みがあっても使わない）|
+| `"embed"` | 焼き込んだデータ（**焼き込みの無いビルドでは `dir` へ落ちる**）|
+
+切り替えは**設定タブ「認識器の読み込み元」**。変えたその場で読み直す
+（`SettingsService.SetSutemeSource` → `CaptureService.applyRecognizerSource`）。
+
+- ⚠️ **`auto` を「焼き込み優先」にしないこと。** 焼き込みは配布用に固定したデータ、
+  ディレクトリは育て続けるデータ。開発中（＝ディレクトリを指している状態）に
+  焼き込みへ倒れると、**学習データを更新しても反映されない**という
+  最も気づきにくい事故になる。指定してあるほうがユーザーの意思表示なのでそちらを採る
+- ⚠️ **`"embed"` を選んでいても、焼き込みの無いビルドでは `dir` へ落とす。**
+  設定ファイル（`config.json`）は配布ビルドと開発ビルドで共用されるので、
+  「焼き込みで動かす設定のまま `wails3 dev` を動かす」は普通に起きる
+- **どれも読めなくてもアプリは動く**（設計原則 3「段階的に劣化する」）。
+  認識結果が空になるだけで、PNG の保存は成功したまま
+- 実際にどこから読んだかは `RecognizerStatus.Mode`。**画面にはこちらを出すこと**
+  （設定の値そのものではない）。⚠️ 焼き込みのとき `Source` は出所のラベルであって
+  パスではないので、「実際に使われた推論器」との突き合わせ（`showPredictor` の
+  「※設定と別の場所」）は `mode === "dir"` のときだけにしてある
+- 解決は `resolveRecognizerSource`（`_cmd/ikkyoku/captureservice.go`）の 1 か所。
+  回帰テストは `_cmd/ikkyoku/recognizersource_test.go`（**タグの有無どちらでも通る**
+  ように、期待値を `recognize.EmbeddedAvailable()` で切り替えている）
+
+#### 焼き込みの中身とビルド手順
+
+**データはこのリポジトリに置いていない**（`recognize/model/` は `.gitignore`）。
+20MB 級のバイナリを、学習し直すたびにコミットすることになるため。
+配布ビルドの前に `suteme` の `dist/` から持ってくる:
+
+```powershell
+cd ikkyoku\_cmd\ikkyoku
+task model:copy         # suteme/dist → recognize/model/*.gz + source.txt
+task build:embed        # model:copy + wails3 のビルド(EXTRA_TAGS=embedmodel)
+```
+
+| 置き場所 | 中身 |
+|---|---|
+| `recognize/model/predictor.bin.gz` | `suteme/dist/training_data_v7.bin` を gzip したもの |
+| `recognize/model/strip.bin.gz` | `suteme/dist/strip_data_v1.bin` を gzip したもの |
+| `recognize/model/source.txt` | 出所（画面とログに出る。焼き込むと元のファイル名が残らないため）|
+
+- ⚠️ **`suteme` の `dist/` は「配布用に書き出す」（`training.ExportCompact`）が作るもの。**
+  リポジトリ直下の全件（`training_data_v7.bin`）ではなく、間引いた配布セットを配ること
+- **gzip で持つ。** 実測 生 23.2MB → 9.9MB、exe は **19.2MB → 29.2MB**（+10MB）。
+  `suteme` 側の口が `io.Reader` を取る（`PredictorFrom` / `StripJudgeFrom`）ので、
+  展開したファイルを置く必要は無い（`recognize/embedded.go`）
+- **焼き込み側のファイル名に版を入れていない**（`training_data_v7` → `predictor`）。
+  版が上がるたびに `go:embed` の行を書き換えることになるため。どの版かは `source.txt`
+- **`task model:copy` を忘れるとビルドが止まる**（`go:embed` がファイルを見つけられない）。
+  それが狙い。古いデータや空のデータで配れてしまうより止まったほうがよい
+- **ビルドが通ることでは足りない。** 中身が壊れていても `go:embed` は通るので、
+  配布ビルドの前に `go test -tags embedmodel ./recognize/` で
+  **実際に認識器として組み立てられること**を確かめる
+- 通常のビルド（タグなし）には**データが入らない**。`recognize/embedded_off.go` が
+  空の変数を返すだけなので、開発中に 20MB をリンクすることはない
 
 ### 分かっていること（設計に効く）
 
@@ -4941,11 +5007,17 @@ wails3 generate bindings -ts -i       # Go の Service/Model を変えたら必�
 wails3 dev                            # 開発モード
 wails3 build                          # frontend ビルド〜bindings 生成〜go build まで一括
 go build -o bin\ikkyoku.exe .         # Go だけを素早く確認したいとき(frontend/dist が要る)
+
+task model:copy                       # 配布用: suteme/dist → recognize/model
+task build:embed                      # 配布用: 認識器を焼き込んだ exe(model:copy 込み)
 ```
 
 - `wails3 generate bindings` は Taskfile(`build/Taskfile.yml` の `generate:bindings`)と
   同じ `-ts -i` を付けること(wails3 skill pitfalls.md 12 の「フラグの食い違いで
   `wails3 dev` の 1 回目だけ失敗する」問題を避けるため)
+- **配る exe は `task build:embed`。** 認識器を焼き込むので、`suteme` のリポジトリが
+  無い環境でもそのまま動く（「認識器の読み込み元は 3 通り」の節）。
+  ⚠️ **`wails3 build` は焼き込まない**（タグが付かない）
 - `Taskfile.yml` の `includes` から `ios`/`android` を外してある(デスクトップ専用のため。
   `build/ios`・`build/android`・`build/docker` ディレクトリも削除済み)
 

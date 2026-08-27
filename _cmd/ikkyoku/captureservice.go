@@ -148,6 +148,15 @@ type RecognizerStatus struct {
 	Ready  bool   `json:"ready"`
 	Error  string `json:"error"`
 
+	// Mode は実際にどこから読んだか(`ikkyoku.SutemeSourceDir` / `SutemeSourceEmbed` /
+	// 空＝suteme 既定の探索)。**設定の値そのものではない** ——
+	// 設定が auto のときはここで初めてどちらかに決まるし、"embed" にしていても
+	// 焼き込みの無いビルドでは dir へ落ちる。**画面にはこちらを出すこと。**
+	Mode string `json:"mode"`
+	// EmbedAvailable はこのビルドに認識器が焼き込まれているか
+	// (`-tags embedmodel`)。設定タブが「焼き込み」を選べるかの判断に使う。
+	EmbedAvailable bool `json:"embedAvailable"`
+
 	// StripSamples は盤の縁の帯の判定器のサンプル数。0 なら読めていない。
 	StripSamples int `json:"stripSamples"`
 	// StripError は帯の判定器が読めなかった理由。**Error とは別**で、
@@ -175,6 +184,9 @@ type CaptureService struct {
 	// recognizerDir は駒種推論器の学習データの置き場所(ikkyoku.Config の SutemeDataDir)。
 	// 空なら suteme 既定の探索(カレントディレクトリ → 実行ファイルのディレクトリ)に任せる。
 	recognizerDir string
+	// recognizerSource は読み込み元の設定(ikkyoku.Config の SutemeSource)。
+	// **設定タブから変えられる**ので、mu で守る(applyRecognizerSource)。
+	recognizerSource string
 
 	mu sync.Mutex
 	// mainShown はメイン画面を一度でも出したか。**初回だけやること**
@@ -195,8 +207,33 @@ type CaptureService struct {
 	mouseThrough bool
 }
 
-func NewCaptureService(logger *slog.Logger, recognizerDir string) *CaptureService {
-	return &CaptureService{logger: logger, recognizerDir: recognizerDir}
+func NewCaptureService(logger *slog.Logger, recognizerDir, recognizerSource string) *CaptureService {
+	return &CaptureService{
+		logger:           logger,
+		recognizerDir:    recognizerDir,
+		recognizerSource: recognizerSource,
+	}
+}
+
+// applyRecognizerDir は学習データの置き場所の変更をその場で効かせる
+// (SettingsService.onSutemeDataDir から呼ばれる)。
+func (s *CaptureService) applyRecognizerDir(dir string) {
+	s.mu.Lock()
+	s.recognizerDir = dir
+	s.mu.Unlock()
+	s.ReloadRecognizer()
+}
+
+// applyRecognizerSource は設定「認識器の読み込み元」の変更をその場で効かせる
+// (SettingsService.onSutemeSource から呼ばれる)。
+//
+// **再起動を待たせないのは、切り替えた結果を見るための設定だから** ——
+// 焼き込みに切り替えて認識が落ちるなら、その場で戻せたほうがよい。
+func (s *CaptureService) applyRecognizerSource(source string) {
+	s.mu.Lock()
+	s.recognizerSource = source
+	s.mu.Unlock()
+	s.ReloadRecognizer()
 }
 
 // ReloadRecognizer は駒種推論器を読み込み直し、その結果を返す。起動時にも呼ぶ。
@@ -222,42 +259,115 @@ func (s *CaptureService) Recognizer() RecognizerStatus {
 	return s.recognizerStatus
 }
 
-// loadRecognizer は SutemeDataDir から suteme のデータを読む。
+// loadRecognizer は設定に従って suteme のデータを読む。
 //
 // ⚠️ **読むものは 2 つ**(駒種推論器と盤の縁の帯の判定器)。片方だけ配線すると、
 // 駒種は最新の学習データなのに盤の位置合わせは学習前、というちぐはぐな状態になる。
 // recognize/predictor.go の先頭の注意書きも参照。
+//
+// **読み込み元は 3 通り**(`ikkyoku.Config.SutemeSource`)。どれを使うかの解決は
+// resolveRecognizerSource が一手に引き受け、ここから先は分岐しない。
 func (s *CaptureService) loadRecognizer() RecognizerStatus {
-	if s.recognizerDir == "" {
+	s.mu.Lock()
+	dir, pref := s.recognizerDir, s.recognizerSource
+	s.mu.Unlock()
+
+	mode := resolveRecognizerSource(pref, dir)
+	st := RecognizerStatus{Mode: mode, EmbedAvailable: recognize.EmbeddedAvailable()}
+
+	switch mode {
+	case ikkyoku.SutemeSourceEmbed:
+		st.Source = embeddedSourceLabel()
+		// 帯の判定器は**推論器が読めなくても読む**(下の dir と同じ理由)。
+		if n, err := recognize.UseStripJudgeEmbedded(); err != nil {
+			st.StripError = err.Error()
+			s.logger.Warn("焼き込んだ帯の判定器を読み込めませんでした(盤の位置が 1マス滑ることがあります)", "error", err)
+		} else {
+			st.StripSamples = n
+			s.logger.Info("焼き込んだ帯の判定器を読み込みました", "samples", n)
+		}
+		if err := recognize.UsePredictorEmbedded(); err != nil {
+			st.Error = err.Error()
+			s.logger.Warn("焼き込んだ駒種推論器を読み込めませんでした", "error", err)
+			return st
+		}
+		st.Ready = true
+		s.logger.Info("焼き込んだ駒種推論器を読み込みました", "source", st.Source)
+		return st
+
+	case ikkyoku.SutemeSourceDir:
+		st.Source = dir
+		// 帯の判定器は**推論器が読めなくても読む**。盤の位置を合わせるだけなら
+		// 駒種推論器は要らない(ガイド枠の自動フィット recognize.DetectRegion がそれ)。
+		if n, err := recognize.UseStripJudgeFrom(dir); err != nil {
+			st.StripError = err.Error()
+			s.logger.Warn("盤の縁の帯の判定器を読み込めませんでした(盤の位置が 1マス滑ることがあります)",
+				"dir", dir, "error", err)
+		} else {
+			st.StripSamples = n
+			s.logger.Info("盤の縁の帯の判定器を読み込みました", "dir", dir, "samples", n)
+		}
+		if err := recognize.UsePredictorFrom(dir); err != nil {
+			st.Error = err.Error()
+			s.logger.Warn("駒種推論器を読み込めませんでした", "dir", dir, "error", err)
+			return st
+		}
+		st.Ready = true
+		s.logger.Info("駒種推論器を読み込みました", "dir", dir)
+		return st
+
+	default:
 		// suteme 既定の探索に任せる。ここではキャッシュを捨てるだけで、
 		// 実際に読めるかどうかは最初のキャプチャのときに分かる。
 		recognize.UseDefaultPredictor()
 		recognize.UseDefaultStripJudge()
 		s.logger.Info("suteme のデータは既定探索に任せます")
-		return RecognizerStatus{}
-	}
-
-	st := RecognizerStatus{Source: s.recognizerDir}
-
-	// 帯の判定器は**推論器が読めなくても読む**。盤の位置を合わせるだけなら
-	// 駒種推論器は要らない(ガイド枠の自動フィット recognize.DetectRegion がそれ)。
-	if n, err := recognize.UseStripJudgeFrom(s.recognizerDir); err != nil {
-		st.StripError = err.Error()
-		s.logger.Warn("盤の縁の帯の判定器を読み込めませんでした(盤の位置が 1マス滑ることがあります)",
-			"dir", s.recognizerDir, "error", err)
-	} else {
-		st.StripSamples = n
-		s.logger.Info("盤の縁の帯の判定器を読み込みました", "dir", s.recognizerDir, "samples", n)
-	}
-
-	if err := recognize.UsePredictorFrom(s.recognizerDir); err != nil {
-		st.Error = err.Error()
-		s.logger.Warn("駒種推論器を読み込めませんでした", "dir", s.recognizerDir, "error", err)
 		return st
 	}
-	st.Ready = true
-	s.logger.Info("駒種推論器を読み込みました", "dir", s.recognizerDir)
-	return st
+}
+
+// resolveRecognizerSource は「設定の値」から「実際にどこから読むか」を決める。
+//
+// ⚠️ **auto を「焼き込み優先」にしていない。** 焼き込みは配るときのための固定した
+// データで、ディレクトリは育て続けるデータ。開発中(＝ディレクトリを指している状態)に
+// 焼き込みへ勝手に倒れると、**学習データを更新しても反映されない**という
+// 最も気づきにくい事故になる。指定してあるほうがユーザーの意思表示なのでそちらを採る。
+//
+// **"embed" を選んでいても、焼き込みの無いビルドでは dir へ落ちる。**
+// 設定ファイルは配布ビルドと開発ビルドで共用される(同じ `config.json`)ので、
+// 「焼き込みで動かす設定のまま `wails3 dev` を動かす」は普通に起きる。
+func resolveRecognizerSource(pref, dir string) string {
+	switch pref {
+	case ikkyoku.SutemeSourceEmbed:
+		if recognize.EmbeddedAvailable() {
+			return ikkyoku.SutemeSourceEmbed
+		}
+		if dir != "" {
+			return ikkyoku.SutemeSourceDir
+		}
+		return ""
+	case ikkyoku.SutemeSourceDir:
+		if dir != "" {
+			return ikkyoku.SutemeSourceDir
+		}
+		return ""
+	default: // auto
+		if dir != "" {
+			return ikkyoku.SutemeSourceDir
+		}
+		if recognize.EmbeddedAvailable() {
+			return ikkyoku.SutemeSourceEmbed
+		}
+		return ""
+	}
+}
+
+// embeddedSourceLabel は焼き込んだデータの出所(画面とログに出す)。
+func embeddedSourceLabel() string {
+	if src := recognize.EmbeddedSource(); src != "" {
+		return "焼き込み (" + src + ")"
+	}
+	return "焼き込み"
 }
 
 // bind は main() から起動シーケンスの中で呼ぶ。ServiceStartup は使わない

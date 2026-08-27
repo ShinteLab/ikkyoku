@@ -16,6 +16,7 @@ import (
 
 	"github.com/ShinteLab/ikkyoku"
 	"github.com/ShinteLab/ikkyoku/analyze"
+	"github.com/ShinteLab/ikkyoku/recognize"
 	"github.com/ShinteLab/ikkyoku/training"
 )
 
@@ -52,6 +53,18 @@ type AppSettings struct {
 	// ⚠️ **フロントに既定値を書かないこと** —— training の Host/Port と同じで、
 	// 2 か所に持つと既定を変えたときに食い違う。
 	PonanzaConstant float64 `json:"ponanzaConstant"`
+	// SutemeSource は認識器の読み込み元（`ikkyoku.SutemeSourceAuto` / `Dir` / `Embed`）。
+	//
+	// **正規化済みで返る**（空は "auto"）。⚠️ **フロントで「空なら auto」を
+	// 書かないこと** —— 既定の解決を 2 か所に持たない。
+	SutemeSource string `json:"sutemeSource"`
+	// SutemeDataDir は学習データを置いたディレクトリ（"dir" のときの読み込み元）。
+	SutemeDataDir string `json:"sutemeDataDir"`
+	// SutemeEmbedAvailable はこのビルドに認識器が焼き込まれているか
+	// （`-tags embedmodel`）。**false なら「焼き込み」は選ばせない。**
+	SutemeEmbedAvailable bool `json:"sutemeEmbedAvailable"`
+	// SutemeEmbedSource は焼き込んだデータの出所（表示用。焼き込みが無ければ空）。
+	SutemeEmbedSource string `json:"sutemeEmbedSource"`
 	// Path は設定ファイルの場所。**表示のためだけ。** 手で編集したくなったときに
 	// 探さずに済むよう出しておく(学習データの置き場所もこのファイルにある)。
 	Path string `json:"path"`
@@ -232,6 +245,13 @@ type SettingsService struct {
 	// ⚠️ **SettingsService から枠を直に触らないこと**（ウィンドウを持っていない）。
 	onClickThrough func(bool)
 
+	// onSutemeSource は「認識器の読み込み元」を切り替えたときに呼ぶ
+	// （`CaptureService.applyRecognizerSource`。その場で読み直す）。
+	onSutemeSource func(string)
+
+	// onSutemeDataDir は学習データの置き場所を変えたときに呼ぶ（同じく読み直す）。
+	onSutemeDataDir func(string)
+
 	mu   sync.Mutex
 	path string
 	cfg  ikkyoku.Config
@@ -287,7 +307,13 @@ func (s *SettingsService) settings() AppSettings {
 		EngineColors:    ikkyoku.EngineColors,
 		AnalyzeSeconds:  s.cfg.ThinkSeconds(),
 		PonanzaConstant: analyze.PonanzaConstantOr(s.cfg.PonanzaConstant),
-		Path:            s.path,
+
+		SutemeSource:         s.cfg.SutemeSourceOr(),
+		SutemeDataDir:        s.cfg.SutemeDataDir,
+		SutemeEmbedAvailable: recognize.EmbeddedAvailable(),
+		SutemeEmbedSource:    recognize.EmbeddedSource(),
+
+		Path: s.path,
 	}
 }
 
@@ -923,6 +949,43 @@ func (s *SettingsService) SetClickThrough(v bool) (AppSettings, error) {
 	}
 	if s.onClickThrough != nil {
 		s.onClickThrough(v)
+	}
+	return st, nil
+}
+
+// SetSutemeSource は認識器の読み込み元を切り替えて保存し、**その場で読み直す。**
+//
+// ⚠️ **保存できたときだけ効かせること**（SetClickThrough と同じ）。先に効かせると、
+// 保存に失敗したときに画面の選択と実際の読み込み元が食い違う。
+//
+// **焼き込みの無いビルドで "embed" を弾いていない。** 設定ファイルは配布ビルドと
+// 開発ビルドで共用されるので、「焼き込みで使う」という意思表示は残せたほうがよい
+// （実際にどちらから読むかは `resolveRecognizerSource` が落としてくれる）。
+func (s *SettingsService) SetSutemeSource(v string) (AppSettings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st, err := s.save(func(cfg *ikkyoku.Config) { cfg.SutemeSource = v })
+	if err != nil {
+		return st, err
+	}
+	if s.onSutemeSource != nil {
+		s.onSutemeSource(st.SutemeSource)
+	}
+	return st, nil
+}
+
+// SetSutemeDataDir は学習データの置き場所を変えて保存し、**その場で読み直す。**
+// 空にすると suteme 既定の探索（または焼き込み）へ落ちる。
+func (s *SettingsService) SetSutemeDataDir(dir string) (AppSettings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	dir = strings.TrimSpace(dir)
+	st, err := s.save(func(cfg *ikkyoku.Config) { cfg.SutemeDataDir = dir })
+	if err != nil {
+		return st, err
+	}
+	if s.onSutemeDataDir != nil {
+		s.onSutemeDataDir(dir)
 	}
 	return st, nil
 }

@@ -27,6 +27,21 @@ type Config struct {
 	// 直接指しておけば、データを更新した結果がそのまま反映される。
 	SutemeDataDir string `json:"sutemeDataDir,omitempty"`
 
+	// SutemeSource は認識器(駒種推論器と盤の縁の帯の判定器)をどこから読むか。
+	//
+	// **exe 1 つで配れる形と、学習データを育てながら使う形の両方が要る**ので、
+	// 読み込み元を選べるようにしてある。値は 3 つ:
+	//
+	//	"" / "auto" … SutemeDataDir が指定されていればそちら、駄目なら焼き込み、
+	//	               それも無ければ suteme 既定の探索(既定)
+	//	"dir"       … SutemeDataDir から読む。焼き込みがあっても使わない
+	//	"embed"     … バイナリに焼き込んだものを読む(`-tags embedmodel` のビルドのみ)
+	//
+	// ⚠️ **焼き込みが入っていないビルドで "embed" にしても認識器は用意できない。**
+	// その場合は dir へ落ちる(`recognize.EmbeddedAvailable`)。設計原則3(段階的に劣化する)
+	// のとおり、**どれも読めなくてもアプリは動く**(認識結果が空になるだけ)。
+	SutemeSource string `json:"sutemeSource,omitempty"`
+
 	// FitOnStartup は起動時に盤面を探してガイド枠を合わせるか。
 	//
 	// **既定は false(探さない)。** 枠の位置はユーザーが手で合わせたものなので、
@@ -523,6 +538,32 @@ func (e EngineEntry) OptionValue(o EngineOption) (value string, custom bool) {
 		return v, true
 	}
 	return o.Default, false
+}
+
+// 認識器の読み込み元（`Config.SutemeSource`）。**文字列を直に書かないこと** ——
+// 設定ファイル・Go・フロントの 3 か所に散ると綴りの食い違いに気づけない。
+const (
+	// SutemeSourceAuto は「指定があればディレクトリ、無ければ焼き込み」（既定）。
+	SutemeSourceAuto = "auto"
+	// SutemeSourceDir はディレクトリ（`SutemeDataDir`）から読む。
+	SutemeSourceDir = "dir"
+	// SutemeSourceEmbed はバイナリに焼き込んだものを読む。
+	SutemeSourceEmbed = "embed"
+)
+
+// SutemeSourceOr は認識器の読み込み元を正規化して返す。
+//
+// **空・未知の値は auto** として扱う（設定ファイルは手で編集する前提なので、
+// 綴り間違いでアプリが認識できなくなるより既定へ倒す）。
+// ⚠️ **これが「焼き込みが在るか」までは見ない。** 実際にどちらから読むかの解決は
+// `recognize.EmbeddedAvailable` を見る側（`_cmd/ikkyoku` の `loadRecognizer`）の仕事。
+func (c Config) SutemeSourceOr() string {
+	switch c.SutemeSource {
+	case SutemeSourceDir, SutemeSourceEmbed:
+		return c.SutemeSource
+	default:
+		return SutemeSourceAuto
+	}
 }
 
 // DefaultAnalyzeSeconds は「考える秒数」の既定（解析タブ）。

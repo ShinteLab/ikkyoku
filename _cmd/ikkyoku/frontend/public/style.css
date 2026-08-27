@@ -958,6 +958,29 @@ html.is-main #app {
   border-color: #6ad3ff;
 }
 
+/* 認識器の読み込み元の選択（2026-08-27）。**input と同じ見た目に揃える** ——
+   同じ行に並ぶので、片方だけ素の見た目だと選択肢のほうが浮く。 */
+.setting-fields select {
+  padding: 5px 8px;
+  font-size: 12.5px;
+  color: #f2f3f5;
+  background: #23262e;
+  border: 1px solid #3a3d47;
+  border-radius: 5px;
+}
+
+.setting-fields select:focus {
+  outline: none;
+  border-color: #6ad3ff;
+}
+
+/* チェックボックスを持たない設定の見出し（`.setting` はチェックボックスと
+   本文を横に並べる形なので、そのままだと本文が字下げの位置に来ない）。 */
+.setting.is-block {
+  cursor: default;
+  padding-left: 22px;
+}
+
 .setting-fields .port {
   width: 76px;
 }

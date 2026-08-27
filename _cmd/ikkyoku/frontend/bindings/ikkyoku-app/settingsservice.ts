@@ -217,6 +217,28 @@ export function SetPonanzaConstant(v: number): $CancellablePromise<$models.AppSe
 }
 
 /**
+ * SetSutemeDataDir は学習データの置き場所を変えて保存し、**その場で読み直す。**
+ * 空にすると suteme 既定の探索（または焼き込み）へ落ちる。
+ */
+export function SetSutemeDataDir(dir: string): $CancellablePromise<$models.AppSettings> {
+    return $Call.ByID(3574585476, dir);
+}
+
+/**
+ * SetSutemeSource は認識器の読み込み元を切り替えて保存し、**その場で読み直す。**
+ * 
+ * ⚠️ **保存できたときだけ効かせること**（SetClickThrough と同じ）。先に効かせると、
+ * 保存に失敗したときに画面の選択と実際の読み込み元が食い違う。
+ * 
+ * **焼き込みの無いビルドで "embed" を弾いていない。** 設定ファイルは配布ビルドと
+ * 開発ビルドで共用されるので、「焼き込みで使う」という意思表示は残せたほうがよい
+ * （実際にどちらから読むかは `resolveRecognizerSource` が落としてくれる）。
+ */
+export function SetSutemeSource(v: string): $CancellablePromise<$models.AppSettings> {
+    return $Call.ByID(800896776, v);
+}
+
+/**
  * SetTraining は「訂正盤面を suteme に登録する」の設定を保存する。
  * 
  * **接続の確認はしない。** 設定を保存する操作と、相手が受け付けているかを見る操作

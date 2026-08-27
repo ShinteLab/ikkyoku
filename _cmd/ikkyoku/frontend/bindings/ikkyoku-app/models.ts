@@ -172,6 +172,30 @@ export interface AppSettings {
     "ponanzaConstant": number;
 
     /**
+     * SutemeSource は認識器の読み込み元（`ikkyoku.SutemeSourceAuto` / `Dir` / `Embed`）。
+     * 
+     * **正規化済みで返る**（空は "auto"）。⚠️ **フロントで「空なら auto」を
+     * 書かないこと** —— 既定の解決を 2 か所に持たない。
+     */
+    "sutemeSource": string;
+
+    /**
+     * SutemeDataDir は学習データを置いたディレクトリ（"dir" のときの読み込み元）。
+     */
+    "sutemeDataDir": string;
+
+    /**
+     * SutemeEmbedAvailable はこのビルドに認識器が焼き込まれているか
+     * （`-tags embedmodel`）。**false なら「焼き込み」は選ばせない。**
+     */
+    "sutemeEmbedAvailable": boolean;
+
+    /**
+     * SutemeEmbedSource は焼き込んだデータの出所（表示用。焼き込みが無ければ空）。
+     */
+    "sutemeEmbedSource": string;
+
+    /**
      * Path は設定ファイルの場所。**表示のためだけ。** 手で編集したくなったときに
      * 探さずに済むよう出しておく(学習データの置き場所もこのファイルにある)。
      */
@@ -999,6 +1023,20 @@ export interface RecognizerStatus {
     "source": string;
     "ready": boolean;
     "error": string;
+
+    /**
+     * Mode は実際にどこから読んだか(`ikkyoku.SutemeSourceDir` / `SutemeSourceEmbed` /
+     * 空＝suteme 既定の探索)。**設定の値そのものではない** ——
+     * 設定が auto のときはここで初めてどちらかに決まるし、"embed" にしていても
+     * 焼き込みの無いビルドでは dir へ落ちる。**画面にはこちらを出すこと。**
+     */
+    "mode": string;
+
+    /**
+     * EmbedAvailable はこのビルドに認識器が焼き込まれているか
+     * (`-tags embedmodel`)。設定タブが「焼き込み」を選べるかの判断に使う。
+     */
+    "embedAvailable": boolean;
 
     /**
      * StripSamples は盤の縁の帯の判定器のサンプル数。0 なら読めていない。

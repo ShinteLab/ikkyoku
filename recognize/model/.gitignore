@@ -1,0 +1,4 @@
+# 焼き込むデータは suteme の dist/ から持ってくるもので、このリポジトリでは育てない
+# （`_cmd/ikkyoku/Taskfile.yml` の `model:copy`）。ディレクトリ自体は残す。
+*.gz
+source.txt
