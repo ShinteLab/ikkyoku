@@ -243,6 +243,20 @@ task model:copy         # suteme/dist → recognize/model/*.gz + source.txt
 task build:embed        # model:copy + wails3 のビルド(EXTRA_TAGS=embedmodel)
 ```
 
+**タグを渡す口は 3 つある**（beta.3 で確認済み。どれも同じ
+`go build -tags production,embedmodel ... -ldflags="-w -s -H windowsgui"` になる）:
+
+| | 備考 |
+|---|---|
+| `task build:embed` | **これを使う。** `model:copy` が前に付くので忘れない |
+| `wails3 build -tags embedmodel` | CLI に `-tags`（カンマ区切り）がある。データのコピーは別途 |
+| `task build EXTRA_TAGS=embedmodel` | Taskfile の変数を直接渡す形 |
+
+- ⚠️ **`BUILD_FLAGS` を上書きしないこと。** あちらには `-tags production` も
+  `-H windowsgui`（コンソールを出さない）も入っている。タグを足す口は `EXTRA_TAGS`
+- ⚠️ **`wails3 dev` と `wails3 package` に `-tags` は無い。** 開発モードで焼き込みを
+  試すなら `task build:embed` した exe を直接起動する
+
 | 置き場所 | 中身 |
 |---|---|
 | `recognize/model/predictor.bin.gz` | `suteme/dist/training_data_v7.bin` を gzip したもの |
@@ -251,7 +265,8 @@ task build:embed        # model:copy + wails3 のビルド(EXTRA_TAGS=embedmodel
 
 - ⚠️ **`suteme` の `dist/` は「配布用に書き出す」（`training.ExportCompact`）が作るもの。**
   リポジトリ直下の全件（`training_data_v7.bin`）ではなく、間引いた配布セットを配ること
-- **gzip で持つ。** 実測 生 23.2MB → 9.9MB、exe は **19.2MB → 29.2MB**（+10MB）。
+- **gzip で持つ。** 実測 生 23.2MB → 9.9MB。exe は **13.4MB → 23.3MB**（+9.9MB。
+  `wails3 build` の配布ビルド。`go build` だけの素の exe なら 19.2MB → 29.2MB）。
   `suteme` 側の口が `io.Reader` を取る（`PredictorFrom` / `StripJudgeFrom`）ので、
   展開したファイルを置く必要は無い（`recognize/embedded.go`）
 - **焼き込み側のファイル名に版を入れていない**（`training_data_v7` → `predictor`）。
