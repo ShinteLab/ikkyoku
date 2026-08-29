@@ -2609,6 +2609,13 @@ html.is-main #app {
      ⚠️ **勝率バーが同じ理由で左右を 5% 詰めている**（.winrate-row）。
      **core/web の MARGIN が変わったら両方直すこと。** */
   --board-margin: calc(var(--board-size) * 0.05);
+  /* ⚠️ **文字の選択を止めること**（2026-08-29）。訂正は**同じところを何度も
+     クリックする**面（「足りない駒」を掴んで盤へ連続で置く・右クリックでマスを
+     回す）なので、そのままだと**盤や駒台の周りが選択状態になって青く反転し**、
+     どこを触っているのか読めなくなる。マスにも駒にも読ませたい文字は無い。
+     ⚠️ **選ばせたい文字（SFEN）だけ user-select: text で戻してある。** */
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .board-with-hands > .board-stage {
