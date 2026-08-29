@@ -3143,7 +3143,7 @@ html.is-main #app {
   content: "";
   position: absolute;
   inset: 0;
-  background: rgba(8, 10, 14, 0.5);
+  background: rgba(8, 10, 14, 0.35);
   pointer-events: none;
 }
 
