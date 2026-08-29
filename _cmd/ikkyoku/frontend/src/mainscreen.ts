@@ -1375,6 +1375,12 @@ export function mountMainScreen(root: HTMLElement): void {
       stopBatch("");
       void AnalyzeService.Release();
     }
+    // ⚠️ **訂正タブを離れるときは掴んでいるものを離す。** 「足りない駒」は
+    // クリックで掴んだままになるので、そのままタブを移ると**見えない盤に対して
+    // 掴んだ状態**が残り、カーソルには駒の絵が付いてくる。
+    if (target !== editTab && editTab.classList.contains("is-active")) {
+      editor.release();
+    }
     for (const { tab, panel } of tabs) {
       const active = tab === target;
       tab.classList.toggle("is-active", active);

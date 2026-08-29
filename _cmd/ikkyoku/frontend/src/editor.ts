@@ -74,6 +74,12 @@ export interface EditorHandle {
   // 中では null が返る）。タブで隠している以上、開いたときに測り直さないと
   // グリッドが出ないか、前回の大きさのまま残って**1 マスずれたところを編集する**。
   relayout(): void;
+  // release は掴んでいるもの（「足りない駒」のクリックで掴んだ駒・引きかけの
+  // ドラッグ）を離す。
+  //
+  // ⚠️ **訂正タブを離れるときに呼ぶこと。** 掴んだままタブを移ると、
+  // **見えない盤に対して掴んだ状態**が残り、カーソルには駒の絵が付いてくる。
+  release(): void;
 }
 
 export interface EditorOptions {
@@ -901,6 +907,22 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     setArmed(null);
   });
 
+  // 掴んだままの右クリックは**どこで押しても離す**（2026-08-29）。
+  //
+  // ⚠️ **盤の上だけにしないこと。** 離す手段を複数用意してあるのに、右クリック
+  // だけは盤の中でしか効かず、「足りない駒」や駒台の上で押しても離れなかった
+  // （掴んだ駒を置くのをやめたいのは、まさに駒箱の側を見ているとき）。
+  //
+  // 盤の上は `grid` 側が先に処理して `armed` を落とすので、ここへ来た時点では
+  // もう掴んでいない（＝マスを回す操作と二重に走らない）。
+  window.addEventListener("contextmenu", (e) => {
+    if (!armed) {
+      return;
+    }
+    e.preventDefault();
+    setArmed(null);
+  });
+
   // dropOnCell は盤のマスへ落としたときの振り分け。
   function dropOnCell(el: HTMLElement, data: Drag) {
     if (!editable) {
@@ -1109,5 +1131,11 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
       onState(null);
     },
     relayout: layoutGrid,
+    release() {
+      if (drag) {
+        endDrag();
+      }
+      setArmed(null);
+    },
   };
 }
