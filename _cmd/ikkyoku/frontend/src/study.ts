@@ -870,6 +870,35 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
     paint();
   });
 
+  // 掴んだ駒は**右クリックで離せる**（2026-08-29）。
+  //
+  // 掴み直しは「同じ駒をもう一度押す」でもできるが、**指す先を探しているあいだ
+  // 目は盤の別のところを見ている**ので、やめるのに掴んだ駒まで戻るのは 1 手多い。
+  // 訂正タブ（`editor.ts`）で掴んだ駒を右クリックで離せるのと同じ約束に揃える。
+  //
+  // ⚠️ **受けるのは盤と駒台だけ。** `window` で拾うと、**手順リストの右クリック
+  // （手を消す・分岐にする）まで巻き添えで掴んだ駒を落とす**（あちらは盤とは
+  // 別の操作で、掴んだままメニューを開くのは普通に起きる）。
+  //
+  // ⚠️ **掴んでいなくても既定のメニューは止める**（訂正タブの盤と同じ）。
+  // webview の既定メニューは盤の上では意味が無く、出ると「右クリックは
+  // 何か別のもの」に見える。
+  const cancelPick = (e: MouseEvent) => {
+    if (ask) {
+      return;
+    }
+    e.preventDefault();
+    if (!pick) {
+      return;
+    }
+    pick = null;
+    onError(""); // 前の操作の理由を残さない
+    paint();
+  };
+  grid.addEventListener("contextmenu", cancelPick);
+  handSlots.black.addEventListener("contextmenu", cancelPick);
+  handSlots.white.addEventListener("contextmenu", cancelPick);
+
   // 駒台の駒をクリックすると、**打てる位置が光る**。
   // ⚠️ **ここはイベント委譲**（駒台の中身は局面が変わるたびに作り直される）。
   for (const [black, slot] of [
