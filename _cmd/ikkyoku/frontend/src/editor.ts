@@ -853,6 +853,14 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     lastX = e.clientX;
     lastY = e.clientY;
     if (!drag || e.pointerId !== drag.pointerId) {
+      // ⚠️ **左ボタンだけが「置く」**（2026-08-29）。**Windows では
+      // `contextmenu` が pointerup の後に来る**ので、ボタンを見ないと
+      // **右クリックで離す前にそこへ 1 枚置いてしまう**（離したのに駒が増える）。
+      // ⚠️ **`beginDrag` の `e.button !== 0` と対にすること** —— あちらだけだと
+      // 右ボタンの pointerup が `drag` の無い経路（＝ここ）へ落ちてくる。
+      if (e.button !== 0) {
+        return;
+      }
       // 掴んだものを置く経路。**空マスを押したときはここに来る**
       // （空マスではドラッグが始まらないので `drag` が無い）。
       dropArmedAt(e.clientX, e.clientY);
