@@ -387,6 +387,10 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
     const dests = movesFromPick();
     const loaded = !!state?.loaded;
     grid.classList.toggle("is-active", loaded);
+    // 駒を掴んでいるあいだは、**動かせないマスを暗くする**（2026-08-29）。
+    // 光らせるのではなく暗幕を敷くのは CSS 側（.study-grid.is-picking）の仕事で、
+    // ここが持つのは「今掴んでいるか」だけ。
+    grid.classList.toggle("is-picking", !!pick);
     for (const el of cells) {
       const rank = Number(el.dataset.rank);
       const file = Number(el.dataset.file);

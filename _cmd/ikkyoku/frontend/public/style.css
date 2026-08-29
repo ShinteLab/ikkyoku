@@ -3103,7 +3103,6 @@ html.is-main #app {
 
 .study-cell {
   position: relative;
-  border: 1px solid transparent;
   border-radius: 2px;
 }
 
@@ -3113,38 +3112,44 @@ html.is-main #app {
   cursor: pointer;
 }
 
+/* ⚠️ **枠線は border ではなく inset の box-shadow で出すこと**（2026-08-29）。
+   border を持たせるとマスの外周 1px が絶対配置の子（下の暗幕）から漏れ、
+   **暗くしたときに格子が明るい線として浮く**（しかも隣と重なって濃淡が出る）。 */
 .study-grid.is-active .study-cell.is-pickable:hover {
-  border-color: rgba(94, 160, 255, 0.9);
+  box-shadow: inset 0 0 0 1px rgba(94, 160, 255, 0.9);
   background: rgba(94, 160, 255, 0.1);
 }
 
 /* 掴んでいる駒。 */
 .study-cell.is-source {
-  border-color: #5ea0ff;
+  box-shadow: inset 0 0 0 1px #5ea0ff;
   background: rgba(94, 160, 255, 0.22);
 }
 
-/* 動かせる位置。**駒を隠さないように中央の丸で出す**（マス全体を塗ると、
-   そこに居る駒（取れる駒）が読めなくなる）。 */
 .study-cell.is-target {
   cursor: pointer;
 }
 
-.study-cell.is-target::after {
+/* 動かせる位置は**そのまま見せ、動かせないところを暗くする**（2026-08-29 に
+   「青い丸を置く」から変えた）。多くのゲームがこの見せ方で、
+   **駒の絵に何も重ならない**ぶん「そこに何が居るか（取れる駒か）」が読める。
+
+   ⚠️ **暗幕は「動かせない側」に敷くこと。** 動かせる側を光らせる作りに戻すと、
+   盤の駒の上に印が乗って**取れる駒が読めなくなる**（丸を置いていた頃の症状）。
+   ⚠️ **`border-radius` を付けないこと** —— マスは隙間なく並ぶので、
+   角を丸めると**四隅だけ明るい点が残って格子に見える**。
+   ⚠️ **掴んでいるマス（.is-source）は暗くしない**（今どれを持っているかが消える）。 */
+.study-grid.is-picking .study-cell:not(.is-target):not(.is-source)::after {
   content: "";
   position: absolute;
   inset: 0;
-  margin: auto;
-  width: 34%;
-  height: 34%;
-  border-radius: 50%;
-  background: rgba(94, 160, 255, 0.75);
-  box-shadow: 0 0 6px rgba(94, 160, 255, 0.8);
+  background: rgba(8, 10, 14, 0.5);
   pointer-events: none;
 }
 
 .study-cell.is-target:hover {
   background: rgba(94, 160, 255, 0.28);
+  box-shadow: inset 0 0 0 1px rgba(94, 160, 255, 0.9);
 }
 
 /* ---- 候補手の重ね表示(2026-08-14) ----------------------------------------
