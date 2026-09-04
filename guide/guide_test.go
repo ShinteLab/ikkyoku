@@ -1,4 +1,4 @@
-package main
+package guide
 
 import (
 	"image"
@@ -15,14 +15,14 @@ import (
 // **原点が揃っていない**(枠の位置とキャプチャ領域の位置は別物)ので、
 // テストでもわざと離れた値を使う。
 func TestFitGeometry(t *testing.T) {
-	cur := windowState{X: 100, Y: 200, Width: 480, Height: 420}
+	cur := Window{X: 100, Y: 200, Width: 480, Height: 420}
 	region := ikkyoku.Region{X: 402, Y: 936, Width: 476, Height: 384}
 
 	tests := []struct {
 		name  string
 		board image.Rectangle
 		scale float64
-		want  windowState
+		want  Window
 		moved bool
 	}{
 		{
@@ -31,7 +31,7 @@ func TestFitGeometry(t *testing.T) {
 			name:  "等倍",
 			board: image.Rect(412, 946, 412+456, 946+364),
 			scale: 1.0,
-			want:  windowState{X: 110, Y: 210, Width: 460, Height: 400},
+			want:  Window{X: 110, Y: 210, Width: 460, Height: 400},
 			moved: true,
 		},
 		{
@@ -40,7 +40,7 @@ func TestFitGeometry(t *testing.T) {
 			name:  "枠の外で見つかった",
 			board: image.Rect(102, 236, 102+476, 236+384),
 			scale: 1.0,
-			want:  windowState{X: -200, Y: -500, Width: 480, Height: 420},
+			want:  Window{X: -200, Y: -500, Width: 480, Height: 420},
 			moved: true,
 		},
 		{
@@ -49,7 +49,7 @@ func TestFitGeometry(t *testing.T) {
 			name:  "150%",
 			board: image.Rect(432, 966, 432+416, 966+324),
 			scale: 1.5,
-			want:  windowState{X: 120, Y: 220, Width: 440, Height: 380},
+			want:  Window{X: 120, Y: 220, Width: 440, Height: 380},
 			moved: true,
 		},
 		{
@@ -64,12 +64,12 @@ func TestFitGeometry(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, moved := fitGeometry(cur, region, tt.board, 2, tt.scale)
+			got, moved := Geometry(cur, region, tt.board, 2, tt.scale)
 			if moved != tt.moved {
 				t.Errorf("moved = %v, want %v", moved, tt.moved)
 			}
 			if got != tt.want {
-				t.Errorf("fitGeometry() = %+v, want %+v", got, tt.want)
+				t.Errorf("Geometry() = %+v, want %+v", got, tt.want)
 			}
 		})
 	}
@@ -78,14 +78,14 @@ func TestFitGeometry(t *testing.T) {
 // 検出結果は毎回 数px 揺れる(実測で 5〜10px)。そこまで直しにいくと押すたびに
 // 枠が少し動くので、slop 以内は動かさない。
 func TestFitGeometrySlop(t *testing.T) {
-	cur := windowState{X: 100, Y: 200, Width: 480, Height: 420}
+	cur := Window{X: 100, Y: 200, Width: 480, Height: 420}
 	region := ikkyoku.Region{X: 0, Y: 0, Width: 476, Height: 384}
 	board := image.Rect(5, 5, 476+5, 384+5) // 5px ずれているが大きさは同じ
 
-	if _, moved := fitGeometry(cur, region, board, 7, 1.0); moved {
+	if _, moved := Geometry(cur, region, board, 7, 1.0); moved {
 		t.Error("slop=7 で 5px のずれを直しにいっている")
 	}
-	if _, moved := fitGeometry(cur, region, board, 2, 1.0); !moved {
+	if _, moved := Geometry(cur, region, board, 2, 1.0); !moved {
 		t.Error("slop=2 では 5px のずれを直すはず")
 	}
 }
@@ -99,7 +99,7 @@ func TestFitSlopIsSmallerThanMargin(t *testing.T) {
 		image.Rect(0, 0, 900, 900),     // マス 100px
 		image.Rect(0, 0, 81, 81),       // 下限に落ちる小さい盤
 	} {
-		m, s := fitMargin(board), fitSlop(board)
+		m, s := Margin(board), Slop(board)
 		if s >= m {
 			t.Errorf("board=%v: slop %d が余白 %d 以上", board, s, m)
 		}
@@ -139,8 +139,8 @@ func TestWithFitMargin(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := withFitMargin(tt.board); got != tt.want {
-				t.Errorf("withFitMargin(%v) = %v, want %v", tt.board, got, tt.want)
+			if got := WithMargin(tt.board); got != tt.want {
+				t.Errorf("WithMargin(%v) = %v, want %v", tt.board, got, tt.want)
 			}
 		})
 	}
@@ -176,8 +176,8 @@ func TestInsideClickThrough(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := insideClickThrough(region, tt.scale, tt.x, tt.y); got != tt.want {
-				t.Errorf("insideClickThrough(%d,%d) = %v, want %v", tt.x, tt.y, got, tt.want)
+			if got := InsideClickThrough(region, tt.scale, tt.x, tt.y); got != tt.want {
+				t.Errorf("InsideClickThrough(%d,%d) = %v, want %v", tt.x, tt.y, got, tt.want)
 			}
 		})
 	}

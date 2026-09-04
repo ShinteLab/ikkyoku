@@ -75,14 +75,6 @@ export interface FitResult {
 }
 
 /**
- * GuideLayout は枠ウィンドウの描画寸法(CSS px)をフロントに渡すための型。
- */
-export interface GuideLayout {
-    "borderPx": number;
-    "toolbarPx": number;
-}
-
-/**
  * RecognizerStatus は suteme のデータ(SutemeDataDir)の読み込み状況。
  * 
  * **駒種推論器と帯の判定器を別々に持つ。** 前者は無ければ駒種が読めない(致命的)が、

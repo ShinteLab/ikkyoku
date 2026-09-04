@@ -9,6 +9,5 @@ export {
 export type {
     CaptureResult,
     FitResult,
-    GuideLayout,
     RecognizerStatus
 } from "./models.js";

@@ -14,6 +14,10 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
+import * as guide$0 from "../github.com/ShinteLab/ikkyoku/guide/models.js";
+
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
 import * as $models from "./models.js";
 
 /**
@@ -108,7 +112,7 @@ export function HideFrame(): $CancellablePromise<void> {
  * Layout は枠ウィンドウが描くべき寸法を返す。フロントは起動時にこれを呼び、
  * CSS 変数に反映してからガイド枠を描く(定数の二重管理を避けるため)。
  */
-export function Layout(): $CancellablePromise<$models.GuideLayout> {
+export function Layout(): $CancellablePromise<guide$0.Layout> {
     return $Call.ByID(3905037405);
 }
 

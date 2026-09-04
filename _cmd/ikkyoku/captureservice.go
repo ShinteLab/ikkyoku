@@ -9,7 +9,6 @@ import (
 	"image/draw"
 	"image/png"
 	"log/slog"
-	"math"
 	"os"
 	"sync"
 	"time"
@@ -17,41 +16,11 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 
 	"github.com/ShinteLab/ikkyoku"
+	"github.com/ShinteLab/ikkyoku/guide"
 	"github.com/ShinteLab/ikkyoku/recognize"
 )
 
-// 枠ウィンドウのレイアウト寸法(CSS px)。**ここが唯一のソース。**
-//
-// フロント側は起動時に CaptureService.Layout() を呼んでこの値を受け取り、CSS 変数に
-// 流し込んで描画する(frame.ts)。以前はフロントにも同じ定数を置いて「両方を必ず
-// 一致させること」という運用にしていたが、ずれると枠やツールバーが写り込むという
-// 直接的な不具合になるうえ、ツールバーの追加で同期対象が 2 つに増えるため、
-// キャプチャ矩形を実際に計算する Go 側に一本化した。
-//
-// キャプチャ領域は「クライアント領域から、ツールバーとガイド枠を除いた内側の矩形」に
-// 決める(決定論的な方式。撮る直前に枠を消すタイミング依存の方式は採らない)。
-const (
-	// guideBorderPx はガイド枠の線の太さ。
-	guideBorderPx = 2
-	// toolbarHeightPx は枠ウィンドウ上部のツールバーの高さ。
-	// Frameless なので、これが OS のタイトルバーの代わりになる。
-	toolbarHeightPx = 32
-)
-
-// framelessBottomPaddingPx は Wails が Frameless ウィンドウの下端に入れる余白(物理px)。
-//
-// Wails は WM_NCCALCSIZE で `rgrc.Bottom += 1` と `setPadding(edge.Rect{Bottom: 1})` を
-// 行っている(リサイズ時のちらつき回避。webview_window_windows.go の該当箇所にコメントあり)。
-// 結果として **クライアント領域の最下 1 行には WebView が描画されず**、ガイド枠の下辺は
-// GetClientRect の下端より 1px 上に来る。これを引かないと、撮った画像の最下行に
-// 赤いガイド枠が 1px 写り込む(実測で確認済み)。
-//
-// DPI ではなく物理ピクセル単位の固定値なので、スケール変換はしない。
-// なお最大化・全画面のときは Wails 側がこの余白を入れないため 1px 余分に内側を撮る
-// ことになるが、盤が 1px 欠けるだけで実害は無い(枠が写り込む方を避ける)。
-const framelessBottomPaddingPx = 1
-
-// clickThroughInsetPx は素通しにする範囲を、撮る領域から内側へ詰める幅(CSS px)。
+// guide.ClickThroughInsetPx は素通しにする範囲を、撮る領域から内側へ詰める幅(CSS px)。
 // clickThroughPoll はカーソルの位置を見に行く間隔。
 //
 // ⚠️ **撮る領域をそのまま素通しにしないこと。** Wails のリサイズ判定は
@@ -61,81 +30,9 @@ const framelessBottomPaddingPx = 1
 //
 // 間隔は 50ms。素通しのあいだ枠はマウスの動きを受け取れない(イベントが来ない)ので、
 // **戻すきっかけを作れるのはポーリングだけ**。設定が入のときしか回さない。
-const (
-	clickThroughInsetPx = 10
-	clickThroughPoll    = 50 * time.Millisecond
-)
-
-// fitMinBoardPx は自動フィットで受け入れる盤の最小の一辺(物理px)。
-//
-// 9 マスに割ると 1 マス 10px。これ以下の矩形に枠を合わせると、盤ではない何かを
-// 掴んでいたときに枠が潰れて操作できなくなる。信頼度の判定(MinRegionConfidence)を
-// 通ったあとの最後の歯止め。
-const fitMinBoardPx = 90
-
-// fitMarginCellRatio は自動フィットで盤の外側に残す余白(マス 1 つの何割か)。
-// fitMinMarginPx はその下限(物理px)。
-//
-// **盤にぴったり合わせると、次に撮った画像が認識しづらくなる。** 盤の外枠の線が
-// 画像の端に来てしまい、検出(DetectBoard)が格子として掴めなくなるため。撮り溜めた
-// PNG を「検出した矩形ぴったり」と「余白つき」で切り出して Recognize に流すと、
-// ぴったり側だけが落ちる(実測: 0.63←0.90 / 0.79←0.99 / 0.86←0.98 / 0.88←1.00 / 0.91←1.00。
-// 悪いものは検出そのものが失敗する)。**フィットの目的は認識を良くすることなので、
-// ここで余白を取らないと機能として本末転倒になる。**
-//
-// 余白はマスの大きさに比例させる(盤の見かけの大きさは中継によって 2 倍以上違う)。
-//
-// **2026-08-11 に 0.1 → 0.3 へ広げた。** 合わせた枠で撮った画像を suteme が
-// 認識できず、少し広げて送ると拾う、という事象が実際に出た。suteme 側の見解は
-// 「**外枠線を含めたうえで、さらに外側へ 0.3 マス程度**(その解像度で 15〜20px)、
-// 最低でも 8px」。以前の 0.1(マス 70〜100px で 7〜10px)は通ることもあるが、
-// **枠自体が数px 揺れる前提だと余裕が足りない**。
-// **大きくしすぎないこと**(余白に写った中継の UI が盤の格子と競合しうる)。
-const (
-	fitMarginCellRatio = 0.3
-	fitMinMarginPx     = 8
-)
-
-// fitSlop は「もう合っている」とみなすずれ(物理px。fitGeometry に渡す)。
-//
-// 検出結果は毎回 5〜10px 揺れるので、そこまで直しにいくと押すたびに枠が動く。
-//
-// ⚠️ **余白そのものを渡さないこと**(2026-08-11 まではそうしていた)。余白と同じ
-// 幅のずれを許すと、**ずれた向きの余白がちょうど 0 になるところまで見逃す**ことに
-// なり、余白を広げた意味が無くなる。余白の半分なら、どちらへ揺れても
-// 余白の半分は必ず残る。
-//
-// 下限は余白の下限の半分(4px)。揺れの実測(5〜10px)よりは小さいが、そこまで
-// 小さい盤は 1 マスが 27px 未満で、そもそもこの機能の想定の外側。
-func fitSlop(board image.Rectangle) int {
-	return fitMargin(board) / 2
-}
-
-// fitMinShrinkRatio は自動フィットで許す縮小の下限(今のキャプチャ領域に対する一辺の比)。
-//
-// **9x9 のグリッド検出には「半分の周期」で 1 校 100 点が出る当たり方がある。**
-// マス 2 つぶんを 1 マスとみなすと格子線が 1 本おきに一致し、盤の内側は
-// どこを切り取っても色が均一なので、信頼度(ValidateBoard)は 1.00 のまま
-// **盤の 1/4 の領域**が返る。撮り溜めた 62 枚のうち 3 枚で実際に起きた
-// (例: 651x700 の盤に対して (10,312) 309x334 で信頼度 1.00)。
-//
-// この当たり方は**縦横の両方がちょうど半分**になるのが特徴なので、両辺ともこの比を
-// 下回る候補は採らない。片辺だけ小さいのは「枠の縦横比が盤と違う」という普通の状態で、
-// これは弾かない。信頼度では区別が付かないため、大きさで見るしかない。
-//
-// 副作用として「盤が枠の半分以下しか占めていない」ときもフィットしなくなるが、
-// これは**枠の中から盤を探す**この機能の想定(盤より少し大きめに枠を置いてから押す)の
-// 外側なので、枠を近づけてから押し直せばよい。
-//
-// **検出そのものを直すのは suteme の仕事。** ここでやっているのは
-// 「アプリとして、ユーザーが手で合わせた枠をどこまで信じて動かすか」の線引き。
-const fitMinShrinkRatio = 0.6
-
-// GuideLayout は枠ウィンドウの描画寸法(CSS px)をフロントに渡すための型。
-type GuideLayout struct {
-	BorderPx  int `json:"borderPx"`
-	ToolbarPx int `json:"toolbarPx"`
-}
+// ⚠️ **詰め幅（guide.ClickThroughInsetPx）は ikkyoku/guide にある。**
+// あちらは幾何の話で、ここにあるのは見張りの間隔だけ。
+const clickThroughPoll = 50 * time.Millisecond
 
 // RecognizerStatus は suteme のデータ(SutemeDataDir)の読み込み状況。
 //
@@ -664,18 +561,7 @@ func (s *CaptureService) stepCursor() {
 		s.setMouseThrough(false)
 		return
 	}
-	s.setMouseThrough(insideClickThrough(region, scale, x, y))
-}
-
-// insideClickThrough はその点が「素通しにしてよい範囲」に入っているか。
-//
-// 撮る範囲そのものではなく、**内側へ clickThroughInsetPx だけ詰めた範囲**。
-// 詰めないと Wails のリサイズ判定（クライアント領域の端 5px）と重なり、
-// **左右と下の縁から枠をリサイズできなくなる**。
-func insideClickThrough(region ikkyoku.Region, scale float64, x, y int) bool {
-	inset := scaleUp(clickThroughInsetPx, scale)
-	return x >= region.X+inset && x < region.X+region.Width-inset &&
-		y >= region.Y+inset && y < region.Y+region.Height-inset
+	s.setMouseThrough(guide.InsideClickThrough(region, scale, x, y))
 }
 
 // setMouseThrough は枠の WS_EX_TRANSPARENT を実際に付け外しする。
@@ -706,8 +592,8 @@ func (s *CaptureService) setMouseThrough(on bool) {
 
 // Layout は枠ウィンドウが描くべき寸法を返す。フロントは起動時にこれを呼び、
 // CSS 変数に反映してからガイド枠を描く(定数の二重管理を避けるため)。
-func (s *CaptureService) Layout() GuideLayout {
-	return GuideLayout{BorderPx: guideBorderPx, ToolbarPx: toolbarHeightPx}
+func (s *CaptureService) Layout() guide.Layout {
+	return guide.Layout{BorderPx: guide.BorderPx, ToolbarPx: guide.ToolbarHeightPx}
 }
 
 // CaptureShot は「撮れた」ことだけを伝えるイベントのペイロード（`capture:shot`）。
@@ -907,7 +793,7 @@ func (s *CaptureService) FitFrame() (FitResult, error) {
 			Message:    "盤が見つかりませんでした",
 		}, nil
 	}
-	if b.Dx() < fitMinBoardPx || b.Dy() < fitMinBoardPx {
+	if b.Dx() < guide.MinBoardPx || b.Dy() < guide.MinBoardPx {
 		s.logger.Info("検出した盤が小さすぎるので合わせませんでした",
 			"width", b.Dx(), "height", b.Dy(), "confidence", conf)
 		return FitResult{
@@ -919,9 +805,9 @@ func (s *CaptureService) FitFrame() (FitResult, error) {
 	// 問題への対策で、動作中の値は正しい(geometry.go)。
 	x, y := s.wins.frame.Position()
 	w, h := s.wins.frame.Size()
-	cur := windowState{X: x, Y: y, Width: w, Height: h}
+	cur := guide.Window{X: x, Y: y, Width: w, Height: h}
 	// **盤ぴったりではなく、少し外側に合わせる**(fitMarginCellRatio 参照)。
-	next, moved := fitGeometry(cur, region, withFitMargin(b), fitSlop(b), scale)
+	next, moved := guide.Geometry(cur, region, guide.WithMargin(b), guide.Slop(b), scale)
 	if !moved {
 		return FitResult{
 			Fitted:     true,
@@ -1005,15 +891,17 @@ func (s *CaptureService) findBoard(region ikkyoku.Region) (image.Rectangle, floa
 //
 // 9x9 のグリッド検出には**マス 2 つぶんを 1 マスとみなす**当たり方があり、
 // 格子線が 1 本おきに一致するうえ盤の内側は色が均一なので、信頼度 1.00 のまま
-// 盤の 1/4 が返る(fitMinShrinkRatio 参照)。縦横の**両方**がちょうど半分になるのが
+// 盤の 1/4 が返る(guide.MinShrinkRatio 参照)。縦横の**両方**がちょうど半分になるのが
 // 特徴なので、大きさで見分ける。片辺だけ小さいのは「枠の縦横比が盤と違う」という
 // 普通の状態なので弾かない。
 //
 // **枠の内側を探すときだけの判定。** 画面全体から探すときは、見つけた盤が
 // 今の枠と無関係な場所にあるので比べる意味が無い。
 func (s *CaptureService) looksLikePartOfBoard(board image.Rectangle, region ikkyoku.Region, conf float64) bool {
-	if float64(board.Dx()) >= float64(region.Width)*fitMinShrinkRatio ||
-		float64(board.Dy()) >= float64(region.Height)*fitMinShrinkRatio {
+	// **大きさの線引きは ikkyoku/guide**（この節の理由もあちらのコメントにある）。
+	// ⚠️ **ログはここに残すこと** —— 採るかどうかは幾何の話だが、
+	// 「採らなかった」と知らせるのは GUI の仕事。
+	if !guide.TooSmall(board, region) {
 		return false
 	}
 	s.logger.Info("枠の内側で見つけた盤が小さすぎるので採りませんでした",
@@ -1114,71 +1002,6 @@ func (s *CaptureService) maskWindows(img image.Image, disp ikkyoku.Region) {
 	s.logger.Debug("メイン画面を塗り潰しました", "rect", rect.String())
 }
 
-// fitMargin は盤の外側に残す余白(物理px)。マスの大きさに比例する。
-func fitMargin(board image.Rectangle) int {
-	cell := float64(board.Dx()) / 9
-	if h := float64(board.Dy()) / 9; h < cell {
-		cell = h // 縦横で違う場合は狭いほうに合わせる(余白が過剰にならないように)
-	}
-	m := int(math.Round(cell * fitMarginCellRatio))
-	if m < fitMinMarginPx {
-		m = fitMinMarginPx
-	}
-	return m
-}
-
-// withFitMargin は盤の矩形を余白のぶんだけ広げる。
-//
-// **画像の外にはみ出しても切り詰めない。** 枠は今より大きくなってよく、はみ出した
-// ぶんには画面の続きが写るだけ。ここで image.Bounds() に丸めると、盤が枠の端に
-// 接している(= まさに余白が要る)ときに限って余白が消える。
-func withFitMargin(board image.Rectangle) image.Rectangle {
-	return board.Inset(-fitMargin(board))
-}
-
-// fitGeometry は「盤がスクリーンのどこにあるか」から、枠ウィンドウの新しい
-// 位置・サイズ(DIP)を求める。moved が false なら動かす必要は無い。
-//
-// board は**スクリーン座標・物理ピクセル**の矩形(撮った画像の座標系ではない。
-// 画面全体から探すので、画像の原点とキャプチャ領域の原点が一致しないため)。
-// region は今のキャプチャ領域で、これもスクリーン座標・物理ピクセル。
-//
-// キャプチャ領域はガイド枠の内側そのものなので、**region と board のずれをそのまま
-// ウィンドウに足せば**枠の内側が盤に重なる。ツールバーやガイド枠の太さは
-// 位置とサイズの両方に同じだけ乗っているので、差分にすると消える(足し引き不要)。
-//
-// scale は CSS px → 物理 px の係数で、ウィンドウの座標系(DIP)へ割り戻すのに使う。
-// slop は「もう合っている」とみなすずれ(物理px。呼び出し側は fitSlop の値を渡す。
-// **余白と同じ値ではない** —— 理由は fitSlop のコメント)。
-//
-// **サイズは外側に倒す**(scaleUp と同じ理由の裏返し。丸めで縮むと盤の端が欠ける。
-// 1px 広いぶんには盤の外周が少し余分に写るだけで実害が無い)。
-//
-// GUI から切り離してあるのは、符号を 1 つ間違えると枠が逆へ飛ぶのに、
-// 実機で気づくしかなくなるため(fitGeometry のテストがある)。
-func fitGeometry(cur windowState, region ikkyoku.Region, board image.Rectangle, slop int, scale float64) (windowState, bool) {
-	dx := board.Min.X - region.X
-	dy := board.Min.Y - region.Y
-	dw := board.Dx() - region.Width
-	dh := board.Dy() - region.Height
-	if abs(dx) <= slop && abs(dy) <= slop && abs(dw) <= slop && abs(dh) <= slop {
-		return cur, false
-	}
-	return windowState{
-		X:      cur.X + int(math.Round(float64(dx)/scale)),
-		Y:      cur.Y + int(math.Round(float64(dy)/scale)),
-		Width:  cur.Width + int(math.Ceil(float64(dw)/scale)),
-		Height: cur.Height + int(math.Ceil(float64(dh)/scale)),
-	}, true
-}
-
-func abs(n int) int {
-	if n < 0 {
-		return -n
-	}
-	return n
-}
-
 // CopyImage は保存済みの PNG をクリップボードへ入れる。デバッグタブから呼ばれる。
 //
 // **撮った画像をメモリに抱えず、保存したファイルを読み直す。** 1 回のキャプチャは
@@ -1219,9 +1042,9 @@ func (s *CaptureService) CopyImage(path string) error {
 // 枠ウィンドウのクライアント領域は、上から順に次のように積まれている(frame.ts):
 //
 //	┌──────────────────────────┐
-//	│ ツールバー(toolbarHeightPx)│ ← 撮る/隠す。ドラッグ移動もここ
+//	│ ツールバー(guide.ToolbarHeightPx)│ ← 撮る/隠す。ドラッグ移動もここ
 //	├──────────────────────────┤
-//	│ ┌──────────────────────┐ │ ← ガイド枠(guideBorderPx)
+//	│ ┌──────────────────────┐ │ ← ガイド枠(guide.BorderPx)
 //	│ │   ここを撮る(透過)    │ │
 //	│ └──────────────────────┘ │
 //	└──────────────────────────┘
@@ -1251,9 +1074,9 @@ func (s *CaptureService) captureRegion() (ikkyoku.Region, float64, error) {
 		return ikkyoku.Region{}, 0, err
 	}
 
-	border := scaleUp(guideBorderPx, scale)
-	top := scaleUp(toolbarHeightPx, scale) + border
-	bottom := border + framelessBottomPaddingPx
+	border := guide.ScaleUp(guide.BorderPx, scale)
+	top := guide.ScaleUp(guide.ToolbarHeightPx, scale) + border
+	bottom := border + guide.FramelessBottomPaddingPx
 	region := ikkyoku.Region{
 		X:      rect.X + border,
 		Y:      rect.Y + top,
@@ -1264,14 +1087,4 @@ func (s *CaptureService) captureRegion() (ikkyoku.Region, float64, error) {
 		return ikkyoku.Region{}, 0, fmt.Errorf("ikkyoku-app: ウィンドウが小さすぎます(ツールバーとガイド枠で領域が無くなります)")
 	}
 	return region, scale, nil
-}
-
-// scaleUp は CSS px を物理ピクセルに変換する。**切り上げる。**
-//
-// ブラウザ側の丸めと 1px ずれることがあるため、どちらに倒すかを決める必要がある。
-// 内側に 1px 多く食い込む(盤が 1px 欠ける)のは実害が無いが、外側に 1px はみ出すと
-// 赤いガイド枠やツールバーがキャプチャに写り込み、認識(Phase 2)のノイズになる。
-// したがって常に内側に倒す。
-func scaleUp(cssPx int, scale float64) int {
-	return int(math.Ceil(float64(cssPx) * scale))
 }

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+
+	"github.com/ShinteLab/ikkyoku/guide"
 )
 
 // unsetPosition はウィンドウ位置が未保存であることを表すセンチネル値。
@@ -35,14 +37,6 @@ const (
 	windowGap = 8
 )
 
-// windowState は 1 ウィンドウぶんの位置・サイズ。
-type windowState struct {
-	X      int `json:"x"`
-	Y      int `json:"y"`
-	Width  int `json:"width"`
-	Height int `json:"height"`
-}
-
 // appState は永続化するウィンドウ状態の全体。
 //
 // ikkyoku ルートパッケージの Config(config.json)とはあえて分けてある。
@@ -53,14 +47,14 @@ type windowState struct {
 // 枠に高さ toolbarHeightPx のツールバーが増えたことで、同じウィンドウサイズでも
 // 撮れる領域が変わっており、**旧い座標をそのまま復元しても位置合わせはやり直しになる**ため。
 type appState struct {
-	Frame windowState `json:"frame"`
-	Main  windowState `json:"main"`
+	Frame guide.Window `json:"frame"`
+	Main  guide.Window `json:"main"`
 }
 
 func defaultAppState() appState {
 	return appState{
-		Frame: windowState{X: unsetPosition, Y: unsetPosition, Width: defaultFrameWidth, Height: defaultFrameHeight},
-		Main:  windowState{X: unsetPosition, Y: unsetPosition, Width: defaultMainWidth, Height: defaultMainHeight},
+		Frame: guide.Window{X: unsetPosition, Y: unsetPosition, Width: defaultFrameWidth, Height: defaultFrameHeight},
+		Main:  guide.Window{X: unsetPosition, Y: unsetPosition, Width: defaultMainWidth, Height: defaultMainHeight},
 	}
 }
 
@@ -119,7 +113,7 @@ func saveAppState(st appState) error {
 // safeFallback は Run() 前(スクリーン情報が使えない段階)での簡易な安全策。
 // 保存値が異常でも極端なサイズで開かないようにするだけで、マルチモニタのクランプはしない
 // (それは Run() 後の clampToScreen が担当する。wails3 skill window-state.md)。
-func safeFallback(state windowState, defW, defH int) (w, h int) {
+func safeFallback(state guide.Window, defW, defH int) (w, h int) {
 	w, h = state.Width, state.Height
 	if w <= 0 || w > maxReasonableSize {
 		w = defW
@@ -132,7 +126,7 @@ func safeFallback(state windowState, defW, defH int) (w, h int) {
 
 // clampToScreen は WindowRuntimeReady 時点(Run() 後)で呼ぶ。
 // 保存位置が存在しないモニタ・解像度変更後などでウィンドウが画面外に飛ぶのを防ぐ。
-func clampToScreen(state windowState, defW, defH int) (x, y, w, h int) {
+func clampToScreen(state guide.Window, defW, defH int) (x, y, w, h int) {
 	w, h = safeFallback(state, defW, defH)
 	x, y = state.X, state.Y
 

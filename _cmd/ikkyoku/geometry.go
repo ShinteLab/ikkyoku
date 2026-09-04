@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"sync"
 
+	"github.com/ShinteLab/ikkyoku/guide"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 )
@@ -26,12 +27,12 @@ type geometryTracker struct {
 	logger *slog.Logger
 
 	mu    sync.Mutex
-	state windowState
+	state guide.Window
 }
 
 // newGeometryTracker は初期値(前回終了時に復元した値)で追跡を始める。
 // 一度も動かさずに終了した場合は、この初期値がそのまま保存される。
-func newGeometryTracker(name string, initial windowState, logger *slog.Logger) *geometryTracker {
+func newGeometryTracker(name string, initial guide.Window, logger *slog.Logger) *geometryTracker {
 	return &geometryTracker{name: name, logger: logger, state: initial}
 }
 
@@ -54,12 +55,12 @@ func (t *geometryTracker) record(win *application.WebviewWindow) {
 		return
 	}
 	t.mu.Lock()
-	t.state = windowState{X: x, Y: y, Width: w, Height: h}
+	t.state = guide.Window{X: x, Y: y, Width: w, Height: h}
 	t.mu.Unlock()
 }
 
 // snapshot は保存に使う最後の正常値を返す。
-func (t *geometryTracker) snapshot() windowState {
+func (t *geometryTracker) snapshot() guide.Window {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.state

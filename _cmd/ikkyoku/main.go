@@ -33,6 +33,7 @@ import (
 	// ⚠️ **別名にしてあるのは、この関数の中の `app`（application.App）と
 	// パッケージ名がぶつかるから。**
 	ikkyokuapp "github.com/ShinteLab/ikkyoku/app"
+	"github.com/ShinteLab/ikkyoku/guide"
 )
 
 //go:embed all:frontend/dist
@@ -178,7 +179,7 @@ func main() {
 // ⚠️ **隠しているあいだは撮れない**(`CaptureService.Capture` の `requireFrame`)。
 // 「今どこを撮るのか」が画面に出ていないまま撮れるのは事故のもとなので、
 // **枠が見えていることを撮れる条件にしてある。**
-func newFrameWindow(app *application.App, st windowState) *application.WebviewWindow {
+func newFrameWindow(app *application.App, st guide.Window) *application.WebviewWindow {
 	w, h := safeFallback(st, defaultFrameWidth, defaultFrameHeight)
 
 	opts := application.WebviewWindowOptions{
@@ -243,7 +244,7 @@ func newFrameWindow(app *application.App, st windowState) *application.WebviewWi
 // 影と角丸が無いと**どこまでがウィンドウか分からなくなる**。
 //
 // 2 つ目の戻り値は「保存された位置を持っているか」で、初回だけ枠の外へ逃がす判断に使う。
-func newMainWindow(app *application.App, st windowState) (*application.WebviewWindow, bool) {
+func newMainWindow(app *application.App, st guide.Window) (*application.WebviewWindow, bool) {
 	w, h := safeFallback(st, defaultMainWidth, defaultMainHeight)
 
 	opts := application.WebviewWindowOptions{
@@ -266,7 +267,7 @@ func newMainWindow(app *application.App, st windowState) (*application.WebviewWi
 
 // applyPosition は保存位置があればそれを、無ければ中央表示を設定する。
 // 戻り値は保存位置を適用したかどうか。
-func applyPosition(opts *application.WebviewWindowOptions, st windowState) bool {
+func applyPosition(opts *application.WebviewWindowOptions, st guide.Window) bool {
 	if st.X == unsetPosition && st.Y == unsetPosition {
 		// 初回起動(保存された位置が無い)は中央表示にフォールバックする。
 		// センチネル値をそのまま X/Y に渡すと画面外に出てしまうため。
@@ -286,7 +287,7 @@ func applyPosition(opts *application.WebviewWindowOptions, st windowState) bool 
 // **ここを伸ばすと、起動してから枠が出るまでの無言の時間がそのまま伸びる。**
 const startupFitDelay = 200 * time.Millisecond
 
-func registerFrameHooks(app *application.App, wins *appWindows, st windowState, svc *CaptureService, fitOnStartup bool, logger *slog.Logger) {
+func registerFrameHooks(app *application.App, wins *appWindows, st guide.Window, svc *CaptureService, fitOnStartup bool, logger *slog.Logger) {
 	frame := wins.frame
 	// WindowRuntimeReady はウィンドウ単位で発火し、この時点なら ScreenNearestDipPoint も
 	// SetSize/SetPosition も確実に効く(ApplicationStarted では不確実)。
@@ -378,7 +379,7 @@ func startupFit(app *application.App, wins *appWindows, svc *CaptureService, log
 	}()
 }
 
-func registerMainHooks(app *application.App, wins *appWindows, st windowState, quit func()) {
+func registerMainHooks(app *application.App, wins *appWindows, st guide.Window, quit func()) {
 	main := wins.main
 	if st.X != unsetPosition || st.Y != unsetPosition {
 		main.RegisterHook(events.Common.WindowRuntimeReady, func(e *application.WindowEvent) {
