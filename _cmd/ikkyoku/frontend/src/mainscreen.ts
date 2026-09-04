@@ -77,6 +77,7 @@ import type {
   EngineSettings,
   FontChoice,
   FontState,
+  GameSummary,
   KifuDBStatus,
   KifuLoad,
   RecognizerStatus,
@@ -483,6 +484,8 @@ export function mountMainScreen(root: HTMLElement): void {
             <strong>指し手を全て反映した局面</strong>で<strong>解析タブ</strong>が開きます。
             手順は盤の右に並ぶので、押せばその局面まで戻れます。
             <strong>訂正タブは通りません</strong>（棋譜の局面は初期局面と手順で決まるため）。
+            <strong>「棚に登録する」を押すと棋譜タブに残ります</strong>
+            （読み込むだけでは残りません）。
           </span>
           <!-- URL から取る（2026-08-12）。日本将棋連盟の棋譜中継のように
                .kif を直に配っているところなら、貼り付けと同じ扱いで読める。
@@ -494,11 +497,21 @@ export function mountMainScreen(root: HTMLElement): void {
             <input id="kifu-url" type="url" spellcheck="false"
                    placeholder="http://live.shogi.or.jp/.../oui202607290101.kif" />
             <button id="kifu-load-url" class="ghost-btn" type="button">URL から読み込む</button>
+            <button id="kifu-import-url" class="ghost-btn" type="button"
+                    title="この URL の棋譜を棚（棋譜タブ）に登録します">棚に登録する</button>
           </div>
           <textarea id="kifu-text" class="kifu-text" spellcheck="false"
                     placeholder="手数----指手---------消費時間--&#10;   1 ７六歩(77)   ( 0:16/00:00:16)&#10;   2 ３四歩(33)   ( 0:04/00:00:04)"></textarea>
+          <!-- ⚠️ **入力欄を 2 つに増やさない。** 同じ入力の**行き先が 2 つある**
+               だけなので、欄を分けると「どちらに貼ったか」で挙動が変わる面になる。
+
+               ⚠️ **二系統を残してある**（2026-09-04）——「読み込む」は棚に入らず
+               解析タブへ直行し、「棚に登録する」は棚へ入れるだけで解析タブを触らない。
+               **棚は解析の前提条件ではない**（設計原則3）。 -->
           <div class="setting-fields">
             <button id="kifu-load" class="ghost-btn" type="button">読み込む</button>
+            <button id="kifu-import" class="ghost-btn" type="button"
+                    title="貼り付けた棋譜を棚（棋譜タブ）に登録します">棚に登録する</button>
             <button id="kifu-clear" class="ghost-btn" type="button">消す</button>
           </div>
           <p id="kifu-status" class="status" role="status" aria-live="polite" hidden></p>
@@ -4533,6 +4546,8 @@ export function mountMainScreen(root: HTMLElement): void {
   const kifuURL = root.querySelector<HTMLInputElement>("#kifu-url")!;
   const kifuLoad = root.querySelector<HTMLButtonElement>("#kifu-load")!;
   const kifuLoadURL = root.querySelector<HTMLButtonElement>("#kifu-load-url")!;
+  const kifuImport = root.querySelector<HTMLButtonElement>("#kifu-import")!;
+  const kifuImportURL = root.querySelector<HTMLButtonElement>("#kifu-import-url")!;
   const kifuStatus = root.querySelector<HTMLParagraphElement>("#kifu-status")!;
   const showKifuStatus = (message: string, kind?: "warn" | "error") => {
     kifuStatus.textContent = message;
@@ -4597,6 +4612,55 @@ export function mountMainScreen(root: HTMLElement): void {
     void runKifuLoad(kifuLoadURL, () => StudyService.LoadKifuURL(url));
   };
   kifuLoadURL.addEventListener("click", loadFromURL);
+
+  // 棚に登録する（棋譜タブ）。**「読み込む」とは行き先が違うだけ**で、
+  // 入力欄は同じ。
+  //
+  // ⚠️ **二系統を残してある**（2026-09-04）——「読み込む」は棚に入らず解析タブへ
+  // 直行し、こちらは棚へ入れるだけで**解析タブを触らない**。棚は解析の前提条件では
+  // ないので（設計原則3）、DB が開けていなくても「読み込む」は今までどおり動く。
+  //
+  // ⚠️ **タブは移らない。** 登録は「あとで探せるようにする」操作で、今すぐ見る
+  // わけではない（今すぐ見たいなら「読み込む」）。**代わりに一覧は取り直す**
+  // （棋譜タブを開いたときに反映されていないと、登録できたのか分からない）。
+  const runKifuImport = async (button: HTMLButtonElement, save: () => Promise<GameSummary>) => {
+    button.disabled = true;
+    kifuImport.disabled = true;
+    kifuImportURL.disabled = true;
+    showKifuStatus("棚に登録しています…");
+    try {
+      const rec = await save();
+      libraryUI.refresh();
+      const who = [rec.black, rec.white].filter(Boolean).join(" - ");
+      showKifuStatus(
+        `棚に登録しました: ${[rec.event, who].filter(Boolean).join(" / ") || "(棋戦名なし)"}`,
+      );
+    } catch (err) {
+      showKifuStatus(
+        `棚に登録できませんでした: ${String(err instanceof Error ? err.message : err)}`,
+        "error",
+      );
+    } finally {
+      kifuImport.disabled = false;
+      kifuImportURL.disabled = false;
+    }
+  };
+  kifuImport.addEventListener("click", () => {
+    const text = kifuText.value.trim();
+    if (!text) {
+      showKifuStatus("棋譜が空です。KIF 形式のテキストを貼り付けてください。", "error");
+      return;
+    }
+    void runKifuImport(kifuImport, () => KifuService.ImportKIF(text));
+  });
+  kifuImportURL.addEventListener("click", () => {
+    const url = kifuURL.value.trim();
+    if (!url) {
+      showKifuStatus("URL が空です。.kif ファイルの URL を入れてください。", "error");
+      return;
+    }
+    void runKifuImport(kifuImportURL, () => KifuService.ImportURL(url));
+  });
   // URL 欄で Enter を押したら読み込む（打ってからボタンへ手を戻さずに済む）。
   kifuURL.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
