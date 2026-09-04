@@ -17,7 +17,7 @@
 // ドラッグが動かない」)。これが無いと枠ウィンドウが一切動かせなくなる。
 import "@wailsio/runtime";
 
-import { DiagService } from "../bindings/ikkyoku-app";
+import { DiagService } from "../bindings/github.com/ShinteLab/ikkyoku/app";
 import { mountFrame } from "./frame";
 import { mountMainScreen } from "./mainscreen";
 

@@ -29,6 +29,10 @@ import (
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
+
+	// ⚠️ **別名にしてあるのは、この関数の中の `app`（application.App）と
+	// パッケージ名がぶつかるから。**
+	ikkyokuapp "github.com/ShinteLab/ikkyoku/app"
 )
 
 //go:embed all:frontend/dist
@@ -79,7 +83,7 @@ func main() {
 	kifuSvc := NewKifuService(logger, studySvc)
 	// フロントが生きているかの計測だけを持つ Service(diagservice.go)。
 	// 局面にもキャプチャにも関与しない。
-	diagSvc := NewDiagService(logger)
+	diagSvc := ikkyokuapp.NewDiagService(logger)
 
 	app := application.New(application.Options{
 		Name:        "ikkyoku",
@@ -148,7 +152,7 @@ func main() {
 	registerMainHooks(app, wins, state.Main, quit)
 	registerHotkey(app, captureSvc, logger)
 	registerVisibilityLog(wins, logger)
-	diagSvc.watch()
+	diagSvc.Watch()
 
 	// 駒種推論器(suteme)を先に用意しておく。3.5MB の学習データを読むので、
 	// 最初のキャプチャのときに読み始めると撮った瞬間に待たされる。

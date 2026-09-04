@@ -168,8 +168,9 @@ export function LoadKifu(text: string): $CancellablePromise<$models.KifuLoad> {
 /**
  * LoadKifuURL は URL から棋譜を取ってきて読み込む（`LoadKifu` の口違い）。
  * 
- * **取ってくるのは `ikkyoku/kifuweb`**（文字コードの判別もあちら。日本将棋連盟の
- * 棋譜中継は Shift_JIS）。ここは繋ぐだけで、**取得も KIF の解釈もここに書かない。**
+ * **取ってくるのは `fetchKIF`**（中身は `kicho/scrape`。文字コードの判別も
+ * HTML から .kif を辿るのもあちら。日本将棋連盟の棋譜中継は Shift_JIS）。
+ * ここは繋ぐだけで、**取得も KIF の解釈もここに書かない。**
  */
 export function LoadKifuURL(rawURL: string): $CancellablePromise<$models.KifuLoad> {
     return $Call.ByID(324395342, rawURL);

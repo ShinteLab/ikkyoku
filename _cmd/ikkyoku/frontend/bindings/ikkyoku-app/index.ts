@@ -3,7 +3,6 @@
 
 import * as AnalyzeService from "./analyzeservice.js";
 import * as CaptureService from "./captureservice.js";
-import * as DiagService from "./diagservice.js";
 import * as FontService from "./fontservice.js";
 import * as KifuService from "./kifuservice.js";
 import * as PositionService from "./positionservice.js";
@@ -13,7 +12,6 @@ import * as TrainingService from "./trainingservice.js";
 export {
     AnalyzeService,
     CaptureService,
-    DiagService,
     FontService,
     KifuService,
     PositionService,

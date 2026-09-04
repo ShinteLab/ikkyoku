@@ -1,4 +1,14 @@
-package main
+// Package app はフロントに公開する Service を持つ。
+//
+// ⚠️ **wails3 に依存しないこと。** Wails 依存は `_cmd/ikkyoku` に閉じ込める、
+// というのがこのプロジェクトの線引きで、ここはその外側。
+// **イベントの発火やダイアログが要る Service は `_cmd` 側に残し、
+// ロジックだけをこちら（あるいは ikkyoku の他のパッケージ）へ出す。**
+//
+// ここに置くのは「Wails の口が要らない Service」だけ。
+// `application.NewService()` は任意のパッケージの値を取れるので、
+// 登録は `_cmd/ikkyoku/main.go` が行う。
+package app
 
 import (
 	"log/slog"
@@ -114,11 +124,11 @@ func (s *DiagService) ReportError(window, kind, message, stack string) {
 		"window", window, "kind", kind, "message", message, "stack", stack)
 }
 
-// watch は心拍の途絶を監視する。main() から 1 回だけ起こす。
+// Watch は心拍の途絶を監視する。main() から 1 回だけ起こす。
 //
 // **一度も心拍を受け取っていないウィンドウは監視しない**(起動直後や、
 // まだ一度も表示していないメイン画面を「途切れた」と言わないため)。
-func (s *DiagService) watch() {
+func (s *DiagService) Watch() {
 	go func() {
 		t := time.NewTicker(heartbeatInterval)
 		defer t.Stop()
