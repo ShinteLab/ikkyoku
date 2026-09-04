@@ -3684,7 +3684,9 @@ DRM を素通りする。そのため入口を Chrome 拡張からネイティ�
   ikkyoku は `kicho.Open(dbPath, logger)` を呼んで `Library` を使うだけで、
   **kicho 側のコードは 1 行も変えていない。** 持ち込まれるのは `goja`（読売の
   Nuxt ペイロードを評価する JS エンジン）/ `modernc.org/sqlite` / `golang.org/x/net` /
-  `google/uuid` で、**全部 PureGo**（そのぶん exe が 10MB 級で膨らむ）
+  `google/uuid` で、**全部 PureGo**。⚠️ **そのぶん exe が膨らむ**
+  （`go build` だけの素の exe が **36.9MB**。この節に載っている kicho 以前の
+  実測 19.2MB からは倍近い。sqlite と goja が効いている）
 
 ワークスペース（`ShinteLab/shinte`）に置いた場合、そのルートに go.mod は無いので
 `go` コマンドは必ずこの `ikkyoku/` ディレクトリで実行すること。
