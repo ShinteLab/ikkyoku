@@ -3751,6 +3751,7 @@ New-Item -ItemType Junction -Path (Join-Path $w 'kicho')  -Target 'D:\Go\Project
 | `training/` | **訂正した局面を `suteme` の学習用サーバへ登録するクライアント**（`POST /api/register` / `GET /api/status`）。標準ライブラリのみ。**サンプルの作り方は書かない**（81 マスの切り出しは suteme の責務） |
 | `piecefont/` | **端末に入っているフォントから駒の字を焼く**（設定タブの「駒の字」）。フォントのある場所を知っているだけで、**TTF を組み立てるコードは書かない**（`core/shogifont`）。⚠️ **焼いたものを書き出す口を持たない**（その端末で表示するまで。配ると元フォントの条項が効く） |
 | `hotkey.go` | `ParseHotkey`（`"alt+s"` 文字列 → `golang.design/x/hotkey` の修飾子・キー） |
+| `dialog.go` | **ファイル選択ダイアログ**（`ikkyoku/app` へ `FilePicker` として差し込む）。⚠️ **ダイアログは Wails の口なのでここに残す** —— 設定のロジックは `ikkyoku/app` にある |
 | `analyze/` | **確定した局面 → 評価値**（Phase 4）。同梱／外部エンジンの選択（`NewLocalSession` / `NewExecSession`）。エンジンとの接続を持ち回り、評価値を先手視点に直す。**画像を知らない**（`position` と同じ側）。**正式な SFEN を要求するのはここだけ**で、視点の反転もこの境界で行う。**評価値 → 勝率の変換（`winrate.go`）もここ** —— 式も定数も 1 か所に置き、フロントで計算し直さない |
 | `usi/` | **Step 1 の足場**（Phase 4）。同一プロセスの `engine` を `io.Pipe` で USI として繋ぐ。**クライアント本体は `core/usi/client`**（ここに書かない）。**Step 2 で消える** |
 | `position/` | **「とある局面」を扱う層**（Phase 3/5）。1 マスずつ直せる `Board`・手番・駒台の先後の割り振り・SFEN の組み立て・警告（`board.go`/`position.go`/`edit.go`）＋**180 度回転**（`rotate.go` の `Rotate180`。⚠️ **表示視点ではない** —— 撮った画像が後手目線だったときに盤・先後・駒台・手番をまとめて入れ替える。**呼ぶのは訂正 → 解析の境界の 1 回だけ**）＋**手を進める側**（`move.go` の `ApplyMove`、`study.go` の `Study` ＝ 根 + **手の木**。⚠️ **一直線ではない** —— `Play`/`AddLine`/`Graft` が枝を生やし、`GoTo`/`DropFrom`/`Branch` は**節点の id** で指す。⚠️ **`Branch` は本譜の手を変化に落とす**（順番では表せないので印を持つ）。
@@ -3758,11 +3759,16 @@ New-Item -ItemType Junction -Path (Join-Path $w 'kicho')  -Target 'D:\Go\Project
 既に決まっているなら断る**（選び直すには先に `Branch` で外す）。⚠️ **`AddLine` は「誰が言った手か」も残す**（`Node.Sources`。既にある手にも足す））＋**棋譜の取り込み**（`kifu.go` の `FromKIF` / `FromFullSFEN`）＋**新規対局**（`newgame.go` の `NewGame`。手合割 → 初期局面。⚠️ **初期局面の表は `core/kifu.StartSFEN`**）。**画像を知らない**。検証は `core/sfen`、**合法性は `ikkyoku/legal`**、**KIF の読み取りと指し手の変換は `core/kifu`**（どれもここには書かない） |
 | `legal/` | **合法手生成のラッパ**（Phase 5）。`engine` を呼ぶのはここだけ。**状態を持たない**（局面 1 つに答えるだけ）。⚠️ **解析をここ経由に戻さないこと**（あちらは USI） |
 | `recognize/` | 画像 → 盤面。`suteme` を呼ぶだけ（`recognize.go`）＋どの学習データを使うかの指定（`predictor.go`）＋盤の矩形だけを探す `DetectRegion`（`detect.go`。ガイド枠の自動フィット用）。**認識器はここに書かない**。**Phase 3 の局面矯正層もここには入れない**（画像を知らない層として別に切る。上記参照） |
+| `app/` | **フロントに公開する Service**（2026-09-04 に `_cmd` から移した）。設定・訂正・解析・棋譜・駒の字・学習送信・計測の 8 つ。⚠️ **wails3 を import しない** —— Wails の口（ダイアログ・イベント）は `FilePicker` / `EventEmitter` として `_cmd` から差し込む。⚠️ **8 つは非公開メソッドで互いに繋がっているので割れない**（公開すると bindings に出てフロント API になる） |
+| `guide/` | **ガイド枠の寸法と幾何**（2026-09-04 に `captureservice.go` から出した）。自動フィットの余白・ずれの許容・枠の座標計算。**ウィンドウにも Wails にも依存しない**（HWND を触るのは `_cmd`）。⚠️ **実測値と経緯のコメントを消さないこと** —— 余白 0.3・「半分の周期」の誤検出・Frameless の下端 1px はどれも実機で踏んで分かったもの |
 | `_cmd/ikkyoku/` | Wails3 GUI アプリ(独立したネストモジュール)。下記「GUI アプリ(Wails3)」参照 |
 
-**ディレクトリ名は `ikkyoku`、モジュール名は `ikkyoku-app`。** `kicho` が
-「ディレクトリ `_cmd/kicho`・モジュール名 `kicho-app`」という構成なので、それに揃えてある。
-紛らわしいので混同しないこと。
+**ディレクトリ名もモジュール名も `ikkyoku`**（2026-09-04 に `ikkyoku-app` から直した。
+`kicho-app` / `prokishi-server` とは揃っていないが、あちらが古い形）。
+
+⚠️ **`bindings/ikkyoku/` と `bindings/github.com/ShinteLab/ikkyoku/` は別物。**
+前者は `_cmd/ikkyoku`（package main。今は `CaptureService` だけ）、
+後者はルートモジュールの各パッケージ（`app` / `guide` / `position` / …）。
 
 ## GUI アプリ(Wails3)
 
@@ -3772,7 +3778,7 @@ New-Item -ItemType Junction -Path (Join-Path $w 'kicho')  -Target 'D:\Go\Project
 CLI は無い。**
 
 - **独立したネストモジュール**（`kicho/_cmd/kicho`・`prokishi/_cmd/prokishi-server` と同じ構成）。
-  `module ikkyoku-app`、`replace github.com/ShinteLab/ikkyoku => ../../` でルートパッケージを参照する
+  `module ikkyoku`、`replace github.com/ShinteLab/ikkyoku => ../../` でルートパッケージを参照する
 - **Wails のバージョンは手元の CLI に追従している。** このディレクトリを作った時点の CLI は
   `v3.0.0-beta.3` だった（`wails3 skill` が前提にしている `alpha2.117` より新しい）。
   `wails3 init` の `-t vanilla` フラグは **beta.3 では無視され、常に React テンプレートが
@@ -3786,15 +3792,28 @@ CLI は無い。**
   **マウント時に一度だけ**静的マークアップへ変換して `innerHTML` に埋める。
   **React の使用箇所はここだけ**（クライアント側の react-dom ランタイムは読み込まれない）。
   アイコンを増やすときも `iconMarkup()` を通すこと
-- Wails 依存は `_cmd/ikkyoku/` にのみ置く（ルートパッケージ `ikkyoku` は触らない）。
+- Wails 依存は `_cmd/ikkyoku/` にのみ置く（`ikkyoku` 側は触らない）。
   `Capture` / `SavePNG` / `DefaultOutDir` / `ParseHotkey` / `DefaultHotkey` を
   そのまま import して使っており、ロジックを再実装していない
+- ⚠️ **ここに置くのは「Wails の口が要るもの」だけ**（2026-09-04）。
+  **7,380 行 → 2,392 行**まで減らしてある。Service は `ikkyoku/app`、
+  枠の幾何は `ikkyoku/guide` にあり、**残っているのは main・`CaptureService`・
+  ウィンドウ／Win32 まわりだけ**。
+  - **Wails の口は関数で渡す。** `SettingsService.PickFile`（ダイアログ。実体は
+    `dialog.go`）と `AnalyzeService.Emit`（イベント。`app.Event.Emit` の薄い包み）。
+    ⚠️ **どちらも nil で動くこと**（設計原則3。ダイアログが無くてもパスは手で打てるし、
+    イベントを捨てても解析は進む）
+  - ⚠️ **`CaptureService` だけが残っているのは、ウィンドウと HWND を触るから**
+    （枠の表示/非表示・素通し・自分を隠して撮る・メイン画面の塗り潰し）。
+    **他の 8 つとは関数フックでしか繋がっていない**ので、ここだけ独立している
+  - ⚠️ **`main` から呼ぶ口は `//wails:ignore` を付けて公開する**
+    （`SettingsService.Config` / `KifuService.Open` / `Close` /
+    `AnalyzeService.Close`）。**付けないと bindings に出てフロント API になる**
 
 | `_cmd/ikkyoku/` のファイル | 役割 |
 |---|---|
-| `main.go` | ウィンドウ 2 枚の生成・フック登録・ホットキー登録・起動時の自動フィット |
-| `settings.go` | 設定(`config.json`)の読み書きを担う Service。起動時に読んで配る役でもある。**エンジンの登録一覧**（追加・削除・名前・「解析に使う」・参照ダイアログ）もここ。⚠️ **エンジンの option の値**（`SetEngineOption` / `ResetEngineOptions`）もここだが、**宣言を控えるのは `AnalyzeService.CheckEngine`**（繋がないと分からないため）。**棋譜データベースの場所**（`SetKifuDBPath` / `BrowseKifuDB`）もここだが、⚠️ **開くのは `KifuService`**（フック 1 本で繋いである。SettingsService は棚を持たない） |
-| `captureservice.go` | Wails にバインドする Service。**寸法定数の唯一のソース**・`captureRegion`・枠の表示/非表示・終了(`Quit`)・認識の呼び出し・ガイド枠の自動フィット(`FitFrame`/`fitGeometry`) |
+| `main.go` | ウィンドウ 2 枚の生成・**Service の登録**・フック登録・ホットキー登録・起動時の自動フィット・終了時の後始末。⚠️ **Service の実体は `ikkyoku/app`**（`application.NewService()` は任意のパッケージの値を取れる）。⚠️ **import は別名にしてある** ——パッケージ名 `app` が `application.App` の変数 `app` とぶつかる |
+| `captureservice.go` | Wails にバインドする Service。**ウィンドウと HWND を触るのでここに残っている**（枠の表示/非表示・素通し・自分を隠して撮る・メイン画面の塗り潰し・終了(`Quit`)・認識の呼び出し・ガイド枠の自動フィット `FitFrame`）。⚠️ **寸法と幾何は `ikkyoku/guide`**（`captureRegion` はそれを使ってHWND の矩形から領域を出すだけ） |
 | `shinteweb.go` | `core/web` の embed を `/shinte-web/` で配信する AssetServer ミドルウェア |
 | `geometry.go` | ウィンドウ位置の追跡（終了時に `Position()` を読めないため） |
 | `windowstate.go` | `app-window.json` の読み書き・既定値・画面内へのクランプ |
@@ -3802,18 +3821,9 @@ CLI は無い。**
 | `clickthrough_windows.go` | HWND の `WS_EX_TRANSPARENT` を付け外しする（**枠の内側を素通しにする**）＋カーソル位置・マウスボタンの取得（`clickthrough_other.go` はスタブ）。**付け外しの判断はここに書かない**（`captureservice.go` の `watchCursor`） |
 | `clipboard_windows.go` | 画像を CF_DIB でクリップボードへ（`clipboard_other.go` はスタブ） |
 | `hotkey.go` | ホットキー文字列 → Wails のアクセラレータ表記 |
-| `diagservice.go` | **フロントが生きているかの計測**（心拍・例外の中継）。局面にもキャプチャにも関与しない。「メイン画面が真っ黒になる」現象を切り分けるためのもの（下記） |
 | `frontend/src/main.ts` | エントリ。**素の `import "@wailsio/runtime"`** と `?window=` による画面分岐 |
 | `frontend/src/frame.ts` | 枠（ツールバー + ガイド枠） |
-| `positionservice.go` | **訂正タブ**の局面を持つ Service。自由編集（未決・不正でよい）。操作のたびに `EditState` を丸ごと返す。⚠️ **撮った盤の目線**（`SetViewpoint`）もここ —— 盤は 1 マスも動かさず、**解析へ渡すときに回す**（`adoptPosition`）。⚠️ **手番は「対局としての先後」で出し入れし、中では「見た目の手番」で持つ**（翻訳はこのファイルの中だけ。`SeenTurn` は駒台の ▲/△ 用） |
-| `evalgraph.go` | **評価値グラフの記録**（`EvalPoint`/`EvalSeries`/`EvalGraph` と `evalStore`）。⚠️ **鍵は手順ツリーの節点 id**（手数ではない。枝があると同じ手数が何本もある）。⚠️ **エンジンごとに別の折れ線**（合成しない）。**持ち主は `StudyService`** —— 記録は局面ではなく**手順**に紐づくので、捨てる判断は手順を持っている側にしか書けない |
-| `studyservice.go` | **解析タブ**の局面を持つ Service。訂正タブから**写しを採る**（`Adopt`）か、**棋譜を読み込む**（`LoadKifu` / `LoadKifuURL`）か、**新しく対局を始める**（`NewGame`）。**URL から読んだものは取り直せる**（`ReloadKifu`。⚠️ **食い違ったところから先だけを差し替え、それより前の評価値は残す**。判断は `mergeReloadLocked` の 1 か所）。⚠️ **後ろの 2 つは訂正タブを経由しない入口**（どちらも局面が既に確定しているため）。⚠️ **PositionService とは別の局面**で、繋がるのは `Adopt` の 1 か所だけ。**手順は `position.Study`**（`Play`/`AddLine`/`GoTo`/`DropFrom`。**木**）。解析には**根 + 手順**を渡す（`analyzeTarget`） |
-| `analyzeservice.go` | 確定した局面を解析する Service（`Start` / `Stop` / `State` / `CheckEngine`）。**順位 1 の評価値を `StudyService.recordEval` に渡す**（評価値グラフ。⚠️ **記録先の判断はしない** —— 手順を持っていないので、捨てた枝かどうかを確かめようがない）。**局面は持たない**（`StudyService` から読む。⚠️ **`PositionService` を見ないこと**）。⚠️ **登録した「解析に使う」エンジンを同時に走らせる**（1 エンジン 1 プロセス）。途中経過はイベント（**`engineId` つき**） |
-| `trainingservice.go` | 訂正した局面を suteme へ登録する Service（`Status` / `Send`）。**状態を持たない**（送るものはフロントが渡す） |
-| `kifuservice.go` | **棋譜データベース（棚）**の Service（`Status` / `List` / `Search` / `Count` / `Get` / `Delete` / `Fetch` / `Refresh` / `Save` / `ImportKIF` / `ImportURL` / `SendToStudy` / `SendToStudyGame`）。**中身は `kicho.Library` を呼ぶだけ**で、取得も保存も検索もあちらの実装。⚠️ **棚が開けていなくてもアプリは動く**（`library()` が理由を返すだけ。設計原則3）。⚠️ **ServerService は移していない**（ikkyoku は HTTP サーバを持たない）。⚠️ **取り直せる URL かの判断は `reloadableURL` の 1 か所**（読売は .kif を置いていないので渡さない） |
-| `kifufetch.go` | **URL から棋譜を取ってくる**（`fetchKIF`）。文字コードの判別・HTML から .kif を辿る・上限つきの読み取りは全部 `kicho/scrape`。⚠️ **`kicho.Library` を経由しない** —— URL から棋譜を読むのは棚に依らない操作なので、DB が開けていなくても動くこと（設計原則3）。⚠️ **辿った先ではなく指定された URL を覚える**（.kif のパスは変わりうる） |
-| `fontservice.go` | **駒の字**の Service（`State` / `Scan` / `Preview` / `Add` / `Use` / `Remove` / `Rename` / **`SetGyoku` / `SetHidariUma`**）。返すのは **family 名と data URL、それに当てる `font-feature-settings` まで**で、画面に当てるのはフロント（`--shogi-font` と `--piece-features-*`）。⚠️ **焼いた TTF はディスクに残さない**（元フォントを入れ替えたのに古い字で描く事故が起きる）。⚠️ **玉の先後の判定を呼び出し側に書かせない**（`pieceStyle`。盤と自前の駒で別々に書くと「盤は玉なのに掴むと王」になる） |
-| `frontend/src/mainscreen.ts` | メイン画面（4 タブ: 入力 / 訂正 / 解析 / 設定。認識の記録は**訂正タブの盤の下**の折りたたみ「認識詳細情報」）。**連続解析の順番を決めているのもここ**（`batchStep`。⚠️ **1 局面ずつ順に・全部のエンジンが終わってから次へ**）。**視点（表示だけの反転）の値を持つのもここ**（`applyViewpoint`。⚠️ **訂正タブと解析タブで 1 つの値**）と、**新規対局の口**（`#newgame-start`。⚠️ **初期局面はフロントで作らない**） |
+| `frontend/src/mainscreen.ts` | メイン画面（5 タブ: 入力 / 棋譜 / 訂正 / 解析 / 設定。認識の記録は**訂正タブの盤の下**の折りたたみ「認識詳細情報」）。**連続解析の順番を決めているのもここ**（`batchStep`。⚠️ **1 局面ずつ順に・全部のエンジンが終わってから次へ**）。**視点（表示だけの反転）の値を持つのもここ**（`applyViewpoint`。⚠️ **訂正タブと解析タブで 1 つの値**）と、**新規対局の口**（`#newgame-start`。⚠️ **初期局面はフロントで作らない**） |
 | `frontend/src/editor.ts` | **訂正タブ**の中身（盤に重ねる 9x9 のグリッド・駒箱・手番・手数）。⚠️ **訂正モードのトグルは無い**（タブそのものがモード）。視点は `setFlip`（⚠️ **見た目の位置 → 局面のマス**の読み替えだけ。局面には効かない） |
 | `frontend/src/study.ts` | **解析タブの盤の操作**（手を進める UI）。駒をクリック → **動かせない位置が暗くなる** → 動かせる位置をクリックで指す。**手順のツリービュー**も（左クリックで戻る／右クリックでその手以下を消す）。⚠️ **解析の候補手の重ね表示もここ**（`showHint`。矢印／打ちは薄い駒。⚠️ **USI を解釈せず、今の局面の合法手から引き当てる**）。⚠️ **訂正タブのグリッドを流用していない**（別の盤・別の意味）。視点は `setFlip`（`editor.ts` と同じ読み替え。⚠️ **切り替えたら掴んでいる駒を捨てる**） |
 | `frontend/src/library.ts` | **棋譜タブ（棚）**。一覧・検索・詳細・削除と**「解析する」**。⚠️ **一覧も検索も Go 側（`KifuService`）が持つ**（3 文字未満の案内も `MinSearchLength` を写すだけ）。⚠️ **「棋譜 URL をコピー」は置かない**（渡す先が自分自身）。⚠️ **タブを開くたびに読み直す**（kicho アプリから足した棋譜が見えるように） |
@@ -3821,6 +3831,22 @@ CLI は無い。**
 | `frontend/src/evalgraph.ts` | **評価値グラフを描く**（SVG を手で組む。ライブラリは足さない）。⚠️ **点をここに溜めない**（持ち主は Go 側の `StudyService`）。押すとその局面へ戻る。⚠️ **箱の高さは持たない**（折り畳みとスプリットバーは `mainscreen.ts` が `--eval-graph-h` を書き換えるだけ。ここは `clientHeight` を測って描く側） |
 | `frontend/src/popup.ts` | **押した場所に出す小さなダイアログ**（成る/成らず・手順を消す・手順を追加・**折れ線の色**）。⚠️ **`window.confirm` を使わないための共通の入れ物**で、位置決め・Esc・外側クリック・初期フォーカスが 1 か所に閉じている。**4 つめもここを使うこと** |
 | `frontend/src/icon.ts` | `react-icons` のアイコン → SVG 文字列（唯一の React 使用箇所） |
+
+`app/` のファイル（**Wails の口が要らない Service**。2026-09-04 に `_cmd` から移した）:
+
+| `app/` のファイル | 役割 |
+|---|---|
+| `settings.go` | 設定(`config.json`)の読み書きを担う Service。起動時に読んで配る役でもある。**エンジンの登録一覧**（追加・削除・名前・「解析に使う」・参照ダイアログ）もここ。⚠️ **ダイアログそのものは持たない** —— `PickFile`（`app.FilePicker`）を`_cmd/ikkyoku/dialog.go` が差し込む。⚠️ **エンジンの option の値**（`SetEngineOption` / `ResetEngineOptions`）もここだが、**宣言を控えるのは `AnalyzeService.CheckEngine`**（繋がないと分からないため）。**棋譜データベースの場所**（`SetKifuDBPath` / `BrowseKifuDB`）もここだが、⚠️ **開くのは `KifuService`**（フック 1 本で繋いである。SettingsService は棚を持たない） |
+| `positionservice.go` | **訂正タブ**の局面を持つ Service。自由編集（未決・不正でよい）。操作のたびに `EditState` を丸ごと返す。⚠️ **撮った盤の目線**（`SetViewpoint`）もここ —— 盤は 1 マスも動かさず、**解析へ渡すときに回す**（`adoptPosition`）。⚠️ **手番は「対局としての先後」で出し入れし、中では「見た目の手番」で持つ**（翻訳はこのファイルの中だけ。`SeenTurn` は駒台の ▲/△ 用） |
+| `studyservice.go` | **解析タブ**の局面を持つ Service。訂正タブから**写しを採る**（`Adopt`）か、**棋譜を読み込む**（`LoadKifu` / `LoadKifuURL`）か、**新しく対局を始める**（`NewGame`）。**URL から読んだものは取り直せる**（`ReloadKifu`。⚠️ **食い違ったところから先だけを差し替え、それより前の評価値は残す**。判断は `mergeReloadLocked` の 1 か所）。⚠️ **後ろの 2 つは訂正タブを経由しない入口**（どちらも局面が既に確定しているため）。⚠️ **PositionService とは別の局面**で、繋がるのは `Adopt` の 1 か所だけ。**手順は `position.Study`**（`Play`/`AddLine`/`GoTo`/`DropFrom`。**木**）。解析には**根 + 手順**を渡す（`analyzeTarget`） |
+| `evalgraph.go` | **評価値グラフの記録**（`EvalPoint`/`EvalSeries`/`EvalGraph` と `evalStore`）。⚠️ **鍵は手順ツリーの節点 id**（手数ではない。枝があると同じ手数が何本もある）。⚠️ **エンジンごとに別の折れ線**（合成しない）。**持ち主は `StudyService`** —— 記録は局面ではなく**手順**に紐づくので、捨てる判断は手順を持っている側にしか書けない |
+| `kifuservice.go` | **棋譜データベース（棚）**の Service（`Status` / `List` / `Search` / `Count` / `Get` / `Delete` / `Fetch` / `Refresh` / `Save` / `ImportKIF` / `ImportURL` / `SendToStudy` / `SendToStudyGame`）。**中身は `kicho.Library` を呼ぶだけ**で、取得も保存も検索もあちらの実装。⚠️ **棚が開けていなくてもアプリは動く**（`library()` が理由を返すだけ。設計原則3）。⚠️ **ServerService は移していない**（ikkyoku は HTTP サーバを持たない）。⚠️ **取り直せる URL かの判断は `reloadableURL` の 1 か所**（読売は .kif を置いていないので渡さない） |
+| `trainingservice.go` | 訂正した局面を suteme へ登録する Service（`Status` / `Send`）。**状態を持たない**（送るものはフロントが渡す） |
+| `fontservice.go` | **駒の字**の Service（`State` / `Scan` / `Preview` / `Add` / `Use` / `Remove` / `Rename` / **`SetGyoku` / `SetHidariUma`**）。返すのは **family 名と data URL、それに当てる `font-feature-settings` まで**で、画面に当てるのはフロント（`--shogi-font` と `--piece-features-*`）。⚠️ **焼いた TTF はディスクに残さない**（元フォントを入れ替えたのに古い字で描く事故が起きる）。⚠️ **玉の先後の判定を呼び出し側に書かせない**（`pieceStyle`。盤と自前の駒で別々に書くと「盤は玉なのに掴むと王」になる） |
+| `analyzeservice.go` | 確定した局面を解析する Service（`Start` / `Stop` / `State` / `CheckEngine`）。**順位 1 の評価値を `StudyService.recordEval` に渡す**（評価値グラフ。⚠️ **記録先の判断はしない** —— 手順を持っていないので、捨てた枝かどうかを確かめようがない）。**局面は持たない**（`StudyService` から読む。⚠️ **`PositionService` を見ないこと**）。⚠️ **登録した「解析に使う」エンジンを同時に走らせる**（1 エンジン 1 プロセス）。途中経過はイベント（**`engineId` つき**）。⚠️ **発火の口は持たない** ——`Emit`（`app.EventEmitter`）を `main.go` が差し込む |
+| `diagservice.go` | **フロントが生きているかの計測**（心拍・例外の中継）。局面にもキャプチャにも関与しない。「メイン画面が真っ黒になる」現象を切り分けるためのもの（下記） |
+| `kifufetch.go` | **URL から棋譜を取ってくる**（`fetchKIF`）。文字コードの判別・HTML から .kif を辿る・上限つきの読み取りは全部 `kicho/scrape`。⚠️ **`kicho.Library` を経由しない** —— URL から棋譜を読むのは棚に依らない操作（設計原則3） |
+
 
 ### ウィンドウ構成(2枚)
 
@@ -5303,13 +5329,14 @@ task build:embed                      # 配布用: 認識器を焼き込んだ e
 
 ```powershell
 cd ikkyoku
-go build ./...                          # ルートパッケージのみ（_cmd はアンダースコア始まりで対象外）
+go build ./...                          # app / guide / position / analyze ...（_cmd はアンダースコア始まりで対象外）
 go vet ./...
 go test ./...
 ```
 
 `_cmd/ikkyoku/`（Wails3 GUI アプリ）は独立したネストモジュールなので、上記の
-`./...` には含まれない。ビルド・確認は「GUI アプリ(Wails3)」節のコマンドを使うこと。
+`./...` には含まれない。⚠️ **ただし中身は 2,392 行まで減った**（2026-09-04）——
+Service は `app/`、枠の幾何は `guide/` にあるので、**普段直すのは `./...` の側**。ビルド・確認は「GUI アプリ(Wails3)」節のコマンドを使うこと。
 
 **`go mod tidy` の実行後は require 行が消えていないか確認すること**
 （親 `CLAUDE.md` に書かれている `_cmd` 配下が `go build ./...` の走査対象外になる落とし穴）。
@@ -5482,7 +5509,9 @@ go test ./...
   **未対応の手合割を平手に倒さないこと**、`FromFullSFEN` が持ち駒を先後に割り振り
   **未決を残さないこと**（残ると SFEN が組み上がらず解析できない）
 
-GUI 側（`_cmd/ikkyoku/`。別モジュールなので上の `./...` には含まれない）にもある:
+`app/` と `guide/` にもある（**2026-09-04 に `_cmd` から移した**ので、
+上の `go test ./...` に含まれるようになった）:
+
 
 - `kifuservice_test.go` — **棋譜データベース（棚）**（2026-09-04）。
   ⚠️ **一番の要点は「棚が開けていなくても panic せず、直す先の分かる理由を返す」**
@@ -5568,14 +5597,14 @@ GUI 側（`_cmd/ikkyoku/`。別モジュールなので上の `./...` には含�
   **宣言順を並べ替えないこと**、⚠️ **実行ファイルを差し替えたら宣言を捨て、
   値は残すこと**、⚠️ **「まだ繋いでいない」と「宣言が 1 つも無い」を
   `OptionsKnown` で区別できること**（画面に出す文言が違う）
-- `fitgeometry_test.go` — `fitGeometry`（盤の位置 → 枠ウィンドウの新しい位置・サイズ）と
-  `fitMargin`/`withFitMargin`（盤の外に残す余白）。**符号を 1 つ間違えると枠が逆方向へ
+- `guide/guide_test.go` — `Geometry`（盤の位置 → 枠ウィンドウの新しい位置・サイズ）と
+  `Margin`/`WithMargin`（盤の外に残す余白）。**符号を 1 つ間違えると枠が逆方向へ
   飛ぶのに、気づく手段が実機しか無い**ので固定してある。DPI スケーリング（150%）と
   「ずれが `slop` より小さければ動かさない」も含む。
   **余白のテストは「0 に戻すな」「1 割に戻すな」の歯止め**（上記の ⚠️）。
-  **`fitSlop` が必ず余白より小さいことも見ている**（同じにすると余白が 0 になる
+  **`Slop` が必ず余白より小さいことも見ている**（同じにすると余白が 0 になる
   ずれを見逃す）
-  **枠の素通し**（`insideClickThrough`）もここ: ⚠️ **撮る範囲そのものにしないこと** ——
+  **枠の素通し**（`InsideClickThrough`）もここ: ⚠️ **撮る範囲そのものにしないこと** ——
   Wails のリサイズ判定（端 5px）と重なるので、**左右と下の縁から枠を
   リサイズできなくなる**（素通しを切るまで大きさを変えられない）。
   詰め幅が CSS px 指定なので **DPI が上がると物理ピクセルでも広がること**も見ている
@@ -5620,10 +5649,19 @@ GUI 側（`_cmd/ikkyoku/`。別モジュールなので上の `./...` には含�
   ⚠️ **古い世代（`Epoch`）の記録が書き戻らないこと**も見ている ——
   解析は非同期なので、**これが無いと捨てた枝の評価値が後から復活する**
   （画面を見ても気づけない）
+
+`_cmd/ikkyoku/` に残るテストは 2 つだけ（別モジュールなので `./...` には含まれない。
+`cd _cmd/ikkyoku; go test .`）:
+
 - `clipboard_roundtrip_windows_test.go` — クリップボードに載せた CF_DIB を読み返し、
   ヘッダ・ボトムアップの行順・BGR の並びを検証する。手で組み立てたバイト列なので、
   貼り付け先で初めて気づくより往復で確かめるほうが速い。
   **実行するとクリップボードの中身が置き換わる**（`cd _cmd\ikkyoku; go test .`）
+- `recognizersource_test.go` — 認識器の読み込み元の解決（`resolveRecognizerSource`）。
+  ⚠️ **`auto` を「焼き込み優先」にしない**歯止め —— 開発中（＝ディレクトリを
+  指している状態）に焼き込みへ倒れると、**学習データを更新しても反映されない**
+  という最も気づきにくい事故になる。**タグの有無どちらでも通る**ように、期待値を
+  `recognize.EmbeddedAvailable()` で切り替えてある
 
 ## 開発上の約束
 
