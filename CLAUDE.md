@@ -3722,6 +3722,15 @@ New-Item -ItemType Junction -Path (Join-Path $w 'kicho')  -Target 'D:\Go\Project
 `.gitignore` が `.*` を無視するので git には見えない。
 `_cmd/ikkyoku` 側の `../../../suteme` も同じジャンクションで解決される。
 
+⚠️ **worktree には `frontend/node_modules` も `frontend/bindings` も無い**
+（どちらも `.gitignore` 済み）。フロントを触る前に 2 つとも用意すること:
+
+```powershell
+cd _cmd\ikkyoku
+npm --prefix frontend install
+wails3 generate bindings -ts -i
+```
+
 **消すときは `Remove-Item -Recurse` を使わないこと**（参照先の中身まで消しうる）。
 `[System.IO.Directory]::Delete($path, $false)` で reparse point だけを消す。
 
@@ -5292,7 +5301,7 @@ Start-Process .\_cmd\ikkyoku\bin\ikkyoku.exe
 ```powershell
 cd ikkyoku\_cmd\ikkyoku
 npm --prefix frontend install         # 初回のみ
-wails3 generate bindings -ts -i       # Go の Service/Model を変えたら必ず実行
+wails3 generate bindings -ts -i       # ⚠️ クローン直後にも要る（下記）／Service・Model を変えたら必ず
 wails3 dev                            # 開発モード
 wails3 build                          # frontend ビルド〜bindings 生成〜go build まで一括
 go build -o bin\ikkyoku.exe .         # Go だけを素早く確認したいとき(frontend/dist が要る)
@@ -5301,9 +5310,29 @@ task model:copy                       # 配布用: suteme/dist → recognize/mod
 task build:embed                      # 配布用: 認識器を焼き込んだ exe(model:copy 込み)
 ```
 
+- ⚠️ **`frontend/bindings/` は生成物で、git に入っていない**（`.gitignore` 済み）。
+  **クローン直後・worktree を作った直後は存在しない**ので、
+  **`npm run build` や `tsc` を打つ前に一度生成すること。**
+
+  忘れると `Cannot find module '../bindings/...'`（TS2307）が延々と出る。
+  ⚠️ **パスの間違いと区別が付きにくい** —— 2026-09-04 に Service を `ikkyoku/app` へ
+  移して import 先が `bindings/ikkyoku-app` から
+  `bindings/github.com/ShinteLab/ikkyoku/app` などに変わったので、
+  **同じエラーが「生成していない」でも「パスが古い」でも出る**。
+  **まず生成してから疑うこと。**
+
+  - **`wails3 build` / `wails3 dev` は自動で生成する**（`build/Taskfile.yml` の
+    `build:frontend` が `generate:bindings` に依存している）。手で打つ必要があるのは
+    **`npm run build` / `npx tsc` を単独で走らせるとき**だけ
+  - **生成は決定論的。** bindings を丸ごと消して `wails3 generate bindings -ts -i` を
+    打つと**バイト単位で同じものが戻る**ことを確認済み（2026-09-04）。
+    消えていても慌てて git から戻さないこと
 - `wails3 generate bindings` は Taskfile(`build/Taskfile.yml` の `generate:bindings`)と
   同じ `-ts -i` を付けること(wails3 skill pitfalls.md 12 の「フラグの食い違いで
   `wails3 dev` の 1 回目だけ失敗する」問題を避けるため)
+  - ⚠️ **Taskfile 側は `-clean=true` も付けている**（生成前に消す）。手で打つときは
+    付かないので、**パッケージを移動・改名したときは古いディレクトリが残る**
+    （実際 `bindings/ikkyoku-app/` が残った）。**移動したら手で消すこと**
 - **配る exe は `task build:embed`。** 認識器を焼き込むので、`suteme` のリポジトリが
   無い環境でもそのまま動く（「認識器の読み込み元は 3 通り」の節）。
   ⚠️ **`wails3 build` は焼き込まない**（タグが付かない）
