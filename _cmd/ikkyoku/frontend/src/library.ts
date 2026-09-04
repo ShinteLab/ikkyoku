@@ -1,0 +1,347 @@
+// 棋譜タブ（棚）。**保存済みの棋譜を探して解析へ送る面。**
+//
+// 実装は `kicho`（棋譜データベース）にあり、ここが呼ぶのは Go 側の
+// `KifuService` だけ。**検索の条件も手数の数え方もここには書かない。**
+//
+// ⚠️ **入力タブの「棋譜を貼り付ける」とは系統が違う。** あちらは
+// 「保存せず解析する」で、こちらは「棚に溜めたものから選ぶ」。
+// **二系統を残してある** —— 棚は解析の前提条件ではない（設計原則3）。
+//
+// ⚠️ **「棋譜 URL をコピー」は置かない**（kicho の UI にはある）。あれは
+// ShogiHome 等の外部ツールへ渡すためのもので、ikkyoku では渡す先が自分自身。
+// **代わりに置くのが「解析する」。**
+import { KifuService } from "../bindings/ikkyoku-app";
+import { openPopup } from "./popup";
+import type { GameDetail, GameSummary, KifuLoad } from "../bindings/ikkyoku-app/models";
+
+export type LibraryHandle = {
+  // reveal はタブを開いたときに呼ぶ（棚を読み直す）。
+  //
+  // ⚠️ **開くたびに読み直すこと。** 同じ DB を kicho アプリからも触れるので、
+  // 初回だけ読む作りにすると**向こうで足した棋譜が見えない**（共用にした意味が消える）。
+  reveal: () => void;
+  // refresh は棚そのものが入れ替わったときに呼ぶ（設定で DB を開き直したとき）。
+  refresh: () => void;
+};
+
+// MIN_SEARCH_LENGTH は索引（FTS5 trigram）が効く最小文字数。
+//
+// ⚠️ **Go 側の `MinSearchLength`（= `store.MinTrigramLen`）と同じ値。**
+// 案内を出すためだけに持っており、**判定そのものは Go 側**（3 文字未満は
+// LIKE へ落ちる）。**ここを検索の条件に使わないこと。**
+const MIN_SEARCH_LENGTH = 3;
+
+// SOURCE_LABELS は取得元の表示名。
+const SOURCE_LABELS: Record<string, string> = {
+  yomiuri: "読売（竜王戦）",
+  shogilive: "将棋連盟 中継",
+  url: "URL から取り込み",
+  paste: "貼り付け",
+};
+
+const formatDate = (rfc3339: string): string => {
+  if (!rfc3339) return "-";
+  const d = new Date(rfc3339);
+  if (Number.isNaN(d.getTime())) return "-";
+  return d.toLocaleDateString("ja-JP");
+};
+
+// movesText は手数の表示。
+//
+// **0 手かつ未終局は「（対局前）」。** 中継は対局開始前から棋譜を置いており、
+// ヘッダだけで指し手がまだ 1 手も無い .kif が返る。**取得の失敗ではない。**
+const movesText = (g: GameSummary): string => {
+  if (g.finished) return `${g.moves}手（終局）`;
+  if (g.moves === 0) return "（対局前）";
+  return `${g.moves}手`;
+};
+
+export function mountLibrary(
+  root: ParentNode,
+  opts: {
+    // onAnalyze は「解析する」を押したとき（解析タブへ移って描くのは呼び出し側）。
+    onAnalyze: (load: KifuLoad) => void;
+  },
+): LibraryHandle {
+  const count = root.querySelector<HTMLElement>("#library-count")!;
+  const reload = root.querySelector<HTMLButtonElement>("#library-reload")!;
+  const text = root.querySelector<HTMLInputElement>("#library-text")!;
+  const from = root.querySelector<HTMLInputElement>("#library-from")!;
+  const to = root.querySelector<HTMLInputElement>("#library-to")!;
+  const finishedOnly = root.querySelector<HTMLInputElement>("#library-finished")!;
+  const search = root.querySelector<HTMLButtonElement>("#library-search")!;
+  const clear = root.querySelector<HTMLButtonElement>("#library-clear")!;
+  const hint = root.querySelector<HTMLParagraphElement>("#library-hint")!;
+  const status = root.querySelector<HTMLParagraphElement>("#library-status")!;
+  const rows = root.querySelector<HTMLTableSectionElement>("#library-rows")!;
+  const preview = root.querySelector<HTMLElement>("#library-preview")!;
+  const previewTitle = root.querySelector<HTMLElement>("#library-preview-title")!;
+  const previewClose = root.querySelector<HTMLButtonElement>("#library-preview-close")!;
+  const previewMeta = root.querySelector<HTMLElement>("#library-preview-meta")!;
+  const previewKif = root.querySelector<HTMLElement>("#library-preview-kif")!;
+
+  // 今開いている詳細の ID（行の強調に使う）。
+  let openID = "";
+  // 読み込み中は多重に走らせない（検索ボタン連打・タブの出入り）。
+  let busy = false;
+
+  const setStatus = (msg: string, kind: "" | "error" | "warn" = "") => {
+    status.textContent = msg;
+    status.hidden = msg === "";
+    status.classList.toggle("is-error", kind === "error");
+    status.classList.toggle("is-warn", kind === "warn");
+  };
+
+  const hasConditions = (): boolean =>
+    text.value !== "" || from.value !== "" || to.value !== "" || finishedOnly.checked;
+
+  // 3 文字未満の案内。**索引が効かないので全件走査になる**ことを先に出す
+  // （件数が増えたときに「急に遅くなった」と見えないように）。
+  const showHint = () => {
+    const n = [...text.value].length;
+    const short = n > 0 && n < MIN_SEARCH_LENGTH;
+    hint.hidden = !short;
+    if (short) {
+      hint.textContent = `検索語が ${MIN_SEARCH_LENGTH} 文字未満です。索引が使えないため全件を走査します（件数が増えると遅くなります）。`;
+    }
+  };
+
+  const closePreview = () => {
+    openID = "";
+    preview.hidden = true;
+    previewKif.textContent = "";
+    previewMeta.replaceChildren();
+    paintSelection();
+  };
+
+  const paintSelection = () => {
+    for (const tr of rows.querySelectorAll<HTMLTableRowElement>("tr")) {
+      tr.classList.toggle("is-selected", tr.dataset.id === openID && openID !== "");
+    }
+  };
+
+  const addMeta = (label: string, value: string) => {
+    if (!value) return;
+    const dt = document.createElement("dt");
+    dt.textContent = label;
+    const dd = document.createElement("dd");
+    dd.textContent = value;
+    previewMeta.append(dt, dd);
+  };
+
+  const showPreview = (d: GameDetail) => {
+    openID = d.id;
+    previewTitle.textContent = d.event || "(棋戦名なし)";
+    previewMeta.replaceChildren();
+    addMeta("先手", d.black);
+    addMeta("後手", d.white);
+    addMeta("手合割", d.handicap);
+    addMeta("開始", formatDate(d.startedAt));
+    addMeta("場所", d.place);
+    addMeta("手数", movesText(d));
+    addMeta("取得元", SOURCE_LABELS[d.source] ?? d.source);
+    addMeta("取得元 URL", d.sourceUrl);
+    // ⚠️ **KIF は原本をそのまま出す**（整形し直さない）。保存されているのも
+    // 原本なので、画面と棚の中身を食い違わせない。
+    previewKif.textContent = d.kif;
+    preview.hidden = false;
+    paintSelection();
+  };
+
+  const show = async (id: string) => {
+    setStatus("");
+    try {
+      showPreview(await KifuService.Get(id));
+    } catch (err) {
+      setStatus(`棋譜を読めませんでした: ${String(err)}`, "error");
+    }
+  };
+
+  const remove = async (id: string) => {
+    setStatus("");
+    try {
+      await KifuService.Delete(id);
+      if (openID === id) closePreview();
+      await load();
+    } catch (err) {
+      setStatus(`削除できませんでした: ${String(err)}`, "error");
+    }
+  };
+
+  // 削除の確認。**取り返しがつかない**（取得元が無いもの＝貼り付け登録は
+  // 戻せない）ので一度聞く。
+  //
+  // ⚠️ **`window.confirm` を使わないこと**（popup.ts の先頭の理由。
+  // 画面の真ん中に出るうえに「OK / キャンセル」という
+  // この選択とは無関係な語でしか聞けない）。
+  // ⚠️ **初期フォーカスは「やめる」**（消す操作なので、Enter の連打で
+  // 消えてしまわないように。手順を消すときと同じ）。
+  const askRemove = (e: MouseEvent, id: string, label: string) => {
+    openPopup(e.clientX, e.clientY, {
+      label: `${label} を棚から削除`,
+      focus: 1,
+      items: [
+        { label: `「${label}」を削除`, kind: "danger", onPick: () => void remove(id) },
+        { label: "やめる", onPick: () => {} },
+      ],
+    });
+  };
+
+  const analyze = async (id: string, btn: HTMLButtonElement) => {
+    setStatus("");
+    btn.disabled = true;
+    try {
+      // ⚠️ **取得元の URL も一緒に渡るのは Go 側の仕事**（`SendToStudy`）。
+      // これがあると解析タブの「再読み込み」で中継の最新手を追える。
+      opts.onAnalyze(await KifuService.SendToStudy(id));
+    } catch (err) {
+      setStatus(`解析タブへ送れませんでした: ${String(err)}`, "error");
+    } finally {
+      btn.disabled = false;
+    }
+  };
+
+  const cell = (tr: HTMLTableRowElement, value: string, cls = ""): HTMLTableCellElement => {
+    const td = document.createElement("td");
+    td.textContent = value;
+    if (cls) td.className = cls;
+    tr.append(td);
+    return td;
+  };
+
+  const render = (games: GameSummary[], total: number) => {
+    rows.replaceChildren();
+    for (const g of games) {
+      const tr = document.createElement("tr");
+      tr.dataset.id = g.id;
+      cell(tr, formatDate(g.startedAt));
+      cell(tr, g.event || "-").title = SOURCE_LABELS[g.source] ?? g.source;
+      cell(tr, g.black || "-");
+      cell(tr, g.white || "-");
+      const moves = cell(tr, movesText(g), "is-num");
+      if (g.endMark) moves.title = g.endMark;
+
+      const actions = document.createElement("td");
+      actions.className = "is-actions";
+
+      // ⚠️ **「解析する」が主役。** kicho の「棋譜 URL をコピー」の置き換えで、
+      // ikkyoku で棚を持つ理由そのもの。
+      const analyzeBtn = document.createElement("button");
+      analyzeBtn.type = "button";
+      analyzeBtn.className = "ghost-btn is-primary";
+      analyzeBtn.textContent = "解析する";
+      analyzeBtn.title = "この棋譜を解析タブで開きます";
+      analyzeBtn.addEventListener("click", () => void analyze(g.id, analyzeBtn));
+
+      const showBtn = document.createElement("button");
+      showBtn.type = "button";
+      showBtn.className = "ghost-btn";
+      showBtn.textContent = "表示";
+      showBtn.title = "KIF の原本を見ます";
+      showBtn.addEventListener("click", () => {
+        if (openID === g.id) {
+          closePreview();
+          return;
+        }
+        void show(g.id);
+      });
+
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.className = "danger-btn";
+      delBtn.textContent = "削除";
+      delBtn.title = "棚から削除します";
+      delBtn.addEventListener("click", (e) => {
+        askRemove(e, g.id, g.event || g.black || g.id);
+      });
+
+      actions.append(analyzeBtn, showBtn, delBtn);
+      tr.append(actions);
+      rows.append(tr);
+    }
+    paintSelection();
+
+    // 件数。条件を付けているときだけ「N / 全体」にする。
+    count.textContent =
+      hasConditions() && total > 0
+        ? `棋譜一覧（${games.length} / ${total}）`
+        : `棋譜一覧（${games.length}）`;
+
+    if (games.length === 0) {
+      setStatus(
+        hasConditions()
+          ? "条件に合う棋譜がありません。"
+          : "まだ棋譜がありません。入力タブの「棚に登録する」や「中継から取得」で追加してください。",
+        "warn",
+      );
+    }
+  };
+
+  const load = async () => {
+    if (busy) return;
+    busy = true;
+    reload.disabled = true;
+    search.disabled = true;
+    setStatus("読み込み中…");
+    try {
+      // ⚠️ **`limit: 0` は無制限**（Go 側の `store.Query.Limit` がそう）。
+      // 一覧は棚の全部を出して、絞るのは検索条件のほう。
+      const [list, total] = await Promise.all([
+        KifuService.Search({
+          text: text.value,
+          from: from.value,
+          to: to.value,
+          finishedOnly: finishedOnly.checked,
+          limit: 0,
+        }),
+        KifuService.Count(),
+      ]);
+      setStatus("");
+      render(list ?? [], total);
+    } catch (err) {
+      // ⚠️ **棚が開けていないのが一番ありうる**（設定タブで場所を直す）。
+      // Go 側がその旨のエラーを返すので、そのまま出せば行き先が分かる。
+      rows.replaceChildren();
+      count.textContent = "棋譜一覧";
+      setStatus(String(err), "error");
+    } finally {
+      busy = false;
+      reload.disabled = false;
+      search.disabled = false;
+    }
+  };
+
+  const runSearch = () => {
+    showHint();
+    closePreview();
+    void load();
+  };
+
+  search.addEventListener("click", runSearch);
+  reload.addEventListener("click", runSearch);
+  // ⚠️ **打つたびには検索しない**（Enter か「検索」で実行）。
+  // 3 文字未満は全件走査になるので、1 文字ごとに走らせない。
+  text.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") runSearch();
+  });
+  text.addEventListener("input", showHint);
+  for (const el of [from, to, finishedOnly]) {
+    el.addEventListener("change", runSearch);
+  }
+  clear.addEventListener("click", () => {
+    text.value = "";
+    from.value = "";
+    to.value = "";
+    finishedOnly.checked = false;
+    runSearch();
+  });
+  previewClose.addEventListener("click", closePreview);
+
+  return {
+    reveal: () => void load(),
+    refresh: () => {
+      closePreview();
+      void load();
+    },
+  };
+}

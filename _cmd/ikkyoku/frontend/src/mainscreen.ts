@@ -68,6 +68,7 @@ import {
 } from "../bindings/ikkyoku-app";
 import { iconMarkup } from "./icon";
 import { mountEditor } from "./editor";
+import { mountLibrary } from "./library";
 import { mountEvalGraph } from "./evalgraph";
 import { mountStudyBoard } from "./study";
 import { openPopup } from "./popup";
@@ -356,6 +357,8 @@ export function mountMainScreen(root: HTMLElement): void {
         <div class="tabs" role="tablist">
           <button id="tab-input" class="tab is-active" type="button"
                   role="tab" aria-selected="true" aria-controls="panel-input">入力</button>
+          <button id="tab-library" class="tab" type="button"
+                  role="tab" aria-selected="false" aria-controls="panel-library">棋譜</button>
           <button id="tab-edit" class="tab" type="button"
                   role="tab" aria-selected="false" aria-controls="panel-edit">訂正</button>
           <button id="tab-study" class="tab" type="button"
@@ -499,6 +502,72 @@ export function mountMainScreen(root: HTMLElement): void {
             <button id="kifu-clear" class="ghost-btn" type="button">消す</button>
           </div>
           <p id="kifu-status" class="status" role="status" aria-live="polite" hidden></p>
+        </div>
+      </div>
+
+      <!-- 棋譜タブ（棚）。**保存済みの棋譜を探して解析へ送る面。**
+
+           ⚠️ **入力タブの「棋譜を貼り付ける」とは系統が違う。** あちらは
+           「保存せず解析する」で、こちらは「棚に溜めたものから選ぶ」。
+           **二系統を残してある**（棚は解析の前提条件ではない。設計原則3）。
+
+           ⚠️ **「棋譜 URL をコピー」は置かない**（kicho の UI にはある）。
+           あれは ShogiHome 等の外部ツールへ渡すためのもので、ikkyoku では
+           渡す先が自分自身。**代わりに置くのが「解析する」。** -->
+      <div id="panel-library" class="panel" role="tabpanel" aria-labelledby="tab-library">
+        <div class="library-head">
+          <span id="library-count" class="field-label">棋譜一覧</span>
+          <button id="library-reload" class="ghost-btn" type="button"
+                  title="棚を読み直します">再読み込み</button>
+        </div>
+
+        <!-- 検索。⚠️ **打つたびには検索しない**（Enter か「検索」で実行）。
+             件数が増えると 3 文字未満は全件走査になるため。 -->
+        <div class="library-search">
+          <input id="library-text" class="library-text" type="search" spellcheck="false"
+                 placeholder="棋戦名・対局者・場所で検索" />
+          <label class="field">
+            <span class="field-label">期間</span>
+            <input id="library-from" type="date" />
+          </label>
+          <label class="field">
+            <span class="field-label">〜</span>
+            <input id="library-to" type="date" />
+          </label>
+          <label class="library-check">
+            <input id="library-finished" type="checkbox" />
+            <span>終局済みのみ</span>
+          </label>
+          <button id="library-search" class="ghost-btn is-primary" type="button">検索</button>
+          <button id="library-clear" class="ghost-btn" type="button">条件をクリア</button>
+        </div>
+        <p id="library-hint" class="setting-note" hidden></p>
+        <p id="library-status" class="status" role="status" aria-live="polite" hidden></p>
+
+        <div class="library-table-wrap">
+          <table class="library-table">
+            <thead>
+              <tr>
+                <th>開始日</th>
+                <th>棋戦</th>
+                <th>先手</th>
+                <th>後手</th>
+                <th class="is-num">手数</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="library-rows"></tbody>
+          </table>
+        </div>
+
+        <!-- 詳細。**KIF の原本をそのまま出す**（整形し直さない）。 -->
+        <div id="library-preview" class="library-preview" hidden>
+          <div class="library-head">
+            <span id="library-preview-title" class="field-label"></span>
+            <button id="library-preview-close" class="ghost-btn" type="button">閉じる</button>
+          </div>
+          <dl id="library-preview-meta" class="library-meta"></dl>
+          <pre id="library-preview-kif" class="library-kif"></pre>
         </div>
       </div>
 
@@ -1384,10 +1453,13 @@ export function mountMainScreen(root: HTMLElement): void {
     tab: root.querySelector<HTMLButtonElement>(`#tab-${name}`)!,
     panel: root.querySelector<HTMLElement>(`#panel-${name}`)!,
   });
-  const tabs = ["input", "edit", "study", "settings"].map(tabOf);
+  const tabs = ["input", "library", "edit", "study", "settings"].map(tabOf);
   const inputTab = tabs[0].tab;
-  const editTab = tabs[1].tab;
-  const studyTab = tabs[2].tab;
+  // 棋譜タブ（棚）。**入力の隣に置いてある** —— 局面を持ってくる口という点で
+  // 入力タブと同じ側で、訂正・解析はその先の面。
+  const libraryTab = tabs[1].tab;
+  const editTab = tabs[2].tab;
+  const studyTab = tabs[3].tab;
   // 認識詳細情報（旧デバッグタブ）。**盤の下・「この局面を解析する」の上**
   // （2026-08-18 に盤の上から移した。開いても盤が動かない位置）。
   const debugDetails = root.querySelector<HTMLDetailsElement>("#debug-details")!;
@@ -1426,6 +1498,12 @@ export function mountMainScreen(root: HTMLElement): void {
     }
     // ⚠️ **解析タブの盤にもグリッドが乗っている**（手を進める UI。2026-08-11）。
     // **こちらを落とすと、光った位置と実際に指す位置が 1 マスずれる。**
+    // ⚠️ **棋譜タブは開くたびに棚を読み直す。** 同じ DB を kicho アプリからも
+    // 触れるので、初回だけ読む作りにすると**向こうで足した棋譜が見えない**
+    // （共用にした意味が消える）。入力タブから登録したときも同じ。
+    if (target === libraryTab) {
+      libraryUI.reveal();
+    }
     if (target === studyTab) {
       studyBoardUI.relayout();
       // ⚠️ **グラフも測り直す。** 大きさは `clientWidth` で測っており、
@@ -3841,6 +3919,29 @@ export function mountMainScreen(root: HTMLElement): void {
     },
   });
 
+  // onKifuDBChanged は棚を開き直したときに呼ぶ（棋譜タブの一覧を取り直す）。
+  // ⚠️ **設定タブから棋譜タブの DOM を触らないこと** —— 一覧を持っているのは
+  // あちらなので、繋ぐのはこの 1 本にする。
+  let onKifuDBChanged: (() => void) | undefined;
+
+  // ---- 棋譜タブ（棚）------------------------------------------------------
+  //
+  // ⚠️ **一覧も検索も Go 側（KifuService）が持つ。** ここは行き先を繋ぐだけ。
+  const libraryUI = mountLibrary(root, {
+    onAnalyze: (got) => {
+      // ⚠️ **入力タブの棋譜読み込みと同じ描き方に合流させる**（`KifuLoad` を
+      // 共有しているのはそのため）。**別の経路を作らないこと。**
+      //
+      // ⚠️ **タブを先に開いてから描くこと。** 手順のリストは「今見ている手」を
+      // scrollIntoView で見せるが、`display: none` の中では効かない。
+      selectTab(studyTab);
+      showStudy(got.state);
+    },
+  });
+
+  // 棚を開き直したら一覧を取り直す（設定タブから繋いである 1 本）。
+  onKifuDBChanged = () => libraryUI.refresh();
+
   // ---- 視点（手前が先手 / 手前が後手）--------------------------------------
   //
   // **表示だけの反転で、局面には一切効かない。** 反転するのは
@@ -4579,10 +4680,6 @@ export function mountMainScreen(root: HTMLElement): void {
   const kifuDBPath = root.querySelector<HTMLInputElement>("#kifudb-path")!;
   const kifuDBBrowse = root.querySelector<HTMLButtonElement>("#kifudb-browse")!;
   const kifuDBNote = root.querySelector<HTMLParagraphElement>("#kifudb-note")!;
-  // onKifuDBChanged は棚を開き直したときに呼ぶ（棋譜タブの一覧を取り直す）。
-  // ⚠️ **設定タブから棋譜タブの DOM を触らないこと** —— 一覧を持っているのは
-  // あちらなので、繋ぐのはこの 1 本にする。
-  let onKifuDBChanged: (() => void) | undefined;
   const settingsStatus = root.querySelector<HTMLParagraphElement>("#settings-status")!;
   const settingsPath = root.querySelector<HTMLElement>("#settings-path")!;
   const trainEnabledInput = root.querySelector<HTMLInputElement>("#train-enabled")!;

@@ -4339,3 +4339,208 @@ html.is-main #app {
   outline: 2px solid #f2f3f5;
   outline-offset: 1px;
 }
+
+/* ---- 棋譜タブ（棚）--------------------------------------------------------
+
+   保存済みの棋譜を探して解析へ送る面。実装は kicho（棋譜データベース）にあり、
+   ここは表示だけ。
+
+   ⚠️ **パネルごとスクロールさせないこと。** 一覧が伸びると検索欄まで流れて
+   しまい、条件を変えるたびに上へ戻ることになる。**縦に伸びるのは表の中だけ**
+   （.library-table-wrap の overflow-y）。 */
+#panel-library {
+  overflow: hidden;
+}
+
+/* 見出しの行。件数（左）と再読み込み（右）。 */
+.library-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.library-head > button {
+  margin-left: auto;
+}
+
+/* 検索の行。⚠️ **折り返しを許すこと** —— 窓を狭めると 6 つは 1 行に入らない。 */
+.library-search {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* テキスト欄だけは残りを全部もらう（一番よく使う条件なので広く取る）。 */
+.library-text {
+  flex: 1 1 220px;
+  min-width: 160px;
+  padding: 6px 10px;
+  font-size: 13px;
+  color: #f2f3f5;
+  background: #23262e;
+  border: 1px solid #3a3f4b;
+  border-radius: 6px;
+}
+
+.library-text:focus {
+  border-color: #5ea0ff;
+  outline: none;
+}
+
+.library-search .field {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.library-search input[type="date"] {
+  padding: 5px 8px;
+  font-size: 12.5px;
+  color: #f2f3f5;
+  background: #23262e;
+  border: 1px solid #3a3f4b;
+  border-radius: 6px;
+  color-scheme: dark;
+}
+
+.library-check {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
+  color: #c7cbd4;
+  cursor: pointer;
+}
+
+/* 表。**縦に伸びるのはここだけ**（上の見出し・検索は動かない）。 */
+.library-table-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  border: 1px solid #2c303a;
+  border-radius: 6px;
+}
+
+.library-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+/* 見出しは貼り付けておく（棋譜が溜まると 100 行を超えるので、
+   スクロールしたときに何の列か分からなくなる）。 */
+.library-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 7px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #8b93a3;
+  text-align: left;
+  background: #23262e;
+  border-bottom: 1px solid #2c303a;
+}
+
+.library-table tbody td {
+  padding: 6px 10px;
+  color: #dfe3ea;
+  border-bottom: 1px solid #23262e;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 棋戦名は長いので、ここだけ残りをもらって省略する。 */
+.library-table tbody td:nth-child(2) {
+  max-width: 0;
+  width: 100%;
+}
+
+.library-table tbody tr:hover td {
+  background: #22252c;
+}
+
+/* 詳細を開いている行。⚠️ **消える範囲の赤（.is-doomed）とは別の意味**なので
+   色を揃えないこと。 */
+.library-table tbody tr.is-selected td {
+  background: #23303f;
+}
+
+.library-table .is-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.library-table .is-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+/* ⚠️ **.danger-btn の margin-left: auto を打ち消すこと。**
+   打ち消さないと「削除」だけが行の右端へ飛んで、3 つのボタンが離れる。 */
+.library-table .is-actions .danger-btn {
+  margin-left: 0;
+}
+
+.library-table .is-actions .ghost-btn {
+  padding: 3px 10px;
+  font-size: 12px;
+}
+
+/* 詳細。**KIF の原本をそのまま出す**（整形し直さない）。 */
+.library-preview {
+  flex: 0 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  background: #1f2229;
+  border: 1px solid #2c303a;
+  border-radius: 6px;
+}
+
+.library-preview[hidden] {
+  display: none;
+}
+
+.library-meta {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 12px;
+  margin: 0;
+  font-size: 12.5px;
+}
+
+.library-meta dt {
+  color: #8b93a3;
+}
+
+.library-meta dd {
+  margin: 0;
+  color: #dfe3ea;
+  word-break: break-all;
+}
+
+/* 本文。⚠️ **高さを頭打ちにすること** —— 150 手の棋譜をそのまま流すと
+   詳細だけで画面が埋まり、上の一覧に戻れなくなる。 */
+.library-kif {
+  max-height: 220px;
+  margin: 0;
+  padding: 8px;
+  overflow: auto;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #c7cbd4;
+  white-space: pre;
+  background: #17191f;
+  border-radius: 5px;
+}
