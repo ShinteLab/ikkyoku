@@ -390,8 +390,8 @@ task build:embed        # model:copy + wails3 のビルド(EXTRA_TAGS=embedmodel
 - その隣のボタンで**画像そのもの**をクリップボードに入れられる（チャットや棋譜ソフトへ
   直接貼る用）。**用途が違うので両方残すこと。** ランタイムのクリップボードは
   テキストしか扱えないため、こちらは Go 側（`CaptureService.CopyImage` →
-  `clipboard_windows.go`）で **Win32 の CF_DIB**（24bpp・無圧縮・ボトムアップ）を
-  載せている。cgo は使わない（`clientrect_windows.go` と同じ LazyProc 経由）。
+  `native_windows.go`）で **Win32 の CF_DIB**（24bpp・無圧縮・ボトムアップ）を
+  載せている。cgo は使わない（`native_windows.go` と同じ LazyProc 経由）。
   フロントから渡すのはパスで、**Go 側が保存済みの PNG を読み直す**（「直近の画像」を
   メモリに抱えないため。後から一覧を作ってどの 1 枚でもコピーできるようにもできる）
 - **「認識詳細情報」は撮った画像に認識の矩形を重ねて出す**（`Result.Debug`。上記の表を参照）。
@@ -3796,7 +3796,7 @@ CLI は無い。**
   `Capture` / `SavePNG` / `DefaultOutDir` / `ParseHotkey` / `DefaultHotkey` を
   そのまま import して使っており、ロジックを再実装していない
 - ⚠️ **ここに置くのは「Wails の口が要るもの」だけ**（2026-09-04）。
-  **7,380 行 → 2,392 行**まで減らしてある。Service は `ikkyoku/app`、
+  **7,380 行 / 22 ファイル → 2,373 行 / 5 ファイル**まで減らしてある。Service は `ikkyoku/app`、
   枠の幾何は `ikkyoku/guide` にあり、**残っているのは main・`CaptureService`・
   ウィンドウ／Win32 まわりだけ**。
   - **Wails の口は関数で渡す。** `SettingsService.PickFile`（ダイアログ。実体は
@@ -3812,15 +3812,11 @@ CLI は無い。**
 
 | `_cmd/ikkyoku/` のファイル | 役割 |
 |---|---|
-| `main.go` | ウィンドウ 2 枚の生成・**Service の登録**・フック登録・ホットキー登録・起動時の自動フィット・終了時の後始末。⚠️ **Service の実体は `ikkyoku/app`**（`application.NewService()` は任意のパッケージの値を取れる）。⚠️ **import は別名にしてある** ——パッケージ名 `app` が `application.App` の変数 `app` とぶつかる |
-| `captureservice.go` | Wails にバインドする Service。**ウィンドウと HWND を触るのでここに残っている**（枠の表示/非表示・素通し・自分を隠して撮る・メイン画面の塗り潰し・終了(`Quit`)・認識の呼び出し・ガイド枠の自動フィット `FitFrame`）。⚠️ **寸法と幾何は `ikkyoku/guide`**（`captureRegion` はそれを使ってHWND の矩形から領域を出すだけ） |
-| `shinteweb.go` | `core/web` の embed を `/shinte-web/` で配信する AssetServer ミドルウェア |
-| `geometry.go` | ウィンドウ位置の追跡（終了時に `Position()` を読めないため） |
-| `windowstate.go` | `app-window.json` の読み書き・既定値・画面内へのクランプ |
-| `clientrect_windows.go` | HWND からクライアント矩形／ウィンドウ矩形を物理ピクセルで取得（`clientrect_other.go` はスタブ） |
-| `clickthrough_windows.go` | HWND の `WS_EX_TRANSPARENT` を付け外しする（**枠の内側を素通しにする**）＋カーソル位置・マウスボタンの取得（`clickthrough_other.go` はスタブ）。**付け外しの判断はここに書かない**（`captureservice.go` の `watchCursor`） |
-| `clipboard_windows.go` | 画像を CF_DIB でクリップボードへ（`clipboard_other.go` はスタブ） |
-| `hotkey.go` | ホットキー文字列 → Wails のアクセラレータ表記 |
+| `main.go` | ウィンドウ 2 枚の生成・**Service の登録**・フック登録・起動時の自動フィット・終了時の後始末。⚠️ **Service の実体は `ikkyoku/app`**（`application.NewService()` は任意のパッケージの値を取れる）。⚠️ **import は別名にしてある** —— パッケージ名 `app` が `application.App` の変数 `app` とぶつかる。**main しか使わない小物も畳んである**（`/shinte-web/` の配信・ホットキーのアクセラレータ変換・ファイル選択ダイアログ） |
+| `captureservice.go` | Wails にバインドする Service。**ウィンドウと HWND を触るのでここに残っている**（枠の表示/非表示・素通し・自分を隠して撮る・メイン画面の塗り潰し・終了(`Quit`)・認識の呼び出し・ガイド枠の自動フィット `FitFrame`）。⚠️ **寸法と幾何は `ikkyoku/guide`**（`captureRegion` はそれを使って HWND の矩形から領域を出すだけ） |
+| `window.go` | ウィンドウの位置・サイズ。**永続化**（`app-window.json`・既定値・画面内へのクランプ）と**追跡**（動くたびに記録。⚠️ **終了時には `Position()` を読めない**）の 2 つ |
+| `native_windows.go` | **Win32 の直呼び**（`golang.org/x/sys/windows` の LazyProc。**cgo を使わないための層**）。①ウィンドウの矩形 ②枠の素通し（`WS_EX_TRANSPARENT`）とカーソル ③画像を CF_DIB でクリップボードへ。⚠️ **ここに判断を書かないこと** —— 付け外しの判断は `captureservice.go` の `watchCursor`、寸法は `ikkyoku/guide` |
+| `native_other.go` | 上のスタブ（Windows 以外）。**呼ばれたらエラーを返すだけ。** ⚠️ **関数を足したら両方に足すこと** |
 | `frontend/src/main.ts` | エントリ。**素の `import "@wailsio/runtime"`** と `?window=` による画面分岐 |
 | `frontend/src/frame.ts` | 枠（ツールバー + ガイド枠） |
 | `frontend/src/mainscreen.ts` | メイン画面（5 タブ: 入力 / 棋譜 / 訂正 / 解析 / 設定。認識の記録は**訂正タブの盤の下**の折りたたみ「認識詳細情報」）。**連続解析の順番を決めているのもここ**（`batchStep`。⚠️ **1 局面ずつ順に・全部のエンジンが終わってから次へ**）。**視点（表示だけの反転）の値を持つのもここ**（`applyViewpoint`。⚠️ **訂正タブと解析タブで 1 つの値**）と、**新規対局の口**（`#newgame-start`。⚠️ **初期局面はフロントで作らない**） |
@@ -4320,7 +4316,7 @@ Frameless にすると移動もリサイズも OS 任せでなくなる。
   マルチモニタでスケーリング(150% 等)が混在する環境ではそのまま使うとずれる
 - **`Window.NativeWindow()` で HWND(`unsafe.Pointer`)を取得し、Windows API の
   `GetClientRect` + `ClientToScreen` を `golang.org/x/sys/windows` 経由で直接呼んで
-  クライアント領域のスクリーン座標を物理ピクセルで得ている**(`clientrect_windows.go`)。
+  クライアント領域のスクリーン座標を物理ピクセルで得ている**(`native_windows.go`)。
   per-monitor DPI aware なプロセスでは `GetClientRect` 自体が物理ピクセルを返すため、
   DPI 変換もタイトルバー・枠の厚みの計算も不要になる
 - ガイド枠の太さ(CSS px 指定)を物理ピクセルのオフセットに変換するためだけに、
@@ -4328,7 +4324,7 @@ Frameless にすると移動もリサイズも OS 任せでなくなる。
   環境では 1.0 にフォールバック)
 - **cgo は使っていない**(`golang.org/x/sys/windows` の `NewLazySystemDLL`/`NewProc` 経由)。
   `ikkyoku` ルートパッケージが PureGo 方針のため、GUI 側も踏襲している
-- Windows 以外は `clientrect_other.go`(`!windows` ビルドタグ)でエラーを返すだけの
+- Windows 以外は `native_other.go`(`!windows` ビルドタグ)でエラーを返すだけの
   スタブにしてあり、ビルド自体は壊れないようにしてある。**実装・動作確認は Windows のみ**
 
 ### ガイド枠の自動フィット（`FitFrame`）
@@ -4538,7 +4534,7 @@ wails3 skill(`tray-hotkey.md`)で保証されており、二重にホットキ�
 ### ウィンドウ状態の永続化
 
 枠とメイン画面**両方**の位置・サイズを `os.UserConfigDir()/ikkyoku/app-window.json` に
-保存・復元する(`windowstate.go` / `geometry.go`)。**ルートパッケージの `Config`(`config.json`)とは
+保存・復元する(`window.go` / `window.go`)。**ルートパッケージの `Config`(`config.json`)とは
 あえて別ファイルにしてある**。ルートパッケージに Wails 依存(`application` パッケージの
 `ScreenNearestDipPoint` 等)を持ち込まないための分離。
 
@@ -4548,7 +4544,7 @@ wails3 skill(`tray-hotkey.md`)で保証されており、二重にホットキ�
 - **⚠️ 終了時に `Position()`/`Size()` を読んではいけない。** `WindowClosing` の時点では
   破棄が進行しており、**不正な値が返る**(wails3 skill `window-state.md`「特に Frameless で
   発生しやすい」。このアプリでも実測で確認し、枠を動かしても保存値が追従しない不具合が出た)。
-  代わりに `geometryTracker`(`geometry.go`)が `WindowDidMove` / `WindowDidResize` の
+  代わりに `geometryTracker`(`window.go`)が `WindowDidMove` / `WindowDidResize` の
   たびに位置を記録しておき、**終了時にはその記録を保存する**。
   スキルが挙げている回避策(フロントの✕から Go の `Quit()` を呼ぶ)は自前の✕しか無い
   ウィンドウ向けで、**ネイティブのタイトルバーを持つメイン画面には使えない**
@@ -5335,7 +5331,7 @@ go test ./...
 ```
 
 `_cmd/ikkyoku/`（Wails3 GUI アプリ）は独立したネストモジュールなので、上記の
-`./...` には含まれない。⚠️ **ただし中身は 2,392 行まで減った**（2026-09-04）——
+`./...` には含まれない。⚠️ **ただし中身は 5 ファイル・2,373 行まで減った**（2026-09-04）——
 Service は `app/`、枠の幾何は `guide/` にあるので、**普段直すのは `./...` の側**。ビルド・確認は「GUI アプリ(Wails3)」節のコマンドを使うこと。
 
 **`go mod tidy` の実行後は require 行が消えていないか確認すること**

@@ -23,12 +23,18 @@ package main
 
 import (
 	"embed"
+	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
+
+	shinteweb "github.com/ShinteLab/core/web"
+	"github.com/ShinteLab/ikkyoku"
 
 	// ⚠️ **別名にしてあるのは、この関数の中の `app`（application.App）と
 	// パッケージ名がぶつかるから。**
@@ -479,5 +485,116 @@ func registerHotkey(app *application.App, svc *CaptureService, logger *slog.Logg
 			"hotkey": accel,
 			"error":  err.Error(),
 		})
+	}
+}
+
+// ---- 資産の配信 -----------------------------------------------------------
+
+// shinteWebPrefix は core/web の共有フロントエンド資産を配信する URL の接頭辞。
+// suteme の学習用サーバ(training/server.go)と同じパスに揃えてある。
+const shinteWebPrefix = "/shinte-web/"
+
+// shinteWebMiddleware は `<shogi-board>` などの共有 Web Component を、
+// core の embed からそのまま配信する。
+//
+// **ファイルをフロントにコピーしない。** 将棋の仕様(SFEN の解釈・盤の描画)は core に
+// 一本化する方針で、コピーするとそこが二重になる。core/web はまさにこの用途のために
+// `web.Assets` を embed で公開している(core/web/assets.go のコメント参照)。
+//
+// npm 依存にしない理由: `@shinte/web` は private パッケージで、file: 参照にすると
+// 相対パスが git worktree で壊れるうえ、node_modules の共有(wails3 skill worktree.md)も
+// 絡んでくる。Go 側は既に core に依存しているので、embed を配信するほうが単純で確実。
+func shinteWebMiddleware(next http.Handler) http.Handler {
+	files := http.StripPrefix(shinteWebPrefix, http.FileServer(http.FS(shinteweb.Assets)))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, shinteWebPrefix) {
+			files.ServeHTTP(w, r)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// assetOptions は埋め込んだフロントバンドルと core/web の配信をまとめたもの。
+func assetOptions() application.AssetOptions {
+	return application.AssetOptions{
+		Handler:    application.AssetFileServerFS(assets),
+		Middleware: shinteWebMiddleware,
+	}
+}
+
+// ---- ホットキー -----------------------------------------------------------
+
+// 設定ファイル(config.json)の読み書きは settings.go(SettingsService)が持っている。
+// ウィンドウの位置・サイズはこれとは別ファイル(app-window.json)。
+// あちらは Wails 依存を避けるための分離で、こちらはアプリ本来の設定。
+
+// resolveHotkey は GUI 版の既定ホットキーを返す。
+// 今のところ設定 UI は無く常に既定値(alt+s)を使う。
+func resolveHotkey() string {
+	return ikkyoku.DefaultHotkey
+}
+
+// hotkeyAccelerator は "alt+s" 形式の文字列を、Wails の GlobalShortcut.Register が
+// 期待するアクセラレータ表記に変換する。
+//
+// 実際のホットキー登録は golang.design/x/hotkey ではなく Wails 標準の GlobalShortcut を使う。
+// 理由: GlobalShortcut はウィンドウが非フォーカスでも確実に発火する経路として wails3 skill
+// (tray-hotkey.md)で保証されており、二重にホットキー実装を持ち込むと同じキーの奪い合いや
+// メッセージループの競合を招くリスクがある。一方で「alt+s」のような文字列の妥当性検証・
+// 既定値の一元化は ikkyoku.ParseHotkey / ikkyoku.DefaultHotkey を単一のソースとして再利用し、
+// CLI 版と GUI 版で「有効なホットキー文字列」の定義がずれないようにする。
+//
+// ikkyoku.ParseHotkey が受け付ける修飾キーのエイリアス(control/win/cmd 等)のうち、
+// Wails の accelerator パーサ(pkg/application/keys.go の modifierMap)が直接は
+// 受け付けない表記だけを変換する。大文字小文字は Wails 側が lower 化して吸収するので
+// ここでは揃えない。
+func hotkeyAccelerator(s string) (string, error) {
+	if _, _, err := ikkyoku.ParseHotkey(s); err != nil {
+		return "", err
+	}
+
+	parts := strings.Split(s, "+")
+	for i, p := range parts[:len(parts)-1] {
+		switch strings.ToLower(strings.TrimSpace(p)) {
+		case "control":
+			parts[i] = "ctrl"
+		case "win":
+			parts[i] = "super"
+		}
+	}
+	return strings.Join(parts, "+"), nil
+}
+
+// ---- ダイアログ -----------------------------------------------------------
+
+// pickFile はファイル選択ダイアログを `ikkyoku/app` へ差し込む形にして返す。
+//
+// ⚠️ **ダイアログは Wails の口なのでここに残す。** 設定のロジック
+// （`SettingsService`）は Wails と関係が無いので `ikkyoku/app` にあり、
+// **口だけを関数で受け取る**（`app.FilePicker`）。
+//
+// **パスを手で打たせないためのもの。** 将棋エンジンも棋譜データベースも
+// 深いディレクトリに置かれることが多く、打ち間違いが一番起きやすい入口。
+// ただし**テキスト欄も残してある**（貼り付けと確認のため）ので、
+// ダイアログが開けなくても設定はできる（設計原則3）。
+func pickFile(a *application.App) ikkyokuapp.FilePicker {
+	return func(title, startDir string, filters ...string) (string, error) {
+		if a == nil {
+			return "", fmt.Errorf("ダイアログを開けません")
+		}
+		dlg := a.Dialog.OpenFile()
+		dlg.SetTitle(title)
+		dlg.CanChooseFiles(true)
+		dlg.CanChooseDirectories(false)
+		if startDir != "" {
+			dlg.SetDirectory(startDir)
+		}
+		// filters は「表示名, ワイルドカード」の対で来る。
+		// ⚠️ **端数は捨てる**（対になっていない指定でダイアログを壊さない）。
+		for i := 0; i+1 < len(filters); i += 2 {
+			dlg.AddFilter(filters[i], filters[i+1])
+		}
+		return dlg.PromptForSingleSelection()
 	}
 }
