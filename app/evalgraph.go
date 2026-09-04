@@ -1,4 +1,4 @@
-package main
+package app
 
 // 評価値グラフの記録（解析タブ。2026-08-12）。
 //

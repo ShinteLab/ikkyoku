@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"context"
@@ -12,7 +12,6 @@ import (
 	coreusi "github.com/ShinteLab/core/usi"
 	"github.com/ShinteLab/ikkyoku"
 	"github.com/ShinteLab/ikkyoku/analyze"
-	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 // AnalyzeService は確定した局面をエンジンに解析させる Service（Phase 4）。
@@ -68,7 +67,11 @@ type AnalyzeService struct {
 	// その評価値には意味が無い。
 	study    *StudyService
 	settings *SettingsService
-	app      *application.App
+	// Emit は途中経過をフロントへ流す口。**`_cmd/ikkyoku` が差し込む。**
+	//
+	// ⚠️ **ここで Wails を import しないこと**（SettingsService.PickFile と同じ）。
+	// nil なら黙って捨てる —— **解析そのものは進む**（設計原則3）。
+	Emit EventEmitter
 
 	mu sync.Mutex
 	// cancel は走っている解析の打ち切り。走っていなければ nil。
@@ -132,7 +135,12 @@ func NewAnalyzeService(logger *slog.Logger, study *StudyService, settings *Setti
 //
 // ⚠️ **待たないと外部エンジンのプロセスが残る。** 親が先に消えても、Windows では
 // 子プロセスは道連れにならない。
-func (s *AnalyzeService) close() {
+//
+// ⚠️ **`//wails:ignore` を外さないこと。** これは `_cmd/ikkyoku` が起動・終了で
+// 呼ぶための口で、**フロントの API ではない**（外すと bindings に出てしまう）。
+//
+//wails:ignore
+func (s *AnalyzeService) Close() {
 	s.mu.Lock()
 	cancel, done := s.cancel, s.done
 	s.mu.Unlock()
@@ -251,7 +259,7 @@ func (s *AnalyzeService) closeSessions() {
 // ⚠️ **走っている解析も止まる。** 全て解析の途中でタブを移ると止まるのは
 // そういう約束で、**そこまでの評価値は残る**（設計原則3）。
 func (s *AnalyzeService) Release() {
-	s.close()
+	s.Close()
 }
 
 // EngineCheck は「接続を確認」の結果。
@@ -354,7 +362,8 @@ func engineOptions(declared []coreusi.Option) []ikkyoku.EngineOption {
 // （`client.HandshakeTimeout`）より長めに取る。
 const engineConnectTimeout = 30 * time.Second
 
-func (s *AnalyzeService) bind(app *application.App) { s.app = app }
+// EventEmitter はフロントへイベントを流す口。
+type EventEmitter func(name string, data any)
 
 // AnalyzeProgress はイベントで流す途中経過。
 //
@@ -619,8 +628,8 @@ func (s *AnalyzeService) engineName(id string) string {
 }
 
 func (s *AnalyzeService) emit(name string, data any) {
-	if s.app == nil {
+	if s.Emit == nil {
 		return
 	}
-	s.app.Event.Emit(name, data)
+	s.Emit(name, data)
 }

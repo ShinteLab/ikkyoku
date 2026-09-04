@@ -57,15 +57,17 @@ import {
   FiSquare,
   FiX,
 } from "react-icons/fi";
+// ⚠️ **CaptureService だけ出所が違う。** あれはウィンドウ（枠）と HWND を触るので
+// `_cmd/ikkyoku` に残っており、他の Service は `ikkyoku/app` にある。
+import { CaptureService } from "../bindings/ikkyoku-app";
 import {
   AnalyzeService,
-  CaptureService,
   FontService,
   KifuService,
   SettingsService,
   StudyService,
   TrainingService,
-} from "../bindings/ikkyoku-app";
+} from "../bindings/github.com/ShinteLab/ikkyoku/app";
 import { iconMarkup } from "./icon";
 import { mountEditor } from "./editor";
 import { mountLibrary } from "./library";
@@ -73,6 +75,7 @@ import { mountFetchCards } from "./fetchcards";
 import { mountEvalGraph } from "./evalgraph";
 import { mountStudyBoard } from "./study";
 import { openPopup } from "./popup";
+import type { RecognizerStatus } from "../bindings/ikkyoku-app/models";
 import type {
   AppSettings,
   EngineSettings,
@@ -81,9 +84,8 @@ import type {
   GameSummary,
   KifuDBStatus,
   KifuLoad,
-  RecognizerStatus,
   StudyState,
-} from "../bindings/ikkyoku-app/models";
+} from "../bindings/github.com/ShinteLab/ikkyoku/app/models";
 import type { EngineColorOption } from "../bindings/github.com/ShinteLab/ikkyoku/models";
 import type { Stock } from "../bindings/github.com/ShinteLab/ikkyoku/position/models";
 // 認識の観測情報。**型を手で書き写さない**(Go 側は suteme の型をそのまま通しており、

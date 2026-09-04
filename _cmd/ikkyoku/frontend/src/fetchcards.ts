@@ -14,9 +14,9 @@
 // ⚠️ **「取得 URL をコピー」は置かない**（kicho の UI にはある）。あれは
 // ShogiHome 等の外部ツールへ渡すためのもので、ikkyoku では渡す先が自分自身。
 // **代わりに置くのが「解析する」。**
-import { KifuService } from "../bindings/ikkyoku-app";
+import { KifuService } from "../bindings/github.com/ShinteLab/ikkyoku/app";
 import { openPopup } from "./popup";
-import type { GameDetail, GameSummary, KifuLoad } from "../bindings/ikkyoku-app/models";
+import type { GameDetail, GameSummary, KifuLoad } from "../bindings/github.com/ShinteLab/ikkyoku/app/models";
 
 export type FetchCardsHandle = {
   // clear は入力とカードを全部捨てる。

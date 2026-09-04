@@ -12,7 +12,7 @@
 // **フロントに評価値を溜めないこと** —— 手順を切ったときにどこまで捨てるかを
 // 知っているのは手順を持っている側だけで、2 か所に持つとどちらが本当か
 // 分からなくなる（局面の写しを持たないのと同じ方針）。
-import type { EvalGraph, EvalPoint } from "../bindings/ikkyoku-app/models";
+import type { EvalGraph, EvalPoint } from "../bindings/github.com/ShinteLab/ikkyoku/app/models";
 
 const NS = "http://www.w3.org/2000/svg";
 

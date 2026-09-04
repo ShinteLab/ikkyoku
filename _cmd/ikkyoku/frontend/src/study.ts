@@ -20,8 +20,8 @@
 // **状態は Go 側（StudyService）が持つ。** ここは操作を送って、返ってきた
 // StudyState をそのまま描くだけ（訂正タブと同じ方針）。フロントに持つのは
 // 「今どの駒を掴んでいるか」という**画面だけの状態**に限る。
-import { StudyService } from "../bindings/ikkyoku-app";
-import type { StudyState } from "../bindings/ikkyoku-app/models";
+import { StudyService } from "../bindings/github.com/ShinteLab/ikkyoku/app";
+import type { StudyState } from "../bindings/github.com/ShinteLab/ikkyoku/app/models";
 import type { Move as LegalMove } from "../bindings/github.com/ShinteLab/ikkyoku/legal/models";
 import { openPopup, type PopupHandle, type PopupItem } from "./popup";
 

@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"io"
@@ -20,8 +20,8 @@ func newTestKifuService(t *testing.T) (*KifuService, *StudyService) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	study := NewStudyService(logger, NewPositionService(logger))
 	svc := NewKifuService(logger, study)
-	svc.open(filepath.Join(t.TempDir(), "kicho.db"))
-	t.Cleanup(svc.close)
+	svc.Open(filepath.Join(t.TempDir(), "kicho.db"))
+	t.Cleanup(svc.Close)
 	if st := svc.Status(); !st.Ready {
 		t.Fatalf("棚を開けませんでした: %+v", st)
 	}
@@ -200,7 +200,7 @@ func TestKifuServiceReopen(t *testing.T) {
 		t.Fatalf("ImportKIF: %v", err)
 	}
 
-	svc.open(filepath.Join(t.TempDir(), "another.db"))
+	svc.Open(filepath.Join(t.TempDir(), "another.db"))
 	n, err := svc.Count()
 	if err != nil {
 		t.Fatalf("Count: %v", err)

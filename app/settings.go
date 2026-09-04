@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"fmt"
@@ -11,8 +11,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-
-	"github.com/wailsapp/wails/v3/pkg/application"
 
 	"github.com/ShinteLab/ikkyoku"
 	"github.com/ShinteLab/ikkyoku/analyze"
@@ -244,24 +242,30 @@ func engineSettings(e ikkyoku.EngineEntry, i int) EngineSettings {
 // 起動時にも読むので、**main() が最初に作って、読み込み済みの Config を配る**役でもある。
 type SettingsService struct {
 	logger *slog.Logger
-	app    *application.App
+	// PickFile はファイル選択ダイアログ。**`_cmd/ikkyoku` が差し込む。**
+	//
+	// ⚠️ **ここで Wails を import しないこと。** ダイアログは Wails の口だが、
+	// 設定のロジックは Wails と関係が無いので、**口だけを関数で受け取る**。
+	// nil のまま呼ばれたら「開けません」と返す（設計原則3。ダイアログが無くても
+	// パスは手で打てる）。
+	PickFile FilePicker
 
-	// onClickThrough は「枠の内側で後ろの画面を操作する」を切り替えたときに呼ぶ。
+	// OnClickThrough は「枠の内側で後ろの画面を操作する」を切り替えたときに呼ぶ。
 	// 実体は `CaptureService.applyClickThrough`（枠の HWND を触るのはあちらの仕事）。
 	// ⚠️ **SettingsService から枠を直に触らないこと**（ウィンドウを持っていない）。
-	onClickThrough func(bool)
+	OnClickThrough func(bool)
 
-	// onSutemeSource は「認識器の読み込み元」を切り替えたときに呼ぶ
+	// OnSutemeSource は「認識器の読み込み元」を切り替えたときに呼ぶ
 	// （`CaptureService.applyRecognizerSource`。その場で読み直す）。
-	onSutemeSource func(string)
+	OnSutemeSource func(string)
 
-	// onSutemeDataDir は学習データの置き場所を変えたときに呼ぶ（同じく読み直す）。
-	onSutemeDataDir func(string)
+	// OnSutemeDataDir は学習データの置き場所を変えたときに呼ぶ（同じく読み直す）。
+	OnSutemeDataDir func(string)
 
-	// onKifuDBPath は棋譜データベースの場所を変えたときに呼ぶ
+	// OnKifuDBPath は棋譜データベースの場所を変えたときに呼ぶ
 	// （`KifuService.open`。その場で開き直す）。
 	// ⚠️ **SettingsService から DB を直に触らないこと**（棚を持っているのはあちら）。
-	onKifuDBPath func(string)
+	OnKifuDBPath func(string)
 
 	mu   sync.Mutex
 	path string
@@ -287,10 +291,18 @@ func NewSettingsService(logger *slog.Logger) *SettingsService {
 	return s
 }
 
-func (s *SettingsService) bind(app *application.App) { s.app = app }
+// FilePicker はファイル選択ダイアログ。取り消したら空文字を返す。
+//
+// filters は「表示名 → ワイルドカード」の並び（例 "実行ファイル", "*.exe"）。
+type FilePicker func(title, startDir string, filters ...string) (string, error)
 
-// Config は読み込み済みの設定を返す(起動シーケンス用。フロントには公開しない形)。
-func (s *SettingsService) config() ikkyoku.Config {
+// Config は読み込み済みの設定を返す(起動シーケンス用)。
+//
+// ⚠️ **`//wails:ignore` を外さないこと。** これは `_cmd/ikkyoku` が起動・終了で
+// 呼ぶための口で、**フロントの API ではない**（外すと bindings に出てしまう）。
+//
+//wails:ignore
+func (s *SettingsService) Config() ikkyoku.Config {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.cfg
@@ -430,20 +442,14 @@ func (s *SettingsService) AddEngine(path string) (AppSettings, error) {
 // **パスを手で打たせない。** 将棋エンジンは深いディレクトリに置かれることが多く、
 // 打ち間違いが一番起きやすい入口。startDir はダイアログの開き始めの場所。
 func (s *SettingsService) pickEngineFile(startDir string) (string, error) {
-	if s.app == nil {
+	if s.PickFile == nil {
 		return "", fmt.Errorf("ダイアログを開けません")
 	}
-	dlg := s.app.Dialog.OpenFile()
-	dlg.SetTitle("USI エンジンの実行ファイルを選ぶ")
-	dlg.CanChooseFiles(true)
-	dlg.CanChooseDirectories(false)
-	if startDir != "" {
-		dlg.SetDirectory(startDir)
-	}
+	var filters []string
 	if runtime.GOOS == "windows" {
-		dlg.AddFilter("実行ファイル", "*.exe")
+		filters = []string{"実行ファイル", "*.exe"}
 	}
-	picked, err := dlg.PromptForSingleSelection()
+	picked, err := s.PickFile("USI エンジンの実行ファイルを選ぶ", startDir, filters...)
 	if err != nil {
 		return "", fmt.Errorf("ファイルを選べませんでした: %w", err)
 	}
@@ -456,7 +462,7 @@ func (s *SettingsService) pickEngineFile(startDir string) (string, error) {
 func (s *SettingsService) BrowseEngine() (AppSettings, error) {
 	// 既に登録があれば、最後に足したものの場所から開く(辿り直さずに済む)。
 	start := ""
-	if list := s.config().Engines; len(list) > 0 {
+	if list := s.Config().Engines; len(list) > 0 {
 		if cur := list[len(list)-1].Path; cur != "" {
 			start = filepath.Dir(cur)
 		}
@@ -975,8 +981,8 @@ func (s *SettingsService) SetClickThrough(v bool) (AppSettings, error) {
 	if err != nil {
 		return st, err
 	}
-	if s.onClickThrough != nil {
-		s.onClickThrough(v)
+	if s.OnClickThrough != nil {
+		s.OnClickThrough(v)
 	}
 	return st, nil
 }
@@ -996,8 +1002,8 @@ func (s *SettingsService) SetSutemeSource(v string) (AppSettings, error) {
 	if err != nil {
 		return st, err
 	}
-	if s.onSutemeSource != nil {
-		s.onSutemeSource(st.SutemeSource)
+	if s.OnSutemeSource != nil {
+		s.OnSutemeSource(st.SutemeSource)
 	}
 	return st, nil
 }
@@ -1012,8 +1018,8 @@ func (s *SettingsService) SetSutemeDataDir(dir string) (AppSettings, error) {
 	if err != nil {
 		return st, err
 	}
-	if s.onSutemeDataDir != nil {
-		s.onSutemeDataDir(dir)
+	if s.OnSutemeDataDir != nil {
+		s.OnSutemeDataDir(dir)
 	}
 	return st, nil
 }
@@ -1036,8 +1042,8 @@ func (s *SettingsService) SetKifuDBPath(path string) (AppSettings, error) {
 	if err != nil {
 		return st, err
 	}
-	if s.onKifuDBPath != nil {
-		s.onKifuDBPath(st.KifuDBPath)
+	if s.OnKifuDBPath != nil {
+		s.OnKifuDBPath(st.KifuDBPath)
 	}
 	return st, nil
 }
@@ -1047,22 +1053,15 @@ func (s *SettingsService) SetKifuDBPath(path string) (AppSettings, error) {
 // 取り消したら何もしない。**手で打たせる欄も残してある**（貼り付けと確認のため。
 // エンジンのパスと同じ）。
 func (s *SettingsService) BrowseKifuDB() (AppSettings, error) {
-	if s.app == nil {
+	if s.PickFile == nil {
 		return s.Settings(), fmt.Errorf("ダイアログを開けません")
 	}
 	start := ""
-	if cur, err := s.config().KifuDB(); err == nil && cur != "" {
+	if cur, err := s.Config().KifuDB(); err == nil && cur != "" {
 		start = filepath.Dir(cur)
 	}
-	dlg := s.app.Dialog.OpenFile()
-	dlg.SetTitle("棋譜データベース（kicho の .db）を選ぶ")
-	dlg.CanChooseFiles(true)
-	dlg.CanChooseDirectories(false)
-	if start != "" {
-		dlg.SetDirectory(start)
-	}
-	dlg.AddFilter("SQLite データベース", "*.db")
-	picked, err := dlg.PromptForSingleSelection()
+	picked, err := s.PickFile("棋譜データベース（kicho の .db）を選ぶ", start,
+		"SQLite データベース", "*.db")
 	if err != nil {
 		return s.Settings(), fmt.Errorf("ファイルを選べませんでした: %w", err)
 	}

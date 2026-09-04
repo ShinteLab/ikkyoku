@@ -59,28 +59,28 @@ func main() {
 	}))
 	slog.SetDefault(logger)
 
-	settingsSvc := NewSettingsService(logger)
-	cfg := settingsSvc.config()
+	settingsSvc := ikkyokuapp.NewSettingsService(logger)
+	cfg := settingsSvc.Config()
 	captureSvc := NewCaptureService(logger, cfg.SutemeDataDir, cfg.SutemeSourceOr())
-	positionSvc := NewPositionService(logger)
-	trainingSvc := NewTrainingService(logger, settingsSvc)
+	positionSvc := ikkyokuapp.NewPositionService(logger)
+	trainingSvc := ikkyokuapp.NewTrainingService(logger, settingsSvc)
 	// 「駒の字」（設定タブ）。端末に入っているフォントから駒の字を焼く。
 	// **盤に当てるのはフロント**で、ここが返すのは family 名と data URL まで。
-	fontSvc := NewFontService(logger, settingsSvc)
+	fontSvc := ikkyokuapp.NewFontService(logger, settingsSvc)
 	// 局面を持つ Service は 2 つあり、**別のものを持っている**（混同しないこと）。
 	//
 	//   positionSvc … 訂正タブ。認識の誤りを直す面。未決・不正でよい
 	//   studySvc    … 解析タブ。確定した局面。**訂正タブから写しを採る**
 	//
 	// 受け渡しは studySvc.Adopt の 1 か所だけ（訂正タブの「この局面を解析する」）。
-	studySvc := NewStudyService(logger, positionSvc)
+	studySvc := ikkyokuapp.NewStudyService(logger, positionSvc)
 	// 解析は**確定した局面**にだけかかる。局面を持っているのは studySvc なので、
 	// フロントから SFEN を渡してもらうのではなく、あちらから読む。
-	analyzeSvc := NewAnalyzeService(logger, studySvc, settingsSvc)
+	analyzeSvc := ikkyokuapp.NewAnalyzeService(logger, studySvc, settingsSvc)
 	// 棋譜データベース（棚）。**実装は kicho のままで、ikkyoku は利用する側**。
 	// ⚠️ **開けなくてもアプリは動く**（設計原則3）——「解析する」の行き先を持つので
 	// studySvc のあとに作り、開くのは下（失敗しても起動を止めない）。
-	kifuSvc := NewKifuService(logger, studySvc)
+	kifuSvc := ikkyokuapp.NewKifuService(logger, studySvc)
 	// フロントが生きているかの計測だけを持つ Service(diagservice.go)。
 	// 局面にもキャプチャにも関与しない。
 	diagSvc := ikkyokuapp.NewDiagService(logger)
@@ -120,31 +120,33 @@ func main() {
 	wins.frameGeom.attach(frame)
 	wins.mainGeom.attach(main)
 	captureSvc.bind(app, wins)
-	settingsSvc.bind(app)
+	// ⚠️ **Wails の口はここで差し込む。** Service 本体は ikkyoku/app にあり
+	// wails3 を import していないので、ダイアログとイベントだけを関数で渡す。
+	settingsSvc.PickFile = pickFile(app)
+	analyzeSvc.Emit = func(name string, data any) { app.Event.Emit(name, data) }
 	// 棚を開く。⚠️ **失敗してもここで止めない** —— 理由は KifuService が抱えて
 	// 設定タブに出す（撮った 1 局面と貼った棋譜の解析は棚に依らない。設計原則3）。
 	if dbPath, err := cfg.KifuDB(); err != nil {
 		logger.Warn("棋譜データベースの場所を決められませんでした", "error", err)
 	} else {
-		kifuSvc.open(dbPath)
+		kifuSvc.Open(dbPath)
 	}
 	// 設定タブで場所を変えたらその場で開き直す（認識器の読み込み元と同じ扱い）。
-	settingsSvc.onKifuDBPath = kifuSvc.open
+	settingsSvc.OnKifuDBPath = kifuSvc.Open
 	// 枠の素通し（設定「枠の内側で後ろの画面を操作する」）。
 	// **枠の HWND を触るのは CaptureService** なので、設定タブからの切り替えは
 	// ここで繋いだこのフックを通る（SettingsService はウィンドウを持っていない）。
-	settingsSvc.onClickThrough = captureSvc.applyClickThrough
-	settingsSvc.onSutemeSource = captureSvc.applyRecognizerSource
-	settingsSvc.onSutemeDataDir = captureSvc.applyRecognizerDir
+	settingsSvc.OnClickThrough = captureSvc.applyClickThrough
+	settingsSvc.OnSutemeSource = captureSvc.applyRecognizerSource
+	settingsSvc.OnSutemeDataDir = captureSvc.applyRecognizerDir
 	captureSvc.applyClickThrough(cfg.ClickThrough)
-	analyzeSvc.bind(app)
 
 	// 終了の入口は 2 つ（メイン画面を閉じる / 枠のメニューの「終了」）。
 	// **後始末はこの 1 本に寄せる**（保存の経路を 1 本にしてあるのと同じ理由）。
 	quit := func() {
 		saveWindowState(wins, logger)
-		analyzeSvc.close()
-		kifuSvc.close()
+		analyzeSvc.Close()
+		kifuSvc.Close()
 	}
 	captureSvc.beforeQuit = quit
 

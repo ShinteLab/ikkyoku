@@ -41,8 +41,8 @@
 // **状態は Go 側（PositionService）が持つ。** ここは操作を送って、返ってきた
 // EditState をそのまま描くだけ。フロントに局面の写しを持つと、ずれたときに
 // どちらが本当か分からなくなる。
-import { PositionService } from "../bindings/ikkyoku-app";
-import type { EditState, EditCell } from "../bindings/ikkyoku-app/models";
+import { PositionService } from "../bindings/github.com/ShinteLab/ikkyoku/app";
+import type { EditState, EditCell } from "../bindings/github.com/ShinteLab/ikkyoku/app/models";
 import type { Stock } from "../bindings/github.com/ShinteLab/ikkyoku/position/models";
 
 // 手番。Go 側（position.Turn）と同じ値。

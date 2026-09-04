@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"encoding/base64"
@@ -104,8 +104,8 @@ type FontState struct {
 // `ss02` = 馬→左馬。`core/CLAUDE.md`）。⚠️ **`K` と `k` はフォント上で同じグリフ**
 // なので、盤全体にまとめて当てると先後を分けられない。そのため:
 //
-//   盤（<shogi-board>）        … `gyoku` / `hidari-uma` 属性。駒 1 つずつに当ててくれる
-//   ikkyoku が自分で描く駒     … 先手用・後手用の 2 つの値を CSS 変数で配る
+//	盤（<shogi-board>）        … `gyoku` / `hidari-uma` 属性。駒 1 つずつに当ててくれる
+//	ikkyoku が自分で描く駒     … 先手用・後手用の 2 つの値を CSS 変数で配る
 //
 // ⚠️ **`font-feature-settings` は個別の値が積み上がらない**（後から当てた宣言が
 // 丸ごと勝つ）ので、**玉と左馬を 1 つの値にまとめてから**渡す。
@@ -235,7 +235,7 @@ type FontScan struct {
 
 // State は今の設定を返す（設定タブを開いたとき・起動時）。
 func (s *FontService) State() FontState {
-	cfg := s.settings.config()
+	cfg := s.settings.Config()
 	return s.state(cfg)
 }
 
@@ -367,7 +367,7 @@ func (s *FontService) Scan() (FontScan, error) {
 
 	// 既に登録してあるものには印を付ける（同じ書体を 2 つ登録しても意味が無い）。
 	registered := map[string]bool{}
-	for _, e := range s.settings.config().PieceFontList() {
+	for _, e := range s.settings.Config().PieceFontList() {
 		registered[choiceKey(e.Path, e.Index)] = true
 	}
 
@@ -560,7 +560,7 @@ func (s *FontService) SetHidariUma(on bool) (FontState, error) {
 }
 
 func (s *FontService) has(id string) bool {
-	for _, e := range s.settings.config().PieceFontList() {
+	for _, e := range s.settings.Config().PieceFontList() {
 		if e.ID == id {
 			return true
 		}

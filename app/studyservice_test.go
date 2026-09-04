@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"io"
@@ -678,7 +678,7 @@ func TestStudyServiceDropFromKeepsSiblings(t *testing.T) {
 }
 
 // TestStudyServiceAddLineSource は**誰が言った手か**が手順に残ることを固定する
-//（2026-08-14）。枝は「エンジンがそう読んだ」だけの手なので、**本譜と同じ
+// （2026-08-14）。枝は「エンジンがそう読んだ」だけの手なので、**本譜と同じ
 // 見た目で並ぶとどれが誰の読み筋か分からない**（手順リストで色の丸になる）。
 func TestStudyServiceAddLineSource(t *testing.T) {
 	s := adopted(t)

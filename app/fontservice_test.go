@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"io"
@@ -437,7 +437,7 @@ func TestFontPieceStyle(t *testing.T) {
 	}
 
 	// 保存されていること。
-	if got := s.settings.config(); got.HidariUma != true || got.Gyoku != ikkyoku.GyokuNone {
+	if got := s.settings.Config(); got.HidariUma != true || got.Gyoku != ikkyoku.GyokuNone {
 		t.Errorf("保存されていない: gyoku=%q hidariUma=%v", got.Gyoku, got.HidariUma)
 	}
 }
@@ -482,7 +482,7 @@ func TestFontPieceInk(t *testing.T) {
 	if st.PieceColor != "#3b2a1a" || st.PieceOpacity != 0.75 {
 		t.Errorf("画面に返す値が違う: color=%q opacity=%v", st.PieceColor, st.PieceOpacity)
 	}
-	if got := s.settings.config(); got.PieceColor != "#3b2a1a" || got.PieceOpacity != 0.75 {
+	if got := s.settings.Config(); got.PieceColor != "#3b2a1a" || got.PieceOpacity != 0.75 {
 		t.Errorf("保存されていない: %+v", got)
 	}
 
@@ -490,7 +490,7 @@ func TestFontPieceInk(t *testing.T) {
 	if _, err := s.SetPieceInk(ikkyoku.DefaultPieceColor, 1); err != nil {
 		t.Fatal(err)
 	}
-	if got := s.settings.config(); got.PieceColor != "" || got.PieceOpacity != 0 {
+	if got := s.settings.Config(); got.PieceColor != "" || got.PieceOpacity != 0 {
 		t.Errorf("既定なのに書き残している: color=%q opacity=%v", got.PieceColor, got.PieceOpacity)
 	}
 

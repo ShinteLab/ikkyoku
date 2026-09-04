@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"context"
@@ -58,12 +58,17 @@ func NewKifuService(logger *slog.Logger, study *StudyService) *KifuService {
 	return &KifuService{logger: logger, study: study}
 }
 
-// open は指定パスの棚を開く（既に開いていれば閉じてから開き直す）。
+// Open は指定パスの棚を開く（既に開いていれば閉じてから開き直す）。
 //
 // ⚠️ **エラーを返さない。** 開けなかったことは openErr に残して Status から
 // 見せる —— ここで失敗を上へ投げると、呼び出し側（main の起動シーケンス・
 // 設定の保存）が「棚が開けないとアプリが動かない」形になってしまう。
-func (s *KifuService) open(path string) {
+//
+// ⚠️ **`//wails:ignore` を外さないこと。** これは `_cmd/ikkyoku` が起動・終了で
+// 呼ぶための口で、**フロントの API ではない**（外すと bindings に出てしまう）。
+//
+//wails:ignore
+func (s *KifuService) Open(path string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.openLocked(path)
@@ -95,8 +100,13 @@ func (s *KifuService) openLocked(path string) {
 	s.logger.Info("棋譜データベースを開きました", "path", path)
 }
 
-// close は棚を閉じる（アプリの終了時。quit から呼ぶ）。
-func (s *KifuService) close() {
+// Close は棚を閉じる（アプリの終了時。quit から呼ぶ）。
+//
+// ⚠️ **`//wails:ignore` を外さないこと。** これは `_cmd/ikkyoku` が起動・終了で
+// 呼ぶための口で、**フロントの API ではない**（外すと bindings に出てしまう）。
+//
+//wails:ignore
+func (s *KifuService) Close() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.lib == nil {

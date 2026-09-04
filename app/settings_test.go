@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"io"
@@ -533,7 +533,7 @@ func TestSetEngineMultiPV(t *testing.T) {
 func TestSetClickThrough(t *testing.T) {
 	s := newTestSettings(t, nil)
 	var got []bool
-	s.onClickThrough = func(v bool) { got = append(got, v) }
+	s.OnClickThrough = func(v bool) { got = append(got, v) }
 
 	st, err := s.SetClickThrough(true)
 	if err != nil {
