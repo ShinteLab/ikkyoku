@@ -564,3 +564,42 @@ func TestConfigSutemeSourceOr(t *testing.T) {
 		}
 	}
 }
+
+// 棋譜データベースの場所。**「空なら既定」の解決は Config.KifuDB の 1 か所。**
+//
+// ⚠️ **既定は kicho アプリのものとは別**（os.UserConfigDir()/ikkyoku/kicho.db）。
+// 同じ SQLite ファイルを 2 プロセスから書くと `database is locked` になりうるので、
+// **共用はユーザーが設定で指定したときだけ**にしてある。
+func TestConfigKifuDB(t *testing.T) {
+	// 指定してあればそのまま。
+	c := Config{KifuDBPath: `D:\shogi\kicho.db`}
+	got, err := c.KifuDB()
+	if err != nil {
+		t.Fatalf("KifuDB: %v", err)
+	}
+	if got != `D:\shogi\kicho.db` {
+		t.Errorf("指定したパスが使われていません: %q", got)
+	}
+
+	// 空なら既定（ikkyoku 配下）。
+	def, err := Config{}.KifuDB()
+	if err != nil {
+		t.Fatalf("KifuDB(既定): %v", err)
+	}
+	if filepath.Base(def) != "kicho.db" || filepath.Base(filepath.Dir(def)) != "ikkyoku" {
+		t.Errorf("既定の場所が違います: %q", def)
+	}
+	// ⚠️ **kicho アプリの既定を指さないこと**（同じ DB を 2 プロセスから開かない）。
+	if filepath.Base(filepath.Dir(def)) == "kicho" {
+		t.Errorf("kicho の既定を指しています: %q", def)
+	}
+
+	// 空白だけのときも既定へ倒す（設定ファイルは手で編集する前提）。
+	blank, err := Config{KifuDBPath: "  "}.KifuDB()
+	if err != nil {
+		t.Fatalf("KifuDB(空白): %v", err)
+	}
+	if blank != def {
+		t.Errorf("空白が既定に倒れていません: %q", blank)
+	}
+}
