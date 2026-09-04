@@ -11,5 +11,5 @@ import (
 // 他 OS はビルドが壊れないようにするためのスタブで、呼ばれたらエラーを返す
 // (clientrect_other.go と同じ扱い。ikkyoku/CLAUDE.md により Windows 以外は対象外)。
 func copyImageToClipboard(img image.Image) error {
-	return fmt.Errorf("ikkyoku-app: このOSでは画像のコピーは未対応です(Windows専用)")
+	return fmt.Errorf("ikkyoku: このOSでは画像のコピーは未対応です(Windows専用)")
 }

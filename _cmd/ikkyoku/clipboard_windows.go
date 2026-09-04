@@ -74,19 +74,19 @@ func copyImageToClipboard(img image.Image) error {
 	defer procCloseClipboard.Call()
 
 	if ret, _, callErr := procEmptyClipboard.Call(); ret == 0 {
-		return fmt.Errorf("ikkyoku-app: クリップボードを空にできませんでした: %w", callErr)
+		return fmt.Errorf("ikkyoku: クリップボードを空にできませんでした: %w", callErr)
 	}
 
 	// GMEM_MOVEABLE で確保して SetClipboardData に渡す。**成功したら所有権は
 	// クリップボード側に移る**ので解放してはいけない(逆に失敗したときは自分で解放する)。
 	hMem, _, callErr := procGlobalAlloc.Call(gmemMoveable, uintptr(len(dib)))
 	if hMem == 0 {
-		return fmt.Errorf("ikkyoku-app: クリップボード用のメモリを確保できませんでした: %w", callErr)
+		return fmt.Errorf("ikkyoku: クリップボード用のメモリを確保できませんでした: %w", callErr)
 	}
 	ptr, _, lockErr := procGlobalLock.Call(hMem)
 	if ptr == 0 {
 		procGlobalFree.Call(hMem)
-		return fmt.Errorf("ikkyoku-app: クリップボード用のメモリをロックできませんでした: %w", lockErr)
+		return fmt.Errorf("ikkyoku: クリップボード用のメモリをロックできませんでした: %w", lockErr)
 	}
 	// GlobalLock が返すのは GC の管理外のアドレス。uintptr のまま RtlMoveMemory に
 	// 渡して書き込む(unsafe.Pointer に戻して slice を作ると、値としては正しくても
@@ -97,7 +97,7 @@ func copyImageToClipboard(img image.Image) error {
 
 	if ret, _, setErr := procSetClipboard.Call(cfDIB, hMem); ret == 0 {
 		procGlobalFree.Call(hMem)
-		return fmt.Errorf("ikkyoku-app: クリップボードに画像を設定できませんでした: %w", setErr)
+		return fmt.Errorf("ikkyoku: クリップボードに画像を設定できませんでした: %w", setErr)
 	}
 	return nil
 }
@@ -112,7 +112,7 @@ func openClipboard() error {
 		lastErr = callErr
 		time.Sleep(20 * time.Millisecond)
 	}
-	return fmt.Errorf("ikkyoku-app: クリップボードを開けませんでした(他のアプリが使用中かもしれません): %w", lastErr)
+	return fmt.Errorf("ikkyoku: クリップボードを開けませんでした(他のアプリが使用中かもしれません): %w", lastErr)
 }
 
 // dibFromImage は image.Image を CF_DIB のバイト列(ヘッダ + 画素)にする。
@@ -124,7 +124,7 @@ func dibFromImage(img image.Image) ([]byte, error) {
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
 	if w <= 0 || h <= 0 {
-		return nil, fmt.Errorf("ikkyoku-app: 画像の大きさが不正です(%dx%d)", w, h)
+		return nil, fmt.Errorf("ikkyoku: 画像の大きさが不正です(%dx%d)", w, h)
 	}
 
 	stride := ((w*3 + 3) / 4) * 4 // 各行を 4 バイト境界に揃える

@@ -62,7 +62,7 @@ func defaultAppState() appState {
 func appStatePath() (string, error) {
 	dir, err := os.UserConfigDir()
 	if err != nil {
-		return "", fmt.Errorf("ikkyoku-app: 設定ディレクトリの取得に失敗しました: %w", err)
+		return "", fmt.Errorf("ikkyoku: 設定ディレクトリの取得に失敗しました: %w", err)
 	}
 	return filepath.Join(dir, "ikkyoku", "app-window.json"), nil
 }
@@ -98,14 +98,14 @@ func saveAppState(st appState) error {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("ikkyoku-app: 設定ディレクトリの作成に失敗しました: %w", err)
+		return fmt.Errorf("ikkyoku: 設定ディレクトリの作成に失敗しました: %w", err)
 	}
 	b, err := json.MarshalIndent(st, "", "  ")
 	if err != nil {
-		return fmt.Errorf("ikkyoku-app: ウィンドウ状態のエンコードに失敗しました: %w", err)
+		return fmt.Errorf("ikkyoku: ウィンドウ状態のエンコードに失敗しました: %w", err)
 	}
 	if err := os.WriteFile(path, b, 0o644); err != nil {
-		return fmt.Errorf("ikkyoku-app: ウィンドウ状態の書き込みに失敗しました: %w", err)
+		return fmt.Errorf("ikkyoku: ウィンドウ状態の書き込みに失敗しました: %w", err)
 	}
 	return nil
 }

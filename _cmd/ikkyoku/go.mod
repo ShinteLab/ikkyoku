@@ -1,4 +1,4 @@
-module ikkyoku-app
+module ikkyoku
 
 go 1.26.1
 

@@ -446,7 +446,7 @@ func (s *CaptureService) RepairMain() {
 // 走る。掛けると自分で自分を止める。
 func (s *CaptureService) requireFrame() error {
 	if s.wins == nil || s.wins.frame == nil {
-		return fmt.Errorf("ikkyoku-app: ウィンドウが初期化されていません")
+		return fmt.Errorf("ikkyoku: ウィンドウが初期化されていません")
 	}
 	if !s.wins.frame.IsVisible() {
 		return fmt.Errorf("ガイド枠が出ていません。タイトルバーの「枠を表示」から出して、撮りたい盤面に合わせてください")
@@ -1014,7 +1014,7 @@ func (s *CaptureService) maskWindows(img image.Image, disp ikkyoku.Region) {
 // (画像はランタイムに口が無く、Win32 を直接叩く必要があるため。clipboard_windows.go)。
 func (s *CaptureService) CopyImage(path string) error {
 	if path == "" {
-		return fmt.Errorf("ikkyoku-app: コピーする画像がありません")
+		return fmt.Errorf("ikkyoku: コピーする画像がありません")
 	}
 	f, err := os.Open(path)
 	if err != nil {
@@ -1062,11 +1062,11 @@ func (s *CaptureService) CopyImage(path string) error {
 // 撮った領域と戻す先が食い違う。
 func (s *CaptureService) captureRegion() (ikkyoku.Region, float64, error) {
 	if s.wins == nil || s.wins.frame == nil {
-		return ikkyoku.Region{}, 0, fmt.Errorf("ikkyoku-app: ウィンドウが初期化されていません")
+		return ikkyoku.Region{}, 0, fmt.Errorf("ikkyoku: ウィンドウが初期化されていません")
 	}
 	hwnd := s.wins.frame.NativeWindow()
 	if hwnd == nil {
-		return ikkyoku.Region{}, 0, fmt.Errorf("ikkyoku-app: ネイティブウィンドウハンドルを取得できませんでした")
+		return ikkyoku.Region{}, 0, fmt.Errorf("ikkyoku: ネイティブウィンドウハンドルを取得できませんでした")
 	}
 
 	rect, scale, err := clientRectPhysical(hwnd)
@@ -1084,7 +1084,7 @@ func (s *CaptureService) captureRegion() (ikkyoku.Region, float64, error) {
 		Height: rect.Height - top - bottom,
 	}
 	if !region.Valid() {
-		return ikkyoku.Region{}, 0, fmt.Errorf("ikkyoku-app: ウィンドウが小さすぎます(ツールバーとガイド枠で領域が無くなります)")
+		return ikkyoku.Region{}, 0, fmt.Errorf("ikkyoku: ウィンドウが小さすぎます(ツールバーとガイド枠で領域が無くなります)")
 	}
 	return region, scale, nil
 }

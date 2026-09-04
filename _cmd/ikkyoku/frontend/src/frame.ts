@@ -12,7 +12,7 @@
 // 定数を置いていたが、ずれると枠が写り込むという直接的な不具合になるため一本化した。
 import { Events } from "@wailsio/runtime";
 import { FiCamera, FiChevronDown, FiCrop, FiX } from "react-icons/fi";
-import { CaptureService } from "../bindings/ikkyoku-app";
+import { CaptureService } from "../bindings/ikkyoku";
 import { iconMarkup } from "./icon";
 
 // capture:shot のうち、枠が使う部分だけ。認識結果はメイン画面の担当なので見ない

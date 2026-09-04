@@ -34,7 +34,7 @@ func windowRectPhysical(hwnd unsafe.Pointer) (physicalRect, error) {
 	var rect win32Rect
 	ret, _, callErr := procGetWindowRect.Call(uintptr(windows.HWND(uintptr(hwnd))), uintptr(unsafe.Pointer(&rect)))
 	if ret == 0 {
-		return physicalRect{}, fmt.Errorf("ikkyoku-app: GetWindowRect に失敗しました: %w", callErr)
+		return physicalRect{}, fmt.Errorf("ikkyoku: GetWindowRect に失敗しました: %w", callErr)
 	}
 	return physicalRect{
 		X:      int(rect.Left),
@@ -72,13 +72,13 @@ func clientRectPhysical(hwnd unsafe.Pointer) (physicalRect, float64, error) {
 	var rect win32Rect
 	ret, _, callErr := procGetClientRect.Call(uintptr(h), uintptr(unsafe.Pointer(&rect)))
 	if ret == 0 {
-		return physicalRect{}, 0, fmt.Errorf("ikkyoku-app: GetClientRect に失敗しました: %w", callErr)
+		return physicalRect{}, 0, fmt.Errorf("ikkyoku: GetClientRect に失敗しました: %w", callErr)
 	}
 
 	origin := win32Point{X: rect.Left, Y: rect.Top}
 	ret2, _, callErr2 := procClientToScreen.Call(uintptr(h), uintptr(unsafe.Pointer(&origin)))
 	if ret2 == 0 {
-		return physicalRect{}, 0, fmt.Errorf("ikkyoku-app: ClientToScreen に失敗しました: %w", callErr2)
+		return physicalRect{}, 0, fmt.Errorf("ikkyoku: ClientToScreen に失敗しました: %w", callErr2)
 	}
 
 	scale := 1.0

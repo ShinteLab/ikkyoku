@@ -59,7 +59,7 @@ import {
 } from "react-icons/fi";
 // ⚠️ **CaptureService だけ出所が違う。** あれはウィンドウ（枠）と HWND を触るので
 // `_cmd/ikkyoku` に残っており、他の Service は `ikkyoku/app` にある。
-import { CaptureService } from "../bindings/ikkyoku-app";
+import { CaptureService } from "../bindings/ikkyoku";
 import {
   AnalyzeService,
   FontService,
@@ -75,7 +75,7 @@ import { mountFetchCards } from "./fetchcards";
 import { mountEvalGraph } from "./evalgraph";
 import { mountStudyBoard } from "./study";
 import { openPopup } from "./popup";
-import type { RecognizerStatus } from "../bindings/ikkyoku-app/models";
+import type { RecognizerStatus } from "../bindings/ikkyoku/models";
 import type {
   AppSettings,
   EngineSettings,

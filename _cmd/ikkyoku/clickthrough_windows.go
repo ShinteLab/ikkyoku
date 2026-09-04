@@ -84,7 +84,7 @@ func setWindowLong(h windows.HWND, index, value uintptr) {
 // 素通しでないあいだまで layered を残す理由が無い。
 func setMouseTransparent(hwnd unsafe.Pointer, on bool) error {
 	if hwnd == nil {
-		return fmt.Errorf("ikkyoku-app: ネイティブウィンドウハンドルがありません")
+		return fmt.Errorf("ikkyoku: ネイティブウィンドウハンドルがありません")
 	}
 	h := windows.HWND(uintptr(hwnd))
 
@@ -105,7 +105,7 @@ func setMouseTransparent(hwnd unsafe.Pointer, on bool) error {
 	// 戻り値だけでは決められない（GetLastError を消してから読む作法が要る）。
 	// **読み直して確かめるほうが確実。**
 	if got := windowLong(h, gwlExStyle); got&(wsExTransparent|wsExLayered) != next&(wsExTransparent|wsExLayered) {
-		return fmt.Errorf("ikkyoku-app: 拡張スタイルを変更できませんでした(WS_EX_TRANSPARENT|WS_EX_LAYERED)")
+		return fmt.Errorf("ikkyoku: 拡張スタイルを変更できませんでした(WS_EX_TRANSPARENT|WS_EX_LAYERED)")
 	}
 
 	if on {
@@ -113,7 +113,7 @@ func setMouseTransparent(hwnd unsafe.Pointer, on bool) error {
 		// 領域はスタイルを変えただけでは更新されない（Wails 自身も同じ理由で
 		// この呼び出しを持っている）。alpha 255 = 見た目は変えない。
 		if ret, _, callErr := procSetLayeredWindowAttributes.Call(uintptr(h), 0, 255, lwaAlpha); ret == 0 {
-			return fmt.Errorf("ikkyoku-app: SetLayeredWindowAttributes に失敗しました: %w", callErr)
+			return fmt.Errorf("ikkyoku: SetLayeredWindowAttributes に失敗しました: %w", callErr)
 		}
 	}
 	return nil
