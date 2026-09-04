@@ -61,6 +61,7 @@ import {
   AnalyzeService,
   CaptureService,
   FontService,
+  KifuService,
   SettingsService,
   StudyService,
   TrainingService,
@@ -75,6 +76,7 @@ import type {
   EngineSettings,
   FontChoice,
   FontState,
+  KifuDBStatus,
   KifuLoad,
   RecognizerStatus,
   StudyState,
@@ -1100,6 +1102,34 @@ export function mountMainScreen(root: HTMLElement): void {
             </label>
           </div>
           <p id="suteme-source-note" class="setting-note"></p>
+        </div>
+
+        <!-- 棋譜データベース（棚）。**実装は kicho のままで、ikkyoku は利用する側。**
+
+             ⚠️ **棚は解析の前提条件ではない**（設計原則3）。開けなくても
+             撮った 1 局面と貼った棋譜の解析は今までどおり動き、棋譜タブだけが
+             理由を出して機能しない。**ここでエラーを赤く出しても、他の機能は
+             壊れていないことが分かるように書くこと。** -->
+        <div class="setting-group">
+          <div class="setting is-block">
+            <span class="setting-body">
+              <span class="setting-title">棋譜データベース</span>
+              <span class="setting-note">
+                棋譜タブの「棚」を置くファイルです。変えるとその場で開き直します。
+                <strong>開けなくても撮影・訂正・解析はそのまま使えます</strong>
+                （棋譜タブだけが使えなくなります）。
+              </span>
+            </span>
+          </div>
+          <div class="setting-fields">
+            <label class="field is-wide">
+              <span class="field-label">場所</span>
+              <input id="kifudb-path" type="text" spellcheck="false"
+                     placeholder="(空なら既定の場所)" />
+            </label>
+            <button id="kifudb-browse" type="button">参照…</button>
+          </div>
+          <p id="kifudb-note" class="setting-note"></p>
         </div>
         <p id="settings-status" class="status" role="status" aria-live="polite"></p>
 
@@ -4546,6 +4576,13 @@ export function mountMainScreen(root: HTMLElement): void {
   const sutemeSource = root.querySelector<HTMLSelectElement>("#suteme-source")!;
   const sutemeDataDir = root.querySelector<HTMLInputElement>("#suteme-data-dir")!;
   const sutemeSourceNote = root.querySelector<HTMLParagraphElement>("#suteme-source-note")!;
+  const kifuDBPath = root.querySelector<HTMLInputElement>("#kifudb-path")!;
+  const kifuDBBrowse = root.querySelector<HTMLButtonElement>("#kifudb-browse")!;
+  const kifuDBNote = root.querySelector<HTMLParagraphElement>("#kifudb-note")!;
+  // onKifuDBChanged は棚を開き直したときに呼ぶ（棋譜タブの一覧を取り直す）。
+  // ⚠️ **設定タブから棋譜タブの DOM を触らないこと** —— 一覧を持っているのは
+  // あちらなので、繋ぐのはこの 1 本にする。
+  let onKifuDBChanged: (() => void) | undefined;
   const settingsStatus = root.querySelector<HTMLParagraphElement>("#settings-status")!;
   const settingsPath = root.querySelector<HTMLElement>("#settings-path")!;
   const trainEnabledInput = root.querySelector<HTMLInputElement>("#train-enabled")!;
@@ -5065,10 +5102,14 @@ export function mountMainScreen(root: HTMLElement): void {
     sutemeDataDir: string;
     sutemeEmbedAvailable: boolean;
     sutemeEmbedSource: string;
+    kifuDbPath: string;
   }) => {
     fitOnStartup.checked = s.fitOnStartup;
     clickThrough.checked = s.clickThrough;
     showSutemeSource(s);
+    // ⚠️ **既定の解決は Go 側**（`Config.KifuDB`）。返ってきた場所をそのまま入れる。
+    kifuDBPath.value = s.kifuDbPath;
+    void refreshKifuDBNote();
     // ⚠️ **既定値の解決は Go 側**（`analyze.PonanzaConstantOr`）。返ってきた値を
     // そのまま入れるだけにすること（フロントに既定を書くと 2 か所に散る）。
     ponanzaConstant.value = String(s.ponanzaConstant);
@@ -5679,6 +5720,78 @@ export function mountMainScreen(root: HTMLElement): void {
         settingsStatus.classList.add("is-error");
       } finally {
         clickThrough.disabled = false;
+      }
+    })();
+  });
+
+  // 棋譜データベース（棚）。
+  //
+  // ⚠️ **「開けているか」は設定ではなく状態**なので、AppSettings ではなく
+  // `KifuService.Status` から取る（設定は「どこを開こうとしているか」）。
+  // ⚠️ **開けなくてもエラー色にしすぎないこと** —— 棚は解析の前提条件ではない
+  // （設計原則3）。「棋譜タブだけが使えない」ことが読めるように書く。
+  const refreshKifuDBNote = async () => {
+    let st: KifuDBStatus;
+    try {
+      st = await KifuService.Status();
+    } catch (err) {
+      kifuDBNote.textContent = `状態を取得できませんでした: ${String(err)}`;
+      kifuDBNote.classList.add("is-error");
+      return;
+    }
+    if (st.ready) {
+      kifuDBNote.textContent = `開いています（${st.count}件）。`;
+      kifuDBNote.classList.remove("is-error");
+    } else {
+      kifuDBNote.textContent = st.error
+        ? `開けていません: ${st.error}（棋譜タブだけが使えません）`
+        : "開けていません（棋譜タブだけが使えません）。";
+      kifuDBNote.classList.add("is-error");
+    }
+  };
+
+  // ⚠️ **change（確定時）で拾う。** パスを 1 文字打つたびに DB を開き直さない。
+  const applyKifuDBPath = async (want: string) => {
+    kifuDBPath.disabled = true;
+    kifuDBBrowse.disabled = true;
+    settingsStatus.textContent = "";
+    settingsStatus.classList.remove("is-error");
+    try {
+      showSettings(await SettingsService.SetKifuDBPath(want));
+      // ⚠️ **開き直した結果はここで取り直す**（showSettings は設定しか映さない）。
+      await refreshKifuDBNote();
+      onKifuDBChanged?.();
+      settingsStatus.textContent = "棋譜データベースを開き直しました。";
+    } catch (err) {
+      settingsStatus.textContent = `設定を保存できませんでした: ${String(err)}`;
+      settingsStatus.classList.add("is-error");
+      try {
+        showSettings(await SettingsService.Settings());
+      } catch {
+        // 読み直せないなら画面はそのまま。
+      }
+    } finally {
+      kifuDBPath.disabled = false;
+      kifuDBBrowse.disabled = false;
+    }
+  };
+
+  kifuDBPath.addEventListener("change", () => {
+    void applyKifuDBPath(kifuDBPath.value);
+  });
+
+  kifuDBBrowse.addEventListener("click", () => {
+    void (async () => {
+      kifuDBBrowse.disabled = true;
+      try {
+        showSettings(await SettingsService.BrowseKifuDB());
+        await refreshKifuDBNote();
+        onKifuDBChanged?.();
+      } catch (err) {
+        settingsStatus.textContent = `選べませんでした: ${String(err)}`;
+        settingsStatus.classList.add("is-error");
+      } finally {
+        kifuDBBrowse.disabled = false;
       }
     })();
   });

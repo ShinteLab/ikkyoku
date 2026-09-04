@@ -65,6 +65,12 @@ type AppSettings struct {
 	SutemeEmbedAvailable bool `json:"sutemeEmbedAvailable"`
 	// SutemeEmbedSource は焼き込んだデータの出所（表示用。焼き込みが無ければ空）。
 	SutemeEmbedSource string `json:"sutemeEmbedSource"`
+	// KifuDBPath は棋譜データベース（棚）の場所。**既定は解決済みで返る**
+	// （`ikkyoku.Config.KifuDB`）。⚠️ **フロントに既定値を書かないこと。**
+	//
+	// **実際に開けているかどうかはここには出ない**（`KifuService.Status`）——
+	// 設定は「どこを開こうとしているか」、状態は「開けたか」で別のもの。
+	KifuDBPath string `json:"kifuDbPath"`
 	// Path は設定ファイルの場所。**表示のためだけ。** 手で編集したくなったときに
 	// 探さずに済むよう出しておく(学習データの置き場所もこのファイルにある)。
 	Path string `json:"path"`
@@ -252,6 +258,11 @@ type SettingsService struct {
 	// onSutemeDataDir は学習データの置き場所を変えたときに呼ぶ（同じく読み直す）。
 	onSutemeDataDir func(string)
 
+	// onKifuDBPath は棋譜データベースの場所を変えたときに呼ぶ
+	// （`KifuService.open`。その場で開き直す）。
+	// ⚠️ **SettingsService から DB を直に触らないこと**（棚を持っているのはあちら）。
+	onKifuDBPath func(string)
+
 	mu   sync.Mutex
 	path string
 	cfg  ikkyoku.Config
@@ -313,8 +324,25 @@ func (s *SettingsService) settings() AppSettings {
 		SutemeEmbedAvailable: recognize.EmbeddedAvailable(),
 		SutemeEmbedSource:    recognize.EmbeddedSource(),
 
+		// **既定は解決して返す**（空でも実際に開く場所が画面に出る）。
+		// 解決できない環境では空のまま返す（画面には理由が別に出る）。
+		KifuDBPath: s.kifuDBPathLocked(),
+
 		Path: s.path,
 	}
+}
+
+// kifuDBPathLocked は棋譜データベースの場所を解決して返す。
+//
+// ⚠️ **「空なら既定」の解決は `ikkyoku.Config.KifuDB` の 1 か所。**
+// ここに既定のパスを書かないこと。
+func (s *SettingsService) kifuDBPathLocked() string {
+	p, err := s.cfg.KifuDB()
+	if err != nil {
+		s.logger.Warn("棋譜データベースの場所を決められませんでした", "error", err)
+		return ""
+	}
+	return p
 }
 
 // enabledEngines は解析に使うエンジンを返す(AnalyzeService が使う)。
@@ -988,6 +1016,60 @@ func (s *SettingsService) SetSutemeDataDir(dir string) (AppSettings, error) {
 		s.onSutemeDataDir(dir)
 	}
 	return st, nil
+}
+
+// SetKifuDBPath は棋譜データベース（棚）の場所を変えて保存し、**その場で開き直す。**
+//
+// **空にすると既定へ戻る**（`os.UserConfigDir()/ikkyoku/kicho.db`）。
+// 解決は `ikkyoku.Config.KifuDB` の 1 か所なので、ここでは空をそのまま保存する。
+//
+// ⚠️ **保存できたときだけ効かせること**（`SetClickThrough` と同じ）。先に開き直すと、
+// 保存に失敗したときに「画面のパスと実際に開いている DB が食い違う」。
+//
+// ⚠️ **存在チェックをしない。** SQLite は無ければ作るので、まだ無い場所を
+// 先に書く順序が普通にある（エンジンのパスとはそこが違う）。
+func (s *SettingsService) SetKifuDBPath(path string) (AppSettings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	path = strings.TrimSpace(path)
+	st, err := s.save(func(cfg *ikkyoku.Config) { cfg.KifuDBPath = path })
+	if err != nil {
+		return st, err
+	}
+	if s.onKifuDBPath != nil {
+		s.onKifuDBPath(st.KifuDBPath)
+	}
+	return st, nil
+}
+
+// BrowseKifuDB は棋譜データベースのファイルを選ぶダイアログを出す。
+//
+// 取り消したら何もしない。**手で打たせる欄も残してある**（貼り付けと確認のため。
+// エンジンのパスと同じ）。
+func (s *SettingsService) BrowseKifuDB() (AppSettings, error) {
+	if s.app == nil {
+		return s.Settings(), fmt.Errorf("ダイアログを開けません")
+	}
+	start := ""
+	if cur, err := s.config().KifuDB(); err == nil && cur != "" {
+		start = filepath.Dir(cur)
+	}
+	dlg := s.app.Dialog.OpenFile()
+	dlg.SetTitle("棋譜データベース（kicho の .db）を選ぶ")
+	dlg.CanChooseFiles(true)
+	dlg.CanChooseDirectories(false)
+	if start != "" {
+		dlg.SetDirectory(start)
+	}
+	dlg.AddFilter("SQLite データベース", "*.db")
+	picked, err := dlg.PromptForSingleSelection()
+	if err != nil {
+		return s.Settings(), fmt.Errorf("ファイルを選べませんでした: %w", err)
+	}
+	if picked == "" {
+		return s.Settings(), nil // 取り消し。**何も変えない。**
+	}
+	return s.SetKifuDBPath(picked)
 }
 
 // save は設定を 1 項目書き換えて保存する共通処理。**ロックを取った状態で呼ぶこと。**

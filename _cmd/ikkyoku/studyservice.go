@@ -266,6 +266,31 @@ type AddLine struct {
 	Note string `json:"note"`
 }
 
+// loadKifuFrom は KIF テキストを読み込んで、**取得元の URL も覚える**。
+//
+// ⚠️ **`LoadKifu` が捨てたあとに入れ直している** —— あちらは貼り付けの口でもあるので、
+// 取得元を知らないほうが正しい。取得元が分かっている入口（URL からの読み込み・
+// 棚からの「解析する」）だけがここを通る。
+//
+// **`sourceURL` は手順の見出しの「再読み込み」の鍵**（これが空だとアイコンが出ない）。
+// ⚠️ **公開しない** —— フロントから任意の URL を紐付けられると、
+// 「今の手順がどこから来たか」が実際の取得元と食い違いうる。
+func (s *StudyService) loadKifuFrom(text, sourceURL string) (KifuLoad, error) {
+	load, err := s.LoadKifu(text)
+	if err != nil {
+		return load, err
+	}
+	if strings.TrimSpace(sourceURL) == "" {
+		return load, nil
+	}
+	s.mu.Lock()
+	s.sourceURL = sourceURL
+	st := s.state()
+	s.mu.Unlock()
+	load.State = st
+	return load, nil
+}
+
 // kifuFetchTimeout は棋譜を取りに行くときの上限。
 //
 // 棋譜 1 局は数十 KB なので、これで足りないのは相手が居ないときだけ。
@@ -286,18 +311,10 @@ func (s *StudyService) LoadKifuURL(rawURL string) (KifuLoad, error) {
 	}
 	s.logger.Info("棋譜を取得しました", "url", got.URL, "encoding", got.Encoding, "bytes", len(got.Text))
 
-	load, err := s.LoadKifu(got.Text)
+	load, err := s.loadKifuFrom(got.Text, got.URL)
 	if err != nil {
 		return load, err
 	}
-	// **取得元を覚える**（手順の見出しの「再読み込み」の鍵）。⚠️ **`LoadKifu` が
-	// 捨てたあとに入れ直している** —— あちらは貼り付けの口でもあるので、
-	// 取得元を知らないほうが正しい。
-	s.mu.Lock()
-	s.sourceURL = got.URL
-	st := s.state()
-	s.mu.Unlock()
-	load.State = st
 	// **何を読んだかを出す。** URL は打ち間違えても「棋譜が読めません」としか
 	// 出ないことがあるので、**取れた側の事実**（どこから・何文字コードで）を見せる。
 	load.Summary += fmt.Sprintf("（%s）", got.Encoding)

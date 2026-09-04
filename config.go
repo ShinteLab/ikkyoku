@@ -170,6 +170,25 @@ type Config struct {
 	// **どれを使うかは一覧の外に 1 つ持つのが正しい** ——
 	// 印にすると「2 つに印が付いている」という表せてはいけない状態が作れる。
 	PieceFont string `json:"pieceFont,omitempty"`
+
+	// KifuDBPath は棋譜データベース（kicho の SQLite）のファイルパス。
+	//
+	// **空なら `os.UserConfigDir()/ikkyoku/kicho.db`**（既定値の解決は
+	// `Config.KifuDB` の 1 か所。**ここにもフロントにも書かないこと**）。
+	//
+	// 指定できるようにしてあるのは、**kicho アプリの DB
+	// （`%APPDATA%\kicho\kicho.db`）を共用したいことがある**ため。
+	// kicho の UI は最終的に「テスト用のモック」になる予定で、
+	// そのとき同じ棚を両方から見られると確かめやすい。
+	//
+	// ⚠️ **同じ DB を kicho アプリと同時に開かないこと。** `store` は
+	// `SetMaxOpenConns(1)` だが、それはプロセス内の話で、2 プロセスから書くと
+	// `database is locked` になりうる。**既定を分けてあるので普段は起きない**
+	// （共用は開発時の意図的な操作）。
+	//
+	// ⚠️ **ここが読めなくてもアプリは動く**（設計原則3）。棋譜タブだけが
+	// 理由を出して機能せず、撮った 1 局面と貼った棋譜の解析は今までどおり。
+	KifuDBPath string `json:"kifuDbPath,omitempty"`
 }
 
 // PieceFontEntry は登録した駒フォント 1 つ。
@@ -773,6 +792,31 @@ type TrainingConfig struct {
 	// （suteme はループバックからのアクセスを認証免除にしている）。
 	// 別のマシンへ送るときだけ、suteme の APIタブで発行したものを入れる。
 	Token string `json:"token,omitempty"`
+}
+
+// DefaultKifuDBPath は既定の棋譜データベースのパスを返す
+// （os.UserConfigDir()/ikkyoku/kicho.db）。
+//
+// ⚠️ **kicho アプリの既定（os.UserConfigDir()/kicho/kicho.db）とは別**にしてある。
+// 同じ SQLite ファイルを 2 つのプロセスから書くと `database is locked` に
+// なりうるので、**共用はユーザーが設定で指定したときだけ**にする。
+func DefaultKifuDBPath() (string, error) {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return "", fmt.Errorf("ikkyoku: 設定ディレクトリの取得に失敗しました: %w", err)
+	}
+	return filepath.Join(dir, "ikkyoku", "kicho.db"), nil
+}
+
+// KifuDB は実際に開く棋譜データベースのパスを返す。
+//
+// ⚠️ **「空なら既定」の解決はここ 1 か所。** 呼び出し側にもフロントにも
+// 書かないこと（`ThinkSeconds` / `DisplayName` / 折れ線の色と同じ約束）。
+func (c Config) KifuDB() (string, error) {
+	if p := strings.TrimSpace(c.KifuDBPath); p != "" {
+		return p, nil
+	}
+	return DefaultKifuDBPath()
 }
 
 // DefaultConfigPath は既定の設定ファイルパスを返す（os.UserConfigDir()/ikkyoku/config.json）。

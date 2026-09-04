@@ -196,6 +196,15 @@ export interface AppSettings {
     "sutemeEmbedSource": string;
 
     /**
+     * KifuDBPath は棋譜データベース（棚）の場所。**既定は解決済みで返る**
+     * （`ikkyoku.Config.KifuDB`）。⚠️ **フロントに既定値を書かないこと。**
+     * 
+     * **実際に開けているかどうかはここには出ない**（`KifuService.Status`）——
+     * 設定は「どこを開こうとしているか」、状態は「開けたか」で別のもの。
+     */
+    "kifuDbPath": string;
+
+    /**
      * Path は設定ファイルの場所。**表示のためだけ。** 手で編集したくなったときに
      * 探さずに済むよう出しておく(学習データの置き場所もこのファイルにある)。
      */
@@ -880,11 +889,122 @@ export interface FontState {
 }
 
 /**
+ * GameDetail は棋譜 1 件の詳細（KIF 本文つき）。
+ * Fetch が返したものをそのまま Save に渡せる。
+ */
+export interface GameDetail {
+    "id": string;
+    "source": string;
+    "sourceId": string;
+
+    /**
+     * SourceURL は取得元の URL。
+     * 
+     * ⚠️ **解析タブの「再読み込み」の鍵になる**（SendToStudy が一緒に渡す）。
+     * 連盟の中継はここが**中継ページ（HTML）の URL** なので、取り直す側は
+     * HTML から .kif を辿れる必要がある。
+     */
+    "sourceUrl": string;
+    "event": string;
+    "handicap": string;
+    "place": string;
+    "black": string;
+    "white": string;
+
+    /**
+     * RFC3339。未設定なら空文字
+     */
+    "startedAt": string;
+
+    /**
+     * EndMark は終局の種別（例 "投了"）。対局中は空。
+     */
+    "endMark": string;
+
+    /**
+     * Finished は終局済みかどうか。UI で手数の横に「（終局）」を出すのに使う。
+     */
+    "finished": boolean;
+    "moves": number;
+    "kif": string;
+
+    /**
+     * Encoding は KIF の元の文字コード（本文は UTF-8 に寄せてある）。
+     * 連盟の中継は Shift_JIS なので、保存の記録として一緒に運ぶ。
+     */
+    "encoding": string;
+}
+
+/**
+ * GameSummary は一覧表示用の 1 件（KIF 本文なし）。
+ */
+export interface GameSummary {
+    "id": string;
+    "source": string;
+    "sourceId": string;
+
+    /**
+     * SourceURL は取得元の URL。
+     * 
+     * ⚠️ **解析タブの「再読み込み」の鍵になる**（SendToStudy が一緒に渡す）。
+     * 連盟の中継はここが**中継ページ（HTML）の URL** なので、取り直す側は
+     * HTML から .kif を辿れる必要がある。
+     */
+    "sourceUrl": string;
+    "event": string;
+    "handicap": string;
+    "place": string;
+    "black": string;
+    "white": string;
+
+    /**
+     * RFC3339。未設定なら空文字
+     */
+    "startedAt": string;
+
+    /**
+     * EndMark は終局の種別（例 "投了"）。対局中は空。
+     */
+    "endMark": string;
+
+    /**
+     * Finished は終局済みかどうか。UI で手数の横に「（終局）」を出すのに使う。
+     */
+    "finished": boolean;
+    "moves": number;
+}
+
+/**
  * GuideLayout は枠ウィンドウの描画寸法(CSS px)をフロントに渡すための型。
  */
 export interface GuideLayout {
     "borderPx": number;
     "toolbarPx": number;
+}
+
+/**
+ * KifuDBStatus は棚の状態（設定タブの「棋譜データベース」の行）。
+ */
+export interface KifuDBStatus {
+    /**
+     * Path は今開こうとしている DB ファイルの場所（既定は解決済み）。
+     */
+    "path": string;
+
+    /**
+     * Ready は開けているか。**false でもアプリは動く**（設計原則3）。
+     */
+    "ready": boolean;
+
+    /**
+     * Count は保存件数（開けていなければ 0）。
+     */
+    "count": number;
+
+    /**
+     * Error は開けなかった / 件数を数えられなかった理由。
+     */
+    "error": string;
 }
 
 /**
@@ -1048,6 +1168,33 @@ export interface RecognizerStatus {
      * これが埋まっていても認識自体は動く(盤の位置が 1マス滑ることがある)。
      */
     "stripError": string;
+}
+
+/**
+ * SearchQuery は検索条件。空の項目は「条件なし」。
+ */
+export interface SearchQuery {
+    /**
+     * Text は棋戦名・対局者・場所への部分一致。
+     * 3 文字以上なら索引（FTS5 trigram）が効く。それ未満は走査になる。
+     */
+    "text": string;
+
+    /**
+     * From / To は開始日の範囲。"YYYY-MM-DD" 形式。空なら無制限。
+     */
+    "from": string;
+    "to": string;
+
+    /**
+     * FinishedOnly が true なら終局済みのみ。
+     */
+    "finishedOnly": boolean;
+
+    /**
+     * Limit は取得件数の上限（0 なら無制限）。
+     */
+    "limit": number;
 }
 
 /**

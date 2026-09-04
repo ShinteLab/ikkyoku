@@ -47,6 +47,16 @@ export function BrowseEngineFor(id: string): $CancellablePromise<$models.AppSett
 }
 
 /**
+ * BrowseKifuDB は棋譜データベースのファイルを選ぶダイアログを出す。
+ * 
+ * 取り消したら何もしない。**手で打たせる欄も残してある**（貼り付けと確認のため。
+ * エンジンのパスと同じ）。
+ */
+export function BrowseKifuDB(): $CancellablePromise<$models.AppSettings> {
+    return $Call.ByID(3145867757);
+}
+
+/**
  * MoveEngine は一覧の中で登録の位置を 1 つ動かす（delta は -1 で上、+1 で下）。
  * 
  * **並び順は表示の順序そのもの。** 解析タブのエンジンごとの結果も、評価値グラフの
@@ -204,6 +214,22 @@ export function SetEnginePath(id: string, path: string): $CancellablePromise<$mo
  */
 export function SetFitOnStartup(v: boolean): $CancellablePromise<$models.AppSettings> {
     return $Call.ByID(2836646091, v);
+}
+
+/**
+ * SetKifuDBPath は棋譜データベース（棚）の場所を変えて保存し、**その場で開き直す。**
+ * 
+ * **空にすると既定へ戻る**（`os.UserConfigDir()/ikkyoku/kicho.db`）。
+ * 解決は `ikkyoku.Config.KifuDB` の 1 か所なので、ここでは空をそのまま保存する。
+ * 
+ * ⚠️ **保存できたときだけ効かせること**（`SetClickThrough` と同じ）。先に開き直すと、
+ * 保存に失敗したときに「画面のパスと実際に開いている DB が食い違う」。
+ * 
+ * ⚠️ **存在チェックをしない。** SQLite は無ければ作るので、まだ無い場所を
+ * 先に書く順序が普通にある（エンジンのパスとはそこが違う）。
+ */
+export function SetKifuDBPath(path: string): $CancellablePromise<$models.AppSettings> {
+    return $Call.ByID(39070208, path);
 }
 
 /**

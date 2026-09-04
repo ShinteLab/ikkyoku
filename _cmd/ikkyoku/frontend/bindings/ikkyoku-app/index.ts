@@ -5,6 +5,7 @@ import * as AnalyzeService from "./analyzeservice.js";
 import * as CaptureService from "./captureservice.js";
 import * as DiagService from "./diagservice.js";
 import * as FontService from "./fontservice.js";
+import * as KifuService from "./kifuservice.js";
 import * as PositionService from "./positionservice.js";
 import * as SettingsService from "./settingsservice.js";
 import * as StudyService from "./studyservice.js";
@@ -14,6 +15,7 @@ export {
     CaptureService,
     DiagService,
     FontService,
+    KifuService,
     PositionService,
     SettingsService,
     StudyService,
@@ -39,11 +41,15 @@ export type {
     FontFace,
     FontScan,
     FontState,
+    GameDetail,
+    GameSummary,
     GuideLayout,
+    KifuDBStatus,
     KifuLoad,
     PieceFontSettings,
     PieceStyle,
     RecognizerStatus,
+    SearchQuery,
     StudyState,
     TrainingSendResult,
     TrainingSettings,
