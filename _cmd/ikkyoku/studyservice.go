@@ -10,7 +10,6 @@ import (
 
 	"github.com/ShinteLab/core/kifu"
 	"github.com/ShinteLab/ikkyoku/analyze"
-	"github.com/ShinteLab/ikkyoku/kifuweb"
 	"github.com/ShinteLab/ikkyoku/legal"
 	"github.com/ShinteLab/ikkyoku/position"
 )
@@ -299,13 +298,14 @@ const kifuFetchTimeout = 20 * time.Second
 
 // LoadKifuURL は URL から棋譜を取ってきて読み込む（`LoadKifu` の口違い）。
 //
-// **取ってくるのは `ikkyoku/kifuweb`**（文字コードの判別もあちら。日本将棋連盟の
-// 棋譜中継は Shift_JIS）。ここは繋ぐだけで、**取得も KIF の解釈もここに書かない。**
+// **取ってくるのは `fetchKIF`**（中身は `kicho/scrape`。文字コードの判別も
+// HTML から .kif を辿るのもあちら。日本将棋連盟の棋譜中継は Shift_JIS）。
+// ここは繋ぐだけで、**取得も KIF の解釈もここに書かない。**
 func (s *StudyService) LoadKifuURL(rawURL string) (KifuLoad, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), kifuFetchTimeout)
 	defer cancel()
 
-	got, err := kifuweb.Fetch(ctx, rawURL)
+	got, err := fetchKIF(ctx, rawURL)
 	if err != nil {
 		return KifuLoad{State: s.State()}, err
 	}
@@ -355,7 +355,7 @@ func (s *StudyService) ReloadKifu() (KifuLoad, error) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), kifuFetchTimeout)
 	defer cancel()
-	got, err := kifuweb.Fetch(ctx, url)
+	got, err := fetchKIF(ctx, url)
 	if err != nil {
 		return KifuLoad{State: s.State()}, err
 	}
