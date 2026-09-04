@@ -4544,3 +4544,81 @@ html.is-main #app {
   background: #17191f;
   border-radius: 5px;
 }
+
+/* ---- 中継から取得（入力タブ）----------------------------------------------
+
+   ⚠️ **カードは新しいものが先頭。** 同じ棋譜を取り直したときは増やさず
+   中身だけ差し替える（判断は fetchcards.ts の mergeCard）。 */
+.fetch-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fetch-cards:empty {
+  display: none;
+}
+
+.fetch-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 9px 11px;
+  background: #1f2229;
+  border: 1px solid #2c303a;
+  border-radius: 6px;
+}
+
+.fetch-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fetch-card-title {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #f2f3f5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 取得元のラベル。**どのサイトから取ったか**が読めないと、
+   「更新」で何を取り直すのかが分からない。 */
+.fetch-card-source {
+  flex: 0 0 auto;
+  padding: 1px 7px;
+  font-size: 11px;
+  color: #9aa3b2;
+  background: #2a2d36;
+  border-radius: 999px;
+}
+
+/* 更新・閉じるは右端へ。⚠️ **.danger-btn の margin-left: auto がここでは効く**
+   （閉じるを一番右に置きたいので、そのままにしてある）。 */
+.fetch-card-head > .ghost-btn {
+  margin-left: auto;
+  padding: 3px 10px;
+  font-size: 12px;
+}
+
+.fetch-card-head > .danger-btn {
+  margin-left: 0;
+}
+
+.fetch-card-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.fetch-card details > summary {
+  font-size: 12px;
+  color: #8b93a3;
+  cursor: pointer;
+}
+
+.fetch-card details[open] > summary {
+  margin-bottom: 5px;
+}

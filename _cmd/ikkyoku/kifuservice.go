@@ -347,7 +347,37 @@ func (s *KifuService) SendToStudy(id string) (KifuLoad, error) {
 	if err != nil {
 		return KifuLoad{State: s.study.State()}, err
 	}
-	return s.study.loadKifuFrom(d.KIF, d.SourceURL)
+	return s.SendToStudyGame(d)
+}
+
+// SendToStudyGame は手元にある棋譜（棚に入れていないものも）を解析タブへ送る。
+//
+// **取得カードの「解析する」がここを通る。** ⚠️ **棚を経由しない** ——
+// 取得しただけの棋譜も解析できる（「棚は解析の前提条件ではない」の一部）。
+func (s *KifuService) SendToStudyGame(d GameDetail) (KifuLoad, error) {
+	if strings.TrimSpace(d.KIF) == "" {
+		return KifuLoad{State: s.study.State()}, fmt.Errorf("棋譜が空です")
+	}
+	return s.study.loadKifuFrom(d.KIF, reloadableURL(d.Source, d.SourceURL))
+}
+
+// reloadableURL は「解析タブの再読み込みで取り直せる URL か」を判定して返す。
+//
+// ⚠️ **判断はここ 1 か所。フロントに書かないこと。** 取り直せない URL を渡すと
+// **解析タブに再読み込みのアイコンが出るのに押すと必ず失敗する**、という
+// 画面からは理由の分からない壊れ方になる。
+//
+//	shogilive … 中継ページ(HTML)。**そこに置かれた .kif を辿れる**ので取り直せる
+//	url       … 指定された .kif そのもの。取り直せる
+//	yomiuri   … ⚠️ **取り直せない。** あちらは Nuxt のページで .kif を置いておらず、
+//	            KIF は構造化データ(_payload.js)から組み立てている。
+//	            **取り直す口は取得カードの「更新」**(KifuService.Refresh)
+//	paste     … 取得元が無い(空のまま)
+func reloadableURL(source, sourceURL string) string {
+	if source == store.SourceYomiuri {
+		return ""
+	}
+	return sourceURL
 }
 
 // Fetch はライブ中継から棋譜を取得する（**保存はしない**）。

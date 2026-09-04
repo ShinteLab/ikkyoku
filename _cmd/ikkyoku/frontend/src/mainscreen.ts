@@ -69,6 +69,7 @@ import {
 import { iconMarkup } from "./icon";
 import { mountEditor } from "./editor";
 import { mountLibrary } from "./library";
+import { mountFetchCards } from "./fetchcards";
 import { mountEvalGraph } from "./evalgraph";
 import { mountStudyBoard } from "./study";
 import { openPopup } from "./popup";
@@ -515,6 +516,36 @@ export function mountMainScreen(root: HTMLElement): void {
             <button id="kifu-clear" class="ghost-btn" type="button">消す</button>
           </div>
           <p id="kifu-status" class="status" role="status" aria-live="polite" hidden></p>
+        </div>
+
+        <!-- 中継から取得する（kicho の「取得」タブ）。**対局中の棋譜を追う口。**
+
+             ⚠️ **上の「棋譜を貼り付ける」とは扱いが違う。** あちらは終局後の
+             .kif を単発で取り込む口で、こちらは**取得元での一意な ID がある**ので
+             取り直しても同じ棋譜として更新される（棚でも増えない）。
+             だから**カードとして積んで「更新」で取り直す**形にしてある。
+
+             ⚠️ **日本将棋連盟の中継はこちらで扱うこと。** 上の URL 欄から入れると
+             source_id が毎回 UUID になり、取り込むたびに別の棋譜として増える。 -->
+        <div class="setting-group">
+          <span class="setting-title">中継から取得する</span>
+          <span class="setting-note">
+            <strong>読売（竜王戦）</strong>の対局ページと
+            <strong>日本将棋連盟の棋譜中継</strong>から取れます。URL か棋譜 ID を入れてください。
+            <strong>取得しただけでは棚に入りません</strong>（カードの「この内容を保存」で入ります）。
+            対局中は棋譜が伸びるので、「更新」で取り直してから保存し直してください。
+          </span>
+          <div class="setting-fields">
+            <span class="field-label">URL / 棋譜 ID</span>
+            <input id="fetch-input" type="text" spellcheck="false"
+                   placeholder="http://live.shogi.or.jp/oui/kifu/67/oui202607290101.html" />
+            <button id="fetch-run" class="ghost-btn is-primary" type="button">取得</button>
+            <button id="fetch-clear" class="ghost-btn" type="button">クリア</button>
+          </div>
+          <p id="fetch-status" class="status" role="status" aria-live="polite" hidden></p>
+          <!-- 取得結果。**新しいものが先頭。** 同じ棋譜を取り直したときは
+               カードを増やさず中身だけ差し替える（key = 取得元:棋譜 ID）。 -->
+          <div id="fetch-cards" class="fetch-cards"></div>
         </div>
       </div>
 
@@ -3954,6 +3985,18 @@ export function mountMainScreen(root: HTMLElement): void {
 
   // 棚を開き直したら一覧を取り直す（設定タブから繋いである 1 本）。
   onKifuDBChanged = () => libraryUI.refresh();
+
+  // ---- 中継から取得（入力タブ）--------------------------------------------
+  //
+  // ⚠️ **取得元の判別も取得も Go 側（KifuService）。** ここは行き先を繋ぐだけ。
+  mountFetchCards(root, {
+    onAnalyze: (got) => {
+      // 棚を通らない経路だが、**描き方は棚から送ったときと同じ**（KifuLoad）。
+      selectTab(studyTab);
+      showStudy(got.state);
+    },
+    onSaved: () => libraryUI.refresh(),
+  });
 
   // ---- 視点（手前が先手 / 手前が後手）--------------------------------------
   //
