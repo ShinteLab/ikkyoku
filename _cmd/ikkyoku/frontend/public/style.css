@@ -2,6 +2,17 @@
   box-sizing: border-box;
 }
 
+/* placeholder は**値ではない**ことが見て分かること。
+
+   ⚠️ **既定のままにしないこと。** このスタイルシートには長らく ::placeholder の
+   指定が無く、ブラウザ既定の灰色で描かれていた。暗い地の上ではそれが本文と
+   近い明るさになり、**入っている値に見える**（実際「名前の欄が編集できない」と
+   誤解された。2026-09-08）。本文（#f2f3f5）より明らかに落とす。 */
+::placeholder {
+  color: #6f7789;
+  opacity: 1; /* Firefox は既定で薄くするので、色をこちらで決め切る。 */
+}
+
 :root {
   /* 盤の固有サイズ。**core/web の `CELL*9 + MARGIN*2`(56*9+28*2)と同じ値。**
      <shogi-board> の SVG は width 属性がこの値で `max-width: 100%` しか付いていないため、
@@ -4621,4 +4632,16 @@ html.is-main #app {
 
 .fetch-card details[open] > summary {
   margin-bottom: 5px;
+}
+
+/* ⚠️ **「既定の名前」を placeholder に出す欄は斜体にする**（2026-09-08）。
+
+   ここの placeholder は案内文ではなく**そのまま値になりうる名前**（エンジンなら
+   名乗り / exe のファイル名、駒フォントなら元フォントの名前）なので、色を
+   落としただけでは**入力済みの値と見分けが付かない**。実際そう誤解された。
+   ⚠️ **他の欄まで斜体にしないこと** —— あちらの placeholder は「空なら既定の場所」
+   のような案内文で、既に値には見えない（KIF の見本は複数行なので特に読みにくくなる）。 */
+.engine-row .engine-name::placeholder,
+.font-row-name-input::placeholder {
+  font-style: italic;
 }
