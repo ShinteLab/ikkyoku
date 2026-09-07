@@ -250,3 +250,82 @@ func TestDescribeOpenErrorExplainsSchemaSkew(t *testing.T) {
 		t.Errorf("無関係なエラーを包んでいます: %v", got)
 	}
 }
+
+// 一覧の上限は kicho が決めている（フロントに数値を書かないための歯止め）。
+func TestMaxSearchRowsComesFromKicho(t *testing.T) {
+	if MaxSearchRows != kicho.MaxSearchRows {
+		t.Fatalf("MaxSearchRows が kicho とずれています: %d / %d",
+			MaxSearchRows, kicho.MaxSearchRows)
+	}
+}
+
+// ⚠️ **`Shown` は「実際に並んだ件数」。上限の定数を決め打ちで返さないこと。**
+//
+// kicho が丸めるのは「Limit が 0 か上限超え」のときだけで、**指定した Limit は
+// そのまま効く**。決め打ちだと 1 件しか並べていないのに「500 件だけを表示して
+// います」と出る、という**画面が嘘をつく**状態になる。
+func TestKifuServiceSearchReportsShownRows(t *testing.T) {
+	svc, _ := newTestKifuService(t)
+	for i := 0; i < 3; i++ {
+		if _, err := svc.ImportKIF(testKIF); err != nil {
+			t.Fatalf("ImportKIF: %v", err)
+		}
+	}
+
+	res, err := svc.Search(SearchQuery{Limit: 1})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(res.Games) != 1 {
+		t.Fatalf("指定した Limit が効いていません: %d 件", len(res.Games))
+	}
+	if !res.Truncated {
+		t.Fatalf("切ったことを返していません: %+v", res)
+	}
+	// ⚠️ **ここが本題** —— 上限の定数（500）ではなく、指定した Limit で
+	// 実際に並んだ 1 件が返ること。
+	if res.Shown == MaxSearchRows {
+		t.Errorf("上限の定数を決め打ちで返しています: shown=%d", res.Shown)
+	}
+	if res.Shown != len(res.Games) {
+		t.Errorf("並べた件数と食い違っています: shown=%d 行=%d", res.Shown, len(res.Games))
+	}
+	if res.Matched != 3 || res.Total != 3 {
+		t.Errorf("件数が合いません: %+v", res)
+	}
+}
+
+// 取り込みの失敗は、**kicho の sentinel で見分けて**ikkyoku 側の直し方を足すこと。
+//
+// ⚠️ **文言比較で分岐しない**（`describeOpenError` と同じ）。kicho は
+// 「画面と文言は使う側にある」という前提で sentinel を公開している。
+func TestDescribeKifuErrorAddsGuidance(t *testing.T) {
+	notKifu := describeKifuError(fmt.Errorf("%w", kicho.ErrNotKifu))
+	if !errors.Is(notKifu, kicho.ErrNotKifu) {
+		t.Fatalf("sentinel が落ちています: %v", notKifu)
+	}
+	if !strings.Contains(notKifu.Error(), ".kif") {
+		t.Errorf("何を指せばよいかが出ていません: %v", notKifu)
+	}
+
+	empty := describeKifuError(kicho.ErrEmptyKifu)
+	if !errors.Is(empty, kicho.ErrEmptyKifu) {
+		t.Fatalf("sentinel が落ちています: %v", empty)
+	}
+
+	// 関係ないエラーはそのまま返す（余計な案内を足さない）。
+	other := errors.New("connection refused")
+	if got := describeKifuError(other); got != other {
+		t.Errorf("無関係なエラーを包んでいます: %v", got)
+	}
+}
+
+// ⚠️ **kicho の文言を書き写さないこと。** 空の棋譜を断るのは kicho も同じなので、
+// 手書きの文字列ではなく sentinel を返す（写すと向こうを直しても古いまま残る）。
+func TestSendToStudyGameUsesKichoSentinel(t *testing.T) {
+	svc, _ := newTestKifuService(t)
+	_, err := svc.SendToStudyGame(GameDetail{KIF: "   \n"})
+	if !errors.Is(err, kicho.ErrEmptyKifu) {
+		t.Fatalf("sentinel を返していません: %v", err)
+	}
+}

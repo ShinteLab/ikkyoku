@@ -283,9 +283,11 @@ export function mountLibrary(
         "warn",
       );
     } else if (res.truncated) {
-      // ⚠️ **上限は Go 側（kicho）が決めている**ので、数値を書かず res.limit を写す。
+      // ⚠️ **上限は Go 側（kicho）が決めている**ので、数値を書かず res.shown を写す。
+      // ⚠️ **`shown` は「実際に並んだ件数」**（上限の定数ではない）——
+      // limit を指定して呼べばそちらが効くので、定数を出すと画面が嘘をつく。
       setStatus(
-        `該当 ${res.matched} 件のうち新しい ${res.limit} 件だけを表示しています。条件で絞り込んでください。`,
+        `該当 ${res.matched} 件のうち新しい ${res.shown} 件だけを表示しています。条件で絞り込んでください。`,
         "warn",
       );
     }
