@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -114,12 +115,27 @@ func (s *KifuService) openLocked(path string) {
 	}
 	lib, err := kicho.Open(path, s.logger)
 	if err != nil {
-		s.openErr = err
-		s.logger.Warn("棋譜データベースを開けませんでした", "path", path, "error", err)
+		s.openErr = describeOpenError(err)
+		s.logger.Warn("棋譜データベースを開けませんでした", "path", path, "error", s.openErr)
 		return
 	}
 	s.lib = lib
 	s.logger.Info("棋譜データベースを開きました", "path", path)
+}
+
+// describeOpenError は棚を開けなかった理由に、ikkyoku 側の直し方を足す。
+//
+// ⚠️ **文言比較で分岐しないこと。** kicho は sentinel を公開しているので
+// `errors.Is` で見分ける（画面と文言はこちらにあるので、種類だけ向こうから貰う）。
+//
+// スキーマ版が新しすぎるのは「DB が壊れている」ではなく、**kicho アプリと
+// 同じ DB を共用していてあちらだけ更新した**ときに起きる。直し方が違うので
+// そう分かるようにする。
+func describeOpenError(err error) error {
+	if errors.Is(err, store.ErrSchemaTooNew) {
+		return fmt.Errorf("%w。kicho アプリと同じ DB を共用しているなら、ikkyoku を更新するか別の DB を指してください", err)
+	}
+	return err
 }
 
 // Close は棚を閉じる（アプリの終了時。quit から呼ぶ）。

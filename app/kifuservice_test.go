@@ -1,6 +1,8 @@
 package app
 
 import (
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"path/filepath"
@@ -224,5 +226,27 @@ func TestKifuServiceReopen(t *testing.T) {
 	}
 	if n != 0 {
 		t.Fatalf("前の棚の中身が見えています: %d 件", n)
+	}
+}
+
+// スキーマ版が新しすぎるときは、**直し方が分かる文言**にすること。
+//
+// kicho と ikkyoku は別バイナリなので、同じ DB を共用していて片方だけ更新すると
+// 起きる。「DB が壊れている」ではないので、そう読めては困る。
+//
+// ⚠️ **判定は文言比較ではなく sentinel**（`store.ErrSchemaTooNew`）。
+func TestDescribeOpenErrorExplainsSchemaSkew(t *testing.T) {
+	err := describeOpenError(fmt.Errorf("%w: v9 で作られています", store.ErrSchemaTooNew))
+	if !errors.Is(err, store.ErrSchemaTooNew) {
+		t.Fatalf("sentinel が落ちています: %v", err)
+	}
+	if !strings.Contains(err.Error(), "kicho アプリ") {
+		t.Errorf("共用しているときの直し方が出ていません: %v", err)
+	}
+
+	// 関係ないエラーはそのまま返す（余計な案内を足さない）。
+	other := errors.New("permission denied")
+	if got := describeOpenError(other); got != other {
+		t.Errorf("無関係なエラーを包んでいます: %v", got)
 	}
 }
