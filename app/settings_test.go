@@ -562,3 +562,89 @@ func TestSetClickThrough(t *testing.T) {
 		t.Errorf("フックの呼ばれ方 = %v, want [true false]", got)
 	}
 }
+
+// ⚠️ **エンジンが名乗った名前は設定ファイルに残すこと。**
+//
+// 名乗りは**繋がないと分からない**ので、メモリだけで持つとアプリを閉じた時点で
+// 消え、次の起動では設定タブも解析タブも exe のファイル名に戻る。
+//
+// ⚠️ **人が付けた名前は上書きしない**（同じ exe を option 違いで 2 つ登録すると
+// 名乗りは同じになるので、潰すと見分けが付かなくなる）。
+func TestRememberEngineName(t *testing.T) {
+	exe := testEnginePath(t)
+	s := newTestSettings(t, []ikkyoku.EngineEntry{
+		{ID: "engine-1", Path: exe, Enabled: true},
+		{ID: "engine-2", Path: exe, Name: "水匠5(D12)", Enabled: true},
+	})
+
+	s.rememberEngineName("engine-1", "Suisho5")
+	s.rememberEngineName("engine-2", "Suisho5")
+
+	e1, _ := s.engineEntry("engine-1")
+	if e1.EngineName != "Suisho5" || e1.DisplayName() != "Suisho5" {
+		t.Errorf("名乗りが既定の表示名になっていません: %+v / %q", e1, e1.DisplayName())
+	}
+	e2, _ := s.engineEntry("engine-2")
+	if e2.DisplayName() != "水匠5(D12)" {
+		t.Errorf("人が付けた名前を上書きしています: %q", e2.DisplayName())
+	}
+
+	// ⚠️ **ファイルに残ること**（メモリだけでは次の起動で消える）。
+	reloaded, err := ikkyoku.LoadConfig(s.path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if reloaded.EngineList()[0].EngineName != "Suisho5" {
+		t.Errorf("設定ファイルに残っていません: %+v", reloaded.EngineList()[0])
+	}
+
+	// ⚠️ **変わっていなければ書かないこと。** 解析が終わるたびに呼ばれるので、
+	// 素通しにすると**1 手ごとに設定ファイルを書く**（連続解析では手数ぶん）。
+	// ファイルに目印を入れて、同じ名前で呼んでも残ることで確かめる。
+	marked := reloaded
+	marked.SutemeDataDir = "書き換えられたら消える目印"
+	if err := ikkyoku.SaveConfig(s.path, marked); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+	s.rememberEngineName("engine-1", "Suisho5")
+	after, err := ikkyoku.LoadConfig(s.path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if after.SutemeDataDir != marked.SutemeDataDir {
+		t.Error("同じ名前なのに設定ファイルを書き直しています")
+	}
+}
+
+// ⚠️ **実行ファイルを差し替えたら名乗りは捨てること**（別のエンジンの名乗りなので、
+// 残すと違うエンジンの名前を出す）。**人が付けた名前は捨てない。**
+func TestSetEnginePathDropsReportedName(t *testing.T) {
+	s := newTestSettings(t, []ikkyoku.EngineEntry{
+		{ID: "engine-1", Path: testEnginePath(t), Name: "手で付けた", EngineName: "Suisho5", Enabled: true},
+	})
+
+	other := filepath.Join(t.TempDir(), "Nagisa.exe")
+	if err := os.WriteFile(other, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetEnginePath("engine-1", other); err != nil {
+		t.Fatalf("SetEnginePath: %v", err)
+	}
+	e, _ := s.engineEntry("engine-1")
+	if e.EngineName != "" {
+		t.Errorf("前のエンジンの名乗りが残っています: %q", e.EngineName)
+	}
+	if e.Name != "手で付けた" {
+		t.Errorf("人が付けた名前まで捨てています: %q", e.Name)
+	}
+}
+
+// testEnginePath は存在する実行ファイルを 1 つ作る（`checkEnginePath` が実在を見る）。
+func testEnginePath(t *testing.T) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "YaneuraOu.exe")
+	if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}

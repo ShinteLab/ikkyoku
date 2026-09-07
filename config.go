@@ -455,6 +455,22 @@ type EngineEntry struct {
 	// ⚠️ **エンジンが `id name` で名乗る名前とは別物。** あちらは繋いで初めて分かるので、
 	// 繋いでいないあいだの表示と、同じ exe を 2 つ登録したときの区別にこちらが要る。
 	Name string `json:"name,omitempty"`
+	// EngineName はエンジンが `id name` で名乗った名前（繋いで初めて分かる）。
+	//
+	// **`Name` を付けていないときの既定の表示名がこれ**（`DisplayName`）。
+	// exe のファイル名（`YaneuraOu_NNUE-tournament-clang++-avx2.exe`）より、
+	// エンジン自身の名乗りのほうが読める。
+	//
+	// ⚠️ **`Name` を上書きしないこと。** 人が付けた名前は「そう呼びたくて
+	// 付けたもの」で、**同じ exe を option 違いで 2 つ登録したときの区別**でもある
+	// （名乗りは同じになるので、これで潰すと見分けが付かなくなる）。
+	//
+	// ⚠️ **控えるのは繋いだとき**（`AnalyzeService` が `CheckEngine` と解析の
+	// 完了で書く）。**保存の操作では繋がない**という線引きは変えていない。
+	//
+	// ⚠️ **実行ファイルを差し替えたら捨てること**（別のエンジンの名乗りなので、
+	// 残すと**違うエンジンの名前を出す**。`OptionSpecs` と同じ扱い）。
+	EngineName string `json:"engineName,omitempty"`
 
 	// Path は USI エンジンの実行ファイル。
 	//
@@ -701,10 +717,21 @@ func (e EngineEntry) DisplayColor(i int) string {
 	return DefaultEngineColor(i)
 }
 
-// DisplayName は画面に出す名前を返す（Name が空ならパスのファイル名）。
+// DisplayName は画面に出す名前を返す。
+//
+// 人が付けた名前 → **エンジンが名乗った名前** → exe のファイル名 → 「同梱エンジン」。
+//
+// ⚠️ **名乗りを人が付けた名前より前に出さないこと。** 同じ exe を option 違いで
+// 2 つ登録すると名乗りは同じになるので、**見分けが付くのは人が付けた名前だけ**。
+//
+// ⚠️ **「空なら既定」の解決をここ以外に書かないこと**（`ThinkSeconds` /
+// 折れ線の色と同じ約束。2 か所に持つと既定を変えたときに食い違う）。
 func (e EngineEntry) DisplayName() string {
 	if e.Name != "" {
 		return e.Name
+	}
+	if e.EngineName != "" {
+		return e.EngineName
 	}
 	if e.Path == "" {
 		return BuiltinEngineName

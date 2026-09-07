@@ -603,3 +603,54 @@ func TestConfigKifuDB(t *testing.T) {
 		t.Errorf("空白が既定に倒れていません: %q", blank)
 	}
 }
+
+// ⚠️ **表示名の優先順位** —— 人が付けた名前 → エンジンが名乗った名前 →
+// exe のファイル名 → 「同梱エンジン」。
+//
+// 名乗りを既定にしてあるのは、`YaneuraOu_NNUE-tournament-clang++-avx2.exe` より
+// エンジン自身の名乗りのほうが読めるから。⚠️ **人が付けた名前より前に出さないこと**
+// —— 同じ exe を option 違いで 2 つ登録すると名乗りは同じになるので、
+// **見分けが付くのは人が付けた名前だけ**。
+func TestEngineDisplayNamePrefersReportedNameOverExe(t *testing.T) {
+	exe := filepath.Join("D:", "ShogiEngine", "YaneuraOu_NNUE-tournament.exe")
+
+	for _, tc := range []struct {
+		label string
+		e     EngineEntry
+		want  string
+	}{
+		{"人が付けた名前が最優先",
+			EngineEntry{Name: "水匠5(D12)", EngineName: "Suisho5", Path: exe}, "水匠5(D12)"},
+		{"付けていなければ名乗り",
+			EngineEntry{EngineName: "Suisho5", Path: exe}, "Suisho5"},
+		{"名乗りも無ければファイル名",
+			EngineEntry{Path: exe}, "YaneuraOu_NNUE-tournament.exe"},
+		{"同梱は名乗りがあればそちら",
+			EngineEntry{EngineName: "ikkyoku (engine 同梱)"}, "ikkyoku (engine 同梱)"},
+		{"同梱で名乗りが無ければ既定の文言",
+			EngineEntry{}, BuiltinEngineName},
+	} {
+		if got := tc.e.DisplayName(); got != tc.want {
+			t.Errorf("%s: DisplayName = %q, want %q", tc.label, got, tc.want)
+		}
+	}
+}
+
+// 名乗りは設定ファイルに残る（繋がないと分からないので、消えると二度と出てこない）。
+func TestEngineNameRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	cfg := Config{Engines: []EngineEntry{
+		{ID: "engine-1", Path: "D:/e.exe", EngineName: "Suisho5", Enabled: true},
+	}}
+	if err := SaveConfig(path, cfg); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+	got, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if got.EngineList()[0].EngineName != "Suisho5" {
+		t.Fatalf("名乗りが残っていません: %+v", got.EngineList()[0])
+	}
+}

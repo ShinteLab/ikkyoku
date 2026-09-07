@@ -99,10 +99,10 @@ type AnalyzeService struct {
 type AnalyzeEngine struct {
 	// ID は設定の登録 ID。**イベントの振り分けはこれ。**
 	ID string `json:"id"`
-	// Label は設定タブで付けた名前（未設定ならファイル名 / 「同梱エンジン」）。
+	// Label は画面に出す名前（`EngineEntry.DisplayName`）。
 	//
-	// **繋ぐ前から出せる名前。** エンジンが `id name` で名乗る名前は繋いで初めて
-	// 分かるので、起動を待っているあいだの見出しにはこちらが要る。
+	// **繋ぐ前から出せる名前。** 起動を待っているあいだの見出しに要る。
+	// 人が付けた名前 → **前に繋いだときの名乗り** → ファイル名 → 「同梱エンジン」。
 	Label string `json:"label"`
 	// Name はエンジンが名乗った名前（`id name`。まだ繋いでいなければ空）。
 	Name string `json:"name"`
@@ -117,8 +117,11 @@ type AnalyzeEngine struct {
 	// ⚠️ **名乗った名前を見出しに足すかどうかの判断**（2026-08-15）。
 	// 人が名前を付けているなら、**そう呼びたくて付けた名前**なので足さない
 	// （prokishi 越しだと `id name` にプラグイン名まで並んで長い）。
-	// 付けていないときは既定の解決結果（ファイル名 / 「同梱エンジン」）でしかないので、
-	// **名乗った名前のほうが情報がある**から足す。
+	//
+	// ⚠️ **一度繋いだあとは `Label` 自体が名乗りになる**（`DisplayName`）ので、
+	// そのときも足さない —— 同じ名前が括弧で 2 回並ぶ。判断はフロントの
+	// 「`Label` と違うときだけ」で、**`Custom` と合わせて 2 つとも要る**
+	// （`Custom` は「人が付けたか」という設定の事実で、一致は別の話）。
 	//
 	// ⚠️ **フロントで `label === name` を見て判断しないこと** —— 名前を付けたかどうかは
 	// 設定が持っている事実で、たまたま一致したかどうかとは別物。
@@ -602,10 +605,18 @@ func (s *AnalyzeService) finish(seq int) {
 }
 
 // rememberEngine は登録ごとに、最後に名乗ったエンジンの名前を覚える（表示用）。
+//
+// ⚠️ **設定ファイルにも控える**（`rememberEngineName`）。ここだけで持つと
+// **アプリを閉じた時点で消える**ので、次の起動では設定タブも解析タブも
+// exe のファイル名に戻ってしまう（名乗りは繋がないと分からないため、
+// 起動しただけでは二度と出てこない）。
+//
+// ⚠️ **向こうは変わっていなければ書かない。** これは解析が終わるたびに呼ばれる。
 func (s *AnalyzeService) rememberEngine(id, name string) {
 	if id == "" || name == "" {
 		return
 	}
+	s.settings.rememberEngineName(id, name)
 	s.mu.Lock()
 	if s.lastEngine == nil {
 		s.lastEngine = map[string]string{}

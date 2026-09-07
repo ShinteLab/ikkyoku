@@ -2100,11 +2100,29 @@ Step 3  ikkyoku ──os/exec──> prokishi.exe                 ※同じ欄�
     端なのかが区別できない
   - ⚠️ **押したあとフォーカスをそのボタンに戻すこと**（行ごと描き直すため）。
     戻さないと**1 つ動かすたびに押しにいくことになる**
-- **`name` は表示名**（空ならパスのファイル名 / 「同梱エンジン」）。
+- **`name` は表示名。空なら既定を解決する**（`EngineEntry.DisplayName`）:
+  **`name`（人が付けた）→ `engineName`（エンジンが名乗った）→ パスのファイル名 →
+  「同梱エンジン」。**
   ⚠️ **エンジンが `id name` で名乗る名前とは別物** —— あちらは繋いで初めて分かるので、
   繋ぐ前の見出しと、同じ exe を 2 つ登録したときの区別にこちらが要る。
   UI は既定の名前を **placeholder に出し、value には入れない**（入れるとパスを
   変えても名前が追従しなくなる。Go 側が `custom` を返しているのはこのため）
+- ⚠️ **名乗り（`engineName`）を既定の表示名にしてある**（2026-09-08）。
+  `YaneuraOu_NNUE-tournament-clang++-avx2.exe` より、エンジン自身の名乗りのほうが
+  読める。**繋いだ時点で控える**（`AnalyzeService` の「接続を確認」と解析の完了 →
+  `SettingsService.rememberEngineName`）。
+  - ⚠️ **人が付けた名前より前に出さないこと。** 同じ exe を option 違いで 2 つ
+    登録すると**名乗りは同じ**になるので、**見分けが付くのは人が付けた名前だけ**
+  - ⚠️ **設定ファイルに控えること**（メモリだけで持たない）。名乗りは繋がないと
+    分からないので、**閉じた時点で消えると次の起動では二度と出てこない**
+    （exe のファイル名に戻る）
+  - ⚠️ **変わっていなければ書かないこと。** 解析が終わるたびに呼ばれるので、
+    素通しにすると**1 手ごとに設定ファイルを書く**（連続解析では手数ぶん）
+  - ⚠️ **実行ファイルを差し替えたら捨てること**（`OptionSpecs` と同じ扱い。
+    別のエンジンの名乗りなので、残すと**違うエンジンの名前を出す**）。
+    **人が付けた `name` のほうは捨てない**
+  - ⚠️ **解析タブの見出しで名乗りを括弧で足すのは、`label` と違うときだけ**
+    —— 一度繋いだあとは `label` 自体が名乗りなので、**同じ名前が 2 回並ぶ**
 - **パスは手で打たせない**（`SettingsService.BrowseEngine` が追加、`BrowseEngineFor` が
   行の差し替え。⚠️ **この 2 つを混ぜないこと** —— 差し替えのつもりで登録が増える）。
   将棋エンジンは深いディレクトリに置かれるので、打ち間違いが一番起きやすい入口。
@@ -3832,7 +3850,7 @@ wails3 generate bindings -ts -i
 | `capture.go` | `Region` / `DisplayInfo` / `ListDisplays` / `Capture` など、キャプチャの中核 |
 | `region.go` | `ParseRegion`（`"x,y,width,height"` 文字列 → `Region`） |
 | `save.go` | `SavePNG` / `DefaultOutDir` / タイムスタンプ式ファイル名生成 |
-| `config.go` | `Config` の JSON 読み書き（`encoding/json` のみ、標準ライブラリで完結）。`SutemeDataDir` / `FitOnStartup` / `ClickThrough`（**枠の内側で後ろの画面を操作する**。⚠️ **素通しにするのは撮る範囲の内側だけで、枠ごとではない**）/ `Training`（suteme への登録先）/ `Engines`（**登録した USI エンジンの一覧**。⚠️ **評価値グラフの折れ線の色もここ**（`color`）。⚠️ **エンジンの設定は「宣言」（`optionSpecs`）と「値」（`options`）の 2 つで、別物**。旧形式 `engine` からの移行もここ）/ `AnalyzeSeconds`（考える秒数。⚠️ **`*int` なのは `0` = 無制限が正当な選択だから**。解決は `Config.ThinkSeconds`）/ `PonanzaConstant`（勝率バーの定数。**既定値はここに書かない** —— 解決は `analyze.PonanzaConstantOr`）/ `PieceFonts` + `PieceFont`（**駒の字**。⚠️ **登録は複数・使うのは 1 つ**で、「使う」を行の印にしない —— 盤は 1 つしかない。⚠️ **鍵はパスではなくパス + 書体番号**（TTC）。空なら同梱）/ `PieceColor` + `PieceOpacity`（**駒の字の色と濃さ**。⚠️ **設定では別々、画面へは 1 つの rgba に合成して渡す**（`PieceInk`）—— 別々に配ると HTML で描く駒が**木地ごと透ける**。既定は `core/web` の `--shogi-piece-color` と同じ値）/ `Gyoku` + `HidariUma`（**王/玉と馬/左馬**。⚠️ **先後を選べるのは玉だけ**。⚠️ 値は `<shogi-board>` の `gyoku` 属性の語彙そのままで、**知らない値は「王のまま」に倒す**（`NormalizeGyoku`）——属性側の既定（知らない値は両方）とは違う） / `KifuDBPath`（**棋譜データベース（棚）の場所**。⚠️ **既定は `ikkyoku/kicho.db`** —— kicho アプリの既定とは別にしてある（同じ SQLite を 2 プロセスから書くと `database is locked` になりうるので、共用は設定で明示したときだけ）。解決は `Config.KifuDB` の 1 か所）もここ |
+| `config.go` | `Config` の JSON 読み書き（`encoding/json` のみ、標準ライブラリで完結）。`SutemeDataDir` / `FitOnStartup` / `ClickThrough`（**枠の内側で後ろの画面を操作する**。⚠️ **素通しにするのは撮る範囲の内側だけで、枠ごとではない**）/ `Training`（suteme への登録先）/ `Engines`（**登録した USI エンジンの一覧**。⚠️ **評価値グラフの折れ線の色もここ**（`color`）。⚠️ **エンジンの設定は「宣言」（`optionSpecs`）と「値」（`options`）の 2 つで、別物**。⚠️ **`engineName` は「エンジンが名乗った名前」**で、`name`（人が付けた）が空のときの既定の表示名 —— **exe のファイル名より読める**ので繋いだ時点で控える。**人が付けた名前より前に出さないこと**（同じ exe を 2 つ登録すると名乗りは同じ）。旧形式 `engine` からの移行もここ）/ `AnalyzeSeconds`（考える秒数。⚠️ **`*int` なのは `0` = 無制限が正当な選択だから**。解決は `Config.ThinkSeconds`）/ `PonanzaConstant`（勝率バーの定数。**既定値はここに書かない** —— 解決は `analyze.PonanzaConstantOr`）/ `PieceFonts` + `PieceFont`（**駒の字**。⚠️ **登録は複数・使うのは 1 つ**で、「使う」を行の印にしない —— 盤は 1 つしかない。⚠️ **鍵はパスではなくパス + 書体番号**（TTC）。空なら同梱）/ `PieceColor` + `PieceOpacity`（**駒の字の色と濃さ**。⚠️ **設定では別々、画面へは 1 つの rgba に合成して渡す**（`PieceInk`）—— 別々に配ると HTML で描く駒が**木地ごと透ける**。既定は `core/web` の `--shogi-piece-color` と同じ値）/ `Gyoku` + `HidariUma`（**王/玉と馬/左馬**。⚠️ **先後を選べるのは玉だけ**。⚠️ 値は `<shogi-board>` の `gyoku` 属性の語彙そのままで、**知らない値は「王のまま」に倒す**（`NormalizeGyoku`）——属性側の既定（知らない値は両方）とは違う） / `KifuDBPath`（**棋譜データベース（棚）の場所**。⚠️ **既定は `ikkyoku/kicho.db`** —— kicho アプリの既定とは別にしてある（同じ SQLite を 2 プロセスから書くと `database is locked` になりうるので、共用は設定で明示したときだけ）。解決は `Config.KifuDB` の 1 か所）もここ |
 | `training/` | **訂正した局面を `suteme` の学習用サーバへ登録するクライアント**（`POST /api/register` / `GET /api/status`）。標準ライブラリのみ。**サンプルの作り方は書かない**（81 マスの切り出しは suteme の責務） |
 | `piecefont/` | **端末に入っているフォントから駒の字を焼く**（設定タブの「駒の字」）。フォントのある場所を知っているだけで、**TTF を組み立てるコードは書かない**（`core/shogifont`）。⚠️ **焼いたものを書き出す口を持たない**（その端末で表示するまで。配ると元フォントの条項が効く） |
 | `hotkey.go` | `ParseHotkey`（`"alt+s"` 文字列 → `golang.design/x/hotkey` の修飾子・キー） |

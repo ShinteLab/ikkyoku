@@ -97,7 +97,8 @@ type EngineSettings struct {
 	// ID は一覧の中でこのエンジンを指す識別子（操作のときに渡す）。
 	ID string `json:"id"`
 	// Name は画面に出す名前。**空欄なら Go 側が解決した既定の名前が入る**
-	// （パスのファイル名 / 「同梱エンジン」）。フロントで組み立てないこと。
+	// （**前に繋いだときの名乗り** → パスのファイル名 → 「同梱エンジン」）。
+	// フロントで組み立てないこと。
 	Name string `json:"name"`
 	// Custom は名前を人が付けたか（false なら Name は既定の解決結果）。
 	//
@@ -522,6 +523,9 @@ func (s *SettingsService) SetEnginePath(id, path string) (AppSettings, error) {
 			// **値のほうは捨てない** —— 置き場所を移しただけのことがあるうえ、
 			// 人が書いた値を黙って消さない（宣言に無い値として画面に残る）。
 			list[i].OptionSpecs = nil
+			// ⚠️ **名乗った名前も捨てる**（同じ理由。残すと**違うエンジンの
+			// 名前を出す**。人が付けた `Name` のほうは捨てない）。
+			list[i].EngineName = ""
 		}
 		return list
 	})
@@ -546,6 +550,39 @@ func (s *SettingsService) setEngineOptionSpecs(id string, specs []ikkyoku.Engine
 		return list
 	}); err != nil {
 		s.logger.Warn("エンジンの option を控えられませんでした", "id", id, "error", err)
+	}
+}
+
+// rememberEngineName はエンジンが名乗った名前（`id name`）を控える。
+//
+// **`Name` を付けていないときの既定の表示名になる**（`EngineEntry.DisplayName`）。
+// exe のファイル名より読めるので、繋いだ時点でそちらへ寄せる。
+//
+// ⚠️ **公開しない**（Service の公開メソッドはフロントの API になる）。名乗りは
+// **繋いで初めて分かる**ので、入口は `AnalyzeService`（「接続を確認」と解析の完了）だけ。
+//
+// ⚠️ **変わっていなければ書かないこと。** 解析が終わるたびに呼ばれるので、
+// 素通しにすると**1 手ごとに設定ファイルを書く**（連続解析では手数ぶん）。
+//
+// ⚠️ **人が付けた名前（`Name`）には触らない。**
+func (s *SettingsService) rememberEngineName(id, name string) {
+	if id == "" || name == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if e, ok := s.entryLocked(id); !ok || e.EngineName == name {
+		return
+	}
+	if _, err := s.editEngines(func(list []ikkyoku.EngineEntry) []ikkyoku.EngineEntry {
+		for i := range list {
+			if list[i].ID == id {
+				list[i].EngineName = name
+			}
+		}
+		return list
+	}); err != nil {
+		s.logger.Warn("エンジンの名乗りを控えられませんでした", "id", id, "error", err)
 	}
 }
 
