@@ -8,10 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ShinteLab/core/kifu"
 	"github.com/ShinteLab/kicho"
-	"github.com/ShinteLab/kicho/format"
-	"github.com/ShinteLab/kicho/scrape"
 	"github.com/ShinteLab/kicho/store"
 )
 
@@ -21,6 +18,12 @@ import (
 // （`kicho.Library` を開いて呼ぶだけ）。ここに書くのは DTO の変換と入力チェックだけで、
 // **取得・保存・検索のロジックは kicho に置く。** kicho の UI は将来
 // 「テスト用のモック」または「ikkyoku 以外の将棋ソフトからの読み込み口」になる。
+//
+// ⚠️ **取得元の知識をここに書かないこと。** 取得元ごとの `source_url` の決め方、
+// 文字コードの既定、手数の数え方、「再読み込みで取り直せる URL か」の判断は
+// **すべて kicho 側にある**（`kicho.Fetched` / `Library.Save` / `RefetchableURL`）。
+// 以前はここと `kicho/_cmd/kicho/kifuservice.go` が同じ変換をそれぞれ持っていて、
+// 片方だけ直せば黙って挙動が割れる状態だった。
 //
 // ⚠️ **棚は解析の前提条件ではない**（設計原則3「段階的に劣化すること」）。
 // DB が開けなくてもアプリは起動し、撮った 1 局面と貼った棋譜の解析は今までどおり
@@ -58,6 +61,25 @@ func NewKifuService(logger *slog.Logger, study *StudyService) *KifuService {
 	return &KifuService{logger: logger, study: study}
 }
 
+// 操作ごとの制限時間。
+//
+// ⚠️ **`context.Background()` をそのまま渡さないこと。** kicho の store は
+// 接続を1本に絞っているので、止まらないクエリが1つあると以後の棚の操作が
+// 全部待たされる（画面からは「棚が反応しない」に見える）。
+const (
+	kifuDBTimeout    = 10 * time.Second
+	kifuNetTimeout   = 60 * time.Second
+	kifuCloseTimeout = 5 * time.Second
+)
+
+func kifuDBContext() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), kifuDBTimeout)
+}
+
+func kifuNetContext() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), kifuNetTimeout)
+}
+
 // Open は指定パスの棚を開く（既に開いていれば閉じてから開き直す）。
 //
 // ⚠️ **エラーを返さない。** 開けなかったことは openErr に残して Status から
@@ -76,7 +98,7 @@ func (s *KifuService) Open(path string) {
 
 func (s *KifuService) openLocked(path string) {
 	if s.lib != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), kifuCloseTimeout)
 		if err := s.lib.Close(ctx); err != nil {
 			s.logger.Warn("棋譜データベースを閉じられませんでした", "path", s.path, "error", err)
 		}
@@ -112,7 +134,7 @@ func (s *KifuService) Close() {
 	if s.lib == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), kifuCloseTimeout)
 	defer cancel()
 	if err := s.lib.Close(ctx); err != nil {
 		s.logger.Warn("棋譜データベースを閉じられませんでした", "path", s.path, "error", err)
@@ -161,7 +183,11 @@ func (s *KifuService) Status() KifuDBStatus {
 	if lib == nil {
 		return st
 	}
-	n, err := lib.Store().Count(context.Background())
+
+	ctx, cancel := kifuDBContext()
+	defer cancel()
+
+	n, err := lib.Count(ctx)
 	if err != nil {
 		st.Error = err.Error()
 		return st
@@ -225,17 +251,55 @@ func toSummary(r store.Record) GameSummary {
 	return s
 }
 
-// countMoves は KIF テキストの手数を数える。
-//
-// **行数を数えるのではなく core/kifu で解析する。** サイトが配信している .kif には
-// コメント行（*）や `# --- Kifu for Windows ...` が混ざっており、行を数えると
-// それらまで手数に入る。
-func countMoves(kifText string) int {
-	doc, err := kicho.ParseKIF(kifText)
-	if err != nil {
-		return 0
+// fetchedToDetail は kicho.Fetched を画面用に変換する（表示のための整形だけ）。
+func fetchedToDetail(f kicho.Fetched) GameDetail {
+	d := GameDetail{
+		GameSummary: GameSummary{
+			Source:    f.Source,
+			SourceID:  f.SourceID,
+			SourceURL: f.SourceURL,
+			Event:     f.Event,
+			Handicap:  f.Handicap,
+			Place:     f.Place,
+			Black:     f.Black,
+			White:     f.White,
+			EndMark:   f.EndMark,
+			Finished:  f.Finished(),
+			Moves:     f.Moves,
+		},
+		KIF:      f.KIF,
+		Encoding: f.Encoding,
 	}
-	return len(doc.Moves)
+	if !f.StartedAt.IsZero() {
+		d.StartedAt = f.StartedAt.Format(time.RFC3339)
+	}
+	return d
+}
+
+// detailToFetched は画面の内容を保存できる形に戻す。
+//
+// **諸元（source_url）と手数は `Library.Save` が決め直す**ので、ここでは運ぶだけ。
+func detailToFetched(d GameDetail) kicho.Fetched {
+	f := kicho.Fetched{
+		Source:    d.Source,
+		SourceID:  d.SourceID,
+		SourceURL: d.SourceURL,
+		Event:     d.Event,
+		Handicap:  d.Handicap,
+		Place:     d.Place,
+		Black:     d.Black,
+		White:     d.White,
+		EndMark:   d.EndMark,
+		Moves:     d.Moves,
+		KIF:       d.KIF,
+		Encoding:  d.Encoding,
+	}
+	if d.StartedAt != "" {
+		if t, err := time.Parse(time.RFC3339, d.StartedAt); err == nil {
+			f.StartedAt = t
+		}
+	}
+	return f
 }
 
 // SearchQuery は検索条件。空の項目は「条件なし」。
@@ -248,7 +312,25 @@ type SearchQuery struct {
 	To   string `json:"to"`
 	// FinishedOnly が true なら終局済みのみ。
 	FinishedOnly bool `json:"finishedOnly"`
-	// Limit は取得件数の上限（0 なら無制限）。
+	// Limit は取得件数の上限（0 なら MaxSearchRows）。
+	Limit int `json:"limit"`
+	// Offset は読み飛ばす件数。
+	Offset int `json:"offset"`
+}
+
+// SearchResult は検索結果と件数。
+//
+// **件数を 2 つ返すのは UI が「N 件中 M 件」を出すため。** 以前は Search と
+// Count を別々に呼んでいたが、条件付きの該当件数が取れなかった。
+type SearchResult struct {
+	Games []GameSummary `json:"games"`
+	// Matched は条件に合う件数（上限で切る前）。
+	Matched int `json:"matched"`
+	// Total は棚全体の件数。
+	Total int `json:"total"`
+	// Truncated は上限で切ったかどうか。
+	Truncated bool `json:"truncated"`
+	// Limit は実際に適用した上限。UI が「先頭 N 件」と出すのに使う。
 	Limit int `json:"limit"`
 }
 
@@ -257,64 +339,87 @@ type SearchQuery struct {
 // ⚠️ **フロントに 3 と書かないこと**（trigram の性質は store が持っている）。
 const MinSearchLength = store.MinTrigramLen
 
+// MaxSearchRows は一覧が 1 回に返す上限（UI の案内表示に使う）。
+//
+// ⚠️ **フロントに数値を書かないこと**（上限は kicho が決めている）。
+const MaxSearchRows = kicho.MaxSearchRows
+
 // jst は日付入力の解釈に使うタイムゾーン。
 var jst = time.FixedZone("JST", 9*60*60)
 
 // List は保存済み棋譜の一覧を新しい順に返す（KIF 本文は含まない）。
-func (s *KifuService) List() ([]GameSummary, error) {
+func (s *KifuService) List() (SearchResult, error) {
 	return s.Search(SearchQuery{})
 }
 
 // Search は条件に合う棋譜を新しい順に返す（KIF 本文は含まない）。
-func (s *KifuService) Search(q SearchQuery) ([]GameSummary, error) {
+//
+// **件数も一緒に返る。** 条件付きの該当件数は検索と同じ条件で数える必要があり、
+// kicho 側で同じ WHERE を共有している。
+func (s *KifuService) Search(q SearchQuery) (SearchResult, error) {
 	lib, err := s.library()
 	if err != nil {
-		return nil, err
+		return SearchResult{}, err
 	}
 
 	sq := store.Query{
 		Text:         q.Text,
 		FinishedOnly: q.FinishedOnly,
 		Limit:        q.Limit,
+		Offset:       q.Offset,
 	}
 
 	// 日付は JST の 0:00 / 23:59:59 として解釈する。
 	if q.From != "" {
 		t, err := time.ParseInLocation("2006-01-02", q.From, jst)
 		if err != nil {
-			return nil, fmt.Errorf("開始日の形式が不正です: %s", q.From)
+			return SearchResult{}, fmt.Errorf("開始日の形式が不正です: %s", q.From)
 		}
 		sq.From = t
 	}
 	if q.To != "" {
 		t, err := time.ParseInLocation("2006-01-02", q.To, jst)
 		if err != nil {
-			return nil, fmt.Errorf("終了日の形式が不正です: %s", q.To)
+			return SearchResult{}, fmt.Errorf("終了日の形式が不正です: %s", q.To)
 		}
 		sq.To = t.Add(24*time.Hour - time.Second)
 	}
 	if !sq.From.IsZero() && !sq.To.IsZero() && sq.To.Before(sq.From) {
-		return nil, fmt.Errorf("終了日が開始日より前になっています")
+		return SearchResult{}, fmt.Errorf("終了日が開始日より前になっています")
 	}
 
-	recs, err := lib.Store().Search(context.Background(), sq)
+	ctx, cancel := kifuDBContext()
+	defer cancel()
+
+	res, err := lib.Search(ctx, sq)
 	if err != nil {
-		return nil, err
+		return SearchResult{}, err
 	}
-	out := make([]GameSummary, 0, len(recs))
-	for _, r := range recs {
-		out = append(out, toSummary(r))
+	out := SearchResult{
+		Games:     make([]GameSummary, 0, len(res.Games)),
+		Matched:   res.Matched,
+		Total:     res.Total,
+		Truncated: res.Truncated,
+		Limit:     MaxSearchRows,
+	}
+	for _, r := range res.Games {
+		out.Games = append(out.Games, toSummary(r))
 	}
 	return out, nil
 }
 
-// Count は保存件数を返す（検索結果と全体を比べて表示するため）。
+// Count は保存件数を返す。
+//
+// 一覧の件数は Search が一緒に返すので、こちらは棚の状態を単独で見たいとき用。
 func (s *KifuService) Count() (int, error) {
 	lib, err := s.library()
 	if err != nil {
 		return 0, err
 	}
-	return lib.Store().Count(context.Background())
+	ctx, cancel := kifuDBContext()
+	defer cancel()
+
+	return lib.Count(ctx)
 }
 
 // Get は棋譜 1 件を KIF 本文つきで返す。
@@ -323,7 +428,10 @@ func (s *KifuService) Get(id string) (GameDetail, error) {
 	if err != nil {
 		return GameDetail{}, err
 	}
-	r, err := lib.Store().Get(context.Background(), id)
+	ctx, cancel := kifuDBContext()
+	defer cancel()
+
+	r, err := lib.Get(ctx, id)
 	if err != nil {
 		return GameDetail{}, err
 	}
@@ -336,7 +444,10 @@ func (s *KifuService) Delete(id string) error {
 	if err != nil {
 		return err
 	}
-	return lib.Store().Delete(context.Background(), id)
+	ctx, cancel := kifuDBContext()
+	defer cancel()
+
+	return lib.Delete(ctx, id)
 }
 
 // SendToStudy は棚の棋譜を解析タブへ送る（一覧の「解析する」）。
@@ -364,35 +475,21 @@ func (s *KifuService) SendToStudy(id string) (KifuLoad, error) {
 //
 // **取得カードの「解析する」がここを通る。** ⚠️ **棚を経由しない** ——
 // 取得しただけの棋譜も解析できる（「棚は解析の前提条件ではない」の一部）。
+//
+// 「再読み込みで取り直せる URL か」の判断は **kicho の `RefetchableURL`**。
+// ⚠️ **ここで取得元ごとに分岐しないこと** —— 取り直せない URL を渡すと
+// 解析タブに再読み込みのアイコンが出るのに押すと必ず失敗する、という
+// 画面からは理由の分からない壊れ方になる。
 func (s *KifuService) SendToStudyGame(d GameDetail) (KifuLoad, error) {
 	if strings.TrimSpace(d.KIF) == "" {
 		return KifuLoad{State: s.study.State()}, fmt.Errorf("棋譜が空です")
 	}
-	return s.study.loadKifuFrom(d.KIF, reloadableURL(d.Source, d.SourceURL))
-}
-
-// reloadableURL は「解析タブの再読み込みで取り直せる URL か」を判定して返す。
-//
-// ⚠️ **判断はここ 1 か所。フロントに書かないこと。** 取り直せない URL を渡すと
-// **解析タブに再読み込みのアイコンが出るのに押すと必ず失敗する**、という
-// 画面からは理由の分からない壊れ方になる。
-//
-//	shogilive … 中継ページ(HTML)。**そこに置かれた .kif を辿れる**ので取り直せる
-//	url       … 指定された .kif そのもの。取り直せる
-//	yomiuri   … ⚠️ **取り直せない。** あちらは Nuxt のページで .kif を置いておらず、
-//	            KIF は構造化データ(_payload.js)から組み立てている。
-//	            **取り直す口は取得カードの「更新」**(KifuService.Refresh)
-//	paste     … 取得元が無い(空のまま)
-func reloadableURL(source, sourceURL string) string {
-	if source == store.SourceYomiuri {
-		return ""
-	}
-	return sourceURL
+	return s.study.loadKifuFrom(d.KIF, kicho.RefetchableURL(d.Source, d.SourceURL))
 }
 
 // Fetch はライブ中継から棋譜を取得する（**保存はしない**）。
 //
-// 取得元は入力から判別する。
+// 取得元は入力から判別する（判別も取得も kicho 側）。
 //
 //   - live.shogi.or.jp の URL  → 日本将棋連盟の棋譜中継
 //   - それ以外（URL / 棋譜 ID）→ 読売（竜王戦）
@@ -403,25 +500,14 @@ func (s *KifuService) Fetch(input string) (GameDetail, error) {
 	if err != nil {
 		return GameDetail{}, err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := kifuNetContext()
 	defer cancel()
 
-	if strings.TrimSpace(input) == "" {
-		return GameDetail{}, fmt.Errorf("URL または棋譜 ID を入力してください")
-	}
-	if scrape.IsShogiLiveURL(input) {
-		id, err := lib.ResolveShogiLiveInput(ctx, input)
-		if err != nil {
-			return GameDetail{}, err
-		}
-		return fetchShogiLive(ctx, lib, id)
-	}
-
-	id, err := resolveRyuohInput(ctx, lib, input)
+	f, err := lib.Fetch(ctx, input)
 	if err != nil {
 		return GameDetail{}, err
 	}
-	return fetchRyuoh(ctx, lib, id)
+	return fetchedToDetail(f), nil
 }
 
 // Refresh は取得済みのカードを取り直す。
@@ -433,20 +519,14 @@ func (s *KifuService) Refresh(source, sourceID string) (GameDetail, error) {
 	if err != nil {
 		return GameDetail{}, err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := kifuNetContext()
 	defer cancel()
 
-	if strings.TrimSpace(sourceID) == "" {
-		return GameDetail{}, fmt.Errorf("取得元の棋譜 ID が空です")
+	f, err := lib.Refresh(ctx, source, sourceID)
+	if err != nil {
+		return GameDetail{}, err
 	}
-	switch source {
-	case store.SourceShogiLive:
-		return fetchShogiLive(ctx, lib, sourceID)
-	case store.SourceYomiuri, "":
-		return fetchRyuoh(ctx, lib, sourceID)
-	default:
-		return GameDetail{}, fmt.Errorf("取り直せない取得元です: %s", source)
-	}
+	return fetchedToDetail(f), nil
 }
 
 // Save は Fetch で取得して画面に表示している内容を**そのまま**保存する。
@@ -460,55 +540,10 @@ func (s *KifuService) Save(d GameDetail) (GameSummary, error) {
 	if err != nil {
 		return GameSummary{}, err
 	}
-	if d.SourceID == "" {
-		return GameSummary{}, fmt.Errorf("保存する棋譜がありません。先に取得してください")
-	}
-	if d.KIF == "" {
-		return GameSummary{}, fmt.Errorf("棋譜が空です")
-	}
+	ctx, cancel := kifuDBContext()
+	defer cancel()
 
-	// 取得元によって諸元（どこから取ったか）の組み立てが変わる。
-	source, sourceURL := d.Source, d.SourceURL
-	switch source {
-	case store.SourceShogiLive:
-		sourceURL = lib.ShogiLiveViewerURL(d.SourceID)
-	case store.SourceYomiuri, "":
-		// 取得元が入っていない古い画面状態でも読売として保存できるようにしておく。
-		source = store.SourceYomiuri
-		sourceURL = scrape.ViewerURL(d.SourceID)
-	default:
-		return GameSummary{}, fmt.Errorf("保存できない取得元です: %s", source)
-	}
-
-	encoding := d.Encoding
-	if encoding == "" {
-		encoding = kicho.EncodingUTF8
-	}
-
-	g := store.Game{
-		Source:    source,
-		SourceID:  d.SourceID,
-		SourceURL: sourceURL,
-		Event:     d.Event,
-		Handicap:  d.Handicap,
-		Place:     d.Place,
-		Black:     d.Black,
-		White:     d.White,
-		EndMark:   d.EndMark,
-		Moves:     countMoves(d.KIF),
-
-		// 画面に出している内容をそのまま書き込む（サイトへ取り直しには行かない）。
-		Body:     d.KIF,
-		Format:   string(format.KIF),
-		Encoding: encoding,
-	}
-	if d.StartedAt != "" {
-		if t, err := time.Parse(time.RFC3339, d.StartedAt); err == nil {
-			g.StartedAt = t
-		}
-	}
-
-	rec, err := lib.Store().Save(context.Background(), g)
+	rec, err := lib.Save(ctx, detailToFetched(d))
 	if err != nil {
 		return GameSummary{}, err
 	}
@@ -517,11 +552,15 @@ func (s *KifuService) Save(d GameDetail) (GameSummary, error) {
 
 // PreviewKIF は KIF テキストを解析して内容を返す（**保存はしない**）。
 func (s *KifuService) PreviewKIF(text string) (GameDetail, error) {
-	doc, err := kicho.ParseKIF(text)
+	lib, err := s.library()
 	if err != nil {
 		return GameDetail{}, err
 	}
-	return docToDetail(doc, store.SourcePaste, "", text, kicho.EncodingUTF8), nil
+	f, err := lib.PreviewKIF(text)
+	if err != nil {
+		return GameDetail{}, err
+	}
+	return fetchedToDetail(f), nil
 }
 
 // ImportKIF は KIF テキストを解析して棚に入れる（入力タブの「棚に登録する」）。
@@ -533,7 +572,10 @@ func (s *KifuService) ImportKIF(text string) (GameSummary, error) {
 	if err != nil {
 		return GameSummary{}, err
 	}
-	rec, err := lib.ImportKIF(context.Background(), text)
+	ctx, cancel := kifuDBContext()
+	defer cancel()
+
+	rec, err := lib.ImportKIF(ctx, text)
 	if err != nil {
 		return GameSummary{}, err
 	}
@@ -546,18 +588,14 @@ func (s *KifuService) PreviewURL(rawURL string) (GameDetail, error) {
 	if err != nil {
 		return GameDetail{}, err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := kifuNetContext()
 	defer cancel()
 
-	text, encoding, err := lib.FetchKIFFromURL(ctx, rawURL)
+	f, err := lib.PreviewURL(ctx, rawURL)
 	if err != nil {
 		return GameDetail{}, err
 	}
-	doc, err := kicho.ParseKIF(text)
-	if err != nil {
-		return GameDetail{}, err
-	}
-	return docToDetail(doc, store.SourceURL, rawURL, text, encoding), nil
+	return fetchedToDetail(f), nil
 }
 
 // ImportURL は URL から KIF を取得して棚に入れる。
@@ -566,7 +604,7 @@ func (s *KifuService) ImportURL(rawURL string) (GameSummary, error) {
 	if err != nil {
 		return GameSummary{}, err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := kifuNetContext()
 	defer cancel()
 
 	rec, err := lib.ImportURL(ctx, rawURL)
@@ -574,118 +612,4 @@ func (s *KifuService) ImportURL(rawURL string) (GameSummary, error) {
 		return GameSummary{}, err
 	}
 	return toSummary(rec), nil
-}
-
-// fetchRyuoh は読売のペイロードから KIF を組み立てる（保存はしない）。
-func fetchRyuoh(ctx context.Context, lib *kicho.Library, id string) (GameDetail, error) {
-	g, err := lib.FetchRyuoh(ctx, id)
-	if err != nil {
-		return GameDetail{}, err
-	}
-
-	d := GameDetail{
-		GameSummary: GameSummary{
-			Source:   store.SourceYomiuri,
-			SourceID: g.SourceID,
-			// 諸元: どこから取ったか。読売は棋譜ビューアの URL。
-			SourceURL: scrape.ViewerURL(g.SourceID),
-			Event:     g.Event,
-			Handicap:  g.Handicap,
-			Place:     g.Place,
-			Black:     g.Black,
-			White:     g.White,
-			EndMark:   g.EndMark,
-			Finished:  g.Finished(),
-			Moves:     len(g.Moves),
-		},
-		// スクレイピングは構造化データから組み立てるので、これ自体が原本。
-		KIF:      g.KIF(),
-		Encoding: kicho.EncodingUTF8,
-	}
-	if !g.StartedAt.IsZero() {
-		d.StartedAt = g.StartedAt.Format(time.RFC3339)
-	}
-	return d, nil
-}
-
-// fetchShogiLive は連盟の中継から .kif を取る（保存はしない）。
-//
-// 本文は**サイトが配信している原本のまま**渡す（整形し直さない）。
-// 画面に出すメタデータだけ解析結果から取る。
-func fetchShogiLive(ctx context.Context, lib *kicho.Library, id string) (GameDetail, error) {
-	g, err := lib.FetchShogiLive(ctx, id)
-	if err != nil {
-		return GameDetail{}, err
-	}
-
-	end := g.Doc.EndMark()
-	d := GameDetail{
-		GameSummary: GameSummary{
-			Source:   store.SourceShogiLive,
-			SourceID: g.SourceID,
-			// 諸元: どこから取ったか。人が開いて確認するのは中継ページ。
-			SourceURL: lib.ShogiLiveViewerURL(g.SourceID),
-			Event:     g.Doc.Event,
-			Handicap:  g.Doc.Handicap,
-			Place:     g.Doc.Place,
-			Black:     g.Doc.Black,
-			White:     g.Doc.White,
-			EndMark:   end,
-			Finished:  end != "",
-			Moves:     len(g.Doc.Moves),
-		},
-		KIF:      g.KIF,
-		Encoding: g.Encoding,
-	}
-	if !g.Doc.StartedAt.IsZero() {
-		d.StartedAt = g.Doc.StartedAt.Format(time.RFC3339)
-	}
-	return d, nil
-}
-
-// docToDetail は解析結果を表示用に変換する。
-//
-// 表示する KIF は解析結果を組み立て直したものではなく **原本（body）をそのまま**使う。
-// 保存されるのも原本なので、画面と保存内容を食い違わせないため
-// （組み立て直すと変化・コメント・不成などが落ちる）。
-func docToDetail(doc kifu.Document, source, sourceURL, body, encoding string) GameDetail {
-	end := doc.EndMark()
-	d := GameDetail{
-		GameSummary: GameSummary{
-			Source:    source,
-			SourceURL: sourceURL,
-			Event:     doc.Event,
-			Handicap:  doc.Handicap,
-			Place:     doc.Place,
-			Black:     doc.Black,
-			White:     doc.White,
-			EndMark:   end,
-			Finished:  end != "",
-			Moves:     len(doc.Moves),
-		},
-		KIF:      body,
-		Encoding: encoding,
-	}
-	if !doc.StartedAt.IsZero() {
-		d.StartedAt = doc.StartedAt.Format(time.RFC3339)
-	}
-	return d
-}
-
-// resolveRyuohInput は入力（対局ページ URL / 棋譜ビューア URL / 棋譜 ID）を
-// 読売の棋譜 ID に解決する。
-func resolveRyuohInput(ctx context.Context, lib *kicho.Library, input string) (string, error) {
-	in := strings.TrimSpace(input)
-	if in == "" {
-		return "", fmt.Errorf("URL または棋譜 ID を入力してください")
-	}
-	if !strings.HasPrefix(in, "http://") && !strings.HasPrefix(in, "https://") {
-		return in, nil // 棋譜 ID とみなす
-	}
-	// 棋譜ビューアの URL が直接貼られた場合はそこから ID を取る。
-	if id, err := kicho.KifuIDFromURL(in); err == nil {
-		return id, nil
-	}
-	// 対局ページ URL → iframe を辿って棋譜 ID を得る。
-	return lib.ResolveRyuohURL(ctx, in)
 }

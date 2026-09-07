@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ShinteLab/kicho"
 	"github.com/ShinteLab/kicho/store"
 )
 
@@ -47,8 +48,12 @@ func TestKifuServiceImportListSendToStudy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if len(list) != 1 || list[0].ID != rec.ID {
+	if len(list.Games) != 1 || list.Games[0].ID != rec.ID {
 		t.Fatalf("一覧に出ていません: %+v", list)
+	}
+	// 件数は一覧と一緒に返る（UI の「N 件中 M 件」に使う）。
+	if list.Total != 1 || list.Matched != 1 || list.Truncated {
+		t.Errorf("件数が合いません: %+v", list)
 	}
 
 	load, err := svc.SendToStudy(rec.ID)
@@ -102,21 +107,33 @@ func TestKifuServiceSaveKeepsIDOnResave(t *testing.T) {
 	}
 }
 
-// ⚠️ **読売の取得元 URL は解析タブへ渡さないこと**（`reloadableURL`）。
+// ⚠️ **読売の取得元 URL は解析タブへ渡さないこと**（`kicho.RefetchableURL`）。
 //
 // あちらは Nuxt のページで .kif を置いておらず、KIF は構造化データから
 // 組み立てている。渡すと**再読み込みのアイコンが出るのに押すと必ず失敗する**
 // という、画面からは理由の分からない壊れ方になる（取り直す口は取得カードの「更新」）。
-func TestReloadableURL(t *testing.T) {
+//
+// **判断は kicho が持つ**（取得元の性質を知っているのはあちら）。ここでは
+// SendToStudyGame がその判断を通していることだけを見る。
+func TestSendToStudyGameDropsUnrefetchableURL(t *testing.T) {
 	page := "http://live.shogi.or.jp/oui/kifu/67/oui202607290101.html"
-	if got := reloadableURL(store.SourceShogiLive, page); got != page {
+	if got := kicho.RefetchableURL(store.SourceShogiLive, page); got != page {
 		t.Errorf("連盟の中継ページを落としています: %q", got)
 	}
-	if got := reloadableURL(store.SourceURL, "https://example.com/a.kif"); got == "" {
+	if got := kicho.RefetchableURL(store.SourceURL, "https://example.com/a.kif"); got == "" {
 		t.Errorf("URL 取り込みの取得元を落としています")
 	}
+
+	// 読売の棋譜を解析タブへ送っても、取得元 URL は付かない。
+	svc, study := newTestKifuService(t)
 	viewer := "https://www.yomiuri.co.jp/kifu/s/66f2539c848c20bac7cb8002/"
-	if got := reloadableURL(store.SourceYomiuri, viewer); got != "" {
+	if _, err := svc.SendToStudyGame(GameDetail{
+		GameSummary: GameSummary{Source: store.SourceYomiuri, SourceURL: viewer},
+		KIF:         testKIF,
+	}); err != nil {
+		t.Fatalf("SendToStudyGame: %v", err)
+	}
+	if got := study.State().SourceURL; got != "" {
 		t.Errorf("読売の URL を渡してしまっています: %q", got)
 	}
 }

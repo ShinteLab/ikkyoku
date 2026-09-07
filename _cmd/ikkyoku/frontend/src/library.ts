@@ -12,7 +12,12 @@
 // **代わりに置くのが「解析する」。**
 import { KifuService } from "../bindings/github.com/ShinteLab/ikkyoku/app";
 import { openPopup } from "./popup";
-import type { GameDetail, GameSummary, KifuLoad } from "../bindings/github.com/ShinteLab/ikkyoku/app/models";
+import type {
+  GameDetail,
+  GameSummary,
+  KifuLoad,
+  SearchResult,
+} from "../bindings/github.com/ShinteLab/ikkyoku/app/models";
 
 export type LibraryHandle = {
   // reveal はタブを開いたときに呼ぶ（棚を読み直す）。
@@ -209,7 +214,8 @@ export function mountLibrary(
     return td;
   };
 
-  const render = (games: GameSummary[], total: number) => {
+  const render = (res: SearchResult) => {
+    const games = res.games ?? [];
     rows.replaceChildren();
     for (const g of games) {
       const tr = document.createElement("tr");
@@ -262,16 +268,24 @@ export function mountLibrary(
     paintSelection();
 
     // 件数。条件を付けているときだけ「N / 全体」にする。
+    // ⚠️ **並べた行数ではなく該当件数（matched）を出す。** 上限で切られていると
+    // 行数は上限そのものになり、「何件あるのか」が分からなくなる。
     count.textContent =
-      hasConditions() && total > 0
-        ? `棋譜一覧（${games.length} / ${total}）`
-        : `棋譜一覧（${games.length}）`;
+      hasConditions() && res.total > 0
+        ? `棋譜一覧（${res.matched} / ${res.total}）`
+        : `棋譜一覧（${res.total}）`;
 
     if (games.length === 0) {
       setStatus(
         hasConditions()
           ? "条件に合う棋譜がありません。"
           : "まだ棋譜がありません。入力タブの「棚に登録する」や「中継から取得」で追加してください。",
+        "warn",
+      );
+    } else if (res.truncated) {
+      // ⚠️ **上限は Go 側（kicho）が決めている**ので、数値を書かず res.limit を写す。
+      setStatus(
+        `該当 ${res.matched} 件のうち新しい ${res.limit} 件だけを表示しています。条件で絞り込んでください。`,
         "warn",
       );
     }
@@ -284,20 +298,22 @@ export function mountLibrary(
     search.disabled = true;
     setStatus("読み込み中…");
     try {
-      // ⚠️ **`limit: 0` は無制限**（Go 側の `store.Query.Limit` がそう）。
-      // 一覧は棚の全部を出して、絞るのは検索条件のほう。
-      const [list, total] = await Promise.all([
-        KifuService.Search({
-          text: text.value,
-          from: from.value,
-          to: to.value,
-          finishedOnly: finishedOnly.checked,
-          limit: 0,
-        }),
-        KifuService.Count(),
-      ]);
+      // ⚠️ **`limit: 0` は「上限は Go 側に任せる」。** 無制限ではない ——
+      // 棚は溜め込んでいく前提なので、kicho が MaxSearchRows で切って
+      // 切ったことを truncated で返す。**ここに件数を書かないこと。**
+      //
+      // ⚠️ **件数は Search が一緒に返す。Count を別に呼ばないこと** ——
+      // 条件付きの該当件数は検索と同じ条件で数える必要がある。
+      const res = await KifuService.Search({
+        text: text.value,
+        from: from.value,
+        to: to.value,
+        finishedOnly: finishedOnly.checked,
+        limit: 0,
+        offset: 0,
+      });
       setStatus("");
-      render(list ?? [], total);
+      render(res);
     } catch (err) {
       // ⚠️ **棚が開けていないのが一番ありうる**（設定タブで場所を直す）。
       // Go 側がその旨のエラーを返すので、そのまま出せば行き先が分かる。

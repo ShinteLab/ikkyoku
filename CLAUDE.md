@@ -904,9 +904,20 @@ kicho の UI は将来「テスト用のモック」または
                         棋譜タブ（棚）─ 検索 ─「解析する」──→ 解析タブ
 ```
 
-**kicho 側のコードは 1 行も変えていない。** `kicho.Open(dbPath, logger)` は
-**dbPath が空でなければ kicho 側の `settings` を見ない**し、HTTP サーバも
-作るだけで起動しない（`httpapi.Server.Stop` は未起動でも安全）。
+`kicho.Open(dbPath, logger)` は**dbPath が空でなければ kicho 側の `settings` を
+見ない**し、HTTP サーバも作るだけで起動しない（`httpapi.Server.Stop` は未起動でも安全）。
+
+⚠️ **移行の直後は kicho を 1 行も変えずに済ませたが、その形は維持できなかった**
+（2026-09-07 に整理）。当時は `kicho.Library.Store()` で `*store.Store` を直接触っており、
+
+- 実質の公開 API が `store` パッケージ全体になっていた
+- **保存の組み立てが 2 か所に分かれていた** —— 取得元ごとの `source_url` の決め方、
+  文字コードの既定、手数の数え方を ikkyoku と `kicho/_cmd/kicho` がそれぞれ持ち、
+  片方だけ直せば黙って割れる状態だった（実際 kicho 側は読売の `source_url` を
+  入れ忘れていた）
+
+いまは **`Store()` は無く、蔵書の操作も取得元の知識も `kicho.Library` にある**。
+ここに書くのは DTO の変換と入力チェックだけ。
 
 #### 崩してはいけない線引き
 
@@ -920,10 +931,14 @@ kicho の UI は将来「テスト用のモック」または
 3. ⚠️ **ikkyoku で伸ばした枝を KIF に書き戻さない。** 棚の KIF は
    **実際に現れた指し手**で、エンジンの読み筋や自分で指した手ではない
    （`TODO.md` の「本譜のロック」と同根）
-4. ⚠️ **kicho の Go コードを書き換えない。** 足りないものが出たら、まず ikkyoku 側で
-   足せるか考える。kicho を変えるなら別の改修として切る
-5. ⚠️ **DTO は `_cmd/ikkyoku` にローカルに持つ**（`GameSummary` / `GameDetail` /
-   `SearchQuery`）。`store.Record` をそのままフロントへ出さないこと ——
+4. ⚠️ **取得元の知識をこちらに書かない。** 取得元ごとの `source_url` の決め方、
+   文字コードの既定、手数の数え方、「再読み込みで取り直せる URL か」の判断は
+   **kicho 側**（`kicho.Fetched` / `Library.Save` / `RefetchableURL`）。
+   同じ変換を `kicho/_cmd/kicho/kifuservice.go` も持つので、こちらに書くと必ず割れる。
+   足りないものが出たら **kicho の `Library` に足す**（`Store()` は無い）。
+   直したら kicho 側で `.\check-consumers.ps1` を流すこと
+5. ⚠️ **DTO は `app` にローカルに持つ**（`GameSummary` / `GameDetail` /
+   `SearchQuery` / `SearchResult`）。`store.Record` をそのままフロントへ出さないこと ——
    bindings に kicho の型が漏れると、向こうのスキーマ変更がフロントに直撃する
 6. ⚠️ **ikkyoku は HTTP サーバを持たない**（`ServerService` は移していない）。
    kicho の UI の「棋譜 URL をコピー」「取得 URL をコピー」は**外部ツール
@@ -931,15 +946,48 @@ kicho の UI は将来「テスト用のモック」または
    **代わりに置いたのが「解析する」**。⚠️ **URL コピーを戻すなら、先に
    「ikkyoku がサーバを持つか」を決めること**
 
+#### kicho を抱えると付いてくるもの
+
+`kicho.Library` を import した時点で、ikkyoku のバイナリには次が入る。
+
+| 依存 | 何のため |
+|---|---|
+| `modernc.org/sqlite` | 棚（PureGo。cgo 不要） |
+| `github.com/dop251/goja` | **読売のペイロード評価** |
+| `golang.org/x/net/html` | 読売の対局ページから iframe を辿る |
+| `golang.org/x/text` | Shift_JIS の判別 |
+
+⚠️ **goja は第三者サイトの JavaScript を ikkyoku のプロセス内で実行する。**
+読売の `_payload.js` は Nuxt の IIFE で、値が引数リストの変数として共有されているため
+文字列パースでは解けず、JS として評価するしかない（理由は kicho の CLAUDE.md）。
+
+- 盤面キャプチャ・エンジン・解析と**同じプロセス**で動くことは認識しておく
+- kicho 側に `vm.Interrupt` による 10 秒のタイムアウトがある。**外さないこと**
+- ikkyoku から呼ぶ経路は「中継から取得」（`KifuService.Fetch` / `Refresh`）だけ。
+  貼り付け・URL 取り込みは goja を通らない
+
+#### 棚の呼び出しには必ず制限時間を付ける
+
+⚠️ **`context.Background()` をそのまま `kicho.Library` へ渡さないこと。**
+kicho の `store` は接続を 1 本に絞っているので、止まらないクエリが 1 つあると
+**以後の棚の操作が全部待たされる**（画面からは「棚が反応しない」に見える）。
+
+`KifuService` の `kifuDBContext()` / `kifuNetContext()` を通す
+（DB は 10 秒、サイトへの取得は 60 秒）。
+
 #### DB の場所
 
 **既定は `os.UserConfigDir()/ikkyoku/kicho.db`**（`Config.KifuDB` の 1 か所で解決）。
 設定タブ「棋譜データベース」で任意のパスを指せるので、**kicho アプリの DB
 （`%APPDATA%\kicho\kicho.db`）を共用**できる（開発時に確かめやすい）。
 
-- ⚠️ **既定を kicho と同じにしないこと。** `store` は `SetMaxOpenConns(1)` だが
-  それは**プロセス内**の話で、**2 プロセスから書くと `database is locked` に
-  なりうる**。共用はユーザーが設定で指定したときだけにする
+- ⚠️ **既定を kicho と同じにしないこと。** `store` の `SetMaxOpenConns(1)` は
+  **プロセス内**の直列化でしかない。プロセスをまたぐ競合には kicho 側で
+  WAL と `busy_timeout` を入れてある（2026-09-07）ので即 `database is locked` には
+  ならないが、**共用を勧める状態ではない**。ユーザーが設定で指定したときだけにする
+- ⚠️ **kicho と ikkyoku は別バイナリなので DB のスキーマ版が食い違いうる。**
+  片方だけ更新した状態で同じ DB を指すと `store.ErrSchemaTooNew` で開けない
+  （黙って開いて後段が `no such column` で落ちるより良い、という判断）
 - ⚠️ **存在チェックをしない**（SQLite は無ければ作る）。まだ無い場所を先に書く
   順序が普通にある（エンジンのパスとはそこが違う）
 - ⚠️ **変えたその場で開き直す**（`SettingsService.onKifuDBPath` → `KifuService.open`）。
