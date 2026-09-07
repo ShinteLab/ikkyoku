@@ -138,6 +138,33 @@ func describeOpenError(err error) error {
 	return err
 }
 
+// describeKifuError は kicho が返した理由に、ikkyoku 側の直し方を足す。
+//
+// ⚠️ **文言比較で分岐しないこと**（`describeOpenError` と同じ）。kicho は
+// **「画面と文言は使う側にある」という前提で sentinel を公開している**ので、
+// **種類だけ向こうから貰い、何をすればよいかはこちらが書く。**
+//
+// ⚠️ **kicho の文言を書き写さないこと** —— `%w` で包んで足すだけにする。
+// 写すと向こうを直してもここだけ古い言い方で残る。
+//
+// ⚠️ **足すのは「ikkyoku の画面で何をすればよいか」だけ。** kicho の文は
+// どの入口から来たかを知らないので、そこはこちらにしか書けない。
+func describeKifuError(err error) error {
+	switch {
+	case errors.Is(err, kicho.ErrEmptyKifu):
+		return fmt.Errorf("%w。KIF 形式のテキストを貼るか、.kif の URL を指定してください", err)
+	case errors.Is(err, kicho.ErrNotKifu):
+		// 一番よくあるのが「中継のトップページを貼った」。
+		// **棋譜そのものを指しているか**を確かめてもらう。
+		return fmt.Errorf("%w。棋譜そのもの（.kif）を指しているか確かめてください", err)
+	case errors.Is(err, kicho.ErrUnsupportedSource):
+		// 取り直せるのは取得元での ID を持つもの（中継）だけ。
+		// 貼り付け・URL 取り込みには取りに行く先が無い。
+		return fmt.Errorf("%w。取り直せるのは中継から取得した棋譜だけです", err)
+	}
+	return err
+}
+
 // Close は棚を閉じる（アプリの終了時。quit から呼ぶ）。
 //
 // ⚠️ **`//wails:ignore` を外さないこと。** これは `_cmd/ikkyoku` が起動・終了で
@@ -346,8 +373,16 @@ type SearchResult struct {
 	Total int `json:"total"`
 	// Truncated は上限で切ったかどうか。
 	Truncated bool `json:"truncated"`
-	// Limit は実際に適用した上限。UI が「先頭 N 件」と出すのに使う。
-	Limit int `json:"limit"`
+	// Shown は実際に並べた件数。UI が「先頭 N 件だけ」と出すのに使う。
+	//
+	// ⚠️ **`MaxSearchRows` を決め打ちで返さないこと。** kicho が丸めるのは
+	// 「0 か上限超え」のときだけで、**呼び出し側が指定した Limit はそのまま効く**
+	// （`SearchQuery.Limit`）。決め打ちだと 50 件だけ並べておきながら
+	// 「500 件だけを表示しています」と出す、という**画面が嘘をつく**状態になる。
+	//
+	// 切ったときは並んだ行数がそのまま適用された上限なので、
+	// **数え直さずここから取る** —— 丸め方（kicho の規則）を写さずに済む。
+	Shown int `json:"shown"`
 }
 
 // MinSearchLength は索引が効く最小文字数（UI の案内表示に使う）。
@@ -355,9 +390,13 @@ type SearchResult struct {
 // ⚠️ **フロントに 3 と書かないこと**（trigram の性質は store が持っている）。
 const MinSearchLength = store.MinTrigramLen
 
-// MaxSearchRows は一覧が 1 回に返す上限（UI の案内表示に使う）。
+// MaxSearchRows は `SearchQuery.Limit` を指定しなかったときに効く上限。
 //
-// ⚠️ **フロントに数値を書かないこと**（上限は kicho が決めている）。
+// ⚠️ **上限を決めているのは kicho**（棚は溜め込んでいく前提なので、切らないと
+// 蔵書が増えたぶんだけ全行が JSON に載る）。**こちらに数値を書かないこと。**
+//
+// ⚠️ **これを「実際に並んだ件数」として画面へ渡さないこと** ——
+// 呼び出し側が Limit を指定すればそちらが効く（`SearchResult.Shown`）。
 const MaxSearchRows = kicho.MaxSearchRows
 
 // jst は日付入力の解釈に使うタイムゾーン。
@@ -416,7 +455,7 @@ func (s *KifuService) Search(q SearchQuery) (SearchResult, error) {
 		Matched:   res.Matched,
 		Total:     res.Total,
 		Truncated: res.Truncated,
-		Limit:     MaxSearchRows,
+		Shown:     len(res.Games),
 	}
 	for _, r := range res.Games {
 		out.Games = append(out.Games, toSummary(r))
@@ -498,7 +537,10 @@ func (s *KifuService) SendToStudy(id string) (KifuLoad, error) {
 // 画面からは理由の分からない壊れ方になる。
 func (s *KifuService) SendToStudyGame(d GameDetail) (KifuLoad, error) {
 	if strings.TrimSpace(d.KIF) == "" {
-		return KifuLoad{State: s.study.State()}, fmt.Errorf("棋譜が空です")
+		// ⚠️ **文言を書き写さないこと。** kicho が同じことを言う口
+		// （`ErrEmptyKifu`）を公開しているので、そちらを包む。写すと
+		// 向こうを直してもここだけ古い言い方で残る。
+		return KifuLoad{State: s.study.State()}, kicho.ErrEmptyKifu
 	}
 	return s.study.loadKifuFrom(d.KIF, kicho.RefetchableURL(d.Source, d.SourceURL))
 }
@@ -521,7 +563,7 @@ func (s *KifuService) Fetch(input string) (GameDetail, error) {
 
 	f, err := lib.Fetch(ctx, input)
 	if err != nil {
-		return GameDetail{}, err
+		return GameDetail{}, describeKifuError(err)
 	}
 	return fetchedToDetail(f), nil
 }
@@ -540,7 +582,7 @@ func (s *KifuService) Refresh(source, sourceID string) (GameDetail, error) {
 
 	f, err := lib.Refresh(ctx, source, sourceID)
 	if err != nil {
-		return GameDetail{}, err
+		return GameDetail{}, describeKifuError(err)
 	}
 	return fetchedToDetail(f), nil
 }
@@ -561,7 +603,7 @@ func (s *KifuService) Save(d GameDetail) (GameSummary, error) {
 
 	rec, err := lib.Save(ctx, detailToFetched(d))
 	if err != nil {
-		return GameSummary{}, err
+		return GameSummary{}, describeKifuError(err)
 	}
 	return toSummary(rec), nil
 }
@@ -574,7 +616,7 @@ func (s *KifuService) PreviewKIF(text string) (GameDetail, error) {
 	}
 	f, err := lib.PreviewKIF(text)
 	if err != nil {
-		return GameDetail{}, err
+		return GameDetail{}, describeKifuError(err)
 	}
 	return fetchedToDetail(f), nil
 }
@@ -593,7 +635,7 @@ func (s *KifuService) ImportKIF(text string) (GameSummary, error) {
 
 	rec, err := lib.ImportKIF(ctx, text)
 	if err != nil {
-		return GameSummary{}, err
+		return GameSummary{}, describeKifuError(err)
 	}
 	return toSummary(rec), nil
 }
@@ -609,7 +651,7 @@ func (s *KifuService) PreviewURL(rawURL string) (GameDetail, error) {
 
 	f, err := lib.PreviewURL(ctx, rawURL)
 	if err != nil {
-		return GameDetail{}, err
+		return GameDetail{}, describeKifuError(err)
 	}
 	return fetchedToDetail(f), nil
 }
@@ -625,7 +667,7 @@ func (s *KifuService) ImportURL(rawURL string) (GameSummary, error) {
 
 	rec, err := lib.ImportURL(ctx, rawURL)
 	if err != nil {
-		return GameSummary{}, err
+		return GameSummary{}, describeKifuError(err)
 	}
 	return toSummary(rec), nil
 }

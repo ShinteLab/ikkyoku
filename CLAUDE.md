@@ -945,6 +945,20 @@ kicho の UI は将来「テスト用のモック」または
    （ShogiHome 等）へ渡すため**のもので、ikkyoku では渡す先が自分自身。
    **代わりに置いたのが「解析する」**。⚠️ **URL コピーを戻すなら、先に
    「ikkyoku がサーバを持つか」を決めること**
+7. ⚠️ **エラーは文言比較で分岐しない。** kicho は**「画面と文言は使う側にある」
+   という前提で sentinel を公開している**（`ErrNoInput` / `ErrEmptyKifu` /
+   `ErrNotKifu` / `ErrUnsupportedSource` と `store.ErrNotFound` /
+   `ErrSchemaTooNew`）。**種類だけ向こうから貰い、何をすればよいかはこちらが書く**
+   （`describeKifuError` / `describeOpenError` の 2 か所）。
+   ⚠️ **kicho の文言を書き写さないこと** —— `%w` で包んで足すだけにする。
+   写すと向こうを直してもこちらだけ古い言い方で残る
+   （実際 `SendToStudyGame` が「棋譜が空です」を手書きで持っていた）
+8. ⚠️ **一覧の上限を「並んだ件数」として画面へ渡さないこと。**
+   `Library.Search` が丸めるのは **Limit が 0 か上限超えのときだけ**で、
+   呼び出し側が指定した `Limit` はそのまま効く。`MaxSearchRows`（500）を
+   決め打ちで返すと、**1 件しか並べていないのに「500 件だけを表示しています」**と
+   出る。返すのは `SearchResult.Shown`（＝実際に並んだ行数）で、
+   **切ったときはそれが適用された上限そのもの**なので丸め方を写さずに済む
 
 #### kicho を抱えると付いてくるもの
 
@@ -1059,7 +1073,9 @@ kicho の `store` は接続を 1 本に絞っているので、止まらない�
 | `yomiuri` | 棋譜ビューアのページ | ⚠️ **×**。Nuxt のページで .kif が無い（KIF は `_payload.js` から組み立てている）。**取り直す口は取得カードの「更新」** |
 | `paste` | 空 | —（取り直す先が無い） |
 
-⚠️ **判断は `reloadableURL` の 1 か所。フロントに書かないこと。**
+⚠️ **判断は kicho の `RefetchableURL` の 1 か所。フロントにも ikkyoku にも
+書かないこと**（取得元ごとの知識は向こうが持つ。上の「取得元の知識をこちらに
+書かない」）。
 取り直せない URL を渡すと**再読み込みのアイコンが出るのに押すと必ず失敗する**、
 という画面からは理由の分からない壊れ方になる。
 
@@ -3727,10 +3743,15 @@ DRM を素通りする。そのため入口を Chrome 拡張からネイティ�
   ⚠️ **`piecefont` が直に import しているわけではない**ので、`go.mod` の
   `// indirect` を外さないこと。PureGo
 - `github.com/ShinteLab/kicho` — **棋譜データベース**（2026-09-04）。
-  ⚠️ **`_cmd/ikkyoku` だけが使う**（ルートモジュールは依存しない）。
+  ⚠️ **ルートモジュールが使う**（`app/kifuservice.go`。2026-09-04 に Service を
+  `_cmd` から `app/` へ移したので、**`go.mod` は 2 つとも require する**）。
   棚（SQLite）・中継からの取得・URL の取り込み・KIF の文字コード判別まで全部あちら。
-  ikkyoku は `kicho.Open(dbPath, logger)` を呼んで `Library` を使うだけで、
-  **kicho 側のコードは 1 行も変えていない。** 持ち込まれるのは `goja`（読売の
+  ikkyoku は `kicho.Open(dbPath, logger)` を呼んで `Library` を使うだけ。
+  ⚠️ **「kicho 側は 1 行も変えていない」はもう成り立たない**（2026-09-07 に
+  向こうが `Store()` を閉じて公開 API を `Library` に集めた）。**公開 API を
+  変えたら kicho 側で `.\check-consumers.ps1` を流すこと** ——
+  kicho で `go build ./...` を通しても ikkyoku はコンパイルされない。
+  持ち込まれるのは `goja`（読売の
   Nuxt ペイロードを評価する JS エンジン）/ `modernc.org/sqlite` / `golang.org/x/net` /
   `google/uuid` で、**全部 PureGo**。⚠️ **そのぶん exe が膨らむ**
   （`go build` だけの素の exe が **36.9MB**。この節に載っている kicho 以前の
@@ -3745,12 +3766,19 @@ DRM を素通りする。そのため入口を Chrome 拡張からネイティ�
 
 ```
 go.mod                    replace .../suteme => ../suteme,       .../core => ../core,       .../engine => ../engine
+                                  .../kicho  => ../kicho
 _cmd/ikkyoku/go.mod       replace .../suteme => ../../../suteme, .../core => ../../../core, .../engine => ../../../engine
-                                  .../kicho  => ../../../kicho    ← ⚠️ **_cmd 側だけ**
+                                  .../kicho  => ../../../kicho
 ```
 
 `_cmd/ikkyoku` にも同じ replace が要る。**path 置換されたモジュール自身の replace は
 無視される**ため（`ikkyoku` を `../../` で参照している以上、`ikkyoku/go.mod` の replace は効かない）。
+
+⚠️ **kicho が相対 replace で引く依存（今は `core`）も、こちらの 2 つの go.mod
+両方に要る。** Go は**メインモジュール以外の replace を読まない**ので、
+kicho に依存が増えるたびに書き足すことになる。取りこぼしは
+kicho の `.\check-consumers.ps1` が見る（⚠️ **`go.work` は replace より優先
+されるので、ビルドが通っても取りこぼしは検出できない** —— あちらが別に見ている）。
 
 ### ⚠️ git worktree で作業するときは replace が解決できない
 
@@ -3893,7 +3921,7 @@ CLI は無い。**
 | `positionservice.go` | **訂正タブ**の局面を持つ Service。自由編集（未決・不正でよい）。操作のたびに `EditState` を丸ごと返す。⚠️ **撮った盤の目線**（`SetViewpoint`）もここ —— 盤は 1 マスも動かさず、**解析へ渡すときに回す**（`adoptPosition`）。⚠️ **手番は「対局としての先後」で出し入れし、中では「見た目の手番」で持つ**（翻訳はこのファイルの中だけ。`SeenTurn` は駒台の ▲/△ 用） |
 | `studyservice.go` | **解析タブ**の局面を持つ Service。訂正タブから**写しを採る**（`Adopt`）か、**棋譜を読み込む**（`LoadKifu` / `LoadKifuURL`）か、**新しく対局を始める**（`NewGame`）。**URL から読んだものは取り直せる**（`ReloadKifu`。⚠️ **食い違ったところから先だけを差し替え、それより前の評価値は残す**。判断は `mergeReloadLocked` の 1 か所）。⚠️ **後ろの 2 つは訂正タブを経由しない入口**（どちらも局面が既に確定しているため）。⚠️ **PositionService とは別の局面**で、繋がるのは `Adopt` の 1 か所だけ。**手順は `position.Study`**（`Play`/`AddLine`/`GoTo`/`DropFrom`。**木**）。解析には**根 + 手順**を渡す（`analyzeTarget`） |
 | `evalgraph.go` | **評価値グラフの記録**（`EvalPoint`/`EvalSeries`/`EvalGraph` と `evalStore`）。⚠️ **鍵は手順ツリーの節点 id**（手数ではない。枝があると同じ手数が何本もある）。⚠️ **エンジンごとに別の折れ線**（合成しない）。**持ち主は `StudyService`** —— 記録は局面ではなく**手順**に紐づくので、捨てる判断は手順を持っている側にしか書けない |
-| `kifuservice.go` | **棋譜データベース（棚）**の Service（`Status` / `List` / `Search` / `Count` / `Get` / `Delete` / `Fetch` / `Refresh` / `Save` / `ImportKIF` / `ImportURL` / `SendToStudy` / `SendToStudyGame`）。**中身は `kicho.Library` を呼ぶだけ**で、取得も保存も検索もあちらの実装。⚠️ **棚が開けていなくてもアプリは動く**（`library()` が理由を返すだけ。設計原則3）。⚠️ **ServerService は移していない**（ikkyoku は HTTP サーバを持たない）。⚠️ **取り直せる URL かの判断は `reloadableURL` の 1 か所**（読売は .kif を置いていないので渡さない） |
+| `kifuservice.go` | **棋譜データベース（棚）**の Service（`Status` / `List` / `Search` / `Count` / `Get` / `Delete` / `Fetch` / `Refresh` / `Save` / `ImportKIF` / `ImportURL` / `SendToStudy` / `SendToStudyGame`）。**中身は `kicho.Library` を呼ぶだけ**で、取得も保存も検索もあちらの実装。⚠️ **棚が開けていなくてもアプリは動く**（`library()` が理由を返すだけ。設計原則3）。⚠️ **ServerService は移していない**（ikkyoku は HTTP サーバを持たない）。⚠️ **取り直せる URL かの判断は `RefetchableURL`（kicho 側）**（読売は .kif を置いていないので渡さない）。⚠️ **エラーは sentinel で見分けて ikkyoku 側の直し方を足す**（`describeKifuError` / `describeOpenError`。**kicho の文言を書き写さない**） |
 | `trainingservice.go` | 訂正した局面を suteme へ登録する Service（`Status` / `Send`）。**状態を持たない**（送るものはフロントが渡す） |
 | `fontservice.go` | **駒の字**の Service（`State` / `Scan` / `Preview` / `Add` / `Use` / `Remove` / `Rename` / **`SetGyoku` / `SetHidariUma`**）。返すのは **family 名と data URL、それに当てる `font-feature-settings` まで**で、画面に当てるのはフロント（`--shogi-font` と `--piece-features-*`）。⚠️ **焼いた TTF はディスクに残さない**（元フォントを入れ替えたのに古い字で描く事故が起きる）。⚠️ **玉の先後の判定を呼び出し側に書かせない**（`pieceStyle`。盤と自前の駒で別々に書くと「盤は玉なのに掴むと王」になる） |
 | `analyzeservice.go` | 確定した局面を解析する Service（`Start` / `Stop` / `State` / `CheckEngine`）。**順位 1 の評価値を `StudyService.recordEval` に渡す**（評価値グラフ。⚠️ **記録先の判断はしない** —— 手順を持っていないので、捨てた枝かどうかを確かめようがない）。**局面は持たない**（`StudyService` から読む。⚠️ **`PositionService` を見ないこと**）。⚠️ **登録した「解析に使う」エンジンを同時に走らせる**（1 エンジン 1 プロセス）。途中経過はイベント（**`engineId` つき**）。⚠️ **発火の口は持たない** ——`Emit`（`app.EventEmitter`）を `main.go` が差し込む |
@@ -4710,7 +4738,7 @@ Start-Process .\_cmd\ikkyoku\bin\ikkyoku.exe
   - ⚠️ **連盟の中継を棚から解析へ送り、「再読み込み」で最新手が追えること**
     （`kifuweb` を畳んだ理由そのもの。**中継ページ（HTML）の URL を辿る**）
   - ⚠️ **読売の棋譜を棚から解析へ送ったとき、再読み込みのアイコンが出ないこと**
-    （出たら `reloadableURL` が効いていない。押しても必ず失敗する）
+    （出たら `kicho.RefetchableURL` が効いていない。押しても必ず失敗する）
   - ⚠️ **アプリ終了で SQLite のファイルロックが残らないこと**（`kifuSvc.close`）
   - ⚠️ **タイトルバーのタブが 5 枚でも窮屈にならないこと**（横幅）
 - ⚠️ **枠の内側の素通し（2026-08-19）。** **使えることは実機で確認済み**
@@ -5595,7 +5623,7 @@ Service は `app/`、枠の幾何は `guide/` にあるので、**普段直す�
   見ている**こと・貼り付けには取り直す先が無いので取得元を付けないこと）、
   ⚠️ **保存し直しても ID が変わらないこと**（`(source, source_id)` の upsert。
   `/kifu/{id}` の URL が変わらないのが重要）、
-  ⚠️ **読売の取得元 URL を解析タブへ渡さないこと**（`reloadableURL`。渡すと
+  ⚠️ **読売の取得元 URL を解析タブへ渡さないこと**（`kicho.RefetchableURL`。渡すと
   再読み込みのアイコンが出るのに必ず失敗する）、**棚を通さない `SendToStudyGame`
   は棚が無くても通ること**、`MinSearchLength` が `store` の値であること
   （フロントに 3 を書かない歯止め）、日付の形が違うときに走らせる前に断ること
