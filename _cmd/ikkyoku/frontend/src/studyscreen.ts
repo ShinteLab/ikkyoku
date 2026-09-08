@@ -12,12 +12,14 @@
 // ⚠️ **届かなくても壊れないこと**（設計原則3）—— 盤の矢印・勝率バー・幕が
 // 更新されなくなるだけで、盤も手順も解析も動く。
 import { Events } from "@wailsio/runtime";
+import { FiMinimize2 } from "react-icons/fi";
 
 import {
   SettingsService,
   StudyService,
 } from "../bindings/github.com/ShinteLab/ikkyoku/app";
 import type { StudyState } from "../bindings/github.com/ShinteLab/ikkyoku/app/models";
+import { iconMarkup } from "./icon";
 import { mountSidePane, type SidePaneHandle } from "./sidepane";
 
 export function mountStudyScreen(root: HTMLElement) {
@@ -44,12 +46,16 @@ export function mountStudyScreen(root: HTMLElement) {
   // —— 切り離すのは大きく見たいからなので、行を積むのは逆行する。
   // ⚠️ **戻す入口はこれと「窓を閉じる」の 2 つ。** どちらも同じ
   // `SettingsService.SetStudyPaneDetached(false)` を通るので食い違わない。
+  // ⚠️ **アイコンだけなので、意味は `aria-label` と `title` が持つ**
+  // （手順の「再読み込み」と同じ。**`title` を空にしないこと** —— 文字が無いぶん、
+  // 何のボタンかはこれでしか読めない）。
   const dock = document.createElement("button");
   dock.id = "side-dock";
-  dock.className = "ghost-btn";
+  dock.className = "icon-btn";
   dock.type = "button";
-  dock.textContent = "ドックに戻す";
-  dock.title = "解析の列をメイン画面の中へ戻します（窓を閉じても同じです）";
+  dock.innerHTML = iconMarkup(FiMinimize2);
+  dock.setAttribute("aria-label", "ドックに戻す");
+  dock.title = "ドックに戻す: 解析の列をメイン画面の中へ戻します（窓を閉じても同じです）";
   dock.addEventListener("click", () => {
     void SettingsService.SetStudyPaneDetached(false);
   });

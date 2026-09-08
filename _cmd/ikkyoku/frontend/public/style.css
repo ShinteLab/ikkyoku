@@ -1863,7 +1863,11 @@ html.is-main #app {
   margin-right: 6px;
 }
 
-/* 解析の行の**右端に寄せるもの**（2026-09-09。切り離した窓の「ドックに戻す」）。
+/* ⚠️ **`.icon-btn` は親に縛らないこと**（2026-09-09 に `.study-move-head >` を外した）。
+   アイコンだけのボタンは手順の見出しの「再読み込み」以外にも出てきた
+   （切り離した窓の「ドックに戻す」）。**意味は `aria-label` と `title` が持つ。**
+
+   解析の行の**右端に寄せるもの**（2026-09-09。切り離した窓の「ドックに戻す」）。
    ⚠️ **窓のときだけ入る**（ドック側には戻す相手が居ない）。
    ⚠️ **`.analyze-row` は `flex-wrap` する**ので、幅が足りなければ次の行へ回る
    —— 窓を細くしたときに解析の行から押し出されない。 */
@@ -3579,7 +3583,7 @@ html.is-graph #app {
 
 /* 取り直しのアイコンボタン（「手順」の真横）。**文字を持たないので正方形。**
    ⚠️ **意味は aria-label / title が持つ**（アイコンは装飾）。 */
-.study-move-head > .icon-btn {
+.icon-btn {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
@@ -3599,25 +3603,25 @@ html.is-graph #app {
    このボタンは URL から読んだときだけ出すので、**打ち消しを忘れると
    撮った局面でも取り直しのアイコンが出てしまう**（押しても取り直す先が無い）。
    `<shogi-board hidden>` で踏んだのと同じ話。 */
-.study-move-head > .icon-btn[hidden] {
+.icon-btn[hidden] {
   display: none;
 }
 
-.study-move-head > .icon-btn:hover:not(:disabled) {
+.icon-btn:hover:not(:disabled) {
   color: #f2f3f5;
   background: #3a3d47;
 }
 
 /* 取り直しの最中。**押せないことが見て分かる程度には落とす**
    （中継が重いと数秒かかる）。 */
-.study-move-head > .icon-btn:disabled {
+.icon-btn:disabled {
   opacity: 0.4;
   cursor: default;
 }
 
 /* ⚠️ **取り直している最中は回す。** 文字が無くなったぶん、**押した手応えが
    アイコンにしか出せない**（理由は下の行にも出るが、目はボタンを見ている）。 */
-.study-move-head > .icon-btn:disabled svg {
+.icon-btn:disabled svg {
   animation: reload-spin 1s linear infinite;
 }
 

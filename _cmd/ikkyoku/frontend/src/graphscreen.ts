@@ -9,11 +9,13 @@
 // ⚠️ **状態は持たない。** 点は `StudyService.Evals()`、色は `SettingsService`。
 // **窓が増えても真実は Go 側に 1 つ**、という線引きを崩さないこと。
 import { Events } from "@wailsio/runtime";
+import { FiMinimize2 } from "react-icons/fi";
 
 import {
   SettingsService,
   StudyService,
 } from "../bindings/github.com/ShinteLab/ikkyoku/app";
+import { iconMarkup } from "./icon";
 import { mountEvalPane } from "./evalgraphpane";
 
 // 設定に無いエンジンの色（`mainscreen.ts` と同じ値にすること）。
@@ -40,8 +42,10 @@ export function mountGraphScreen(root: HTMLElement) {
         <span id="eval-graph-readout" class="note eval-graph-readout"></span>
         <!-- ⚠️ **戻す入口はここと「窓を閉じる」の 2 つ。** どちらも同じ
              SettingsService.SetEvalGraphDetached(false) を通るので食い違わない。 -->
-        <button id="graph-dock" class="ghost-btn" type="button"
-                title="評価値グラフをメイン画面の中へ戻します（窓を閉じても同じです）">ドックに戻す</button>
+        <!-- ⚠️ アイコンだけなので、意味は aria-label と title が持つ
+             （解析の列の窓と同じアイコンにすること。2 つの窓で作法を揃える）。 -->
+        <button id="graph-dock" class="icon-btn" type="button" aria-label="ドックに戻す"
+                title="ドックに戻す: 評価値グラフをメイン画面の中へ戻します（窓を閉じても同じです）"></button>
       </div>
       <div id="eval-graph" class="eval-graph"
            title="押すとその局面に戻ります（手順は消えません）。横にドラッグするとその範囲に絞ります"></div>
@@ -108,7 +112,9 @@ export function mountGraphScreen(root: HTMLElement) {
     }
   });
 
-  q<HTMLButtonElement>("#graph-dock").addEventListener("click", () => {
+  const dock = q<HTMLButtonElement>("#graph-dock");
+  dock.innerHTML = iconMarkup(FiMinimize2);
+  dock.addEventListener("click", () => {
     void SettingsService.SetEvalGraphDetached(false);
   });
 
