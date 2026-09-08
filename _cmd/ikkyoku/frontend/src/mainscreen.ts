@@ -862,15 +862,6 @@ export function mountMainScreen(root: HTMLElement): void {
                  （pointerdown を止める）。 -->
             <button id="study-split-toggle" class="split-toggle" type="button"
                     aria-expanded="true"></button>
-            <!-- 切り離し（2026-09-08）。**別ウィンドウへ出す。**
-                 ⚠️ 畳む（幅 0）とは別物。畳むのは「今は見ない」で、
-                 こちらは別の窓で見る（盤の大きさに効かなくなる）。
-                 ⚠️ 戻す入口はこちらには無い（その窓の「ドックに戻す」と
-                 窓を閉じる操作）。切り離すとこのバーごと消えるので、
-                 ここに戻す口を置いても押せない。 -->
-            <button id="study-split-detach" class="split-toggle is-secondary" type="button"
-                    title="解析の列を別ウィンドウに切り離します（盤の大きさに効かなくなります）"
-                    aria-label="解析の列を切り離す"></button>
           </div>
           <!-- 盤の右の列（2026-08-12 に作り替えた）。**解析のものは全部ここに入る**
                —— 解析の行・エンジンごとの結果・手順。⚠️ **SFEN は盤の下**
@@ -921,15 +912,6 @@ export function mountMainScreen(root: HTMLElement): void {
                  ⚠️ **押してもドラッグが始まらないようにすること**（pointerdown を止める）。 -->
             <button id="eval-graph-toggle" class="split-toggle" type="button"
                     aria-expanded="true"></button>
-            <!-- 切り離し（2026-09-08）。**別ウィンドウへ出す。**
-                 ⚠️ **畳む（高さ 0）とは別物。** 畳むのは「今は見ない」で、
-                 こちらは「**別の窓で見る**」——盤の大きさに効かなくなる。
-                 ⚠️ **戻す入口はこちらには無い**（グラフ窓の「ドックに戻す」と
-                 窓を閉じる操作）。切り離すとこのバーごと消えるので、
-                 ここに戻す口を置いても押せない。 -->
-            <button id="eval-graph-detach" class="split-toggle is-secondary" type="button"
-                    title="評価値グラフを別ウィンドウに切り離します（盤の大きさに効かなくなります）"
-                    aria-label="評価値グラフを切り離す"></button>
           </div>
           <div class="eval-graph-head">
             <span class="field-label">評価値</span>
@@ -958,6 +940,14 @@ export function mountMainScreen(root: HTMLElement): void {
             <!-- 触った位置の中身。**ツールチップだけにしない**（点の上にぴったり
                  乗せないと出ないので、線を目で追いながらは読めない）。 -->
             <span id="eval-graph-readout" class="note eval-graph-readout"></span>
+            <!-- 切り離し（2026-09-09 にバーの上からここへ移した）。
+                 ⚠️ **切り離した窓の「ドックに戻す」と同じ場所**にすること ——
+                 出す/戻すが同じ位置にあると、どちらの状態でも探す場所が変わらない。
+                 ⚠️ 畳む（高さ 0）とは別物。畳むのは「今は見ない」で、
+                 こちらは別の窓で見る（盤の大きさに効かなくなる）。 -->
+            <button id="eval-graph-detach" class="icon-btn" type="button"
+                    title="切り離す: 評価値グラフを別ウィンドウに出します（盤の大きさに効かなくなります）"
+                    aria-label="評価値グラフを切り離す"></button>
           </div>
           <div id="eval-graph" class="eval-graph"
                title="押すとその局面に戻ります（手順は消えません）。横にドラッグするとその範囲に絞ります"></div>
@@ -2061,6 +2051,19 @@ ${st.turnLabel}${n}`;
   // 再読み込み（2026-08-13）。**URL の側を正**にして手順を最新にする。
   //
 
+  // ⚠️ **置き場所は解析の行の右端**（2026-09-09 にバーの上から移した）——
+  // **切り離した窓の「ドックに戻す」と同じ場所**。出す/戻すが同じ位置にあると、
+  // どちらの状態でも探す場所が変わらない。
+  // ⚠️ **アイコンだけなので、意味は `aria-label` と `title` が持つ。**
+  const studySplitDetach = document.createElement("button");
+  studySplitDetach.id = "study-side-detach";
+  studySplitDetach.className = "icon-btn";
+  studySplitDetach.type = "button";
+  studySplitDetach.innerHTML = iconMarkup(FiExternalLink);
+  studySplitDetach.setAttribute("aria-label", "解析の列を切り離す");
+  studySplitDetach.title =
+    "切り離す: 解析の列を別ウィンドウに出します（盤の大きさに効かなくなります）";
+
   // 盤の右の列（2026-09-08 に `sidepane.ts` へ切り出した）。
   //
   // ⚠️ **中身をここから触らないこと。** 別ウィンドウへ切り離せるようにするための
@@ -2085,6 +2088,9 @@ ${st.turnLabel}${n}`;
     },
     // 設定を書き換えたら設定タブも描き直す（色・候補手の本数）。
     onSettings: (st) => showSettings(st),
+    // ⚠️ **解析の行の右端に置くもの。** ドックしているときは「切り離す」、
+    // 切り離した窓では「ドックに戻す」——**同じ場所**にすること。
+    action: studySplitDetach,
   });
   // ⚠️ **幕の出口はここ**（幕は下を全部塞ぐので、側の列の「停止」も押せない）。
   batchVeilCancel.addEventListener("click", () => sidePane.cancelBatch());
@@ -2328,8 +2334,6 @@ ${st.turnLabel}${n}`;
   evalGraphDetach.addEventListener("click", () => {
     void SettingsService.SetEvalGraphDetached(true);
   });
-  // ⚠️ **押してもドラッグが始まらないようにする**（畳むトグルと同じ）。
-  evalGraphDetach.addEventListener("pointerdown", (e) => e.stopPropagation());
 
   // ⚠️ **戻すのは向こうから**（グラフ窓の「ドックに戻す」と、窓を閉じる操作）。
   // Go 側が `graph:detached` で知らせてくるので、**こちらから状態を作らない。**
@@ -2341,8 +2345,6 @@ ${st.turnLabel}${n}`;
   //
   // **作りは評価値グラフと同じ**（設定が状態を持ち、切り替えは必ず
   // `SettingsService.SetStudyPaneDetached` を通る）。**揃えておくこと。**
-  const studySplitDetach = root.querySelector<HTMLButtonElement>("#study-split-detach")!;
-  studySplitDetach.innerHTML = iconMarkup(FiExternalLink);
 
   let sideDetached: boolean | null = null;
 
@@ -2371,8 +2373,6 @@ ${st.turnLabel}${n}`;
   studySplitDetach.addEventListener("click", () => {
     void SettingsService.SetStudyPaneDetached(true);
   });
-  // ⚠️ **押してもドラッグが始まらないようにする**（畳むトグルと同じ）。
-  studySplitDetach.addEventListener("pointerdown", (e) => e.stopPropagation());
 
   Events.On("side:detached", (event: { data: boolean }) => {
     applySideDetached(!!event.data);

@@ -2213,25 +2213,10 @@ html.is-main #app {
   cursor: pointer;
 }
 
-/* 2 つめのトグル（切り離し。2026-09-08）。**畳むトグルの右隣に並べる。**
-   ⚠️ **34px 幅どうしが重ならない位置にすること**（中心を 40px 離してある＝隙間 6px）。
-   ⚠️ **畳むトグルは真ん中のまま動かさない** —— あちらは前からある操作なので、
-   ボタンが 1 つ増えたせいで押す場所が変わるのは筋が悪い。 */
-.split-toggle.is-secondary {
-  left: calc(50% + 40px);
-}
-
 /* 縦のバー: 縦長（向きだけ入れ替える）。 */
 .split-bar.is-vertical .split-toggle {
   width: 14px;
   height: 34px;
-}
-
-/* ⚠️ **縦のバーでは「下へ」ずらすこと**（横のバーは「右へ」）。バーの向きに
-   沿って並べないと、2 つのトグルが重なる。中心を 40px 離してある（隙間 6px）。 */
-.split-bar.is-vertical .split-toggle.is-secondary {
-  left: 50%;
-  top: calc(50% + 40px);
 }
 
 .split-toggle:hover {
@@ -2366,6 +2351,15 @@ html.is-graph #app {
   background: #23262e;
   border: 1px solid #3a3d47;
   border-radius: 5px;
+}
+
+/* 評価値グラフの見出しの行の**右端**（2026-09-09）。ドックしているときは
+   「切り離す」、切り離した窓では「ドックに戻す」——**同じ場所**にすること
+   （出す/戻すが同じ位置にあると、どちらの状態でも探す場所が変わらない）。
+   ⚠️ **`margin-left: auto` は要らない** —— 読み上げ（`.eval-graph-readout`）が
+   `flex: 1 1 auto` で余りを取るので、そのうしろは自然と右端に来る。 */
+.eval-graph-head > .icon-btn {
+  flex: 0 0 auto;
 }
 
 /* 自由入力の範囲。**ドラッグで絞ったときの行き先でもある**（選んだ値がここに入る）
