@@ -1863,6 +1863,14 @@ html.is-main #app {
   margin-right: 6px;
 }
 
+/* 解析の行の**右端に寄せるもの**（2026-09-09。切り離した窓の「ドックに戻す」）。
+   ⚠️ **窓のときだけ入る**（ドック側には戻す相手が居ない）。
+   ⚠️ **`.analyze-row` は `flex-wrap` する**ので、幅が足りなければ次の行へ回る
+   —— 窓を細くしたときに解析の行から押し出されない。 */
+.analyze-row-action {
+  margin-left: auto;
+}
+
 .analyze-row[hidden] {
   display: none;
 }
@@ -2273,13 +2281,6 @@ html.is-study #app {
   gap: 6px;
   padding: 8px;
   box-sizing: border-box;
-}
-
-.study-screen-head {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 8px;
 }
 
 /* ⚠️ **窓いっぱいに広げること。** ドック側は盤との取り合いで幅が決まるが、

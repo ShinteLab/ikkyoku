@@ -82,6 +82,14 @@ export interface SidePaneOptions {
   onBusy(on: boolean, note: string): void;
   // onSettings は設定を書き換えたとき（設定タブを描き直すのは呼び出し側）。
   onSettings(settings: AppSettings): void;
+  // action は**解析の行の右端**に置くもの（2026-09-09）。
+  //
+  // 切り離した窓の「ドックに戻す」がこれ。⚠️ **ドックしているときは渡さないこと**
+  // —— あちらに戻す相手が居ない（戻す口はバーの上のトグル）。
+  //
+  // ⚠️ **見出しの行を別に作らないこと。** 窓の一番上に 1 行足すと、そのぶん
+  // **候補手と手順の取り分が減る**（切り離すのは大きく見たいからで、逆行する）。
+  action?: HTMLElement;
 }
 
 export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
@@ -231,6 +239,13 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
   // この面が今使われているか（**切り離すと、ドック側は隠れたまま生き続ける**）。
   // ⚠️ **false のあいだは自動解析をしないこと** —— 両方が起こし合う。
   let active = true;
+
+  // ⚠️ **右端へ寄せるのは `margin-left: auto`**（`.analyze-row-action`）。
+  // 解析の行は `flex-wrap` するので、**幅が足りなければ次の行へ回る**。
+  if (opts.action) {
+    opts.action.classList.add("analyze-row-action");
+    q<HTMLElement>("#analyze-row").appendChild(opts.action);
+  }
 
   const studyWarnings = q<HTMLUListElement>("#study-warnings");
   const studyMoves = q<HTMLDivElement>("#study-moves");

@@ -23,13 +23,6 @@ import { mountSidePane, type SidePaneHandle } from "./sidepane";
 export function mountStudyScreen(root: HTMLElement) {
   root.innerHTML = `
     <div class="study-screen">
-      <div class="study-screen-head">
-        <span class="field-label">解析</span>
-        <!-- ⚠️ **戻す入口はここと「窓を閉じる」の 2 つ。** どちらも同じ
-             SettingsService.SetStudyPaneDetached(false) を通るので食い違わない。 -->
-        <button id="side-dock" class="ghost-btn" type="button"
-                title="解析の列をメイン画面の中へ戻します（窓を閉じても同じです）">ドックに戻す</button>
-      </div>
       <div id="study-side" class="study-side"></div>
       <!-- 連続解析のあいだ被せる幕。⚠️ **こちらにも要る** —— 1 手ずつ局面を
            動かしている最中に手順を触ると、自分の操作と連続解析が同じ局面を取り合う。 -->
@@ -46,12 +39,29 @@ export function mountStudyScreen(root: HTMLElement) {
   const veil = q<HTMLElement>("#batch-veil");
   const veilNote = q<HTMLElement>("#batch-veil-note");
 
+  // ⚠️ **「ドックに戻す」は解析の行の右端に入れる**（2026-09-09）。
+  // 窓の一番上に見出しの行を作ると、そのぶん**候補手と手順の取り分が減る**
+  // —— 切り離すのは大きく見たいからなので、行を積むのは逆行する。
+  // ⚠️ **戻す入口はこれと「窓を閉じる」の 2 つ。** どちらも同じ
+  // `SettingsService.SetStudyPaneDetached(false)` を通るので食い違わない。
+  const dock = document.createElement("button");
+  dock.id = "side-dock";
+  dock.className = "ghost-btn";
+  dock.type = "button";
+  dock.textContent = "ドックに戻す";
+  dock.title = "解析の列をメイン画面の中へ戻します（窓を閉じても同じです）";
+  dock.addEventListener("click", () => {
+    void SettingsService.SetStudyPaneDetached(false);
+  });
+
   // ⚠️ **`pane` は自分の options から参照するので `let` で先に置く**
   // （マウントし終わるまで中身は無いが、呼ばれるのはそのあと）。
   let pane: SidePaneHandle;
 
   pane = mountSidePane({
     host: q<HTMLElement>("#study-side"),
+    // ⚠️ **窓のときだけ置く**（ドック側に戻す相手は居ない）。
+    action: dock,
     // 手順の操作で局面が変わった。**盤は別の窓**なので、ここで描くのは自分だけ
     // （盤は `study:changed` を受けて自分で追随する）。
     onState: (st) => pane.render(st),
@@ -82,10 +92,6 @@ export function mountStudyScreen(root: HTMLElement) {
     if (e.key === "Escape" && !veil.hidden) {
       pane.cancelBatch();
     }
-  });
-
-  q<HTMLButtonElement>("#side-dock").addEventListener("click", () => {
-    void SettingsService.SetStudyPaneDetached(false);
   });
 
   // ---- 連動 ---------------------------------------------------------------
