@@ -699,3 +699,130 @@ func TestStudyServiceAddLineSource(t *testing.T) {
 		t.Fatalf("足した節点が見つかりません: %+v", got)
 	}
 }
+
+// ---- study:changed（別ウィンドウとの連動の土台。2026-09-08）----------------
+
+// studyEvents は流れたイベントを控える（`Emit` の差し込み先）。
+type studyEvents struct {
+	names []string
+	revs  []int
+	last  StudyState
+}
+
+func (e *studyEvents) emit(name string, data any) {
+	e.names = append(e.names, name)
+	st, _ := data.(StudyState)
+	e.revs = append(e.revs, st.Rev)
+	e.last = st
+}
+
+// watched は Emit を差し込んだ StudyService を返す。
+func watched(t *testing.T) (*StudyService, *studyEvents) {
+	t.Helper()
+	s := adopted(t)
+	ev := &studyEvents{}
+	s.Emit = ev.emit
+	return s, ev
+}
+
+// ⚠️ **変えたら必ず知らせること。** これが無いと、別ウィンドウは
+// 「自分が呼んでいない変更」に気づけない（連動の土台そのもの）。
+// ⚠️ **rev が進むこと**も見ている —— 受け取る側は「既に描いた版より新しいときだけ
+// 描く」で古いイベントを弾くので、進まないと**2 回目以降が全部捨てられる**。
+func TestStudyServicePublishesOnChange(t *testing.T) {
+	s, ev := watched(t)
+	st, err := s.Play("7g7f")
+	if err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	if len(ev.names) != 1 || ev.names[0] != "study:changed" {
+		t.Fatalf("流れたイベント = %v, want [study:changed]", ev.names)
+	}
+	// ⚠️ **戻り値とイベントは同じ版であること。** 食い違うと、呼んだ窓と
+	// 別の窓が違う局面を描く。
+	if ev.last.Rev != st.Rev {
+		t.Errorf("イベントの rev = %d, 戻り値の rev = %d（同じであること）", ev.last.Rev, st.Rev)
+	}
+	if ev.last.SFEN != st.SFEN {
+		t.Errorf("イベントの SFEN = %q, 戻り値 = %q", ev.last.SFEN, st.SFEN)
+	}
+
+	before := st.Rev
+	next, err := s.Play("3c3d")
+	if err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	if next.Rev <= before {
+		t.Errorf("rev が進んでいません: %d → %d", before, next.Rev)
+	}
+	if len(ev.names) != 2 {
+		t.Errorf("イベントの数 = %d, want 2", len(ev.names))
+	}
+}
+
+// ⚠️ **失敗したら出さないこと。** 状態は変わっていないので、出すと
+// 全部の窓が同じ絵を描き直すだけになる。
+func TestStudyServiceNoPublishOnError(t *testing.T) {
+	s, ev := watched(t)
+	if _, err := s.Play("5e5d"); err == nil { // 5e には駒が居ない
+		t.Fatal("指せない手が通りました")
+	}
+	if len(ev.names) != 0 {
+		t.Errorf("失敗したのにイベントが流れました: %v", ev.names)
+	}
+	if _, err := s.GoTo(999); err == nil { // 無い節点
+		t.Fatal("無い節点へ行けました")
+	}
+	if len(ev.names) != 0 {
+		t.Errorf("失敗したのにイベントが流れました: %v", ev.names)
+	}
+}
+
+// ⚠️ **読むだけでは rev を進めないこと**（進めると全部の窓が無駄に描き直す）。
+func TestStudyServiceStateDoesNotBumpRev(t *testing.T) {
+	s, ev := watched(t)
+	first := s.State().Rev
+	for i := 0; i < 3; i++ {
+		if got := s.State().Rev; got != first {
+			t.Fatalf("State を呼んだだけで rev が動きました: %d → %d", first, got)
+		}
+	}
+	if len(ev.names) != 0 {
+		t.Errorf("読んだだけでイベントが流れました: %v", ev.names)
+	}
+}
+
+// ⚠️ **棋譜の読み込みは「取得元まで入った 1 回」で知らせること**（2026-09-08）。
+// 2 回に分けると、**取得元が空の状態が 1 回ぶん外へ漏れる** ——
+// 別の窓で再読み込みのアイコンが出たり消えたりする。
+func TestStudyServiceLoadKifuURLPublishesOnce(t *testing.T) {
+	kif := "手合割：平手\n手数----指手---------消費時間--\n   1 ７六歩(77)   ( 0:01/00:00:01)\n"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = io.WriteString(w, kif)
+	}))
+	defer srv.Close()
+
+	s, ev := watched(t)
+	if _, err := s.LoadKifuURL(srv.URL + "/x.kif"); err != nil {
+		t.Fatalf("LoadKifuURL: %v", err)
+	}
+	if len(ev.names) != 1 {
+		t.Fatalf("イベントの数 = %d, want 1（%v）", len(ev.names), ev.names)
+	}
+	if ev.last.SourceURL == "" {
+		t.Error("イベントに取得元が入っていません（別の窓で再読み込みが出せない）")
+	}
+}
+
+// ⚠️ **Emit が nil でも動くこと**（設計原則3）。イベントを捨てても、
+// 呼んだ窓は戻り値で描けるので今までどおり動く。
+func TestStudyServiceWithoutEmitter(t *testing.T) {
+	s := adopted(t) // Emit は nil のまま
+	if _, err := s.Play("7g7f"); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	if s.State().Ply != 1 {
+		t.Error("Emit が無いと手が進みません")
+	}
+}

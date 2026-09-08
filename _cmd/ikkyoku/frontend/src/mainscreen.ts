@@ -3168,6 +3168,12 @@ export function mountMainScreen(root: HTMLElement): void {
   // 解析タブの駒台に最後に描いた中身。**視点を切り替えたときに並べ直すため**に持つ
   // （局面の写しではない —— 駒台の並び順だけがここに依存している）。
   let studyHands: Stock[] = [];
+  // 最後に描いた状態の版（`StudyState.rev`。2026-09-08）。
+  //
+  // ⚠️ **局面の写しではない。** `study:changed` は**メソッドの戻り値とは別の経路**で
+  // 届くので順番が入れ替わりうる（十字キーで手を続けて辿ると、古い局面のイベントが
+  // 後から届く）。**既に描いた版より新しいときだけ描く**ための番号。
+  let studyRev = 0;
 
   // showStudy は解析タブの表示一式（盤・駒台・SFEN・警告・手順）を描く。
   //
@@ -3176,6 +3182,8 @@ export function mountMainScreen(root: HTMLElement): void {
   // 盤の操作から呼ばれたとき（`fromBoard`）だけは、あちらが既に描いているので
   // 二度描かない（**同じ状態を 2 か所から描くと、どちらが今かが分からなくなる**）。
   const showStudy = (st: StudyState, o?: { fromBoard?: boolean }) => {
+    // ⚠️ **描いた版を控えること。** これが遅れて届いた `study:changed` を弾く鍵。
+    studyRev = Math.max(studyRev, st.rev ?? 0);
     studyLoaded = !!st.loaded;
     studySfen = st.sfen ?? "";
     // 連続解析が進む範囲。**棋譜の手数で数える**（評価値グラフの横軸と同じ）。
@@ -3247,6 +3255,25 @@ export function mountMainScreen(root: HTMLElement): void {
     // 局面が変わったら点を取り直す（**戻った位置の縦線も動く**）。
     refreshEvalGraph();
   };
+
+  // ⚠️ **別ウィンドウとの連動の土台**（2026-09-08）。`StudyService` は局面を
+  // 変えるたびに `study:changed` を流す（`app.Event.Emit` は**アプリ全体**に届く）ので、
+  // **自分が呼んでいない変更**にも気づける。
+  //
+  // ⚠️ **戻り値で描く経路は残してある。** 呼んだ窓はその場で描けるほうが速いし、
+  // **描くのは同じ `showStudy` に同じ `StudyState` を渡すだけ**なので、
+  // 2 つの描き方が生まれるわけではない（下の版の判定で二度描きにならない）。
+  //
+  // ⚠️ **版が古いイベントは捨てること。** イベントと戻り値は別の経路なので
+  // **順番が入れ替わりうる** —— 捨てないと、十字キーで手を続けて辿ったときに
+  // **古い局面が後から届いて盤が戻る**。
+  Events.On("study:changed", (event: { data: StudyState }) => {
+    const st = event.data;
+    if (!st || (st.rev ?? 0) <= studyRev) {
+      return;
+    }
+    showStudy(st);
+  });
 
   // 解析タブの駒台の角のマークを手番に合わせる（1=先手番 / 2=後手番 / 0=局面なし）。
   //

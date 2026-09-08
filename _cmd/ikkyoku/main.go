@@ -131,6 +131,10 @@ func main() {
 	// wails3 を import していないので、ダイアログとイベントだけを関数で渡す。
 	settingsSvc.PickFile = pickFile(app)
 	analyzeSvc.Emit = func(name string, data any) { app.Event.Emit(name, data) }
+	// ⚠️ **解析タブの局面が変わったことも流すこと**（2026-09-08。`study:changed`）。
+	// **別ウィンドウとの連動の土台**で、これが無いと「変えた窓」しか気づけない
+	// （`app.Event.Emit` はアプリ全体に届く）。
+	studySvc.Emit = func(name string, data any) { app.Event.Emit(name, data) }
 	// 棚を開く。⚠️ **失敗してもここで止めない** —— 理由は KifuService が抱えて
 	// 設定タブに出す（撮った 1 局面と貼った棋譜の解析は棚に依らない。設計原則3）。
 	if dbPath, err := cfg.KifuDB(); err != nil {

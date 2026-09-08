@@ -46,6 +46,13 @@ type StudyService struct {
 	// src は訂正タブの局面。**読むのは Adopt の瞬間だけ。**
 	src *PositionService
 
+	// Emit は**局面が変わったこと**をフロントへ知らせる口（`study:changed`）。
+	// 形は `AnalyzeService.Emit` と同じで、`main.go` が起動時に 1 度だけ入れる。
+	//
+	// ⚠️ **nil でも動くこと**（設計原則3）。イベントを捨てても、**呼んだ窓は
+	// 戻り値で描ける**ので今までどおり動く。効かなくなるのは**別の窓との連動**だけ。
+	Emit EventEmitter
+
 	mu sync.Mutex
 	// study は確定した局面を根にした検討（手順を含む）。まだ採っていなければ nil。
 	//
@@ -68,6 +75,15 @@ type StudyService struct {
 	// —— 撮った局面にも貼り付けた棋譜にも新規対局にも取得元は無いので、
 	// 残っていると**別の対局の URL で今の手順を上書きできてしまう**。
 	sourceURL string
+	// rev は状態の版（**変えるたびに 1 つ進む**。2026-09-08）。
+	//
+	// **どの窓がどこまで描いたかを揃えるための番号。** `study:changed` は
+	// メソッドの戻り値とは**別の経路**で届くので、**順番が入れ替わりうる**
+	// （続けて手を辿ると、古い局面のイベントが後から届く）。受け取る側は
+	// 「**既に描いた版より新しいときだけ描く**」で弾ける。
+	//
+	// ⚠️ **画面に出す数ではない。** 手数とは何の関係も無い。
+	rev int
 	// evals は手順の 1 手ごとの評価値（評価値グラフ。2026-08-12）。
 	//
 	// ⚠️ **置き場所がここなのは、記録が手順に紐づくから。** 節点を消す操作
@@ -155,6 +171,13 @@ type StudyState struct {
 	// ⚠️ **これはエラーにしない**（設計原則3）。玉の欠けた局面などでは手を進められ
 	// ないが、盤は描けるし解析タブに居ることもできる。**手が指せなくなるだけ。**
 	LegalError string `json:"legalError"`
+
+	// Rev は状態の版（**変わるたびに 1 つ進む**。2026-09-08）。
+	//
+	// ⚠️ **画面に出すものではない。** `study:changed` は戻り値と別の経路で届くので、
+	// **自分が既に描いたもの**と**遅れて届いた古いもの**をこれで弾く
+	// （フロントは「既に描いた版より新しいときだけ描く」）。
+	Rev int `json:"rev"`
 }
 
 // Adopt は訂正タブの局面を採って、解析タブの根にする。
@@ -163,7 +186,10 @@ type StudyState struct {
 // `position.Position.SFEN()` がエラーを返すので、そのまま理由として返す。
 // ここで先手に倒すと、決めていない手番でエンジンが読むことになる（設計原則5）。
 // **これは警告ではなくエラー** —— 決めてもらう以外に手が無い。
-func (s *StudyService) Adopt() (StudyState, error) {
+func (s *StudyService) Adopt() (st StudyState, err error) {
+	// ⚠️ **`publish` はロックの外で走らせること**（`defer` は LIFO なので、
+	// ここで登録しておけば `s.mu.Unlock()` の**後**に走る）。
+	defer func() { s.publish(st, err) }()
 	// ⚠️ **ここで向きが直る。** 撮った画像が後手目線なら、盤・先後・駒台・手番を
 	// まとめて 180 度回した写しが返る（`PositionService.adoptPosition`）。
 	// 訂正タブ側は撮った向きのままで、**回るのはこの 1 回だけ**。
@@ -187,7 +213,7 @@ func (s *StudyService) Adopt() (StudyState, error) {
 	// **評価値グラフも捨てる。** 別の局面から始まる別の手順なので、前の折れ線を
 	// 残すと**違う対局の評価値が同じ横軸に並ぶ。**
 	s.evals.reset()
-	st := s.state()
+	st = s.changed()
 	s.mu.Unlock()
 
 	s.logger.Info("局面を解析タブへ採りました", "sfen", st.SFEN, "rotated", rotated)
@@ -225,7 +251,26 @@ type KifuLoad struct {
 // 進める」の条件から外れる）。中継を追うなら**一度最終手を見ておくこと**で、
 // これは「見ている位置を保つ」という取り直しの規約どおり。
 func (s *StudyService) LoadKifu(text string) (KifuLoad, error) {
-	study, load, err := position.FromKIF(text)
+	// ⚠️ **貼り付けには取り直す先が無い**ので、取得元は空。
+	return s.loadKifuFrom(text, "")
+}
+
+// loadKifuFrom は KIF テキストを読み込んで、**取得元の URL も一緒に覚える**。
+//
+// ⚠️ **取得元まで含めて 1 回のロックで入れ替えること**（2026-09-08）。以前は
+// `LoadKifu` が読み込んでから取得元を入れ直していたが、**`study:changed` を
+// 出すようになると「取得元が空の状態」が 1 回ぶん外へ漏れる**
+// （別の窓で再読み込みのアイコンが出たり消えたりする）。
+//
+// **`sourceURL` は手順の見出しの「再読み込み」の鍵**（これが空だとアイコンが出ない）。
+// ⚠️ **公開しない** —— フロントから任意の URL を紐付けられると、
+// 「今の手順がどこから来たか」が実際の取得元と食い違いうる。
+func (s *StudyService) loadKifuFrom(text, sourceURL string) (load KifuLoad, err error) {
+	// ⚠️ **`publish` はロックの外で走らせること**（`defer` は LIFO なので、
+	// ここで登録しておけば `s.mu.Unlock()` の**後**に走る）。
+	defer func() { s.publish(load.State, err) }()
+
+	study, k, err := position.FromKIF(text)
 	if err != nil {
 		return KifuLoad{State: s.State()}, err
 	}
@@ -237,17 +282,16 @@ func (s *StudyService) LoadKifu(text string) (KifuLoad, error) {
 	// ⚠️ **手順は 1 手も消さない** —— `GoTo` は見る位置を動かすだけ。
 	_ = s.study.GoTo(0)
 	// **対局者はここでだけ埋まる**（勝率バーの左右に出す）。
-	s.game = load.Game
-	// ⚠️ **取得元は捨てる。** 貼り付けた棋譜には取り直す先が無い。
-	// URL から読んだときは `LoadKifuURL` が**このあとに**入れ直す。
-	s.sourceURL = ""
+	s.game = k.Game
+	// **取得元が分かっている入口だけが埋める**（貼り付けは空）。
+	s.sourceURL = strings.TrimSpace(sourceURL)
 	s.evals.reset()
-	st := s.state()
+	st := s.changed()
 	s.mu.Unlock()
 
 	s.logger.Info("棋譜を読み込みました",
-		"moves", load.Loaded, "total", load.Total, "note", load.Note)
-	return KifuLoad{State: st, Summary: kifuSummary(load), Note: load.Note}, nil
+		"moves", k.Loaded, "total", k.Total, "note", k.Note, "url", s.sourceURL)
+	return KifuLoad{State: st, Summary: kifuSummary(k), Note: k.Note}, nil
 }
 
 // AddLine は候補手を枝として足した結果（解析タブの候補手の右クリック）。
@@ -263,31 +307,6 @@ type AddLine struct {
 	Added int `json:"added"`
 	// Note は全部は足せなかった理由（足せたなら空）。**エラーではない**（設計原則3）。
 	Note string `json:"note"`
-}
-
-// loadKifuFrom は KIF テキストを読み込んで、**取得元の URL も覚える**。
-//
-// ⚠️ **`LoadKifu` が捨てたあとに入れ直している** —— あちらは貼り付けの口でもあるので、
-// 取得元を知らないほうが正しい。取得元が分かっている入口（URL からの読み込み・
-// 棚からの「解析する」）だけがここを通る。
-//
-// **`sourceURL` は手順の見出しの「再読み込み」の鍵**（これが空だとアイコンが出ない）。
-// ⚠️ **公開しない** —— フロントから任意の URL を紐付けられると、
-// 「今の手順がどこから来たか」が実際の取得元と食い違いうる。
-func (s *StudyService) loadKifuFrom(text, sourceURL string) (KifuLoad, error) {
-	load, err := s.LoadKifu(text)
-	if err != nil {
-		return load, err
-	}
-	if strings.TrimSpace(sourceURL) == "" {
-		return load, nil
-	}
-	s.mu.Lock()
-	s.sourceURL = sourceURL
-	st := s.state()
-	s.mu.Unlock()
-	load.State = st
-	return load, nil
 }
 
 // kifuFetchTimeout は棋譜を取りに行くときの上限。
@@ -344,7 +363,11 @@ func (s *StudyService) LoadKifuURL(rawURL string) (KifuLoad, error) {
 // ⚠️ **食い違いが無ければ `dropAfter` を呼ばないこと。** あれは世代（epoch）を
 // 進めるので、**走っている解析の途中経過が捨てられる**（1 手進むたびに
 // 再読み込みする使い方では、毎回それが起きる）。
-func (s *StudyService) ReloadKifu() (KifuLoad, error) {
+func (s *StudyService) ReloadKifu() (load KifuLoad, err error) {
+	// ⚠️ **`publish` はロックの外で走らせること**（`defer` は LIFO なので、
+	// ここで登録しておけば `s.mu.Unlock()` の**後**に走る）。
+	defer func() { s.publish(load.State, err) }()
+
 	s.mu.Lock()
 	url := s.sourceURL
 	s.mu.Unlock()
@@ -361,19 +384,19 @@ func (s *StudyService) ReloadKifu() (KifuLoad, error) {
 	}
 	// ⚠️ **取れなかった / 読めなかったときは今の手順を壊さないこと。**
 	// 組み立てが通ってから初めて入れ替える。
-	study, load, err := position.FromKIF(got.Text)
+	study, k, err := position.FromKIF(got.Text)
 	if err != nil {
 		return KifuLoad{State: s.State()}, err
 	}
 
 	s.mu.Lock()
 	graft := s.mergeReloadLocked(study)
-	s.game = load.Game
-	st := s.state()
+	s.game = k.Game
+	st := s.changed()
 	s.mu.Unlock()
 
-	summary := kifuSummary(load) + fmt.Sprintf("（%s）", got.Encoding)
-	note := load.Note
+	summary := kifuSummary(k) + fmt.Sprintf("（%s）", got.Encoding)
+	note := k.Note
 	for _, msg := range []string{graft.Note, reloadNote(graft)} {
 		if msg == "" {
 			continue
@@ -384,7 +407,7 @@ func (s *StudyService) ReloadKifu() (KifuLoad, error) {
 			note += "／" + msg
 		}
 	}
-	s.logger.Info("棋譜を取り直しました", "url", got.URL, "moves", load.Loaded,
+	s.logger.Info("棋譜を取り直しました", "url", got.URL, "moves", k.Loaded,
 		"kept", graft.Kept, "added", graft.Added, "movedAt", graft.MovedAt)
 	return KifuLoad{State: st, Summary: summary, Note: note}, nil
 }
@@ -456,7 +479,11 @@ func rootSFEN(s *position.Study) string {
 // **画面の向き（視点）だけ**で、局面には一切効かない（平手の初期局面は
 // どちらを持っても同じ）。対局モード（人が片側を持ち、エンジンがもう片側を指す）を
 // 入れる段になったら、その時点でここに載せる。**先回りして未使用の欄を作らない。**
-func (s *StudyService) NewGame(handicap string) (KifuLoad, error) {
+func (s *StudyService) NewGame(handicap string) (load KifuLoad, err error) {
+	// ⚠️ **`publish` はロックの外で走らせること**（`defer` は LIFO なので、
+	// ここで登録しておけば `s.mu.Unlock()` の**後**に走る）。
+	defer func() { s.publish(load.State, err) }()
+
 	study, err := position.NewGame(handicap)
 	if err != nil {
 		return KifuLoad{State: s.State()}, err
@@ -471,7 +498,7 @@ func (s *StudyService) NewGame(handicap string) (KifuLoad, error) {
 	// **取り直す先も無い。**
 	s.sourceURL = ""
 	s.evals.reset()
-	st := s.state()
+	st := s.changed()
 	s.mu.Unlock()
 
 	name := strings.TrimSpace(handicap)
@@ -514,7 +541,11 @@ func kifuSummary(load position.KIFLoad) string {
 // ⚠️ **戻って見ている途中で別の手を指すと、枝が生える**（2026-08-13。前の手順は
 // **消えない**）。**評価値も捨てない** —— 記録は節点に紐づいているので、
 // 枝を選び直せばそちらの折れ線がそのまま出る。
-func (s *StudyService) Play(move string) (StudyState, error) {
+func (s *StudyService) Play(move string) (st StudyState, err error) {
+	// ⚠️ **`publish` はロックの外で走らせること**（`defer` は LIFO なので、
+	// ここで登録しておけば `s.mu.Unlock()` の**後**に走る）。
+	defer func() { s.publish(st, err) }()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.study == nil {
@@ -523,7 +554,7 @@ func (s *StudyService) Play(move string) (StudyState, error) {
 	if err := s.study.Play(move); err != nil {
 		return s.state(), err
 	}
-	return s.state(), nil
+	return s.changed(), nil
 }
 
 // AddLine は解析の候補手（読み筋）を**枝として木に足す**（候補手の右クリック）。
@@ -537,7 +568,11 @@ func (s *StudyService) Play(move string) (StudyState, error) {
 // engineID は**その読み筋を出したエンジン**の登録 ID。手順リストで
 // **誰が言った手なのか**を色で出すのに使う（`Node.Sources`）。
 // ⚠️ **空でも足せること** —— 出所が分からない読み筋でも、手順に足す価値は変わらない。
-func (s *StudyService) AddLine(engineID string, moves []string) (AddLine, error) {
+func (s *StudyService) AddLine(engineID string, moves []string) (line AddLine, err error) {
+	// ⚠️ **`publish` はロックの外で走らせること**（`defer` は LIFO なので、
+	// ここで登録しておけば `s.mu.Unlock()` の**後**に走る）。
+	defer func() { s.publish(line.State, err) }()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.study == nil {
@@ -547,7 +582,7 @@ func (s *StudyService) AddLine(engineID string, moves []string) (AddLine, error)
 		return AddLine{State: s.state()}, fmt.Errorf("読み筋がありません")
 	}
 	first, added, note := s.study.AddLine(moves, engineID)
-	return AddLine{State: s.state(), FirstID: first, Added: added, Note: note}, nil
+	return AddLine{State: s.changed(), FirstID: first, Added: added, Note: note}, nil
 }
 
 // Branch はその手から先を**本譜ではなく変化にする**（手順リストの右クリック →
@@ -561,7 +596,11 @@ func (s *StudyService) AddLine(engineID string, moves []string) (AddLine, error)
 //
 // ⚠️ **評価値も捨てない。** 節点はそのまま（id も変わらない）で、
 // **本譜かどうかが変わるだけ**。
-func (s *StudyService) Branch(id int) (StudyState, error) {
+func (s *StudyService) Branch(id int) (st StudyState, err error) {
+	// ⚠️ **`publish` はロックの外で走らせること**（`defer` は LIFO なので、
+	// ここで登録しておけば `s.mu.Unlock()` の**後**に走る）。
+	defer func() { s.publish(st, err) }()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.study == nil {
@@ -570,7 +609,7 @@ func (s *StudyService) Branch(id int) (StudyState, error) {
 	if err := s.study.Branch(id); err != nil {
 		return s.state(), err
 	}
-	return s.state(), nil
+	return s.changed(), nil
 }
 
 // Promote はその手を**分かれ道の続き（本線）に選ぶ**（手順リストの右クリック →
@@ -585,7 +624,11 @@ func (s *StudyService) Branch(id int) (StudyState, error) {
 //
 // ⚠️ **続きが既に決まっているなら断る**（`position.Study.Promote`）。
 // 選び直すときは**先に「分岐にする」で外す。**
-func (s *StudyService) Promote(id int) (StudyState, error) {
+func (s *StudyService) Promote(id int) (st StudyState, err error) {
+	// ⚠️ **`publish` はロックの外で走らせること**（`defer` は LIFO なので、
+	// ここで登録しておけば `s.mu.Unlock()` の**後**に走る）。
+	defer func() { s.publish(st, err) }()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.study == nil {
@@ -594,7 +637,7 @@ func (s *StudyService) Promote(id int) (StudyState, error) {
 	if err := s.study.Promote(id); err != nil {
 		return s.state(), err
 	}
-	return s.state(), nil
+	return s.changed(), nil
 }
 
 // DropFrom はその手**とその先（子孫の枝も全部）**を消す（**手順リストの右クリック**）。
@@ -608,7 +651,11 @@ func (s *StudyService) Promote(id int) (StudyState, error) {
 // **見るだけなら GoTo。混同しないこと**（あちらは何も消さない）。
 //
 // ⚠️ **引数は節点の id で、手数ではない**（枝があると同じ手数が何個もある）。
-func (s *StudyService) DropFrom(id int) (StudyState, error) {
+func (s *StudyService) DropFrom(id int) (st StudyState, err error) {
+	// ⚠️ **`publish` はロックの外で走らせること**（`defer` は LIFO なので、
+	// ここで登録しておけば `s.mu.Unlock()` の**後**に走る）。
+	defer func() { s.publish(st, err) }()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.study == nil {
@@ -621,13 +668,17 @@ func (s *StudyService) DropFrom(id int) (StudyState, error) {
 	// **消えた節点の評価値も消す**（`GoTo` との違いがここにも出る。
 	// あちらは何も消さないので、評価値もそのまま残る）。
 	s.evals.drop(gone)
-	return s.state(), nil
+	return s.changed(), nil
 }
 
 // GoTo はその節点の局面を見る（0 なら根）。**手順は消さない。**
 //
 // ⚠️ **引数は節点の id で、手数ではない。**
-func (s *StudyService) GoTo(id int) (StudyState, error) {
+func (s *StudyService) GoTo(id int) (st StudyState, err error) {
+	// ⚠️ **`publish` はロックの外で走らせること**（`defer` は LIFO なので、
+	// ここで登録しておけば `s.mu.Unlock()` の**後**に走る）。
+	defer func() { s.publish(st, err) }()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.study == nil {
@@ -636,7 +687,7 @@ func (s *StudyService) GoTo(id int) (StudyState, error) {
 	if err := s.study.GoTo(id); err != nil {
 		return s.state(), err
 	}
-	return s.state(), nil
+	return s.changed(), nil
 }
 
 // State は今の状態を返す（何も変えない）。フロントの初期表示用。
@@ -657,14 +708,18 @@ func (s *StudyService) State() StudyState {
 // ⚠️ **今は呼び出し側が無い。** 消さずに残してあるのは「解析タブを空にする」
 // という操作そのものは正当だから（入口が要るようになったらここを使う）。
 // **撮った時点で呼ぶ形に戻さないこと。**
-func (s *StudyService) Clear() StudyState {
+func (s *StudyService) Clear() (st StudyState) {
+	// ⚠️ **`publish` はロックの外で走らせること**（`defer` は LIFO なので、
+	// ここで登録しておけば `s.mu.Unlock()` の**後**に走る）。
+	defer func() { s.publish(st, nil) }()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.study = nil
 	s.game = position.Game{}
 	s.sourceURL = ""
 	s.evals.reset()
-	return s.state()
+	return s.changed()
 }
 
 // Evals は評価値グラフの中身を返す（解析タブ）。
@@ -844,6 +899,34 @@ func (s *StudyService) analyzeTarget() (analyzeTarget, error) {
 	}, nil
 }
 
+// changed は**変えたあとの状態**を作る（`rev` を 1 つ進める）。
+//
+// ⚠️ **読むだけのときは `state()` を使うこと。** `rev` は「別の窓が描き直すべきか」
+// の判断そのものなので、何も変えていないのに進めると**全部の窓が無駄に描き直す**。
+// ⚠️ **ロックを取った状態で呼ぶこと。**
+func (s *StudyService) changed() StudyState {
+	s.rev++
+	return s.state()
+}
+
+// publish は「解析タブの局面が変わった」を**全部の窓へ**知らせる（`study:changed`）。
+//
+// **これが別ウィンドウとの連動の土台**（2026-09-08）。以前は変更の結果を
+// **戻り値だけ**で返していたので、**呼んだ窓しか気づけなかった**。
+//
+// ⚠️ **ロックを外してから呼ぶこと。** 先はフロントなので、ロックを持ったまま
+// 渡すと、そこから戻ってきた呼び出しと噛み合う余地がある。**`defer` は LIFO** なので、
+// `s.mu.Unlock()` より**先に登録**すれば後に走る（各メソッドの先頭に置いてあるのはこのため）。
+//
+// ⚠️ **失敗したときは出さない**（状態は変わっていない）。出すと全部の窓が
+// 同じ絵を描き直すだけになる。
+func (s *StudyService) publish(st StudyState, err error) {
+	if err != nil || s.Emit == nil {
+		return
+	}
+	s.Emit("study:changed", st)
+}
+
 // state はロックを取った状態で呼ぶこと。
 func (s *StudyService) state() StudyState {
 	if s.study == nil {
@@ -851,6 +934,7 @@ func (s *StudyService) state() StudyState {
 			Hands: []position.Stock{}, Warnings: []string{},
 			Nodes: []position.Node{}, Line: []int{},
 			Played: []string{}, Legal: []legal.Move{},
+			Rev: s.rev,
 		}
 	}
 	// **描くのは常に「今見ている局面」**（根 + 手順の ply 手目まで）。
@@ -890,5 +974,6 @@ func (s *StudyService) state() StudyState {
 		Black:      s.game.Black,
 		White:      s.game.White,
 		SourceURL:  s.sourceURL,
+		Rev:        s.rev,
 	}
 }
