@@ -537,16 +537,30 @@ export function mountMainScreen(root: HTMLElement): void {
             <strong>取得しただけでは棚に入りません</strong>（カードの「この内容を保存」で入ります）。
             対局中は棋譜が伸びるので、「更新」で取り直してから保存し直してください。
           </span>
+          <!-- ⚠️ **カードは再起動しても残る**（仮の一覧 / kicho の watches）。
+               2 日制の対局で翌日また URL を貼り直さずに済ませるためのもので、
+               **覚えているのは「どのサイトのどの棋譜か」だけ**（棋譜そのものではない）。 -->
+          <span class="setting-note">
+            <strong>カードは再起動しても残ります。</strong>2 日制の対局で翌日また URL を
+            貼り直さずに済むよう、「どのサイトのどの棋譜か」を覚えておきます
+            （<strong>棋譜そのものではありません</strong>）。復元したカードは中身が空なので
+            「更新」でサイトから取り直してください。追うのをやめるときはカードの「閉じる」で外します
+            （<strong>保存済みの棋譜は消えません</strong>）。終局した棋譜を保存したときは自動で外れます。
+          </span>
           <div class="setting-fields">
             <span class="field-label">URL / 棋譜 ID</span>
             <input id="fetch-input" type="text" spellcheck="false"
                    placeholder="http://live.shogi.or.jp/oui/kifu/67/oui202607290101.html" />
             <button id="fetch-run" class="ghost-btn is-primary" type="button">取得</button>
-            <button id="fetch-clear" class="ghost-btn" type="button">クリア</button>
+            <button id="fetch-refresh-all" class="ghost-btn" type="button"
+                    title="並んでいるカードを順にサイトから取り直します（復元した直後に使います）">すべて更新</button>
+            <button id="fetch-clear" class="ghost-btn" type="button"
+                    title="入力とカードをすべて捨てます（仮の一覧も空にします。棚の棋譜は消えません）">クリア</button>
           </div>
           <p id="fetch-status" class="status" role="status" aria-live="polite" hidden></p>
           <!-- 取得結果。**新しいものが先頭。** 同じ棋譜を取り直したときは
-               カードを増やさず中身だけ差し替える（key = 取得元:棋譜 ID）。 -->
+               カードを増やさず中身だけ差し替える（key = 取得元:棋譜 ID）。
+               ⚠️ **起動時は仮の一覧（DB）から復元する**（サイトへは取りに行かない）。 -->
           <div id="fetch-cards" class="fetch-cards"></div>
         </div>
       </div>

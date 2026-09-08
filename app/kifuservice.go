@@ -671,3 +671,133 @@ func (s *KifuService) ImportURL(rawURL string) (GameSummary, error) {
 	}
 	return toSummary(rec), nil
 }
+
+// ---- 仮の一覧（追跡中の中継 / kicho の `watches`）--------------------------
+//
+// **2 日制の対局では翌日また中継の URL を貼り直すことになる。** それを避けるため、
+// 入力タブの取得カードを DB に残して再起動後に並べ直す。
+//
+// ⚠️ **残すのは「サイト」であって棋譜ではない。** 持つのは
+// 「どのサイトのどの棋譜か」（source / source_id / source_url）と、一覧で
+// 見分けるためのメタだけで、**KIF 本文は持たない。** 棋譜そのものを残すのは
+// `Save`（棚）の役目で、**役割を混ぜないこと。**
+//
+// ⚠️ **どれを載せられるか・諸元をどう決めるかは kicho 側**（`Library.Watch`）。
+// ライブ中継（読売・連盟）だけが対象で、貼り付け・URL 取り込みは取得元での
+// 一意な ID を持たないため向こうが `ErrUnsupportedSource` で弾く。
+// **ここに取得元ごとの分岐を書かないこと**（この節の外にある約束と同じ）。
+
+// WatchEntry は仮の一覧 1 件。
+//
+// ⚠️ **`GameDetail` を返さないこと。** あちらは KIF 本文を持つ形なので、
+// 空の本文を詰めて返すと「棋譜が取れている」ように見える。
+// 復元したカードの中身はユーザが「更新」を押した時点で `Refresh` が取りに行く。
+type WatchEntry struct {
+	Source   string `json:"source"`
+	SourceID string `json:"sourceId"`
+	// SourceURL は人が開いて確認できる URL。
+	SourceURL string `json:"sourceUrl"`
+	Event     string `json:"event"`
+	Black     string `json:"black"`
+	White     string `json:"white"`
+	StartedAt string `json:"startedAt"` // RFC3339。未設定なら空文字
+	// EndMark は終局の種別（例 "投了"）。対局中は空。
+	EndMark string `json:"endMark"`
+	// Finished は終局済みかどうか。
+	Finished bool `json:"finished"`
+	// Moves は最後に取得したときの手数。
+	Moves int `json:"moves"`
+}
+
+func toWatchEntry(w store.Watch) WatchEntry {
+	e := WatchEntry{
+		Source:    w.Source,
+		SourceID:  w.SourceID,
+		SourceURL: w.SourceURL,
+		Event:     w.Event,
+		Black:     w.Black,
+		White:     w.White,
+		EndMark:   w.EndMark,
+		Finished:  w.Finished(),
+		Moves:     w.Moves,
+	}
+	if !w.StartedAt.IsZero() {
+		e.StartedAt = w.StartedAt.Format(time.RFC3339)
+	}
+	return e
+}
+
+// Watches は仮の一覧を新しい順に返す（入力タブの取得カードの復元に使う）。
+//
+// ⚠️ **ここからサイトへは取りに行かない。** 起動のたびに追跡ぶんの通信が走ると
+// 待たされるうえ、**中継を追っていない日でも毎回外へ出ることになる。**
+// 中身が要るときはカードの「更新」（`Refresh`）を押す。
+func (s *KifuService) Watches() ([]WatchEntry, error) {
+	lib, err := s.library()
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := kifuDBContext()
+	defer cancel()
+
+	list, err := lib.Watches(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]WatchEntry, 0, len(list))
+	for _, w := range list {
+		out = append(out, toWatchEntry(w))
+	}
+	return out, nil
+}
+
+// Watch は取得したカードを仮の一覧に載せる（既にあれば内容を最新化する）。
+//
+// **諸元（source_url）は kicho が取得元から決め直す**ので、ここでは運ぶだけ
+// （`Save` と同じ約束）。
+func (s *KifuService) Watch(d GameDetail) (WatchEntry, error) {
+	lib, err := s.library()
+	if err != nil {
+		return WatchEntry{}, err
+	}
+	ctx, cancel := kifuDBContext()
+	defer cancel()
+
+	w, err := lib.Watch(ctx, detailToFetched(d))
+	if err != nil {
+		return WatchEntry{}, describeKifuError(err)
+	}
+	return toWatchEntry(w), nil
+}
+
+// Unwatch は仮の一覧から外す（カードの「閉じる」）。
+//
+// ⚠️ **保存済みの棋譜は消えない。** 消えるのは「翌日また並べ直す」という約束だけ。
+func (s *KifuService) Unwatch(source, sourceID string) error {
+	lib, err := s.library()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := kifuDBContext()
+	defer cancel()
+
+	// ⚠️ **既に無いのを失敗にしないこと。** 目的は画面から消すことで、
+	// 終局した棋譜を保存すると kicho 側が先に外している（`Library.Save`）。
+	if err := lib.Unwatch(ctx, source, sourceID); err != nil &&
+		!errors.Is(err, store.ErrNotFound) {
+		return err
+	}
+	return nil
+}
+
+// UnwatchAll は仮の一覧を空にする（入力タブの「クリア」）。消した件数を返す。
+func (s *KifuService) UnwatchAll() (int, error) {
+	lib, err := s.library()
+	if err != nil {
+		return 0, err
+	}
+	ctx, cancel := kifuDBContext()
+	defer cancel()
+
+	return lib.UnwatchAll(ctx)
+}

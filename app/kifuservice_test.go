@@ -329,3 +329,182 @@ func TestSendToStudyGameUsesKichoSentinel(t *testing.T) {
 		t.Fatalf("sentinel を返していません: %v", err)
 	}
 }
+
+// liveCard は仮の一覧に載せられる取得カード（連盟の中継）。
+func liveCard() GameDetail {
+	return GameDetail{
+		GameSummary: GameSummary{
+			Source: store.SourceShogiLive, SourceID: "oui/kifu/67/oui202607290101",
+			Event: "テスト棋戦", Black: "先手太郎", White: "後手花子", Moves: 2,
+		},
+		KIF: testKIF,
+	}
+}
+
+// 仮の一覧の一巡（載せる → 復元 → 外す）。
+//
+// ⚠️ **一番の要点は「棋譜本文を持たないこと」。** ここが KIF まで返すように
+// なると、復元しただけのカードが「取れている」ように見えて、そのまま棚へ
+// 保存できてしまう（中身の無い棋譜が棚に入る）。
+func TestKifuServiceWatchRoundTrip(t *testing.T) {
+	svc, _ := newTestKifuService(t)
+
+	d := liveCard()
+	w, err := svc.Watch(d)
+	if err != nil {
+		t.Fatalf("Watch: %v", err)
+	}
+	// 諸元は kicho が取得元から決め直す（画面の値を運ぶだけ）。
+	if w.SourceURL == "" {
+		t.Errorf("取得元の URL が決まっていません: %+v", w)
+	}
+
+	list, err := svc.Watches()
+	if err != nil {
+		t.Fatalf("Watches: %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("仮の一覧に出ていません: %+v", list)
+	}
+	got := list[0]
+	if got.Source != d.Source || got.SourceID != d.SourceID {
+		t.Fatalf("別の棋譜が入っています: %+v", got)
+	}
+	// 一覧で見分けるためのメタは持つ。
+	if got.Event != "テスト棋戦" || got.Black != "先手太郎" || got.Moves != 2 {
+		t.Errorf("一覧で見分けるためのメタが落ちています: %+v", got)
+	}
+
+	// ⚠️ **同じ中継を取り直しても増えない**（主キーは (source, source_id)）。
+	d.Moves = 3
+	if _, err := svc.Watch(d); err != nil {
+		t.Fatalf("Watch（2 回目）: %v", err)
+	}
+	list, _ = svc.Watches()
+	if len(list) != 1 || list[0].Moves != 3 {
+		t.Fatalf("取り直しで増えたか最新化されていません: %+v", list)
+	}
+
+	// ⚠️ **外しても棚の棋譜は消えない**（そもそも棚には入っていない）。
+	if err := svc.Unwatch(d.Source, d.SourceID); err != nil {
+		t.Fatalf("Unwatch: %v", err)
+	}
+	if list, _ = svc.Watches(); len(list) != 0 {
+		t.Fatalf("外れていません: %+v", list)
+	}
+}
+
+// ⚠️ **貼り付け・URL 取り込みは仮の一覧に載せない。**
+//
+// 取得元での一意な ID が無く `source_id` が毎回新しくなるので、復元しても
+// 「更新」が必ず失敗するカードになる。**判断は kicho（`ErrUnsupportedSource`）** で、
+// ここではその種類が落ちずに、ikkyoku 側の直し方が付いていることだけを見る。
+func TestKifuServiceWatchRejectsUnrefetchable(t *testing.T) {
+	svc, _ := newTestKifuService(t)
+
+	_, err := svc.Watch(GameDetail{
+		GameSummary: GameSummary{Source: store.SourcePaste, SourceID: "any"},
+		KIF:         testKIF,
+	})
+	if !errors.Is(err, kicho.ErrUnsupportedSource) {
+		t.Fatalf("sentinel が落ちています: %v", err)
+	}
+	if !strings.Contains(err.Error(), "中継から取得") {
+		t.Errorf("何が載せられるのかが分かる文言になっていません: %v", err)
+	}
+}
+
+// ⚠️ **終局済みを保存したら仮の一覧から外れ、対局中は外れないこと。**
+//
+// 2 日制なら 1 日目の封じ手時点で保存しても翌日また同じカードで追うので、
+// そこで一覧から消えては困る。**分岐を持っているのは kicho の `Save`** で、
+// ここではそれが ikkyoku の経路でも効いていることを見る。
+func TestKifuServiceSaveUnwatchesOnlyWhenFinished(t *testing.T) {
+	svc, _ := newTestKifuService(t)
+
+	d := liveCard()
+	if _, err := svc.Watch(d); err != nil {
+		t.Fatalf("Watch: %v", err)
+	}
+
+	// 対局中の保存では外さない。
+	if _, err := svc.Save(d); err != nil {
+		t.Fatalf("Save（対局中）: %v", err)
+	}
+	if list, _ := svc.Watches(); len(list) != 1 {
+		t.Fatalf("対局中の保存で仮の一覧から外れています: %+v", list)
+	}
+
+	// 終局していれば外す（もう取り直す必要が無い）。
+	d.EndMark = "投了"
+	rec, err := svc.Save(d)
+	if err != nil {
+		t.Fatalf("Save（終局）: %v", err)
+	}
+	if !rec.Finished {
+		t.Fatalf("終局として保存できていません: %+v", rec)
+	}
+	if list, _ := svc.Watches(); len(list) != 0 {
+		t.Fatalf("終局しても仮の一覧に残っています: %+v", list)
+	}
+}
+
+// ⚠️ **既に無いものを外すのは失敗にしないこと。**
+//
+// 目的は画面からカードを消すことで、終局した棋譜を保存すると kicho 側が
+// 先に外している。ここでエラーにすると**カードが閉じられなくなる。**
+func TestKifuServiceUnwatchMissingIsNotError(t *testing.T) {
+	svc, _ := newTestKifuService(t)
+
+	if err := svc.Unwatch(store.SourceShogiLive, "no/such/kifu"); err != nil {
+		t.Fatalf("既に無い追跡を外せません: %v", err)
+	}
+}
+
+// 「クリア」は仮の一覧ごと捨てる（画面から消しただけでは再起動で戻ってくる）。
+func TestKifuServiceUnwatchAll(t *testing.T) {
+	svc, _ := newTestKifuService(t)
+
+	first := liveCard()
+	second := liveCard()
+	second.SourceID = "oui/kifu/67/oui202607290102"
+	for _, d := range []GameDetail{first, second} {
+		if _, err := svc.Watch(d); err != nil {
+			t.Fatalf("Watch: %v", err)
+		}
+	}
+
+	n, err := svc.UnwatchAll()
+	if err != nil {
+		t.Fatalf("UnwatchAll: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("消した件数が合いません: %d", n)
+	}
+	if list, _ := svc.Watches(); len(list) != 0 {
+		t.Fatalf("空になっていません: %+v", list)
+	}
+}
+
+// ⚠️ **棚が開けていなくても panic せず、理由を返すこと**（設計原則3）。
+//
+// 仮の一覧は棚（SQLite）の上にあるので、開けていなければ使えない。
+// **それでも取得そのものは動く**（カードは今日のあいだ画面に残る）。
+func TestKifuServiceWatchWithoutDatabase(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	svc := NewKifuService(logger, NewStudyService(logger, NewPositionService(logger)))
+	// **開いていない**（main が open を呼べなかったときと同じ状態）。
+
+	if _, err := svc.Watches(); err == nil {
+		t.Error("Watches がエラーを返しません")
+	}
+	if _, err := svc.Watch(liveCard()); err == nil {
+		t.Error("Watch がエラーを返しません")
+	}
+	if err := svc.Unwatch(store.SourceShogiLive, "x"); err == nil {
+		t.Error("Unwatch がエラーを返しません")
+	}
+	if _, err := svc.UnwatchAll(); err == nil {
+		t.Error("UnwatchAll がエラーを返しません")
+	}
+}
