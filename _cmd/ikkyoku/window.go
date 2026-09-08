@@ -47,6 +47,13 @@ const (
 	minMainWidth      = 360
 	minMainHeight     = 280
 
+	// 評価値グラフの窓（切り離したとき。2026-09-08）。**横に長いほうが読める**
+	// ——150 手を横軸に並べる面なので、正方形に近い形にすると点が潰れる。
+	defaultGraphWidth  = 720
+	defaultGraphHeight = 260
+	minGraphWidth      = 320
+	minGraphHeight     = 140
+
 	maxReasonableSize = 4000
 
 	// 初回にメイン画面を枠の外へ逃がすときの間隔。重なったまま撮ると
@@ -67,12 +74,19 @@ const (
 type appState struct {
 	Frame guide.Window `json:"frame"`
 	Main  guide.Window `json:"main"`
+	// Graph は切り離した評価値グラフの窓（2026-09-08）。
+	//
+	// ⚠️ **「切り離しているか」はここには無い**（`config.json` の
+	// `evalGraphDetached`）。ここが持つのは**位置と大きさだけ** —— 窓の座標は
+	// GUI 固有の関心事だが、画面の組み方は設定なので、置き場所を分けてある。
+	Graph guide.Window `json:"graph"`
 }
 
 func defaultAppState() appState {
 	return appState{
 		Frame: guide.Window{X: unsetPosition, Y: unsetPosition, Width: defaultFrameWidth, Height: defaultFrameHeight},
 		Main:  guide.Window{X: unsetPosition, Y: unsetPosition, Width: defaultMainWidth, Height: defaultMainHeight},
+		Graph: guide.Window{X: unsetPosition, Y: unsetPosition, Width: defaultGraphWidth, Height: defaultGraphHeight},
 	}
 }
 
@@ -106,6 +120,11 @@ func loadAppState() appState {
 	}
 	if st.Main.Width <= 0 || st.Main.Height <= 0 {
 		st.Main = def.Main
+	}
+	// ⚠️ **古い app-window.json には graph が無い**（0 で読まれる）ので、
+	// ここで既定に倒すこと。倒さないと**大きさ 0 の窓**が出る。
+	if st.Graph.Width <= 0 || st.Graph.Height <= 0 {
+		st.Graph = def.Graph
 	}
 	return st
 }

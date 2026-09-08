@@ -50,6 +50,7 @@ import {
   FiChevronRight,
   FiChevronUp,
   FiCopy,
+  FiExternalLink,
   FiImage,
   FiMaximize,
   FiMinus,
@@ -72,7 +73,7 @@ import { iconMarkup } from "./icon";
 import { mountEditor } from "./editor";
 import { mountLibrary } from "./library";
 import { mountFetchCards } from "./fetchcards";
-import { mountEvalGraph } from "./evalgraph";
+import { mountEvalPane } from "./evalgraphpane";
 import { mountStudyBoard } from "./study";
 import { openPopup } from "./popup";
 import type { RecognizerStatus } from "../bindings/ikkyoku/models";
@@ -1114,6 +1115,15 @@ export function mountMainScreen(root: HTMLElement): void {
                  ⚠️ **押してもドラッグが始まらないようにすること**（pointerdown を止める）。 -->
             <button id="eval-graph-toggle" class="split-toggle" type="button"
                     aria-expanded="true"></button>
+            <!-- 切り離し（2026-09-08）。**別ウィンドウへ出す。**
+                 ⚠️ **畳む（高さ 0）とは別物。** 畳むのは「今は見ない」で、
+                 こちらは「**別の窓で見る**」——盤の大きさに効かなくなる。
+                 ⚠️ **戻す入口はこちらには無い**（グラフ窓の「ドックに戻す」と
+                 窓を閉じる操作）。切り離すとこのバーごと消えるので、
+                 ここに戻す口を置いても押せない。 -->
+            <button id="eval-graph-detach" class="split-toggle is-secondary" type="button"
+                    title="評価値グラフを別ウィンドウに切り離します（盤の大きさに効かなくなります）"
+                    aria-label="評価値グラフを切り離す"></button>
           </div>
           <div class="eval-graph-head">
             <span class="field-label">評価値</span>
@@ -3031,7 +3041,9 @@ export function mountMainScreen(root: HTMLElement): void {
     studyFlip.hidden = !studyLoaded;
     // 評価値グラフも同じ（**まだ 1 点も無くても軸だけ出す**）。出たり消えたりすると
     // 盤が上下に動くうえ、「解析すると点が並ぶ場所」が見えているほうが分かりやすい。
-    evalGraphRow.hidden = !studyLoaded;
+    // ⚠️ **切り離しているあいだは出さないこと**（2026-09-08）。
+    // 別ウィンドウに出ているので、**同じ値を 2 か所に描くことになる**。
+    evalGraphRow.hidden = graphDetached === true || !studyLoaded;
     if (!studyLoaded) {
       // 空に戻った。**仕掛けた記録も捨てる** —— 同じ局面をもう一度
       // 採ったときに、連続モードなのに解析が始まらない、ということが起きる。
@@ -3511,7 +3523,7 @@ export function mountMainScreen(root: HTMLElement): void {
   // ⚠️ **点はここに溜めない。** 持っているのは Go 側（`StudyService.Evals`）で、
   // **手順を切ったときにどこまで捨てるかを知っているのはあちらだけ**。
   // フロントにも溜めると、戻って別の手を指したときに片方だけ古い値が残る。
-  const evalGraphUI = mountEvalGraph({
+  const evalGraphUI = mountEvalPane({
     host: root.querySelector<HTMLElement>("#eval-graph")!,
     range: root.querySelector<HTMLSelectElement>("#eval-graph-range")!,
     from: root.querySelector<HTMLInputElement>("#eval-graph-from")!,
@@ -3536,41 +3548,10 @@ export function mountMainScreen(root: HTMLElement): void {
     },
   });
 
-  // 途中経過からの取り直しを間引くためのタイマー（0 なら待っていない）。
-  let evalGraphTimer = 0;
-
-  // refreshEvalGraph は Go から点を取り直して描く。
-  //
-  // **呼ぶのは「局面が変わったとき」と「解析が 1 つ終わったとき」。**
-  const refreshEvalGraph = () => {
-    if (evalGraphTimer !== 0) {
-      window.clearTimeout(evalGraphTimer);
-      evalGraphTimer = 0;
-    }
-    void (async () => {
-      try {
-        evalGraphUI.render(await StudyService.Evals());
-      } catch {
-        // 取れなくてもグラフが古いままになるだけ。**盤も解析も止めない**（設計原則3）。
-      }
-    })();
-  };
-
-  // 途中経過から呼ぶ側。**間引く。**
-  //
-  // ⚠️ **info のたびに取り直さないこと** —— 深さが 1 つ進むたびに、しかも
-  // エンジンの数だけ届くので、そのまま往復させると読み筋の更新より頻繁になる。
-  // ⚠️ **かといって done だけにもできない** —— 考える秒数が「無制限」のときは
-  // **止めるまで done が来ない**ので、その手の点がいつまでも出ない。
-  const refreshEvalGraphSoon = () => {
-    if (evalGraphTimer !== 0) {
-      return;
-    }
-    evalGraphTimer = window.setTimeout(() => {
-      evalGraphTimer = 0;
-      refreshEvalGraph();
-    }, 1000);
-  };
+  // ⚠️ **取り直しの実装は `evalgraphpane.ts` に移した**（2026-09-08）。
+  // **切り離した窓と同じものを使う**ので、片方だけ直して挙動が食い違うことがない。
+  const refreshEvalGraph = () => evalGraphUI.refresh();
+  const refreshEvalGraphSoon = () => evalGraphUI.refreshSoon();
 
   // ---- 評価値グラフの高さ（折り畳み + スプリットバー。2026-08-13）-----------
   //
@@ -3710,6 +3691,74 @@ export function mountMainScreen(root: HTMLElement): void {
   evalGraphToggle.innerHTML = iconMarkup(FiChevronDown);
   evalGraphToggle.title = "評価値グラフを畳みます（そのぶん盤が大きくなります）";
   evalGraphSplit.setAttribute("aria-valuenow", String(evalGraphH));
+
+  // ---- 別ウィンドウへの切り離し（2026-09-08）--------------------------------
+  //
+  // **ペインのままだと盤の大きさに効く**（`--board-size` がグラフの高さを引いている）
+  // ので、盤を好きな大きさにしたい人のために窓へ出せるようにした。
+  //
+  // ⚠️ **畳む（高さ 0）とは別の状態。** 畳むのは「今は見ない」、切り離しは
+  // 「**別の窓で見る**」。**畳んだ高さは覚えたまま**なので、戻せば元の高さで出る。
+  //
+  // ⚠️ **状態を持っているのは Go 側**（設定 `evalGraphDetached`）。ここが持つのは
+  // 写しだけで、**切り替えは必ず `SettingsService.SetEvalGraphDetached` を通す** ——
+  // グラフ窓を閉じる操作も同じ口を通るので、**どちらから切り替えても食い違わない。**
+  const evalGraphDetach = root.querySelector<HTMLButtonElement>("#eval-graph-detach")!;
+  evalGraphDetach.innerHTML = iconMarkup(FiExternalLink);
+
+  // 切り離しているとき、盤から**余分に引く**量。**実測で決めた値**
+  // （窓 4 通り × 畳み方で測り、**盤の下に 5px 残る**ところ。`--eval-graph-pad`
+  // の表も読むこと）。行ごと消えるので、畳んだとき（20px）より小さい。
+  // ⚠️ **0 にしないこと** —— 実測で盤の下端が 3px はみ出す。
+  // ⚠️ **畳んだ行の高さ（バー 8 + gap 2 + 逃げ 6 = 16px）を変えたら測り直すこと。**
+  const EVAL_GRAPH_PAD_DETACHED = "8px";
+
+  // ⚠️ **null は「まだ決まっていない」。** 起動直後の 1 回だけは、値が同じでも
+  // 通してレイアウトを整える必要がある。
+  let graphDetached: boolean | null = null;
+
+  const applyGraphDetached = (on: boolean) => {
+    if (graphDetached === on) {
+      return;
+    }
+    graphDetached = on;
+    // ⚠️ **行ごと消すこと**（バーも見出しも）。同じ値を 2 か所に描かない。
+    evalGraphRow.hidden = on || !studyLoaded;
+    // ⚠️ **盤の式が読む値も切り替えること。** 切り離したのに高さが残っていると、
+    // **そのぶん盤が小さいまま**になる（何も無い余白ができる）。
+    document.documentElement.style.setProperty(
+      "--eval-graph-h",
+      on ? "0px" : `${evalGraphH}px`,
+    );
+    if (on) {
+      document.documentElement.style.setProperty(
+        "--eval-graph-pad",
+        EVAL_GRAPH_PAD_DETACHED,
+      );
+    } else {
+      // ⚠️ **消すこと**（値を書き戻さない）。CSS 側は畳む/開くに追随する式なので、
+      // inline が残ると**畳んでも引き算が変わらない**。
+      document.documentElement.style.removeProperty("--eval-graph-pad");
+    }
+    // ⚠️ **見えていない側は取り直さない**（イベント 1 回で往復が 2 回になる）。
+    evalGraphUI.setActive(!on);
+    // 盤の大きさが変わったので、重ねたグリッドと横の遊びを取り直す。
+    studyBoardUI.relayout();
+    evalGraphUI.relayout();
+    settleStudySide();
+  };
+
+  evalGraphDetach.addEventListener("click", () => {
+    void SettingsService.SetEvalGraphDetached(true);
+  });
+  // ⚠️ **押してもドラッグが始まらないようにする**（畳むトグルと同じ）。
+  evalGraphDetach.addEventListener("pointerdown", (e) => e.stopPropagation());
+
+  // ⚠️ **戻すのは向こうから**（グラフ窓の「ドックに戻す」と、窓を閉じる操作）。
+  // Go 側が `graph:detached` で知らせてくるので、**こちらから状態を作らない。**
+  Events.On("graph:detached", (event: { data: boolean }) => {
+    applyGraphDetached(!!event.data);
+  });
 
   // ---- 盤と解析の列の幅（縦のスプリットバー。2026-08-13）--------------------
   //
@@ -5339,6 +5388,8 @@ export function mountMainScreen(root: HTMLElement): void {
   const showSettings = (s: {
     fitOnStartup: boolean;
     clickThrough: boolean;
+    // 評価値グラフを別ウィンドウに切り離しているか（2026-09-08）。
+    evalGraphDetached: boolean;
     path: string;
     training: { enabled: boolean; host: string; port: number; token: string; target: string };
     engines: EngineSettings[] | null;
@@ -5363,6 +5414,10 @@ export function mountMainScreen(root: HTMLElement): void {
     settingsPath.textContent = s.path || "(保存先を決められませんでした)";
     // エンジンの色（評価値グラフ・見出しの色見本）。**設定が唯一の出所**で、
     // 既定色の解決も Go 側が済ませてある（`EngineSettings.Color` は常に入っている）。
+    // ⚠️ **評価値グラフの置き場所も設定から受け取る**（2026-09-08）。
+    // Go 側は起動時にも `graph:detached` を出すが、**その時点でフロントはまだ
+    // 購読していない**ので、起動直後の形はここで決まる。
+    applyGraphDetached(!!s.evalGraphDetached);
     engineColors.clear();
     engineNames.clear();
     engineMultiPV.clear();

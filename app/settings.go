@@ -28,6 +28,14 @@ type AppSettings struct {
 	FitOnStartup bool `json:"fitOnStartup"`
 	// ClickThrough はガイド枠の内側のクリックを後ろの画面へ素通しするか（Windows のみ）。
 	ClickThrough bool `json:"clickThrough"`
+	// EvalGraphDetached は評価値グラフを**別ウィンドウに切り離しているか**
+	// （2026-09-08）。
+	//
+	// ⚠️ **設定タブには出していない。** 切り替えるのは解析タブのスプリットバーの
+	// トグルと、グラフ窓を閉じる操作の 2 つ（**画面の組み方は、その画面で
+	// 切り替えるのが素直**）。ここに載せてあるのは、**起動時にどちらで始めるかを
+	// フロントが知る必要がある**から。
+	EvalGraphDetached bool `json:"evalGraphDetached"`
 	// Training は訂正した局面を suteme へ登録する設定。
 	Training TrainingSettings `json:"training"`
 	// Engines は登録した USI エンジンの一覧（登録順）。
@@ -251,6 +259,11 @@ type SettingsService struct {
 	// パスは手で打てる）。
 	PickFile FilePicker
 
+	// OnEvalGraphDetached は評価値グラフの切り離しを切り替えたときに呼ぶ
+	// （`CaptureService.applyEvalGraphDetached`。窓を出し入れするのはあちらの仕事）。
+	// ⚠️ **SettingsService からウィンドウを直に触らないこと**（持っていない）。
+	OnEvalGraphDetached func(bool)
+
 	// OnClickThrough は「枠の内側で後ろの画面を操作する」を切り替えたときに呼ぶ。
 	// 実体は `CaptureService.applyClickThrough`（枠の HWND を触るのはあちらの仕事）。
 	// ⚠️ **SettingsService から枠を直に触らないこと**（ウィンドウを持っていない）。
@@ -324,13 +337,14 @@ func (s *SettingsService) settings() AppSettings {
 		engines = append(engines, engineSettings(e, i))
 	}
 	return AppSettings{
-		FitOnStartup:    s.cfg.FitOnStartup,
-		ClickThrough:    s.cfg.ClickThrough,
-		Training:        trainingSettings(s.cfg.Training),
-		Engines:         engines,
-		EngineColors:    ikkyoku.EngineColors,
-		AnalyzeSeconds:  s.cfg.ThinkSeconds(),
-		PonanzaConstant: analyze.PonanzaConstantOr(s.cfg.PonanzaConstant),
+		FitOnStartup:      s.cfg.FitOnStartup,
+		ClickThrough:      s.cfg.ClickThrough,
+		EvalGraphDetached: s.cfg.EvalGraphDetached,
+		Training:          trainingSettings(s.cfg.Training),
+		Engines:           engines,
+		EngineColors:      ikkyoku.EngineColors,
+		AnalyzeSeconds:    s.cfg.ThinkSeconds(),
+		PonanzaConstant:   analyze.PonanzaConstantOr(s.cfg.PonanzaConstant),
 
 		SutemeSource:         s.cfg.SutemeSourceOr(),
 		SutemeDataDir:        s.cfg.SutemeDataDir,
@@ -1020,6 +1034,27 @@ func (s *SettingsService) SetClickThrough(v bool) (AppSettings, error) {
 	}
 	if s.OnClickThrough != nil {
 		s.OnClickThrough(v)
+	}
+	return st, nil
+}
+
+// SetEvalGraphDetached は評価値グラフの切り離しを切り替えて保存し、**その場で効かせる。**
+//
+// ⚠️ **入口は 2 つある**（2026-09-08）。解析タブのスプリットバーのトグル（切り離す）と、
+// **グラフ窓を閉じる操作**（戻す）。どちらもここを通るので、**どちらから切り替えても
+// 設定と窓の状態が食い違わない。**
+//
+// ⚠️ **保存できたときだけ効かせること**（SetClickThrough と同じ）。先に効かせると、
+// 保存に失敗したときに「設定はドックなのに窓は出たまま」になる。
+func (s *SettingsService) SetEvalGraphDetached(v bool) (AppSettings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st, err := s.save(func(cfg *ikkyoku.Config) { cfg.EvalGraphDetached = v })
+	if err != nil {
+		return st, err
+	}
+	if s.OnEvalGraphDetached != nil {
+		s.OnEvalGraphDetached(v)
 	}
 	return st, nil
 }

@@ -79,6 +79,22 @@
      盤の大きさの式（`#panel-study` の `--board-size`）がこれを引いているので、
      **余白を変えたら両方直すこと**（引き忘れると盤が縦にはみ出す）。 */
   --winrate-h: calc(var(--winrate-row-h) + 12px);
+
+  /* 評価値グラフのぶんで、盤から**余分に引く**量（2026-09-08）。
+     `#panel-study` の `--board-area-h` がこれを引く。**3 つの状態がある**:
+
+     | 状態 | 値 | なぜ |
+     |---|---|---|
+     | ドック・開いている | 0 | 行が `--eval-graph-h` ぶんきっちり食う |
+     | ドック・畳んでいる | 20px | 詰めたぶんの空きが消える（下記の ⚠️）|
+     | **切り離している** | 8px（JS が入れる）| 行ごと消えるので、また別の値 |
+
+     ⚠️ **切り離しのときだけ JS が `documentElement` に inline で上書きする**
+     （`mainscreen.ts` の `applyGraphDetached`）。ドックに戻すときは
+     **inline を消すこと** —— 消さないと畳む/開くに追随しなくなる。
+     ⚠️ **`:root` に置くこと。** `#panel-study` の中で定義すると、盤の式から
+     読めるが JS の上書き（`documentElement`）が効かなくなる。 */
+  --eval-graph-pad: max(0px, 20px - var(--eval-graph-h));
 }
 
 html,
@@ -853,8 +869,7 @@ html.is-main #app {
      ⚠️ **33px は `.eval-graph` の 38px と `margin-bottom` の 5px の差。**
      どちらかを変えたらここも直すこと（`mainscreen.ts` の `EVAL_GRAPH_CHROME`）。 */
   --board-area-h: calc(
-    100vh - var(--winrate-h) - var(--eval-graph-h) - 72px -
-      max(0px, 20px - var(--eval-graph-h))
+    100vh - var(--winrate-h) - var(--eval-graph-h) - 72px - var(--eval-graph-pad)
   );
   --board-size: min(
     var(--board-area-h),
@@ -2170,6 +2185,14 @@ html.is-main #app {
   cursor: pointer;
 }
 
+/* 2 つめのトグル（切り離し。2026-09-08）。**畳むトグルの右隣に並べる。**
+   ⚠️ **34px 幅どうしが重ならない位置にすること**（中心を 40px 離してある＝隙間 6px）。
+   ⚠️ **畳むトグルは真ん中のまま動かさない** —— あちらは前からある操作なので、
+   ボタンが 1 つ増えたせいで押す場所が変わるのは筋が悪い。 */
+.split-toggle.is-secondary {
+  left: calc(50% + 40px);
+}
+
 /* 縦のバー: 縦長（向きだけ入れ替える）。 */
 .split-bar.is-vertical .split-toggle {
   width: 14px;
@@ -2209,6 +2232,39 @@ html.is-main #app {
 
 .split-bar:focus-visible {
   outline: none;
+}
+
+/* 切り離した評価値グラフの窓（2026-09-08。`?window=evalgraph`）。
+   ⚠️ **ここでは高さを固定しない。** 窓の大きさがそのままグラフの大きさになるのが
+   切り離す理由そのもの（ドック側の `--eval-graph-h` は**盤との取り合い**の話）。 */
+html.is-graph,
+html.is-graph body,
+html.is-graph #app {
+  height: 100%;
+}
+
+.graph-screen {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px 8px;
+  box-sizing: border-box;
+}
+
+/* ⚠️ **見出しの行は縮ませない**（グラフが余りを全部もらう）。 */
+.graph-screen > .eval-graph-head {
+  flex: 0 0 auto;
+}
+
+/* ⚠️ **`height` ではなく `flex: 1` で残りをもらうこと。** ドック側の
+   `.eval-graph` は `--eval-graph-h` から 38px 詰めた固定高だが、
+   こちらは**窓いっぱい**が正しい。 */
+.graph-screen > .eval-graph {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+  margin: 0;
 }
 
 /* 畳んだ状態。**高さは JS が --eval-graph-h に 0 を入れて作る**ので、ここでは

@@ -964,11 +964,39 @@ func (s *CaptureService) captureWithoutSelf(disp ikkyoku.Region) (image.Image, e
 	return img, nil
 }
 
+// applyEvalGraphDetached は評価値グラフの切り離しを窓に反映する（2026-09-08）。
+//
+// 呼ばれるのは 3 経路 —— 起動時（設定の値）・解析タブのトグル・グラフ窓を閉じたとき。
+// **どれも `SettingsService.SetEvalGraphDetached` を通る**（起動時だけは直接）ので、
+// **設定と窓の状態が食い違わない。**
+//
+// ⚠️ **メイン画面へ知らせること**（`graph:detached`）。窓を閉じて戻したときに
+// これが無いと、**メイン画面のペインが出てこない**（グラフがどこにも無くなる）。
+func (s *CaptureService) applyEvalGraphDetached(detached bool) {
+	if s.wins == nil || s.wins.graph == nil {
+		return
+	}
+	if detached {
+		s.wins.graph.Show()
+		s.wins.graph.Focus()
+	} else {
+		s.wins.graph.Hide()
+	}
+	if s.app != nil {
+		s.app.Event.Emit("graph:detached", detached)
+	}
+	s.logger.Info("評価値グラフの置き場所を変えました", "detached", detached)
+}
+
 // maskWindows は撮った画像から、まだ写っている自分のウィンドウを塗り潰す。
 //
 // **メイン画面には `<shogi-board>` が本物の将棋盤を描いている。** 中継の盤より
 // 綺麗な格子なので、放っておくと検出はそちらを選ぶ。塗り潰しはウィンドウ全体
 // (タイトルバー込み)で、消し残しを作らない。
+//
+// ⚠️ **自分の窓が増えたらここにも足すこと**（2026-09-08 に評価値グラフの窓を足した）。
+// あちらに盤は無いが、**折れ線と目盛りは格子に似た直線の集まり**で、
+// 検出を汚す余地がある。**「盤が描かれていないから要らない」と決めないこと。**
 //
 // 画像が *image.RGBA でない(将来キャプチャの実装が変わった)場合は何もしない。
 // 塗り潰せないこと自体は致命的ではなく、検出が外れるだけで枠は動かない。
@@ -978,28 +1006,34 @@ func (s *CaptureService) maskWindows(img image.Image, disp ikkyoku.Region) {
 		s.logger.Warn("撮った画像を塗り潰せません(*image.RGBA ではありません)")
 		return
 	}
-	main := s.wins.main
-	if main == nil || !main.IsVisible() || main.IsMinimised() {
-		return
-	}
-	hwnd := main.NativeWindow()
-	if hwnd == nil {
-		return
-	}
-	r, err := windowRectPhysical(hwnd)
-	if err != nil {
-		s.logger.Warn("メイン画面の矩形を取得できませんでした", "error", err)
-		return
-	}
-
 	// スクリーン座標 → 撮った画像の座標。
 	off := img.Bounds().Min.Sub(image.Pt(disp.X, disp.Y))
-	rect := image.Rect(r.X, r.Y, r.X+r.Width, r.Y+r.Height).Add(off).Intersect(rgba.Bounds())
-	if rect.Empty() {
-		return // 別のディスプレイにいる
+	for _, w := range []struct {
+		name string
+		win  *application.WebviewWindow
+	}{
+		{"メイン画面", s.wins.main},
+		{"評価値グラフの窓", s.wins.graph},
+	} {
+		if w.win == nil || !w.win.IsVisible() || w.win.IsMinimised() {
+			continue
+		}
+		hwnd := w.win.NativeWindow()
+		if hwnd == nil {
+			continue
+		}
+		r, err := windowRectPhysical(hwnd)
+		if err != nil {
+			s.logger.Warn("ウィンドウの矩形を取得できませんでした", "window", w.name, "error", err)
+			continue
+		}
+		rect := image.Rect(r.X, r.Y, r.X+r.Width, r.Y+r.Height).Add(off).Intersect(rgba.Bounds())
+		if rect.Empty() {
+			continue // 別のディスプレイにいる
+		}
+		draw.Draw(rgba, rect, image.NewUniform(color.Black), image.Point{}, draw.Src)
+		s.logger.Debug("ウィンドウを塗り潰しました", "window", w.name, "rect", rect.String())
 	}
-	draw.Draw(rgba, rect, image.NewUniform(color.Black), image.Point{}, draw.Src)
-	s.logger.Debug("メイン画面を塗り潰しました", "rect", rect.String())
 }
 
 // CopyImage は保存済みの PNG をクリップボードへ入れる。デバッグタブから呼ばれる。

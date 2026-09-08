@@ -7,6 +7,8 @@
 //     だけが操作可能な領域。ツールバーはキャプチャ領域の外にあるので写り込まない。
 //   - ?window=main  … アプリ本体。撮った画像・保存先・(将来は)認識結果と設定。
 //     起動時は非表示で、最初のキャプチャで現れる。閉じるとアプリが終了する。
+//   - ?window=evalgraph … 切り離した評価値グラフ(2026-09-08)。**閉じてもアプリは
+//     終わらない**(ドックに戻るだけ)。出すかどうかは設定 `evalGraphDetached`。
 
 // ⚠️ この素の import を消さないこと。
 // Frameless ウィンドウのドラッグ移動(--wails-draggable: drag)とリサイズ(ウィンドウ端の
@@ -19,6 +21,7 @@ import "@wailsio/runtime";
 
 import { DiagService } from "../bindings/github.com/ShinteLab/ikkyoku/app";
 import { mountFrame } from "./frame";
+import { mountGraphScreen } from "./graphscreen";
 import { mountMainScreen } from "./mainscreen";
 
 const params = new URLSearchParams(window.location.search);
@@ -79,6 +82,11 @@ if (windowName === "frame") {
   document.title = "ikkyoku";
   document.documentElement.classList.add("is-frame");
   mountFrame(app);
+} else if (windowName === "evalgraph") {
+  // ⚠️ **タイトルは窓の名前になる**（この窓だけ OS のタイトルバーを持つ）。
+  document.title = "評価値グラフ - ikkyoku";
+  document.documentElement.classList.add("is-graph");
+  mountGraphScreen(app);
 } else {
   document.title = "ikkyoku";
   document.documentElement.classList.add("is-main");

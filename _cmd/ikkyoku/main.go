@@ -51,9 +51,13 @@ type appWindows struct {
 	frame *application.WebviewWindow
 	// main はメイン画面。閉じるとアプリが終了する。
 	main *application.WebviewWindow
+	// graph は切り離した評価値グラフの窓（2026-09-08）。**閉じてもアプリは
+	// 終わらない**（ドックに戻るだけ）。⚠️ **枠と違って破棄せず隠す**のも同じ。
+	graph *application.WebviewWindow
 
 	frameGeom *geometryTracker
 	mainGeom  *geometryTracker
+	graphGeom *geometryTracker
 
 	// mainHasSavedPos は前回終了時の位置を復元したか。復元しているなら初回表示で
 	// 枠の外へ動かさない(ユーザーが決めた位置を上書きしないため)。
@@ -116,16 +120,20 @@ func main() {
 	state := loadAppState()
 	frame := newFrameWindow(app, state.Frame)
 	main, mainHasSavedPos := newMainWindow(app, state.Main)
+	graph := newGraphWindow(app, state.Graph)
 
 	wins := &appWindows{
 		frame:           frame,
 		main:            main,
+		graph:           graph,
 		frameGeom:       newGeometryTracker("frame", state.Frame, logger),
 		mainGeom:        newGeometryTracker("main", state.Main, logger),
+		graphGeom:       newGeometryTracker("graph", state.Graph, logger),
 		mainHasSavedPos: mainHasSavedPos,
 	}
 	wins.frameGeom.attach(frame)
 	wins.mainGeom.attach(main)
+	wins.graphGeom.attach(graph)
 	captureSvc.bind(app, wins)
 	// ⚠️ **Wails の口はここで差し込む。** Service 本体は ikkyoku/app にあり
 	// wails3 を import していないので、ダイアログとイベントだけを関数で渡す。
@@ -148,9 +156,15 @@ func main() {
 	// **枠の HWND を触るのは CaptureService** なので、設定タブからの切り替えは
 	// ここで繋いだこのフックを通る（SettingsService はウィンドウを持っていない）。
 	settingsSvc.OnClickThrough = captureSvc.applyClickThrough
+	// 評価値グラフの切り離し（解析タブのスプリットバーのトグル / グラフ窓を閉じる）。
+	// **窓を出し入れするのは CaptureService**（SettingsService はウィンドウを持たない）。
+	settingsSvc.OnEvalGraphDetached = captureSvc.applyEvalGraphDetached
 	settingsSvc.OnSutemeSource = captureSvc.applyRecognizerSource
 	settingsSvc.OnSutemeDataDir = captureSvc.applyRecognizerDir
 	captureSvc.applyClickThrough(cfg.ClickThrough)
+	// ⚠️ **切り離したまま終了したら、次の起動でも切り離した形で始める**
+	// （画面の組み方の好みなので、毎回ドックへ戻さない）。
+	captureSvc.applyEvalGraphDetached(cfg.EvalGraphDetached)
 
 	// 終了の入口は 2 つ（メイン画面を閉じる / 枠のメニューの「終了」）。
 	// **後始末はこの 1 本に寄せる**（保存の経路を 1 本にしてあるのと同じ理由）。
@@ -163,6 +177,7 @@ func main() {
 
 	registerFrameHooks(app, wins, state.Frame, captureSvc, cfg.FitOnStartup, logger)
 	registerMainHooks(app, wins, state.Main, quit)
+	registerGraphHooks(wins, state.Graph, settingsSvc)
 	registerHotkey(app, captureSvc, logger)
 	registerVisibilityLog(wins, logger)
 	diagSvc.Watch()
@@ -273,6 +288,67 @@ func newMainWindow(app *application.App, st guide.Window) (*application.WebviewW
 	}
 	hasSavedPos := applyPosition(&opts, st)
 	return app.Window.NewWithOptions(opts), hasSavedPos
+}
+
+// newGraphWindow は切り離した評価値グラフの窓を作る（2026-09-08）。
+//
+// **ペインのままだと盤の大きさに効く**（`--board-size` がグラフの高さを引いている）
+// ので、盤を好きな大きさにしたい人のために窓へ出せるようにした。
+//
+// ⚠️ **Frameless にしない。** 枠とメイン画面は理由があって自前のツールバーを
+// 描いているが（枠は中継に重ねる透過ウィンドウ、メイン画面はタイトルバーのぶんを
+// 盤に返すため）、**ここは普通のユーティリティ窓**。OS のタイトルバーがあれば
+// 移動・リサイズ・閉じるが全部ただで手に入る。
+//
+// ⚠️ **AlwaysOnTop も付けない。** 中継を観ながら使うので、最前面に居座ると
+// 中継そのものを覆う（メイン画面と同じ判断）。
+//
+// ⚠️ **常に隠した状態で作る。** 出すのは `CaptureService.applyEvalGraphDetached`
+// だけで、**設定が「切り離している」ときに限る**。
+func newGraphWindow(app *application.App, st guide.Window) *application.WebviewWindow {
+	w, h := safeFallback(st, defaultGraphWidth, defaultGraphHeight)
+
+	opts := application.WebviewWindowOptions{
+		Hidden:    true,
+		Title:     "評価値グラフ - ikkyoku",
+		Width:     w,
+		Height:    h,
+		MinWidth:  minGraphWidth,
+		MinHeight: minGraphHeight,
+		URL:       "/?window=evalgraph",
+	}
+	applyPosition(&opts, st)
+	return app.Window.NewWithOptions(opts)
+}
+
+// registerGraphHooks はグラフ窓の位置の復元と、**閉じたらドックに戻す**を仕込む。
+//
+// ⚠️ **閉じてもアプリを終わらせない。** 終わるのはメイン画面を閉じたときだけ。
+//
+// ⚠️ **破棄させないこと**（`e.Cancel()`）。破棄すると次に切り離すときに窓を
+// 作り直すことになり、**位置も大きさも失う**（枠を ✕ で隠すだけにしてあるのと同じ話）。
+//
+// ⚠️ **設定の側も戻すこと。** 窓だけ隠して設定が「切り離している」のままだと、
+// **次の起動で中身の見えない窓が出る**。だから `SetEvalGraphDetached(false)` を
+// 通す（そこから `applyEvalGraphDetached` が呼ばれて、メイン画面へも知らせが行く）。
+func registerGraphHooks(wins *appWindows, st guide.Window, settings *ikkyokuapp.SettingsService) {
+	graph := wins.graph
+	if st.X != unsetPosition || st.Y != unsetPosition {
+		graph.RegisterHook(events.Common.WindowRuntimeReady, func(e *application.WindowEvent) {
+			x, y, w, h := clampToScreen(st, defaultGraphWidth, defaultGraphHeight)
+			graph.SetSize(w, h)
+			graph.SetPosition(x, y)
+		})
+	}
+	graph.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
+		e.Cancel()
+		// ⚠️ **窓を直に隠さないこと。** ここを通せば設定も一緒に戻り、
+		// メイン画面にも `graph:detached` で伝わる。
+		if _, err := settings.SetEvalGraphDetached(false); err != nil {
+			// 保存できなくても窓は閉じる（設計原則3）。次の起動で戻るだけ。
+			graph.Hide()
+		}
+	})
 }
 
 // applyPosition は保存位置があればそれを、無ければ中央表示を設定する。
@@ -446,6 +522,7 @@ func registerVisibilityLog(wins *appWindows, logger *slog.Logger) {
 	}
 	watch("frame", wins.frame)
 	watch("main", wins.main)
+	watch("graph", wins.graph)
 }
 
 // saveWindowState は枠とメイン画面の位置・サイズを保存する。
@@ -459,6 +536,7 @@ func saveWindowState(wins *appWindows, logger *slog.Logger) {
 	st := appState{
 		Frame: wins.frameGeom.snapshot(),
 		Main:  wins.mainGeom.snapshot(),
+		Graph: wins.graphGeom.snapshot(),
 	}
 	if err := saveAppState(st); err != nil {
 		logger.Error("ウィンドウ状態の保存に失敗しました", "error", err)

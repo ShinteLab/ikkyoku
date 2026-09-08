@@ -563,6 +563,53 @@ func TestSetClickThrough(t *testing.T) {
 	}
 }
 
+// TestSetEvalGraphDetached は評価値グラフの切り離しを固定する（2026-09-08）。
+//
+// ⚠️ **一番の要点は「入口が 2 つあっても食い違わないこと」。** 解析タブのトグル
+// （切り離す）と**グラフ窓を閉じる操作**（戻す）の両方がここを通るので、
+// **設定と窓の状態がずれない。**
+//
+// ⚠️ **残すこと自体も要点。** 枠の表示（残さない）とは扱いが違い、こちらは
+// **画面の組み方の好み**なので、次の起動でも同じ形で始まってほしい。
+func TestSetEvalGraphDetached(t *testing.T) {
+	s := newTestSettings(t, nil)
+	var got []bool
+	s.OnEvalGraphDetached = func(v bool) { got = append(got, v) }
+
+	st, err := s.SetEvalGraphDetached(true)
+	if err != nil {
+		t.Fatalf("SetEvalGraphDetached: %v", err)
+	}
+	if !st.EvalGraphDetached {
+		t.Errorf("EvalGraphDetached = false, want true")
+	}
+	if len(got) != 1 || !got[0] {
+		t.Errorf("フックの呼ばれ方 = %v, want [true]", got)
+	}
+	cfg, err := ikkyoku.LoadConfig(s.path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if !cfg.EvalGraphDetached {
+		t.Error("保存されていません（次の起動でドックに戻ってしまう）")
+	}
+
+	// **戻したことも残ること**（キーが消えると、手で編集する側から存在に気づけない）。
+	if _, err := s.SetEvalGraphDetached(false); err != nil {
+		t.Fatalf("SetEvalGraphDetached(false): %v", err)
+	}
+	cfg, err = ikkyoku.LoadConfig(s.path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.EvalGraphDetached {
+		t.Errorf("保存された EvalGraphDetached = true, want false")
+	}
+	if len(got) != 2 || got[1] {
+		t.Errorf("フックの呼ばれ方 = %v, want [true false]", got)
+	}
+}
+
 // ⚠️ **エンジンが名乗った名前は設定ファイルに残すこと。**
 //
 // 名乗りは**繋がないと分からない**ので、メモリだけで持つとアプリを閉じた時点で

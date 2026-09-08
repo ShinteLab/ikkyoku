@@ -75,6 +75,21 @@ type Config struct {
 	// omitempty を付けていないのは FitOnStartup と同じ理由（切ってあること自体を残す）。
 	ClickThrough bool `json:"clickThrough"`
 
+	// EvalGraphDetached は評価値グラフを**別ウィンドウに切り離しているか**
+	// （2026-09-08）。
+	//
+	// **ペインのままだと盤の大きさに効く**（`--board-size` がグラフの高さを
+	// 引いている）ので、盤を好きな大きさにしたい人のために窓へ出せるようにした。
+	// ⚠️ **切り離しているあいだ、メイン画面のペインは出さない**（同じ値を
+	// 2 か所に描かない）。
+	//
+	// **起動のたびにドックへ戻さないため**に残す。⚠️ **枠の表示（残さない）とは
+	// 扱いが違う** —— あちらは「撮るときだけ使う道具」だが、こちらは
+	// **画面の組み方の好み**なので、次の起動でも同じ形で始まってほしい。
+	//
+	// omitempty を付けていないのは ClickThrough と同じ理由（切ってあること自体を残す）。
+	EvalGraphDetached bool `json:"evalGraphDetached"`
+
 	// Training は訂正した局面を suteme の学習用サーバへ送る設定。
 	Training TrainingConfig `json:"training"`
 
