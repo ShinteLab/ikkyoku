@@ -9,6 +9,8 @@
 //     起動時は非表示で、最初のキャプチャで現れる。閉じるとアプリが終了する。
 //   - ?window=evalgraph … 切り離した評価値グラフ(2026-09-08)。**閉じてもアプリは
 //     終わらない**(ドックに戻るだけ)。出すかどうかは設定 `evalGraphDetached`。
+//   - ?window=study … 切り離した**盤の右の列**(候補手・手順・解析の操作。2026-09-08)。
+//     扱いは evalgraph と同じ。出すかどうかは設定 `studyPaneDetached`。
 
 // ⚠️ この素の import を消さないこと。
 // Frameless ウィンドウのドラッグ移動(--wails-draggable: drag)とリサイズ(ウィンドウ端の
@@ -23,6 +25,7 @@ import { DiagService } from "../bindings/github.com/ShinteLab/ikkyoku/app";
 import { mountFrame } from "./frame";
 import { mountGraphScreen } from "./graphscreen";
 import { mountMainScreen } from "./mainscreen";
+import { mountStudyScreen } from "./studyscreen";
 
 const params = new URLSearchParams(window.location.search);
 const windowName = params.get("window") ?? "main";
@@ -87,6 +90,10 @@ if (windowName === "frame") {
   document.title = "評価値グラフ - ikkyoku";
   document.documentElement.classList.add("is-graph");
   mountGraphScreen(app);
+} else if (windowName === "study") {
+  document.title = "解析 - ikkyoku";
+  document.documentElement.classList.add("is-study");
+  mountStudyScreen(app);
 } else {
   document.title = "ikkyoku";
   document.documentElement.classList.add("is-main");

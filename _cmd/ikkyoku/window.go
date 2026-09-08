@@ -54,6 +54,13 @@ const (
 	minGraphWidth      = 320
 	minGraphHeight     = 140
 
+	// 盤の右の列の窓（切り離したとき。2026-09-08）。**縦に長いほうが読める**
+	// ——手順が縦に積まれる面なので、横に広げても余るだけ。
+	defaultSideWidth  = 420
+	defaultSideHeight = 720
+	minSideWidth      = 300
+	minSideHeight     = 240
+
 	maxReasonableSize = 4000
 
 	// 初回にメイン画面を枠の外へ逃がすときの間隔。重なったまま撮ると
@@ -74,6 +81,9 @@ const (
 type appState struct {
 	Frame guide.Window `json:"frame"`
 	Main  guide.Window `json:"main"`
+	// Side は切り離した**盤の右の列**の窓（2026-09-08）。⚠️ **Graph とは別** ——
+	// 片方だけ切り離す使い方が普通なので、位置も別に覚える。
+	Side guide.Window `json:"side"`
 	// Graph は切り離した評価値グラフの窓（2026-09-08）。
 	//
 	// ⚠️ **「切り離しているか」はここには無い**（`config.json` の
@@ -87,6 +97,7 @@ func defaultAppState() appState {
 		Frame: guide.Window{X: unsetPosition, Y: unsetPosition, Width: defaultFrameWidth, Height: defaultFrameHeight},
 		Main:  guide.Window{X: unsetPosition, Y: unsetPosition, Width: defaultMainWidth, Height: defaultMainHeight},
 		Graph: guide.Window{X: unsetPosition, Y: unsetPosition, Width: defaultGraphWidth, Height: defaultGraphHeight},
+		Side:  guide.Window{X: unsetPosition, Y: unsetPosition, Width: defaultSideWidth, Height: defaultSideHeight},
 	}
 }
 
@@ -125,6 +136,9 @@ func loadAppState() appState {
 	// ここで既定に倒すこと。倒さないと**大きさ 0 の窓**が出る。
 	if st.Graph.Width <= 0 || st.Graph.Height <= 0 {
 		st.Graph = def.Graph
+	}
+	if st.Side.Width <= 0 || st.Side.Height <= 0 {
+		st.Side = def.Side
 	}
 	return st
 }

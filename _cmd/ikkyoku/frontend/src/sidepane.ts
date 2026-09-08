@@ -61,6 +61,12 @@ export interface SidePaneHandle {
   cancelBatch(): void;
   // stepping は連続解析が走っているか（**キー操作を横取りしないため**）。
   stepping(): boolean;
+  // setActive は「この面が今使われているか」（2026-09-08）。
+  //
+  // ⚠️ **切り離すと、ドック側のペインは隠れたまま生き続ける。** そのままだと
+  // **両方が連続モードで解析を起こし合う**（互いの解析を打ち切り続ける）ので、
+  // 使われていない側は**自動解析をしない**。
+  setActive(on: boolean): void;
 }
 
 export interface SidePaneOptions {
@@ -221,6 +227,10 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
             <p id="study-move-status" class="note is-caution" hidden></p>
 `;
   const q = <T extends Element>(sel: string) => host.querySelector<T>(sel)!;
+
+  // この面が今使われているか（**切り離すと、ドック側は隠れたまま生き続ける**）。
+  // ⚠️ **false のあいだは自動解析をしないこと** —— 両方が起こし合う。
+  let active = true;
 
   const studyWarnings = q<HTMLUListElement>("#study-warnings");
   const studyMoves = q<HTMLDivElement>("#study-moves");
@@ -1329,6 +1339,11 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
   // ⚠️ **エンジンの寿命は変わらない**（前の解析を止めてから起こし直すだけで、
   // 常駐にはしない。`AnalyzeService.Start` が前の解析を打ち切る）。
   const autoAnalyze = () => {
+    // ⚠️ **使われていない面は手を出さない**（2026-09-08）。切り離すと
+    // ドック側のペインは隠れたまま生きているので、**両方が起こし合う**。
+    if (!active) {
+      return;
+    }
     // ⚠️ **連続解析の最中は手を出さない。** あちらが局面と解析の順番を握って
     // いるので、連続モードが横から起こすと**同じ局面を 2 回起こして片方が
     // 打ち切られる**（打ち切られたほうの done で次の手へ進んでしまう）。
@@ -1577,6 +1592,17 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
     },
     stepping() {
       return batchActive();
+    },
+    setActive(on: boolean) {
+      if (active === on) {
+        return;
+      }
+      active = on;
+      if (!on) {
+        // ⚠️ **走っているものは止めること。** 使われなくなった面が
+        // エンジンを掴んだままだと、切り離した先の解析と取り合う。
+        stopBatch("");
+      }
     },
   };
 }

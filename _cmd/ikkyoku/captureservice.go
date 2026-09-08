@@ -988,6 +988,26 @@ func (s *CaptureService) applyEvalGraphDetached(detached bool) {
 	s.logger.Info("評価値グラフの置き場所を変えました", "detached", detached)
 }
 
+// applyStudyPaneDetached は**盤の右の列**の切り離しを窓に反映する（2026-09-08）。
+//
+// **`applyEvalGraphDetached` と同じ形。揃えておくこと** —— 2 つの窓で作法が違うと、
+// どちらがどうだったかを覚えることになる。
+func (s *CaptureService) applyStudyPaneDetached(detached bool) {
+	if s.wins == nil || s.wins.side == nil {
+		return
+	}
+	if detached {
+		s.wins.side.Show()
+		s.wins.side.Focus()
+	} else {
+		s.wins.side.Hide()
+	}
+	if s.app != nil {
+		s.app.Event.Emit("side:detached", detached)
+	}
+	s.logger.Info("解析の列の置き場所を変えました", "detached", detached)
+}
+
 // maskWindows は撮った画像から、まだ写っている自分のウィンドウを塗り潰す。
 //
 // **メイン画面には `<shogi-board>` が本物の将棋盤を描いている。** 中継の盤より
@@ -1014,6 +1034,7 @@ func (s *CaptureService) maskWindows(img image.Image, disp ikkyoku.Region) {
 	}{
 		{"メイン画面", s.wins.main},
 		{"評価値グラフの窓", s.wins.graph},
+		{"解析の列の窓", s.wins.side},
 	} {
 		if w.win == nil || !w.win.IsVisible() || w.win.IsMinimised() {
 			continue

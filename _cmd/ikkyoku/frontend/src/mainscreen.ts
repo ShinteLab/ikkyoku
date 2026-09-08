@@ -862,6 +862,15 @@ export function mountMainScreen(root: HTMLElement): void {
                  （pointerdown を止める）。 -->
             <button id="study-split-toggle" class="split-toggle" type="button"
                     aria-expanded="true"></button>
+            <!-- 切り離し（2026-09-08）。**別ウィンドウへ出す。**
+                 ⚠️ 畳む（幅 0）とは別物。畳むのは「今は見ない」で、
+                 こちらは別の窓で見る（盤の大きさに効かなくなる）。
+                 ⚠️ 戻す入口はこちらには無い（その窓の「ドックに戻す」と
+                 窓を閉じる操作）。切り離すとこのバーごと消えるので、
+                 ここに戻す口を置いても押せない。 -->
+            <button id="study-split-detach" class="split-toggle is-secondary" type="button"
+                    title="解析の列を別ウィンドウに切り離します（盤の大きさに効かなくなります）"
+                    aria-label="解析の列を切り離す"></button>
           </div>
           <!-- 盤の右の列（2026-08-12 に作り替えた）。**解析のものは全部ここに入る**
                —— 解析の行・エンジンごとの結果・手順。⚠️ **SFEN は盤の下**
@@ -1340,7 +1349,15 @@ export function mountMainScreen(root: HTMLElement): void {
     //
     // **走っている解析（連続解析を含む）も止まる。** タブを移ると止まるのは
     // そういう約束で、**そこまでの評価値は残る**（設計原則3）。
-    if (target !== studyTab && studyTab.classList.contains("is-active")) {
+    // ⚠️ **切り離しているあいだは手放さないこと**（2026-09-08）。エンジンの寿命を
+    // 解析タブに紐づけているのは**そこに解析の面があるから**で、別ウィンドウに
+    // 出しているなら**タブを移っても見えている**（止めると、見ている目の前で
+    // 解析が消える）。窓を閉じればドックに戻るので、そのとき普通に効く。
+    if (
+      sideDetached !== true &&
+      target !== studyTab &&
+      studyTab.classList.contains("is-active")
+    ) {
       // ⚠️ **連続解析も止めること**（側の列が持っている）。
       sidePane.release();
       void AnalyzeService.Release();
@@ -1384,7 +1401,10 @@ export function mountMainScreen(root: HTMLElement): void {
       settleStudySide();
       // **解析タブに来たら（連続モードなら）そのまま解析を始める。**
       // まだ解析していない局面のときだけ動く（止めた解析を勝手に起こし直さない）。
-      sidePane.reveal();
+      // ⚠️ **切り離しているあいだは向こうが持っている**（こちらは眠っている）。
+      if (sideDetached !== true) {
+        sidePane.reveal();
+      }
     }
   };
 
@@ -1787,10 +1807,12 @@ export function mountMainScreen(root: HTMLElement): void {
     // 視点のボタンも盤と一緒（盤が出ていないのに向きだけ変えても意味が無い）。
     studyFlip.hidden = !loaded;
     // 側の列と、その境目のバー。
-    studySide.hidden = !loaded;
+    // ⚠️ **切り離しているあいだは出さないこと**（2026-09-08）。別ウィンドウに
+    // 出ているので、**同じ値を 2 か所に描くことになる**。
+    studySide.hidden = sideDetached === true || !loaded;
     // ⚠️ **縦のスプリットバーも局面があるときだけ出す。** 局面が無いときは
     // 分ける相手（解析の列）が出ていないので、バーだけが宙に浮く。
-    studySplit.hidden = !loaded;
+    studySplit.hidden = sideDetached === true || !loaded;
     // ⚠️ **評価値グラフは切り離しているあいだ出さないこと**（2026-09-08）。
     // 別ウィンドウに出ているので、**同じ値を 2 か所に描くことになる**。
     evalGraphRow.hidden = graphDetached === true || !loaded;
@@ -2307,6 +2329,76 @@ ${st.turnLabel}${n}`;
     applyGraphDetached(!!event.data);
   });
 
+  // ---- 盤の右の列の切り離し（2026-09-08）------------------------------------
+  //
+  // **作りは評価値グラフと同じ**（設定が状態を持ち、切り替えは必ず
+  // `SettingsService.SetStudyPaneDetached` を通る）。**揃えておくこと。**
+  const studySplitDetach = root.querySelector<HTMLButtonElement>("#study-split-detach")!;
+  studySplitDetach.innerHTML = iconMarkup(FiExternalLink);
+
+  let sideDetached: boolean | null = null;
+
+  const applySideDetached = (on: boolean) => {
+    if (sideDetached === on) {
+      return;
+    }
+    sideDetached = on;
+    // ⚠️ **列ごと消すこと**（バーも）。同じ値を 2 か所に描かない。
+    panelStudy.classList.toggle("is-side-detached", on);
+    studySide.hidden = on || studyStage.hidden;
+    studySplit.hidden = on || studyStage.hidden;
+    // ⚠️ **盤の式が読む幅も 0 にすること。** 列が出ていないのに幅を予約したままだと、
+    // **そのぶん盤が小さいまま**になる（何も無い余白ができる）。
+    rawSide(on ? 0 : studySideW);
+    // ⚠️ **使われていない側は自動解析をしないこと**（2026-09-08）。切り離しても
+    // ドック側のペインは隠れたまま生きているので、**両方が起こし合う**。
+    sidePane.setActive(!on);
+    studyBoardUI.relayout();
+    evalGraphUI.relayout();
+    if (!on) {
+      settleStudySide();
+    }
+  };
+
+  studySplitDetach.addEventListener("click", () => {
+    void SettingsService.SetStudyPaneDetached(true);
+  });
+  // ⚠️ **押してもドラッグが始まらないようにする**（畳むトグルと同じ）。
+  studySplitDetach.addEventListener("pointerdown", (e) => e.stopPropagation());
+
+  Events.On("side:detached", (event: { data: boolean }) => {
+    applySideDetached(!!event.data);
+  });
+
+  // ---- 切り離した窓からの知らせ（**盤に効くもの**）--------------------------
+  //
+  // ⚠️ **フロントの `Events.Emit` は Go を経由して全部の窓へ配られる**
+  // （`EmitEvent` → `dispatchEventToWindows`）。ドックしているあいだは
+  // **コールバックで直に渡している**ので、こちらは飛んでこない。
+  Events.On("study:hint", (event: { data: string | null }) => {
+    studyBoardUI.showHint(event.data ?? null);
+  });
+  Events.On("study:scores", (event: { data: EngineScore[] }) => {
+    winrateScores = event.data ?? [];
+    renderWinRate();
+  });
+  // ⚠️ **幕は盤にも被せること** —— 連続解析は 1 手ずつ局面を動かすので、
+  // その最中に盤を触ると自分の操作と取り合う。
+  Events.On("study:busy", (event: { data: { on: boolean; note: string } }) => {
+    batchVeil.hidden = !event.data?.on;
+    batchVeilNote.textContent = event.data?.note ?? "";
+  });
+  // 切り離した窓で色や本数を変えたら、設定タブと折れ線の色も追随させる。
+  Events.On("settings:changed", () => {
+    void (async () => {
+      try {
+        showSettings(await SettingsService.Settings());
+      } catch {
+        /* 読めなくても今の表示のまま（設計原則3）。 */
+      }
+    })();
+  });
+
   // ---- 盤と解析の列の幅（縦のスプリットバー。2026-08-13）--------------------
   //
   // ⚠️ **書き換えるのは `--study-side-min` ただ 1 つ。** 盤の大きさ
@@ -2350,8 +2442,10 @@ ${st.turnLabel}${n}`;
   // ⚠️ **既に盤が縮んでいるときは触らないこと** —— それはユーザーが自分で
   // 列を広げた状態なので、勝手に戻すと設定を奪う。
   const settleStudySide = () => {
-    if (studySideW === 0 || boardW() <= 0) {
-      return; // 畳んでいる / タブが隠れている（測れない）
+    // ⚠️ **切り離しているあいだは触らない**（2026-09-08）。列が出ていないので
+    // 詰める相手が居ない（畳んでいるときと同じ扱い）。
+    if (sideDetached === true || studySideW === 0 || boardW() <= 0) {
+      return; // 切り離し / 畳んでいる / タブが隠れている（測れない）
     }
     // ⚠️ **折り畳みのアニメーション中は測らない。** 盤の幅が動いている最中なので、
     // 二分探索が途中の値を掴んで**でたらめな幅で確定する**。終わったら呼び直す。
@@ -2386,8 +2480,8 @@ ${st.turnLabel}${n}`;
 
   // setStudySideW は幅を変える。**効果が無い方向へは動かさない。**
   const setStudySideW = (px: number) => {
-    if (studySideW === 0 || boardW() <= 0) {
-      return; // 畳んでいるあいだは幅を変えない（戻すのはトグルの仕事）
+    if (sideDetached === true || studySideW === 0 || boardW() <= 0) {
+      return; // 切り離し / 畳んでいるあいだは幅を変えない（戻すのはトグルの仕事）
     }
     const next = Math.max(Math.round(px), STUDY_SIDE_MIN);
     if (next === studySideW) {
@@ -3936,6 +4030,8 @@ ${st.turnLabel}${n}`;
     clickThrough: boolean;
     // 評価値グラフを別ウィンドウに切り離しているか（2026-09-08）。
     evalGraphDetached: boolean;
+    // 盤の右の列を別ウィンドウに切り離しているか（2026-09-08）。
+    studyPaneDetached: boolean;
     path: string;
     training: { enabled: boolean; host: string; port: number; token: string; target: string };
     engines: EngineSettings[] | null;
@@ -3964,6 +4060,7 @@ ${st.turnLabel}${n}`;
     // Go 側は起動時にも `graph:detached` を出すが、**その時点でフロントはまだ
     // 購読していない**ので、起動直後の形はここで決まる。
     applyGraphDetached(!!s.evalGraphDetached);
+    applySideDetached(!!s.studyPaneDetached);
     // ⚠️ **評価値グラフの折れ線の色はここが持つ**（側の列とは別）。
     // 切り離すと側の列は別の窓に居るので、**あちらから引けない**。
     graphColors.clear();

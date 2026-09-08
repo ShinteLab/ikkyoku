@@ -610,6 +610,51 @@ func TestSetEvalGraphDetached(t *testing.T) {
 	}
 }
 
+// TestSetStudyPaneDetached は**盤の右の列**の切り離しを固定する（2026-09-08）。
+//
+// ⚠️ **評価値グラフとは別の設定であること。** 片方だけ切り離す使い方が普通なので、
+// **一方を切り替えたときにもう一方が巻き添えにならない**ことを見ている。
+func TestSetStudyPaneDetached(t *testing.T) {
+	s := newTestSettings(t, nil)
+	var got []bool
+	s.OnStudyPaneDetached = func(v bool) { got = append(got, v) }
+
+	if _, err := s.SetEvalGraphDetached(true); err != nil {
+		t.Fatalf("SetEvalGraphDetached: %v", err)
+	}
+	st, err := s.SetStudyPaneDetached(true)
+	if err != nil {
+		t.Fatalf("SetStudyPaneDetached: %v", err)
+	}
+	if !st.StudyPaneDetached || !st.EvalGraphDetached {
+		t.Errorf("両方立っているはずです: study=%v graph=%v",
+			st.StudyPaneDetached, st.EvalGraphDetached)
+	}
+	if len(got) != 1 || !got[0] {
+		t.Errorf("フックの呼ばれ方 = %v, want [true]", got)
+	}
+
+	// ⚠️ **片方を戻してももう一方は残ること。**
+	st, err = s.SetStudyPaneDetached(false)
+	if err != nil {
+		t.Fatalf("SetStudyPaneDetached(false): %v", err)
+	}
+	if st.StudyPaneDetached {
+		t.Error("戻っていません")
+	}
+	if !st.EvalGraphDetached {
+		t.Error("評価値グラフまで戻っています（別の設定であること）")
+	}
+	cfg, err := ikkyoku.LoadConfig(s.path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.StudyPaneDetached || !cfg.EvalGraphDetached {
+		t.Errorf("保存された値が違います: study=%v graph=%v",
+			cfg.StudyPaneDetached, cfg.EvalGraphDetached)
+	}
+}
+
 // ⚠️ **エンジンが名乗った名前は設定ファイルに残すこと。**
 //
 // 名乗りは**繋がないと分からない**ので、メモリだけで持つとアプリを閉じた時点で

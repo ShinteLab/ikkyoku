@@ -90,6 +90,17 @@ type Config struct {
 	// omitempty を付けていないのは ClickThrough と同じ理由（切ってあること自体を残す）。
 	EvalGraphDetached bool `json:"evalGraphDetached"`
 
+	// StudyPaneDetached は**盤の右の列**（候補手・手順・解析の操作）を
+	// 別ウィンドウに切り離しているか（2026-09-08）。
+	//
+	// **盤の大きさに依存しない大きさで見たい**というのが切り離しの目的
+	// （`--board-size` は右の列の幅を引いている）。⚠️ **評価値グラフとは別の設定**
+	// —— 片方だけ切り離す使い方が普通なので、1 つにまとめない。
+	//
+	// ⚠️ **切り離しているあいだ、メイン画面の列は出さない**（同じ値を 2 か所に
+	// 描かない）。**起動のたびにドックへ戻さない**のも評価値グラフと同じ。
+	StudyPaneDetached bool `json:"studyPaneDetached"`
+
 	// Training は訂正した局面を suteme の学習用サーバへ送る設定。
 	Training TrainingConfig `json:"training"`
 

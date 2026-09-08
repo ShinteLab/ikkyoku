@@ -36,6 +36,9 @@ type AppSettings struct {
 	// 切り替えるのが素直**）。ここに載せてあるのは、**起動時にどちらで始めるかを
 	// フロントが知る必要がある**から。
 	EvalGraphDetached bool `json:"evalGraphDetached"`
+	// StudyPaneDetached は**盤の右の列**を別ウィンドウに切り離しているか
+	// （2026-09-08）。⚠️ **評価値グラフとは別の設定**（片方だけ切り離す使い方が普通）。
+	StudyPaneDetached bool `json:"studyPaneDetached"`
 	// Training は訂正した局面を suteme へ登録する設定。
 	Training TrainingSettings `json:"training"`
 	// Engines は登録した USI エンジンの一覧（登録順）。
@@ -264,6 +267,10 @@ type SettingsService struct {
 	// ⚠️ **SettingsService からウィンドウを直に触らないこと**（持っていない）。
 	OnEvalGraphDetached func(bool)
 
+	// OnStudyPaneDetached は**盤の右の列**の切り離しを切り替えたときに呼ぶ
+	// （`CaptureService.applyStudyPaneDetached`）。
+	OnStudyPaneDetached func(bool)
+
 	// OnClickThrough は「枠の内側で後ろの画面を操作する」を切り替えたときに呼ぶ。
 	// 実体は `CaptureService.applyClickThrough`（枠の HWND を触るのはあちらの仕事）。
 	// ⚠️ **SettingsService から枠を直に触らないこと**（ウィンドウを持っていない）。
@@ -340,6 +347,7 @@ func (s *SettingsService) settings() AppSettings {
 		FitOnStartup:      s.cfg.FitOnStartup,
 		ClickThrough:      s.cfg.ClickThrough,
 		EvalGraphDetached: s.cfg.EvalGraphDetached,
+		StudyPaneDetached: s.cfg.StudyPaneDetached,
 		Training:          trainingSettings(s.cfg.Training),
 		Engines:           engines,
 		EngineColors:      ikkyoku.EngineColors,
@@ -1055,6 +1063,23 @@ func (s *SettingsService) SetEvalGraphDetached(v bool) (AppSettings, error) {
 	}
 	if s.OnEvalGraphDetached != nil {
 		s.OnEvalGraphDetached(v)
+	}
+	return st, nil
+}
+
+// SetStudyPaneDetached は**盤の右の列**の切り離しを切り替えて保存し、**その場で効かせる。**
+//
+// ⚠️ **入口は 2 つある**（解析タブの縦のスプリットバーのトグルと、**その窓を閉じる操作**）。
+// どちらもここを通るので、**設定と窓の状態が食い違わない。**
+func (s *SettingsService) SetStudyPaneDetached(v bool) (AppSettings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st, err := s.save(func(cfg *ikkyoku.Config) { cfg.StudyPaneDetached = v })
+	if err != nil {
+		return st, err
+	}
+	if s.OnStudyPaneDetached != nil {
+		s.OnStudyPaneDetached(v)
 	}
 	return st, nil
 }

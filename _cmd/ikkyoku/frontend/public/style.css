@@ -2122,6 +2122,22 @@ html.is-main #app {
   margin-left: 12px;
 }
 
+/* 解析の列を**別ウィンドウへ切り離した**状態（2026-09-08）。
+   ⚠️ **畳んだ状態（`is-side-collapsed`）とは別。** あちらは列を幅 0 へ縮めて
+   バーを右端に残す（戻す口がバーの上にある）が、こちらは**バーごと消す** ——
+   戻す口は**その窓の中**にあるので、ここに残しても押す相手が居ない。
+   ⚠️ **`--study-side-min` を 0 にするのは JS 側**（`applySideDetached`）。 */
+#panel-study.is-side-detached .study-side,
+#panel-study.is-side-detached #study-split {
+  display: none;
+}
+
+/* ⚠️ **盤の左の余白で中央に寄せる**（畳んだときと同じ 12px。`.board-area` の
+   `gap` を変えたら計算し直すこと）。 */
+#panel-study.is-side-detached #study-board-with-hands {
+  margin-left: 12px;
+}
+
 /* 縦のスプリットバー（2026-08-13）。**盤と、右の解析の列の境目。**
    ⚠️ **幅 8px と .board-area の gap 12px は #panel-study の --board-size の
    横の定数（86px）が見込んでいる。** 変えたらあちらも直すこと。 */
@@ -2199,6 +2215,13 @@ html.is-main #app {
   height: 34px;
 }
 
+/* ⚠️ **縦のバーでは「下へ」ずらすこと**（横のバーは「右へ」）。バーの向きに
+   沿って並べないと、2 つのトグルが重なる。中心を 40px 離してある（隙間 6px）。 */
+.split-bar.is-vertical .split-toggle.is-secondary {
+  left: 50%;
+  top: calc(50% + 40px);
+}
+
 .split-toggle:hover {
   color: #f2f3f5;
   border-color: #5ea0ff;
@@ -2232,6 +2255,41 @@ html.is-main #app {
 
 .split-bar:focus-visible {
   outline: none;
+}
+
+/* 切り離した**盤の右の列**の窓（2026-09-08。`?window=study`）。
+   ⚠️ **中身はドックしたときと同じ**（`.study-side`）。ここで持つのは器だけ。 */
+html.is-study,
+html.is-study body,
+html.is-study #app {
+  height: 100%;
+}
+
+.study-screen {
+  position: relative;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  box-sizing: border-box;
+}
+
+.study-screen-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ⚠️ **窓いっぱいに広げること。** ドック側は盤との取り合いで幅が決まるが、
+   こちらは**窓の大きさがそのまま列の大きさ**になるのが切り離す理由そのもの。 */
+.study-screen > .study-side {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: auto;
+  max-width: none;
+  max-height: none;
 }
 
 /* 切り離した評価値グラフの窓（2026-09-08。`?window=evalgraph`）。

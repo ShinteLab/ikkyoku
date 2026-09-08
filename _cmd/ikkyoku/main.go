@@ -54,10 +54,13 @@ type appWindows struct {
 	// graph は切り離した評価値グラフの窓（2026-09-08）。**閉じてもアプリは
 	// 終わらない**（ドックに戻るだけ）。⚠️ **枠と違って破棄せず隠す**のも同じ。
 	graph *application.WebviewWindow
+	// side は切り離した**盤の右の列**の窓（2026-09-08）。扱いは graph と同じ。
+	side *application.WebviewWindow
 
 	frameGeom *geometryTracker
 	mainGeom  *geometryTracker
 	graphGeom *geometryTracker
+	sideGeom  *geometryTracker
 
 	// mainHasSavedPos は前回終了時の位置を復元したか。復元しているなら初回表示で
 	// 枠の外へ動かさない(ユーザーが決めた位置を上書きしないため)。
@@ -121,19 +124,23 @@ func main() {
 	frame := newFrameWindow(app, state.Frame)
 	main, mainHasSavedPos := newMainWindow(app, state.Main)
 	graph := newGraphWindow(app, state.Graph)
+	side := newSideWindow(app, state.Side)
 
 	wins := &appWindows{
 		frame:           frame,
 		main:            main,
 		graph:           graph,
+		side:            side,
 		frameGeom:       newGeometryTracker("frame", state.Frame, logger),
 		mainGeom:        newGeometryTracker("main", state.Main, logger),
 		graphGeom:       newGeometryTracker("graph", state.Graph, logger),
+		sideGeom:        newGeometryTracker("side", state.Side, logger),
 		mainHasSavedPos: mainHasSavedPos,
 	}
 	wins.frameGeom.attach(frame)
 	wins.mainGeom.attach(main)
 	wins.graphGeom.attach(graph)
+	wins.sideGeom.attach(side)
 	captureSvc.bind(app, wins)
 	// ⚠️ **Wails の口はここで差し込む。** Service 本体は ikkyoku/app にあり
 	// wails3 を import していないので、ダイアログとイベントだけを関数で渡す。
@@ -159,6 +166,7 @@ func main() {
 	// 評価値グラフの切り離し（解析タブのスプリットバーのトグル / グラフ窓を閉じる）。
 	// **窓を出し入れするのは CaptureService**（SettingsService はウィンドウを持たない）。
 	settingsSvc.OnEvalGraphDetached = captureSvc.applyEvalGraphDetached
+	settingsSvc.OnStudyPaneDetached = captureSvc.applyStudyPaneDetached
 	settingsSvc.OnSutemeSource = captureSvc.applyRecognizerSource
 	settingsSvc.OnSutemeDataDir = captureSvc.applyRecognizerDir
 	captureSvc.applyClickThrough(cfg.ClickThrough)
@@ -180,6 +188,7 @@ func main() {
 	registerFrameHooks(app, wins, state.Frame, captureSvc, cfg.FitOnStartup, logger)
 	registerMainHooks(app, wins, state.Main, quit)
 	registerGraphHooks(wins, state.Graph, cfg.EvalGraphDetached, settingsSvc, logger)
+	registerSideHooks(wins, state.Side, cfg.StudyPaneDetached, settingsSvc, logger)
 	registerHotkey(app, captureSvc, logger)
 	registerVisibilityLog(wins, logger)
 	diagSvc.Watch()
@@ -321,6 +330,64 @@ func newGraphWindow(app *application.App, st guide.Window) *application.WebviewW
 	}
 	applyPosition(&opts, st)
 	return app.Window.NewWithOptions(opts)
+}
+
+// newSideWindow は切り離した**盤の右の列**の窓を作る（2026-09-08）。
+//
+// **盤の大きさに依存しない大きさで見たい**というのが切り離しの目的
+// （`--board-size` は右の列の幅を引いている）。
+//
+// ⚠️ **作りはグラフの窓と同じ**（Frameless にしない・AlwaysOnTop も付けない・
+// 常に隠して作る）。**揃えておくこと** —— 2 つの窓で作法が違うと、
+// どちらがどうだったかを覚えることになる。
+func newSideWindow(app *application.App, st guide.Window) *application.WebviewWindow {
+	w, h := safeFallback(st, defaultSideWidth, defaultSideHeight)
+
+	opts := application.WebviewWindowOptions{
+		Hidden:    true,
+		Title:     "解析 - ikkyoku",
+		Width:     w,
+		Height:    h,
+		MinWidth:  minSideWidth,
+		MinHeight: minSideHeight,
+		URL:       "/?window=study",
+	}
+	applyPosition(&opts, st)
+	return app.Window.NewWithOptions(opts)
+}
+
+// registerSideHooks は右の列の窓の位置の復元と、**閉じたらドックに戻す**を仕込む
+// （`registerGraphHooks` と同じ形。**揃えておくこと**）。
+func registerSideHooks(wins *appWindows, st guide.Window, detached bool, settings *ikkyokuapp.SettingsService, logger *slog.Logger) {
+	side := wins.side
+	side.RegisterHook(events.Common.WindowRuntimeReady, func(e *application.WindowEvent) {
+		if st.X != unsetPosition || st.Y != unsetPosition {
+			x, y, w, h := clampToScreen(st, defaultSideWidth, defaultSideHeight)
+			side.SetSize(w, h)
+			side.SetPosition(x, y)
+		}
+		if !detached {
+			return
+		}
+		// ⚠️ **出すのはここ**（`app.Run()` の前の `Show()` は何も起きない。
+		// グラフの窓で踏んだのと同じ罠）。**`Focus()` は呼ばない。**
+		side.Show()
+		// ⚠️ **出せなかったらドックへ戻すこと**（設計原則3）。
+		if !side.IsVisible() {
+			logger.Warn("解析の列の窓を出せませんでした。ドックに戻します")
+			if _, err := settings.SetStudyPaneDetached(false); err != nil {
+				logger.Error("ドックに戻せませんでした", "error", err)
+			}
+		}
+	})
+	side.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
+		e.Cancel()
+		// ⚠️ **窓を直に隠さないこと**（設定も一緒に戻さないと、次の起動で
+		// 中身の見えない窓が出る）。
+		if _, err := settings.SetStudyPaneDetached(false); err != nil {
+			side.Hide()
+		}
+	})
 }
 
 // registerGraphHooks はグラフ窓の位置の復元と、**閉じたらドックに戻す**を仕込む。
@@ -544,6 +611,7 @@ func registerVisibilityLog(wins *appWindows, logger *slog.Logger) {
 	watch("frame", wins.frame)
 	watch("main", wins.main)
 	watch("graph", wins.graph)
+	watch("side", wins.side)
 }
 
 // saveWindowState は枠とメイン画面の位置・サイズを保存する。
@@ -558,6 +626,7 @@ func saveWindowState(wins *appWindows, logger *slog.Logger) {
 		Frame: wins.frameGeom.snapshot(),
 		Main:  wins.mainGeom.snapshot(),
 		Graph: wins.graphGeom.snapshot(),
+		Side:  wins.sideGeom.snapshot(),
 	}
 	if err := saveAppState(st); err != nil {
 		logger.Error("ウィンドウ状態の保存に失敗しました", "error", err)
