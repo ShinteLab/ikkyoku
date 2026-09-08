@@ -1,59 +1,41 @@
-# Welcome to Your New Wails3 Project!
+# ikkyoku（Wails3 アプリ）
 
-Congratulations on generating your Wails3 application! This README will guide you through the next steps to get your project up and running.
+`ikkyoku` のデスクトップアプリ本体。**独立したネストモジュール**（`module ikkyoku`）で、
+ルートの `github.com/ShinteLab/ikkyoku` を `replace` で相対参照している。
 
-## Getting Started
+⚠️ **ここに置くのは「Wails の口が要るもの」だけ。** フロントに公開する Service は
+ルート側の `app/`、ガイド枠の幾何は `guide/` にある。ここに残っているのは
+main・`CaptureService`（ウィンドウと HWND を触る）・ウィンドウ／Win32 まわり。
 
-1. Navigate to your project directory in the terminal.
+## ビルド
 
-2. To run your application in development mode, use the following command:
+```powershell
+npm --prefix frontend install     # 初回のみ
+wails3 generate bindings -ts -i   # ⚠️ クローン直後・worktree では先に必要
+wails3 build                      # frontend ビルド〜bindings 生成〜go build まで一括
+wails3 dev                        # 開発モード
 
-   ```
-   wails3 dev
-   ```
+task model:copy                   # 配布用: suteme/dist → recognize/model
+task build:embed                  # 配布用: 認識器を焼き込んだ exe
+```
 
-   This will start your application and enable hot-reloading for both frontend and backend changes.
+⚠️ **`frontend/bindings/` は生成物で git に入っていない。** クローン直後や
+git worktree では存在しないので、`npm run build` や `tsc` を単独で打つ前に
+一度生成すること（`wails3 build` / `wails3 dev` は自動で生成する）。
 
-3. To build your application for production, use:
+## ウィンドウ（4 枚）
 
-   ```
-   wails3 build
-   ```
+同じフロントを URL クエリで出し分けている（`frontend/src/main.ts`）。
 
-   This will create a production-ready executable in the `build` directory.
+| ウィンドウ | URL | 役割 |
+|---|---|---|
+| 枠 | `/?window=frame` | 盤に重ねる透過ウィンドウ。**「どこを撮るか」の定義そのもの** |
+| メイン画面 | `/?window=main` | アプリ本体（5 タブ）。**閉じるとアプリが終了する** |
+| 評価値グラフ | `/?window=evalgraph` | 解析タブから切り離したグラフ。**閉じるとドックに戻る** |
+| 解析の列 | `/?window=study` | 解析タブから切り離した候補手・手順。同上 |
 
-## Exploring Wails3 Features
+## 設計判断はどこに書いてあるか
 
-Now that you have your project set up, it's time to explore the features that Wails3 offers:
-
-1. **Check out the examples**: The best way to learn is by example. Visit the `examples` directory in the `v3/examples` directory to see various sample applications.
-
-2. **Run an example**: To run any of the examples, navigate to the example's directory and use:
-
-   ```
-   go run .
-   ```
-
-   Note: Some examples may be under development during the alpha phase.
-
-3. **Explore the documentation**: Visit the [Wails3 documentation](https://v3.wails.io/) for in-depth guides and API references.
-
-4. **Join the community**: Have questions or want to share your progress? Join the [Wails Discord](https://discord.gg/JDdSxwjhGf) or visit the [Wails discussions on GitHub](https://github.com/wailsapp/wails/discussions).
-
-## Project Structure
-
-Take a moment to familiarize yourself with your project structure:
-
-- `frontend/`: Contains your frontend code (HTML, CSS, JavaScript/TypeScript)
-- `main.go`: The entry point of your Go backend
-- `app.go`: Define your application structure and methods here
-- `wails.json`: Configuration file for your Wails project
-
-## Next Steps
-
-1. Modify the frontend in the `frontend/` directory to create your desired UI.
-2. Add backend functionality in `main.go`.
-3. Use `wails3 dev` to see your changes in real-time.
-4. When ready, build your application with `wails3 build`.
-
-Happy coding with Wails3! If you encounter any issues or have questions, don't hesitate to consult the documentation or reach out to the Wails community.
+**このディレクトリの詳細は `../../CLAUDE.md` の「GUI アプリ(Wails3)」節。**
+透過・Frameless・キャプチャ領域の決め方・ウィンドウ状態の永続化・ペインの切り離し・
+踏んだ罠（`app.Run()` の前の `Show()` は効かない、など）は全部そちらにまとめてある。
