@@ -74,6 +74,7 @@ import { mountEditor } from "./editor";
 import { mountLibrary } from "./library";
 import { mountFetchCards } from "./fetchcards";
 import { mountEvalPane } from "./evalgraphpane";
+import { mountMoveList } from "./movelist";
 import { mountStudyBoard } from "./study";
 import { openPopup } from "./popup";
 import type { RecognizerStatus } from "../bindings/ikkyoku/models";
@@ -3263,6 +3264,9 @@ export function mountMainScreen(root: HTMLElement): void {
     if (!o?.fromBoard) {
       studyBoardUI.render(st.loaded ? st : null);
     }
+    // ⚠️ **手順は盤と別のモジュールなので、必ずここで描くこと**（2026-09-08）。
+    // `fromBoard` は「盤が自分で描いた」の意味で、**手順は描かれていない。**
+    moveListUI.render(st.loaded ? st : null);
     syncAnalyze();
     // 局面が変わったら点を取り直す（**戻った位置の縦線も動く**）。
     refreshEvalGraph();
@@ -3389,11 +3393,26 @@ export function mountMainScreen(root: HTMLElement): void {
   const studyBoardUI = mountStudyBoard({
     stage: studyStage,
     handSlots: studyHandSlots,
-    movesPanel: studyMoves,
-    // 指したあとの局面は showStudy がそのまま描く（盤・駒台・SFEN・警告）。
+    // 指したあとの局面は showStudy がそのまま描く（盤・駒台・SFEN・警告・手順）。
     onState: (st) => showStudy(st, { fromBoard: true }),
     // 空文字は「理由を消す」（駒を掴み直したときなど）。**出しっぱなしにしないこと** ——
     // 前の操作の理由が残っていると、今の操作が失敗したように見える。
+    onError: (message) => {
+      studyMoveStatus.textContent = message;
+      studyMoveStatus.hidden = message === "";
+    },
+  });
+
+  // 手順（棋譜）のツリービュー（2026-09-08 に `study.ts` から切り出した）。
+  //
+  // ⚠️ **盤とは別のモジュール。** 切り出したのは、**解析の列を別ウィンドウへ
+  // 出せるようにするには、盤の無い窓でも手順が出せる必要がある**から。
+  // ⚠️ **描き直しは `showStudy` の 1 か所から**（盤と手順が食い違わないように）。
+  const moveListUI = mountMoveList({
+    panel: studyMoves,
+    // ⚠️ **盤も一緒に描き直すこと。** 手順を押すと局面が変わるので、
+    // **手順だけ描き直すと盤が前の局面のまま残る。**
+    onState: (st) => showStudy(st),
     onError: (message) => {
       studyMoveStatus.textContent = message;
       studyMoveStatus.hidden = message === "";
@@ -3502,7 +3521,7 @@ export function mountMainScreen(root: HTMLElement): void {
       // **開いたまま積むと手順が読めない** —— 足した手 1 行 +「＋」にして、
       // **候補どうしを隣り合わせて比べられる形**にする。
       // ⚠️ **他の候補は畳み直さないこと**（開いて読んでいる最中に閉じる）。
-      studyBoardUI.foldAdded(got.firstId);
+      moveListUI.foldAdded(got.firstId);
       // ⚠️ **1 手も増えないことがある**（候補が本譜と同じ手順のとき）。
       // **それは失敗ではない**ので、そう分かる文言にする。
       studyMoveStatus.textContent = got.added > 0
