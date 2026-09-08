@@ -1703,6 +1703,13 @@ export function mountMainScreen(root: HTMLElement): void {
   // 届くので順番が入れ替わりうる（十字キーで手を続けて辿ると、古い局面のイベントが
   // 後から届く）。**既に描いた版より新しいときだけ描く**ための番号。
   let studyRev = 0;
+  // 解析タブに局面があるか。
+  //
+  // ⚠️ **他の要素の `hidden` から読まないこと**（2026-09-09 に踏んだ）。
+  // 切り離すと `.study-side` も `#eval-graph-row` も**別の理由で hidden になる**ので、
+  // 片方から読むと**もう片方を戻したときに「局面が無い」と誤読する**
+  // （実際、解析の列を切り離しているとグラフがドックへ戻らなかった）。
+  let studyLoaded = false;
 
   // ---- 盤の周り（勝率バー・対局者・連続解析の幕）----------------------------
   //
@@ -1830,6 +1837,7 @@ export function mountMainScreen(root: HTMLElement): void {
     // ⚠️ **描いた版を控えること。** これが遅れて届いた `study:changed` を弾く鍵。
     studyRev = Math.max(studyRev, st.rev ?? 0);
     const loaded = !!st.loaded;
+    studyLoaded = loaded;
     studyStage.hidden = !loaded;
     studyBoard.hidden = !loaded;
     studyPlaceholder.hidden = loaded;
@@ -2292,7 +2300,7 @@ ${st.turnLabel}${n}`;
     }
     graphDetached = on;
     // ⚠️ **行ごと消すこと**（バーも見出しも）。同じ値を 2 か所に描かない。
-    evalGraphRow.hidden = on || studySide.hidden;
+    evalGraphRow.hidden = on || !studyLoaded;
     // ⚠️ **盤の式が読む値も切り替えること。** 切り離したのに高さが残っていると、
     // **そのぶん盤が小さいまま**になる（何も無い余白ができる）。
     document.documentElement.style.setProperty(
@@ -2345,8 +2353,8 @@ ${st.turnLabel}${n}`;
     sideDetached = on;
     // ⚠️ **列ごと消すこと**（バーも）。同じ値を 2 か所に描かない。
     panelStudy.classList.toggle("is-side-detached", on);
-    studySide.hidden = on || studyStage.hidden;
-    studySplit.hidden = on || studyStage.hidden;
+    studySide.hidden = on || !studyLoaded;
+    studySplit.hidden = on || !studyLoaded;
     // ⚠️ **盤の式が読む幅も 0 にすること。** 列が出ていないのに幅を予約したままだと、
     // **そのぶん盤が小さいまま**になる（何も無い余白ができる）。
     rawSide(on ? 0 : studySideW);
