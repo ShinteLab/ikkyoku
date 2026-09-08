@@ -823,7 +823,26 @@ html.is-main #app {
      ⚠️ **右の列（`.study-side`）の頭打ちには使わないこと** —— あちらが受け持つのは
      `.board-area` の縦いっぱい（＝勝率バーと SFEN も含む）なので、
      **盤の取り分で止めるとそのぶん下に遊びが残る**。あちらは `100%`。 */
-  --board-area-h: calc(100vh - var(--winrate-h) - var(--eval-graph-h) - 72px);
+  /* ⚠️ **グラフを畳んだぶんは、この式から引くこと**（2026-09-08）。
+     `.eval-graph` は `--eval-graph-h` から 38px 詰めた高さで描き、下に 5px の
+     余白を置くので、**行が実際に食う高さは `--eval-graph-h` より 33px 低い**。
+     SFEN の行はその空きに収めてある（「盤は小さくしていない」の実体）。
+
+     ⚠️ **畳むと箱も余白も 0 になるので、空きだけが消えて 33px ぶん溢れる。**
+     `.board-area` は縮まない（`flex: 1 0 auto`）ので、はみ出しはそのまま下の
+     `#eval-graph-row` を押し下げ、**開き直すトグルごと窓の外へ出て押せなくなる**
+     （＝畳んだら二度と開けない）。⚠️ **解析の列も畳むと出る** —— 列を畳むと
+     盤が横の制限から外れて**縦の上限に張り付く**ので、この 33px がそのまま溢れる
+     （列が開いていて盤が横で決まっているうちは、そのぶんが吸収されて出ない）。
+
+     ⚠️ **開いているときの盤の大きさは 1px も変えないこと**（`max()` が 0 を
+     返すので、畳んだときにだけ効く）。
+     ⚠️ **33px は `.eval-graph` の 38px と `margin-bottom` の 5px の差。**
+     どちらかを変えたらここも直すこと（`mainscreen.ts` の `EVAL_GRAPH_CHROME`）。 */
+  --board-area-h: calc(
+    100vh - var(--winrate-h) - var(--eval-graph-h) - 72px -
+      max(0px, 33px - var(--eval-graph-h))
+  );
   --board-size: min(
     var(--board-area-h),
     calc((100vw - var(--study-side-min) - 86px) / 1.4)
