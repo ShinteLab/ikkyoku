@@ -83,7 +83,8 @@ type FetchCard = {
 // cardFromWatch は仮の一覧の 1 件をカードに戻す（再起動後の復元）。
 //
 // ⚠️ **KIF 本文は入っていない。** 復元の時点ではサイトへ取りに行かないので、
-// 中身が要るときはユーザが「更新」を押す（それまで保存も解析もできない）。
+// 中身が要るときは「更新」を押す（保存はそれまでできない）。
+// ⚠️ **解析だけは直行できる** —— 「取り直して解析」が先に取り直す（analyze を参照）。
 const cardFromWatch = (w: WatchEntry): FetchCard => {
   const game: GameDetail = {
     id: "",
@@ -206,24 +207,36 @@ export function mountFetchCards(
   // busyAll は「すべて更新」で回っているあいだ（1 枚ずつ順に取りに行く）。
   let busyAll = false;
 
-  const refresh = async (card: FetchCard) => {
-    busyKeys.add(card.key);
-    render();
+  // fetchInto はサイトから取り直してカードへ反映する（取れたら新しい中身を返す）。
+  //
+  // ⚠️ **busy の出し入れをここでしないこと。** 「更新」からも「解析する」からも
+  // 通るので、塞ぐのは押した側の都合（解析は取り直したあとにまだ続きがある）。
+  const fetchInto = async (card: FetchCard): Promise<GameDetail | null> => {
     let got: GameDetail;
     try {
       // ⚠️ **入力欄からの `Fetch` ではなく `Refresh`。** 取得元が既に分かっているので、
       // 判別も中継ページ → 棋譜 ID の往復も挟まらない。
       got = await KifuService.Refresh(card.game.source, card.game.sourceId);
-      mergeCard(got);
     } catch (err) {
       patch(card.key, { error: `取り直せませんでした: ${String(err)}`, notice: "" });
-      return;
-    } finally {
-      busyKeys.delete(card.key);
+      return null;
     }
+    mergeCard(got);
     render();
     // 取り直した内容で仮の一覧も最新化する（手数・終局が一覧に出る）。
     await remember(got);
+    return got;
+  };
+
+  const refresh = async (card: FetchCard) => {
+    busyKeys.add(card.key);
+    render();
+    try {
+      await fetchInto(card);
+    } finally {
+      busyKeys.delete(card.key);
+      render();
+    }
   };
 
   // refreshAll は並んでいるカードを順に取り直す（復元した直後に使う）。
@@ -274,12 +287,32 @@ export function mountFetchCards(
     }
   };
 
+  // analyze はカードの棋譜を解析タブへ送る。
+  //
+  // ⚠️ **本文が無ければ、先にサイトから取り直す**（2026-09-09。
+  // 後述の「復元したカード」がそれ）。以前は「更新」を押すまで
+  // 押せなくしていたが、**押せなかった理由は「送っても必ず失敗する」だけ**で、
+  // 取り直してから送ればその理由は消える。人に「更新 → 解析」と
+  // 2 回押させる意味が無い。
+  //
+  // ⚠️ **本文があるカードでは取り直しに行かないこと。** 送るのは
+  // 「いま画面に出ているこの内容」という約束（保存と同じ）で、
+  // 最新手を追うのは「更新」か解析タブの「再読み込み」の役目。
   const analyze = async (card: FetchCard) => {
     busyKeys.add(card.key);
     render();
     try {
+      let game = card.game;
+      if (isRestored(card)) {
+        const got = await fetchInto(card);
+        // ⚠️ **取れなかったら解析へ進まない。** 理由は fetchInto がカードに
+        // 出しているので、ここで書き直すと「送れなかった」で上書きして
+        // **取得に失敗したのか送れなかったのかが分からなくなる**。
+        if (!got) return;
+        game = got;
+      }
       // ⚠️ **棚を通さない。** 取得しただけの棋譜も解析できる（二系統を残す方針）。
-      opts.onAnalyze(await KifuService.SendToStudyGame(card.game));
+      opts.onAnalyze(await KifuService.SendToStudyGame(game));
     } catch (err) {
       patch(card.key, { error: `解析タブへ送れませんでした: ${String(err)}`, notice: "" });
     } finally {
@@ -391,7 +424,8 @@ export function mountFetchCards(
       hint.textContent =
         "前回のカードを復元しました。棋譜本文はまだありません" +
         "（覚えているのは「どのサイトのどの棋譜か」だけです）。" +
-        "「更新」を押すとサイトから取り直し、解析・保存ができるようになります。";
+        "「取り直して解析」ならそのまま進めます。" +
+        "棚に入れるときは先に「更新」を押してください。";
       box.append(hint);
     } else if (!game.finished) {
       // ⚠️ **未終局の注意は出すこと。** 保存は画面の内容をそのまま書き込むので、
@@ -422,19 +456,29 @@ export function mountFetchCards(
     const analyzeBtn = document.createElement("button");
     analyzeBtn.type = "button";
     analyzeBtn.className = "ghost-btn is-primary";
-    analyzeBtn.textContent = "解析する";
-    // ⚠️ **復元しただけのカードは押せないこと。** 本文が無いので送っても必ず
-    // 失敗する（`SendToStudyGame` が断る）。**理由をボタンに出す。**
+    // ⚠️ **復元しただけのカードでも押せる**（2026-09-09。押したときに
+    // サイトから取り直してから送る）。⚠️ **そのときはラベルを変えること** ——
+    // 外へ取りに行くので数秒かかる。**同じ「解析する」のままにしないこと。**
+    analyzeBtn.textContent = fetching && restored
+      ? "取り直しています…"
+      : restored
+        ? "取り直して解析"
+        : "解析する";
     analyzeBtn.title = restored
-      ? "先に「更新」でサイトから取り直してください（棋譜本文がまだありません）"
-      : "この内容を解析タブで開きます（棚には入りません）";
-    analyzeBtn.disabled = busy || restored;
+      ? "サイトから取り直してから解析タブで開きます（棚には入りません）"
+      : "この内容を解析タブで開きます（棚には入りません。最新手は「更新」してから）";
+    // ⚠️ **`sourceId` を見るのは取り直すときだけ。** 本文があるカードは
+    // 送るだけなので、取得元の ID は要らない。
+    analyzeBtn.disabled = busy || (restored && !game.sourceId);
     analyzeBtn.addEventListener("click", () => void analyze(card));
 
     const saveBtn = document.createElement("button");
     saveBtn.type = "button";
     saveBtn.className = "ghost-btn";
     saveBtn.textContent = saved ? "保存し直す" : "この内容を保存";
+    // ⚠️ **保存は「解析する」と違って、取り直しに行かない。** 保存は
+    // **画面の内容をそのまま書き込む**操作だから（上の「未終局の注意」と同根）で、
+    // 本文の無いカードは押せないままにしてある。
     saveBtn.title = restored
       ? "先に「更新」でサイトから取り直してください（棋譜本文がまだありません）"
       : "いま表示している内容を棚（棋譜タブ）に書き込みます";
