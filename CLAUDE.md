@@ -86,12 +86,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### この CLAUDE.md の外に置いてあるもの
 
-**このファイルは「構想と、コードを触るときの制約」だけを持つ。** 手順と記録は外に出した
-（2026-09-09。それまで 6,183 行あった）。
+**このファイルは「構想と、Phase ごとの決定」だけを持つ。** **コードを触るときの制約は
+そのパッケージの CLAUDE.md**、**手順はスキル**、**記録は `_docs/`**（2026-09-09 に
+分けた。それまで 1 枚に 6,183 行あった）。
+
+⚠️ **どこに何を書くかの基準はこれ。迷ったらこの 3 分類に当てること:**
+
+| | 何を置くか | どう読まれるか |
+|---|---|---|
+| **CLAUDE.md（このファイル）** | 構想・設計原則・**Phase ごとの「なぜそう決めたか」**・依存の向き | いつも |
+| **パッケージの CLAUDE.md** | **「⚠️ …しないこと」** —— 破ると壊れる制約 | そのディレクトリを触ったとき |
+| **スキル** | **手順**（ビルドする・実機で確かめる） | その作業を始めたとき |
+| **`_docs/`** | **記録**（もう判断は済んでいる調査・経緯） | 掘るときだけ |
 
 | 置き場所 | 中身 | 引くとき |
 |---|---|---|
-| スキル `ikkyoku-verify` | **実機で何を押すか**（未検証チェックリスト・確認済みの記録・確かめ方） | 実装が終わって実機で触るとき |
+| スキル **`ikkyoku-build`** | **ビルド・bindings の生成・配布ビルド（焼き込み）・worktree のジャンクション** | ビルドが通らないとき / 配るとき |
+| スキル **`ikkyoku-verify`** | **実機で何を押すか**（未検証チェックリスト・確認済みの記録・確かめ方） | 実装が終わって実機で触るとき |
 | スキル `wails3` | Wails3 全般。⚠️ **alpha2.117 前提なので beta.16 と食い違う** | Wails の API で詰まったとき |
 | **各パッケージの `CLAUDE.md`** | **そのコードを触るときの制約**（`recognize` / `position` / `analyze` / `app` / `guide` / `piecefont` / `training` / `legal` / `usi` / `_cmd/ikkyoku`）。**テストが何の歯止めか**も、それぞれの「テスト」節 | そのディレクトリを触るとき（自動で読まれる） |
 | `_cmd/ikkyoku/frontend/src/CLAUDE.md` | **画面（フロント）の地図と、崩さないこと 12 箇条** | フロントを触るとき（自動で読まれる） |
@@ -528,13 +539,13 @@ StudyService ──> position.Study ──> position.Position.ApplyMove   手を
   「詰将棋のような『正常でない局面』も確定できること」の節を読むこと）
 - **実機のエンジン（やねうら王・水匠）で通す。** 経路はテストで通っているが、
   **実物では確かめていない**（評価関数の読み込み待ち・独自の option・終了の作法）
-- ~~**エンジンを切り替えて比べる。**~~ **入れた**（2026-08-11。「エンジンの登録」の節）。
+- ~~**エンジンを切り替えて比べる。**~~ **入れた**（2026-08-11。`app/CLAUDE.md` の「エンジンの登録」）。
   登録は一覧で、「解析に使う」を付けたものが同時に走る。**評価値を先手視点に固定して
   あるのがここでも効く** —— エンジンが違っても符号の意味が変わらないので並べて読める。
   **残っているのは「どこが食い違っているか」を目立たせる表示**（今は素朴に縦に並べる
   だけ）で、**合成はしないこと**（平均も多数決も取らない。設計思想の側の話）
 - ~~**エンジンの option を画面から設定する。**~~ **入れた**（2026-08-15。
-  「エンジンの option を画面から設定する」の節）。「接続を確認」で宣言を控え、
+  `app/CLAUDE.md` の「エンジンの option を画面から設定する」）。「接続を確認」で宣言を控え、
   型どおりの入力欄を出す。**残っているのは button を押せるようにすること**で、
   それには**繋がっているエンジン**が要る（今は解析タブに居るあいだしか生きていない）
 
@@ -621,32 +632,13 @@ kicho の `.\check-consumers.ps1` が見る（⚠️ **`go.work` は replace よ
 
 `replace` は go.mod からの相対パスなので、`ikkyoku/.claude/worktrees/<名前>/` で作業すると
 `../suteme` が `ikkyoku/.claude/worktrees/suteme` を指してしまい解決できない。
-**worktree 側に合わせて replace を書き換えないこと**（本来の配置で壊れる）。
-代わりに、ジャンクションを置いてパスを成立させる:
-
-```powershell
-$w = 'D:\Go\Projects\shinte\ikkyoku\.claude\worktrees'
-New-Item -ItemType Junction -Path (Join-Path $w 'suteme') -Target 'D:\Go\Projects\shinte\suteme'
-New-Item -ItemType Junction -Path (Join-Path $w 'core')   -Target 'D:\Go\Projects\shinte\core'
-New-Item -ItemType Junction -Path (Join-Path $w 'engine') -Target 'D:\Go\Projects\shinte\engine'
-New-Item -ItemType Junction -Path (Join-Path $w 'kicho')  -Target 'D:\Go\Projects\shinte\kicho'
-```
-
-`.gitignore` が `.*` を無視するので git には見えない。
-`_cmd/ikkyoku` 側の `../../../suteme` も同じジャンクションで解決される。
+⚠️ **worktree 側に合わせて replace を書き換えないこと**（本来の配置で壊れる）。
+代わりに**ジャンクションを置いてパスを成立させる** —— 手順は
+スキル `ikkyoku-build`（⚠️ **消すときに `Remove-Item -Recurse` を使わない**ことも
+そちら。参照先の中身まで消しうる）。
 
 ⚠️ **worktree には `frontend/node_modules` も `frontend/bindings` も無い**
-（どちらも `.gitignore` 済み）。フロントを触る前に 2 つとも用意すること:
-
-```powershell
-cd _cmd\ikkyoku
-npm --prefix frontend install
-wails3 generate bindings -ts -i
-```
-
-**消すときは `Remove-Item -Recurse` を使わないこと**（参照先の中身まで消しうる）。
-`[System.IO.Directory]::Delete($path, $false)` で reparse point だけを消す。
-
+（どちらも `.gitignore` 済み）。**フロントを触る前に 2 つとも用意すること。**
 ## 設計制約（必ず守ること）
 
 冒頭の「絶対に壊してはいけない設計原則」がプロジェクト全体の話。ここはコードを書くときの話。
@@ -737,49 +729,14 @@ Service は `ikkyoku/app`、枠の幾何は `ikkyoku/guide`、画面は
 - ⚠️ **チェックリストを CLAUDE.md に戻さないこと。** 読む場面が実機確認のときだけなのに、
   **実装のたびに増える**ので放っておくと元の 772 行に戻る
 
-### コマンド
+### コマンド — **スキル `ikkyoku-build`**
 
-```powershell
-cd ikkyoku\_cmd\ikkyoku
-npm --prefix frontend install         # 初回のみ
-wails3 generate bindings -ts -i       # ⚠️ クローン直後にも要る（下記）／Service・Model を変えたら必ず
-wails3 dev                            # 開発モード
-wails3 build                          # frontend ビルド〜bindings 生成〜go build まで一括
-go build -o bin\ikkyoku.exe .         # Go だけを素早く確認したいとき(frontend/dist が要る)
-
-task model:copy                       # 配布用: suteme/dist → recognize/model
-task build:embed                      # 配布用: 認識器を焼き込んだ exe(model:copy 込み)
-```
-
-- ⚠️ **`frontend/bindings/` は生成物で、git に入っていない**（`.gitignore` 済み）。
-  **クローン直後・worktree を作った直後は存在しない**ので、
-  **`npm run build` や `tsc` を打つ前に一度生成すること。**
-
-  忘れると `Cannot find module '../bindings/...'`（TS2307）が延々と出る。
-  ⚠️ **パスの間違いと区別が付きにくい** —— 2026-09-04 に Service を `ikkyoku/app` へ
-  移して import 先が `bindings/ikkyoku-app` から
-  `bindings/github.com/ShinteLab/ikkyoku/app` などに変わったので、
-  **同じエラーが「生成していない」でも「パスが古い」でも出る**。
-  **まず生成してから疑うこと。**
-
-  - **`wails3 build` / `wails3 dev` は自動で生成する**（`build/Taskfile.yml` の
-    `build:frontend` が `generate:bindings` に依存している）。手で打つ必要があるのは
-    **`npm run build` / `npx tsc` を単独で走らせるとき**だけ
-  - **生成は決定論的。** bindings を丸ごと消して `wails3 generate bindings -ts -i` を
-    打つと**バイト単位で同じものが戻る**ことを確認済み（2026-09-04）。
-    消えていても慌てて git から戻さないこと
-- `wails3 generate bindings` は Taskfile(`build/Taskfile.yml` の `generate:bindings`)と
-  同じ `-ts -i` を付けること(wails3 skill pitfalls.md 12 の「フラグの食い違いで
-  `wails3 dev` の 1 回目だけ失敗する」問題を避けるため)
-  - ⚠️ **Taskfile 側は `-clean=true` も付けている**（生成前に消す）。手で打つときは
-    付かないので、**パッケージを移動・改名したときは古いディレクトリが残る**
-    （実際 `bindings/ikkyoku-app/` が残った）。**移動したら手で消すこと**
-- **配る exe は `task build:embed`。** 認識器を焼き込むので、`suteme` のリポジトリが
-  無い環境でもそのまま動く（「認識器の読み込み元は 3 通り」の節）。
-  ⚠️ **`wails3 build` は焼き込まない**（タグが付かない）
-- `Taskfile.yml` の `includes` から `ios`/`android` を外してある(デスクトップ専用のため。
-  `build/ios`・`build/android`・`build/docker` ディレクトリも削除済み)
-
+**ビルド・bindings の生成・配布ビルドの手順はスキルに移した**（2026-09-09）。
+⚠️ **`frontend/bindings/` は生成物で git に入っていない**ので、
+**クローン直後・worktree を作った直後は `wails3 generate bindings -ts -i` が要る**
+（忘れると `Cannot find module '../bindings/...'` が延々と出て、
+**パスの間違いと区別が付かない**）。⚠️ **配る exe は `task build:embed`**
+（`wails3 build` は認識器を焼き込まない）。
 ## アーキテクチャ
 
 - **ルートパッケージ（`ikkyoku`）はライブラリとして完結させる。** GUI 固有の関心事
@@ -789,27 +746,26 @@ task build:embed                      # 配布用: 認識器を焼き込んだ e
   goroutine を起動し、`RegisterHotKey` のメッセージループを回す。呼び出し側
   （このツール）が追加でスレッド管理をする必要はない（現状 GUI 側のホットキー登録は
   Wails 標準の `app.GlobalShortcut` を使っており、この仕組み自体は直接は呼んでいない。
-  「ホットキー」節を参照）
+  `_cmd/ikkyoku/CLAUDE.md` の「ホットキー」を参照）
 
-## よく使うコマンド
+## よく使うコマンド — **スキル `ikkyoku-build`**
 
 ```powershell
 cd ikkyoku
-go build ./...                          # app / guide / position / analyze ...（_cmd はアンダースコア始まりで対象外）
+go build ./...      # app / guide / position / analyze / recognize / legal / piecefont / training / usi
 go vet ./...
 go test ./...
 ```
 
-`_cmd/ikkyoku/`（Wails3 GUI アプリ）は独立したネストモジュールなので、上記の
-`./...` には含まれない。⚠️ **ただし中身は 5 ファイル・2,373 行まで減った**（2026-09-04）——
-Service は `app/`、枠の幾何は `guide/` にあるので、**普段直すのは `./...` の側**。ビルド・確認は「GUI アプリ(Wails3)」節のコマンドを使うこと。
+⚠️ **`_cmd/ikkyoku`（Wails3 アプリ）は独立したネストモジュールなので `./...` に
+含まれない**（7 ファイル・2,745 行。**普段直すのは `./...` の側**）。
+**bindings の生成・frontend の npm・配布ビルド（焼き込み）・worktree の
+ジャンクションはスキル `ikkyoku-build`。**
 
-**`go mod tidy` の実行後は require 行が消えていないか確認すること**
-（親 `CLAUDE.md` に書かれている `_cmd` 配下が `go build ./...` の走査対象外になる落とし穴）。
-現状はルートパッケージ自体が `screenshot` と `hotkey` の両方を使っているため、
-`_cmd` 側だけが依存する形にはなっていない。この構成を崩すとき（`_cmd` 専用の依存を
-追加するとき）は特に注意すること。
-
+⚠️ **`go mod tidy` の後は require 行が消えていないか確認すること。** `_cmd` 配下は
+`go build ./...` の走査対象外なので、**そこだけが必要とする依存は消される**。
+**今は該当が無い** —— ルートパッケージ自体が `screenshot` と `hotkey` の両方を
+使っているため。**この構成を崩すとき（`_cmd` 専用の依存を足すとき）に効く。**
 ## テスト方針
 
 画面キャプチャそのもの（`Capture`）はテストしない（実行環境の画面に依存するため）。
@@ -859,3 +815,9 @@ Service は `app/`、枠の幾何は `guide/` にあるので、**普段直す�
 親ディレクトリの `../CLAUDE.md` に準じる。実装は Sonnet サブエージェントに委譲し、
 メイン側は計画・指示・レビューに徹する運用。ドキュメント（README.md / CLAUDE.md）は
 日本語で書く。コード中のコメントも日本語。
+
+⚠️ **書き足すときは、上の「この CLAUDE.md の外に置いてあるもの」の 3 分類に当てること。**
+**制約（「⚠️ …しないこと」）はそのパッケージの CLAUDE.md へ** —— ここに積むと、
+また 1 枚で 6,000 行になる（2026-09-09 に 4 段階で分けた）。
+⚠️ **同じ事実を 2 か所に書かないこと。** 親に置くのはポインタだけで、
+写すと片方だけ古くなる（実際に段 2 で 4 か所やって段 3 で直した）。

@@ -14,3 +14,4 @@ _dist
 !.claude/skills/
 .claude/skills/*
 !.claude/skills/ikkyoku-verify/
+!.claude/skills/ikkyoku-build/
