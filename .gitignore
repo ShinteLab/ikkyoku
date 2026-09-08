@@ -4,3 +4,13 @@ _dist
 .*
 !.gitignore
 !.github
+
+# .claude 自体は無視のままだが、**プロジェクトのスキルは追跡する。**
+# ⚠️ 実機確認のチェックリストが入っており、追跡していないとクローンで消える。
+# ⚠️ 段階的に開けること（`.*` で除外したディレクトリの中は、親を開けないと戻せない）。
+# ⚠️ `.claude/worktrees/` を巻き込まないこと（git worktree の置き場）。
+!.claude/
+.claude/*
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/ikkyoku-verify/
