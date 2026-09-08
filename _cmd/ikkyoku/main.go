@@ -162,9 +162,11 @@ func main() {
 	settingsSvc.OnSutemeSource = captureSvc.applyRecognizerSource
 	settingsSvc.OnSutemeDataDir = captureSvc.applyRecognizerDir
 	captureSvc.applyClickThrough(cfg.ClickThrough)
-	// ⚠️ **切り離したまま終了したら、次の起動でも切り離した形で始める**
-	// （画面の組み方の好みなので、毎回ドックへ戻さない）。
-	captureSvc.applyEvalGraphDetached(cfg.EvalGraphDetached)
+	// ⚠️ **評価値グラフの窓をここで出さないこと**（2026-09-08 に踏んだ）。
+	// **`app.Run()` の前の `Show()` は何もしない**（Wails の `WebviewWindow.Show` は
+	// `globalApplication.impl == nil` で即 return する）ので、**設定は「切り離し」の
+	// ままなのに窓が出ず、グラフがどこにも無い**という状態になる。
+	// 出すのは窓自身の `WindowRuntimeReady`（`registerGraphHooks`）。
 
 	// 終了の入口は 2 つ（メイン画面を閉じる / 枠のメニューの「終了」）。
 	// **後始末はこの 1 本に寄せる**（保存の経路を 1 本にしてあるのと同じ理由）。
@@ -177,7 +179,7 @@ func main() {
 
 	registerFrameHooks(app, wins, state.Frame, captureSvc, cfg.FitOnStartup, logger)
 	registerMainHooks(app, wins, state.Main, quit)
-	registerGraphHooks(wins, state.Graph, settingsSvc)
+	registerGraphHooks(wins, state.Graph, cfg.EvalGraphDetached, settingsSvc, logger)
 	registerHotkey(app, captureSvc, logger)
 	registerVisibilityLog(wins, logger)
 	diagSvc.Watch()
@@ -331,15 +333,34 @@ func newGraphWindow(app *application.App, st guide.Window) *application.WebviewW
 // ⚠️ **設定の側も戻すこと。** 窓だけ隠して設定が「切り離している」のままだと、
 // **次の起動で中身の見えない窓が出る**。だから `SetEvalGraphDetached(false)` を
 // 通す（そこから `applyEvalGraphDetached` が呼ばれて、メイン画面へも知らせが行く）。
-func registerGraphHooks(wins *appWindows, st guide.Window, settings *ikkyokuapp.SettingsService) {
+func registerGraphHooks(wins *appWindows, st guide.Window, detached bool, settings *ikkyokuapp.SettingsService, logger *slog.Logger) {
 	graph := wins.graph
-	if st.X != unsetPosition || st.Y != unsetPosition {
-		graph.RegisterHook(events.Common.WindowRuntimeReady, func(e *application.WindowEvent) {
+	graph.RegisterHook(events.Common.WindowRuntimeReady, func(e *application.WindowEvent) {
+		if st.X != unsetPosition || st.Y != unsetPosition {
 			x, y, w, h := clampToScreen(st, defaultGraphWidth, defaultGraphHeight)
 			graph.SetSize(w, h)
 			graph.SetPosition(x, y)
-		})
-	}
+		}
+		if !detached {
+			return
+		}
+		// ⚠️ **切り離したまま終了したら、次の起動でも出すこと。**
+		// ⚠️ **出すのはここ**（`app.Run()` の前に `Show()` を呼んでも何も起きない。
+		// 2026-09-08 に踏んだ —— 設定は「切り離し」のままなのに窓が出ず、
+		// **グラフがどこにも無い**状態になった）。
+		// ⚠️ **`Focus()` は呼ばないこと** —— 起動直後にメイン画面から
+		// フォーカスを奪う（ユーザーが押した結果ではないので、前に出す理由が無い）。
+		graph.Show()
+		// ⚠️ **出せなかったらドックへ戻すこと**（設計原則3）。窓が出ないまま
+		// 設定だけ「切り離し」で残ると、**グラフがどこにも無いうえ戻す入口も無い**
+		// （戻す口はその窓の中にある）。
+		if !graph.IsVisible() {
+			logger.Warn("評価値グラフの窓を出せませんでした。ドックに戻します")
+			if _, err := settings.SetEvalGraphDetached(false); err != nil {
+				logger.Error("ドックに戻せませんでした", "error", err)
+			}
+		}
+	})
 	graph.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
 		e.Cancel()
 		// ⚠️ **窓を直に隠さないこと。** ここを通せば設定も一緒に戻り、
