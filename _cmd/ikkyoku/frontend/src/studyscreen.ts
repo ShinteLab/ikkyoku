@@ -64,13 +64,32 @@ export function mountStudyScreen(root: HTMLElement) {
   // （マウントし終わるまで中身は無いが、呼ばれるのはそのあと）。
   let pane: SidePaneHandle;
 
+  // 最後に描いた状態の版（`StudyState.rev`）。
+  //
+  // ⚠️ **メイン画面と同じ形にすること**（あちらの `studyRev`）。`study:changed` は
+  // **メソッドの戻り値とは別の経路**で届くので、**順番が入れ替わりうる。**
+  //
+  // ⚠️ **捨てないと連続解析が一気に走り抜ける**（2026-09-09 に踏んだ）。古い局面が
+  // 後から届くと、側の列は「局面が変わった」と読んで
+  // **走っている解析を `AnalyzeService.Stop()` で打ち切る** —— 打ち切られた解析も
+  // `analyze:done` を出すので、**連続解析はそれを「1 手ぶん終わった」と読んで
+  // 次の手へ進む**。これが 1 手ごとに起きると、手数ぶんが数秒で流れる。
+  // ⚠️ **戻り値で描いた版も控えること** —— 控えないと、同じ状態を
+  // **戻り値とイベントの 2 回**描くことになる（描き直しが 2 倍になるだけでなく、
+  // 上の食い違いの窓が 1 手ごとに開く）。
+  let studyRev = 0;
+  const showStudy = (st: StudyState | null) => {
+    studyRev = Math.max(studyRev, st?.rev ?? 0);
+    pane.render(st);
+  };
+
   pane = mountSidePane({
     host: q<HTMLElement>("#study-side"),
     // ⚠️ **窓のときだけ置く**（ドック側に戻す相手は居ない）。
     action: dock,
     // 手順の操作で局面が変わった。**盤は別の窓**なので、ここで描くのは自分だけ
     // （盤は `study:changed` を受けて自分で追随する）。
-    onState: (st) => pane.render(st),
+    onState: (st) => showStudy(st),
     // 候補手を選んだ → **盤の矢印**。窓をまたぐ唯一の「見せるだけ」の連動。
     onHint: (usi) => void Events.Emit("study:hint", usi),
     // 勝率バーは盤の上にある（＝別の窓）。
@@ -104,8 +123,14 @@ export function mountStudyScreen(root: HTMLElement) {
   //
   // ⚠️ **局面は持たない。** どちらの窓から押しても変わるのは Go 側の 1 つの手順で、
   // **両方の窓が同じイベントで追随する。**
+  //
+  // ⚠️ **版が古いイベントは捨てること**（メイン画面と同じ。上の `studyRev`）。
   Events.On("study:changed", (event: { data: StudyState }) => {
-    pane.render(event.data ?? null);
+    const st = event.data;
+    if (!st || (st.rev ?? 0) <= studyRev) {
+      return;
+    }
+    showStudy(st);
   });
 
   const load = () => {
@@ -117,7 +142,7 @@ export function mountStudyScreen(root: HTMLElement) {
         // 読めなくても既定の色と本数で動く（設計原則3）。
       }
       try {
-        pane.render(await StudyService.State());
+        showStudy(await StudyService.State());
       } catch {
         /* 局面が取れなければ空のまま。 */
       }

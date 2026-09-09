@@ -1556,7 +1556,13 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
         // 採り直した・手を進めたので、前の評価値は今の盤の値ではなくなった。
         // ⚠️ **走っているなら止めること** —— 表示を消すだけだと、**もう誰も
         // 読まない局面のためにエンジンのプロセスが生き続ける。**
-        if (analyzeRunning) {
+        //
+        // ⚠️ **使われていない面からは止めないこと**（2026-09-09）。`Stop` は
+        // **今走っているものを止める**（世代を選べない）ので、切り離して隠れた側が
+        // 持っている「走っている」を鵜呑みにすると、**切り離した先の解析を
+        // 打ち切る**。打ち切られた解析も `analyze:done` を出すため、
+        // **向こうの連続解析はそれを 1 手ぶんと読んで次へ進む。**
+        if (analyzeRunning && active) {
           void AnalyzeService.Stop();
         }
         clearAnalyzeResult();
