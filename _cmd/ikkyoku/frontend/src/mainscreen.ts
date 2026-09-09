@@ -1804,18 +1804,38 @@ export function mountMainScreen(root: HTMLElement): void {
   // ⚠️ **解析は止めない。** 消えるのは帯だけで、候補手も評価値も右の列には
   // 今までどおり出る（**見たくないものだけを消す**）。
   //
-  // ⚠️ **盤の大きさは変わらない。** 1 行目には対局者名が残るので、帯を消しても
-  // 空くのは数 px しかない。`--board-size` の引き算（`--winrate-h`）は
-  // **触らないこと** —— 引く量だけ減らすと、名前のぶん盤が縦にはみ出す。
+  // ⚠️ **帯と対局者名は別々に消せる**（2026-09-10。1 行目に並んでいる 2 つ）。
+  // **帯だけ消して名前は残す**（誰の対局かは見ていたい）も、**両方消す**
+  // （盤を大きくしたい）も、どちらも普通の使い方なので 1 つにまとめない。
   let winrateHidden = false;
+  let playersHidden = false;
 
-  // applyWinRateBar は**画面だけ**に効かせる（保存は呼び出し側）。
+  // applyStudyTopRow は**盤の上の 1 行**（帯・対局者名）の出し入れ。
+  // **画面だけに効かせる**（保存は呼び出し側）。
   //
-  // ⚠️ **`syncStudyChrome` と条件を揃えること。** 帯が出るのは
-  // 「局面があって、かつ隠していない」ときだけで、**判断は 2 か所にある**。
-  const applyWinRateBar = (hidden: boolean) => {
-    winrateHidden = hidden;
-    winrateRow.hidden = hidden || !studyLoaded;
+  // ⚠️ **出す条件をここ 1 か所にまとめてあること。** 「局面がある」と
+  // 「隠していない」の掛け算なので、`syncStudyChrome` からもここを呼ぶ ——
+  // 2 か所に書くと、**隠したまま別の局面を読み込んだ瞬間に戻る**。
+  //
+  // ⚠️ **盤の取り分（`--winrate-h`）を返すのは、行が空になったときだけ。**
+  // 片方でも出ているなら 1 行目は残るので、引く量だけ減らすと**そのぶん盤が
+  // 縦にはみ出す**（対局者名は 24px あり、帯の 34px とほとんど変わらない）。
+  const applyStudyTopRow = () => {
+    winrateRow.hidden = winrateHidden || !studyLoaded;
+    playerNames.black.hidden = playersHidden || !studyLoaded;
+    playerNames.white.hidden = playersHidden || !studyLoaded;
+    // ⚠️ **`studyLoaded` は見ないこと。** 局面が無いあいだも行の高さは
+    // 予約したままにする（出たり消えたりすると盤ごと上下に動く）。
+    const empty = winrateHidden && playersHidden;
+    if (panelStudy.classList.contains("is-toprow-empty") === empty) {
+      return;
+    }
+    panelStudy.classList.toggle("is-toprow-empty", empty);
+    // 盤の大きさが変わったので、重ねたグリッドと横の遊びを取り直す
+    // （評価値グラフの切り離しと同じ後始末）。
+    studyBoardUI.relayout();
+    evalGraphUI.relayout();
+    settleStudySide();
   };
 
   // 解析タブの**空いているところ**（盤・駒台・帯・右の列のどれでもない黒地）の
@@ -1829,17 +1849,28 @@ export function mountMainScreen(root: HTMLElement): void {
   const openBoardMenu = (x: number, y: number) => {
     openPopup(x, y, {
       label: "盤の表示",
+      // ⚠️ **1 つにまとめないこと**（2026-09-10）。**帯だけ消して名前は残す**
+      // 使い方があるので、独立したチェック 2 つにしてある。
       items: [
         {
-          label: "評価値バー表示",
+          label: "評価値バー",
           checked: !winrateHidden,
           onPick: () => {
-            const hide = !winrateHidden;
+            winrateHidden = !winrateHidden;
             // **先に画面へ効かせる**（押した手応えを保存の往復まで待たせない）。
-            applyWinRateBar(hide);
+            applyStudyTopRow();
             // ⚠️ **設定に残すこと** —— 画面の組み方の好みなので、次の起動でも
             // 同じ形で始まってほしい（切り離しと同じ扱い）。
-            void SettingsService.SetHideWinRateBar(hide);
+            void SettingsService.SetHideWinRateBar(winrateHidden);
+          },
+        },
+        {
+          label: "対局者名",
+          checked: !playersHidden,
+          onPick: () => {
+            playersHidden = !playersHidden;
+            applyStudyTopRow();
+            void SettingsService.SetHidePlayerNames(playersHidden);
           },
         },
       ],
@@ -1881,11 +1912,11 @@ export function mountMainScreen(root: HTMLElement): void {
   // ⚠️ **まだ結果が無くても枠は出す。** 出たり消えたりすると盤が上下に動くうえ、
   // 勝率バーは盤の**上**なので、動くと盤ごと押し下げる。
   const syncStudyChrome = (loaded: boolean) => {
-    // ⚠️ **隠してあるなら局面があっても出さない**（盤の右クリックの
-    // 「評価値バー表示」。`applyWinRateBar` と条件を揃えること）。
-    winrateRow.hidden = !loaded || winrateHidden;
-    playerNames.black.hidden = !loaded;
-    playerNames.white.hidden = !loaded;
+    // ⚠️ **盤の上の 1 行（帯・対局者名）は `applyStudyTopRow` に任せること。**
+    // 「隠してあるなら局面があっても出さない」の判断を 2 か所に書くと、
+    // **隠したまま別の局面を読み込んだ瞬間に戻る**（`studyLoaded` は
+    // 呼び出し元が先に入れてある）。
+    applyStudyTopRow();
     // 視点のボタンも盤と一緒（盤が出ていないのに向きだけ変えても意味が無い）。
     studyFlip.hidden = !loaded;
     // 側の列と、その境目のバー。
@@ -4158,8 +4189,10 @@ ${st.turnLabel}${n}`;
     evalGraphDetached: boolean;
     // 盤の右の列を別ウィンドウに切り離しているか（2026-09-08）。
     studyPaneDetached: boolean;
-    // 勝率バー（評価値バー）を隠しているか（2026-09-10。盤の右クリック）。
+    // 勝率バー（評価値バー）を隠しているか（2026-09-10。黒地の右クリック）。
     hideWinRateBar: boolean;
+    // 対局者名を隠しているか（2026-09-10。⚠️ **帯とは別の設定**）。
+    hidePlayerNames: boolean;
     path: string;
     training: { enabled: boolean; host: string; port: number; token: string; target: string };
     engines: EngineSettings[] | null;
@@ -4189,9 +4222,11 @@ ${st.turnLabel}${n}`;
     // 購読していない**ので、起動直後の形はここで決まる。
     applyGraphDetached(!!s.evalGraphDetached);
     applySideDetached(!!s.studyPaneDetached);
-    // ⚠️ **勝率バーの表示も設定から受け取る**（2026-09-10）。切り替えは盤の
-    // 右クリックだが、**起動直後にどちらで始まるかはここで決まる。**
-    applyWinRateBar(!!s.hideWinRateBar);
+    // ⚠️ **盤の上の 1 行の出し入れも設定から受け取る**（2026-09-10）。切り替えは
+    // 黒地の右クリックだが、**起動直後にどちらで始まるかはここで決まる。**
+    winrateHidden = !!s.hideWinRateBar;
+    playersHidden = !!s.hidePlayerNames;
+    applyStudyTopRow();
     // ⚠️ **評価値グラフの折れ線の色はここが持つ**（側の列とは別）。
     // 切り離すと側の列は別の窓に居るので、**あちらから引けない**。
     graphColors.clear();

@@ -703,6 +703,51 @@ func TestSetHideWinRateBar(t *testing.T) {
 	}
 }
 
+// TestSetHidePlayerNames は対局者名の表示を固定する（2026-09-10）。
+//
+// ⚠️ **一番の要点は「勝率バーとは別の設定であること」。** 帯だけ消して名前は
+// 残す使い方も、両方消して盤を大きくする使い方も普通にあるので、
+// **片方を切り替えたときにもう片方を巻き添えにしない。**
+func TestSetHidePlayerNames(t *testing.T) {
+	s := newTestSettings(t, nil)
+
+	if s.Settings().HidePlayerNames {
+		t.Error("既定が「隠す」になっています（設定を触っていないのに名前が出ません）")
+	}
+
+	if _, err := s.SetHideWinRateBar(true); err != nil {
+		t.Fatalf("SetHideWinRateBar: %v", err)
+	}
+	st, err := s.SetHidePlayerNames(true)
+	if err != nil {
+		t.Fatalf("SetHidePlayerNames: %v", err)
+	}
+	if !st.HidePlayerNames || !st.HideWinRateBar {
+		t.Errorf("両方立っているはずです: names=%v bar=%v",
+			st.HidePlayerNames, st.HideWinRateBar)
+	}
+
+	// ⚠️ **片方を戻してももう一方は残ること。**
+	st, err = s.SetHidePlayerNames(false)
+	if err != nil {
+		t.Fatalf("SetHidePlayerNames(false): %v", err)
+	}
+	if st.HidePlayerNames {
+		t.Error("戻っていません")
+	}
+	if !st.HideWinRateBar {
+		t.Error("勝率バーまで戻っています（別の設定であること）")
+	}
+	cfg, err := ikkyoku.LoadConfig(s.path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.HidePlayerNames || !cfg.HideWinRateBar {
+		t.Errorf("保存された値が違います: names=%v bar=%v",
+			cfg.HidePlayerNames, cfg.HideWinRateBar)
+	}
+}
+
 // ⚠️ **エンジンが名乗った名前は設定ファイルに残すこと。**
 //
 // 名乗りは**繋がないと分からない**ので、メモリだけで持つとアプリを閉じた時点で

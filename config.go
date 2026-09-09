@@ -118,6 +118,20 @@ type Config struct {
 	// （EvalGraphDetached と同じ扱い）。
 	HideWinRateBar bool `json:"hideWinRateBar"`
 
+	// HidePlayerNames は解析タブの**対局者名を隠しているか**（2026-09-10）。
+	// 切り替えるのは勝率バーと同じ**解析タブの黒地の右クリック**。
+	//
+	// ⚠️ **勝率バーとは別の設定**（切り離しの 2 つと同じ理由）。
+	// **帯だけ消して名前は残す**（誰の対局かは見ていたい）も、
+	// **両方消す**（盤を大きくしたい）も、どちらも普通の使い方。
+	//
+	// ⚠️ **両方隠したときだけ、盤の上の 1 行そのものが消える**
+	// （`--winrate-h` を返して盤が 34px 大きくなる）。片方でも出ているなら
+	// 行は残るので、**盤の大きさは変わらない。**
+	//
+	// ⚠️ `HideWinRateBar` と同じく**「隠しているか」で持つこと。**
+	HidePlayerNames bool `json:"hidePlayerNames"`
+
 	// Training は訂正した局面を suteme の学習用サーバへ送る設定。
 	Training TrainingConfig `json:"training"`
 

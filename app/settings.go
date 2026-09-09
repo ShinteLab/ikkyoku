@@ -47,6 +47,9 @@ type AppSettings struct {
 	// その場で切り替えるほうが素直。ここに載せてあるのは、**起動時に
 	// どちらで始めるかをフロントが知る必要がある**から。
 	HideWinRateBar bool `json:"hideWinRateBar"`
+	// HidePlayerNames は解析タブの**対局者名を隠しているか**（2026-09-10）。
+	// ⚠️ **勝率バーとは別の設定**（帯だけ消して名前は残す使い方が普通）。
+	HidePlayerNames bool `json:"hidePlayerNames"`
 	// Training は訂正した局面を suteme へ登録する設定。
 	Training TrainingSettings `json:"training"`
 	// Engines は登録した USI エンジンの一覧（登録順）。
@@ -357,6 +360,7 @@ func (s *SettingsService) settings() AppSettings {
 		EvalGraphDetached: s.cfg.EvalGraphDetached,
 		StudyPaneDetached: s.cfg.StudyPaneDetached,
 		HideWinRateBar:    s.cfg.HideWinRateBar,
+		HidePlayerNames:   s.cfg.HidePlayerNames,
 		Training:          trainingSettings(s.cfg.Training),
 		Engines:           engines,
 		EngineColors:      ikkyoku.EngineColors,
@@ -1102,6 +1106,17 @@ func (s *SettingsService) SetHideWinRateBar(v bool) (AppSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.save(func(cfg *ikkyoku.Config) { cfg.HideWinRateBar = v })
+}
+
+// SetHidePlayerNames は解析タブの対局者名の表示を切り替えて保存する。
+//
+// ⚠️ **勝率バーとは別の設定**（`SetHideWinRateBar`）。**片方を切り替えても
+// もう片方を巻き添えにしないこと** —— 帯だけ消して名前は残す使い方も、
+// 両方消して盤を大きくする使い方も、どちらも普通にある。
+func (s *SettingsService) SetHidePlayerNames(v bool) (AppSettings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.save(func(cfg *ikkyoku.Config) { cfg.HidePlayerNames = v })
 }
 
 // SetSutemeSource は認識器の読み込み元を切り替えて保存し、**その場で読み直す。**
