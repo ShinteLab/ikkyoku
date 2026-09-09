@@ -112,6 +112,37 @@ export function mountStudyScreen(root: HTMLElement) {
     },
   });
 
+  // ⚠️ **隠れているあいだは「使われていない面」**（2026-09-09 に踏んだ）。
+  //
+  // **この窓は切り離していなくても作られている**（`Hidden: true` で作って、
+  // 切り離したときに `Show()` するだけ。破棄しないのは位置と大きさを失わないため）。
+  // つまり**中身は最初から動いていて、`study:changed` も届いている。**
+  //
+  // 何もしないと、**連続モード（既定で入）がここでも解析を起こす** ——
+  // 手を 1 手進めるたびに**メイン画面とこの窓の両方が `AnalyzeService.Start` を呼び、
+  // 互いの解析を打ち切り合う。** 連続解析では 1 手ごとにこれが起きるので、
+  // **打ち切られた `analyze:done` で次の手へ進んで一気に走り抜け**、
+  // 局面の違う探索が重なって、そのうち噛み合わなくなる。
+  //
+  // ⚠️ **既定は「使われていない」に倒すこと。** 設定が届く前に 1 手進んだだけでも
+  // 上が起きるので、**出ていると分かってから起こす。**
+  pane.setActive(false);
+
+  // ⚠️ **見るのは「切り離しているか」の 1 つだけ。** `document.hidden` を条件に
+  // 足さないこと —— 窓が他の窓に隠れただけでも下りることがあり、
+  // **見ている目の前で連続解析が黙って止まる**（`setActive(false)` は止める）。
+  // 切り離していないあいだ、この窓は `Hide()` されているので条件はこれで足りる。
+  const applyActive = (detached: boolean) => {
+    pane.setActive(detached);
+  };
+  // ⚠️ **切り離しの状態を持っているのは設定**（`Config.StudyPaneDetached`）。
+  // Go 側が切り替えるたびに知らせてくるので、ここで作らないこと。
+  let sideDetached = false;
+  Events.On("side:detached", (event: { data: boolean }) => {
+    sideDetached = !!event.data;
+    applyActive(sideDetached);
+  });
+
   q<HTMLButtonElement>("#batch-veil-cancel").addEventListener("click", () => pane.cancelBatch());
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && !veil.hidden) {
@@ -138,6 +169,11 @@ export function mountStudyScreen(root: HTMLElement) {
       try {
         const s = await SettingsService.Settings();
         pane.setEngines(s.engines ?? [], s.engineColors ?? [], s.analyzeSeconds);
+        // ⚠️ **起動直後の形は設定から読むこと。** Go 側は起動時にも
+        // `side:detached` を出すが、**その時点でこの窓はまだ購読していない**
+        // （グラフの窓で踏んだのと同じ罠）。
+        sideDetached = !!s.studyPaneDetached;
+        applyActive(sideDetached);
       } catch {
         // 読めなくても既定の色と本数で動く（設計原則3）。
       }
