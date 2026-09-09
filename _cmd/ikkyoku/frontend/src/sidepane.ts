@@ -1049,6 +1049,17 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
   let batchNext = -1;
   // 次へ進んでいる最中か（done はエンジンの数だけ届くので、二重に進めない）。
   let batchStepping = false;
+  // 連続解析が結果を待っている解析の世代（`analyzeSeq` の写し）。
+  //
+  // ⚠️ **自分が起こした世代の done でだけ次へ進むこと**（2026-09-09）。
+  // 世代を見ないと、**別の窓が起こした解析の done**でも進んでしまう。
+  let batchSeq = -1;
+  // 結果が返ってこないのを見切るタイマー。
+  //
+  // ⚠️ **これが無いと黙って止まる。** done が 1 通でも迷子になると
+  // （世代が入れ替わった・エンジンが応えない）**幕が出たまま何も起きなくなり、
+  // 止める以外にできることが無くなる。**
+  let batchWatch = 0;
   // 今の経路の節点 id（`StudyState.line`）。**連続解析が次に進む先はここから取る。**
   //
   // ⚠️ **手数から `GoTo` の引数を作らないこと** —— 枝が入ってからは
@@ -1186,6 +1197,29 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
     }
   };
 
+  // startBatchWatch は「1 手ぶんの結果が返ってこない」を見切る。
+  //
+  // ⚠️ **頼んだ秒数より十分長く取ること** —— エンジンの起動（評価関数の読み込み）は
+  // 数秒かかることがあり、**そこで見切ると起動の遅いエンジンでは 1 手も進まない。**
+  const startBatchWatch = () => {
+    stopBatchWatch();
+    const limit = (batchSeconds() * 2 + 30) * 1000;
+    batchWatch = window.setTimeout(() => {
+      if (!batchActive()) {
+        return;
+      }
+      stopBatch("連続解析を止めました: 1 手ぶんの結果が返ってきません（エンジンが応えていないか、解析が別のものに入れ替わっています）");
+      void AnalyzeService.Stop();
+    }, limit);
+  };
+
+  const stopBatchWatch = () => {
+    if (batchWatch) {
+      window.clearTimeout(batchWatch);
+      batchWatch = 0;
+    }
+  };
+
   // 走っているエンジンが残っているか。**1 つ終わっただけでは解析は終わらない。**
   const syncAnalyzeRunning = () => {
     analyzeRunning = [...engineCards.values()].some((c) => c.pending);
@@ -1194,7 +1228,10 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
     }
     syncAnalyzeButton();
     // ⚠️ **全部終わってから次の手へ**（上の ⚠️）。
-    if (!analyzeRunning && batchActive()) {
+    // ⚠️ **自分が起こした世代でなければ進まないこと**（2026-09-09）。別の窓が
+    // 起こした解析の done で進むと、**まだ考えていない局面を置き去りにして
+    // 手数ぶんが数秒で流れる。**
+    if (!analyzeRunning && batchActive() && analyzeSeq === batchSeq) {
       void batchStep();
     }
   };
@@ -1204,6 +1241,10 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
     batchLast = -1;
     batchNext = -1;
     batchStepping = false;
+    batchSeq = -1;
+    // ⚠️ **見切りのタイマーも消すこと**（残すと、止めたあとに幕の文言だけ
+    // 書き換わる）。
+    stopBatchWatch();
     // ⚠️ **残り時間の更新を止めること**（残すと、幕を畳んだあとも動き続ける）。
     stopBatchTick();
     batchEndAt = 0;
@@ -1239,6 +1280,9 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
       // あちらは「まだ解析していない局面なら」という条件で動くので、
       // **連続モードが切ってあると 1 手目で止まる。**
       await startAnalyze();
+      // ⚠️ **待つ世代を控えること。** これと違う世代の done では進まない。
+      batchSeq = analyzeSeq;
+      startBatchWatch();
       analyzeMeta.textContent = `連続解析: ${n}〜${batchLast}手目のうち ${n}手目`;
       // ⚠️ **幕にも出すこと。** 下の行は幕越しで読みにくいので、
       // **どこまで進んだか**が分からないと、止めるかどうかを判断できない。
@@ -1411,6 +1455,17 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
     card.reused = !!event.data.reused;
     showEngineName(card, event.data.engineName ?? "");
     showAnalyzeProgress(card, event.data.progress);
+    // ⚠️ **考える時間を使い切る前に止められていたら、連続解析は進まずに止まる**
+    // （2026-09-09）。打ち切られた解析も done を出す（設計原則3: そこまでの
+    // 評価値は残る）ので、**これを見ないと「1 手ぶん終わった」と読んで次へ進み、
+    // 手数ぶんが数秒で流れる。**
+    // ⚠️ **黙って止めないこと** —— 何が起きたのか分からないと直しようがない。
+    if (event.data.interrupted && batchActive() && event.data.seq === batchSeq) {
+      stopBatch(
+        "連続解析を止めました: 解析が考える時間を使い切る前に打ち切られました" +
+          "（別の窓やタブで解析を起こしていないか確認してください）",
+      );
+    }
     // ⚠️ **1 つ終わっただけでは解析は終わらない**（他のエンジンはまだ読んでいる）。
     syncAnalyzeRunning();
     // **その手の点はこれで確定する**（打ち切ったときも done は来る。設計原則3）。

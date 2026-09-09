@@ -61,6 +61,15 @@ export interface AnalyzeProgress {
 // 解析の結末（analyze:done のみ）。**起動にかかった時間は done でしか分からない。**
 export interface AnalyzeDone extends AnalyzeProgress {
   startupMs: number;
+  // interrupted は**考える時間を使い切る前に外から止められた**か。
+  //
+  // ⚠️ **「打ち切られた」一般ではない。** 時間切れも `stop` を送って終わるので、
+  // それと区別できるように Go 側が**頼んだ秒数に届いたか**で判断している
+  // （`AnalyzeProgress.Interrupted`）。**フロントで計算し直さないこと。**
+  //
+  // ⚠️ **連続解析はこれを見て止まる。** 打ち切られた解析も done を出す
+  // （設計原則3）ので、これを見ないと**「1 手ぶん終わった」と読んで次へ進む。**
+  interrupted: boolean;
   // ⚠️ **接続を使い回したか。** `startupMs` が 0 のとき、「起動が速かった」のか
   // 「払っていない」のかはこれでしか区別できない。
   reused: boolean;

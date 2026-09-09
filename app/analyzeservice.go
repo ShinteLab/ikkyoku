@@ -365,6 +365,19 @@ func engineOptions(declared []coreusi.Option) []ikkyoku.EngineOption {
 // （`client.HandshakeTimeout`）より長めに取る。
 const engineConnectTimeout = 30 * time.Second
 
+// cancelGrace は**前の解析が畳まれるのを待つ上限**（`Start`）。
+//
+// ⚠️ **無制限に待たないこと。** `stop` に応えないエンジンが居ると、そこで
+// 「解析」を押しても何も起きないアプリになる。見切ったら重なったまま始める。
+const cancelGrace = 3 * time.Second
+
+// interruptSlack は「頼んだ秒数を使い切った」と見なす遊び（`Interrupted`）。
+//
+// **打ち切りを送るのはこちら**（`go infinite` + `stop`）なので、往復のぶんだけ
+// 頼んだ秒数より手前で終わる。⚠️ **狭くしすぎないこと** —— 普通に考え切った
+// 解析まで「外から止められた」と読むと、**連続解析が 1 手目で止まる。**
+const interruptSlack = 500 * time.Millisecond
+
 // EventEmitter はフロントへイベントを流す口。
 type EventEmitter func(name string, data any)
 
@@ -397,6 +410,21 @@ type AnalyzeProgress struct {
 	// **`StartupMS` が 0 の理由がこれ。** 「速かった」と「払っていない」を
 	// 画面で区別するために要る。
 	Reused bool `json:"reused"`
+	// Interrupted は**考える時間を使い切る前に外から止められた**か（done のときだけ）。
+	//
+	// ⚠️ **「打ち切られた」（`Stopped`）とは違う。** 時間切れも `stop` を送って
+	// 終わるので、あちらは**普通に考え切ったときも立つ**。ここが立つのは
+	// **頼んだ秒数に届いていない**ときだけで、原因は外から来た `Stop` か、
+	// **別の解析が始まって世代ごと打ち切られた**か。
+	//
+	// ⚠️ **連続解析はこれを見て止まる**（`sidepane.ts`）。打ち切られた解析も
+	// `analyze:done` を出す（設計原則3: そこまでの評価値は残る）ので、
+	// **これが無いと「1 手ぶん終わった」と読んで次の手へ進み、手数ぶんが
+	// 数秒で流れる**（2026-09-09 に踏んだ）。
+	//
+	// ⚠️ **「無制限」（`Movetime` が 0）では立たない** —— 止めて終わるのが
+	// 普通の終わり方なので、区別のしようが無い。
+	Interrupted bool `json:"interrupted"`
 }
 
 // AnalyzeFailure は解析が失敗したことの通知。
@@ -455,12 +483,33 @@ func (s *AnalyzeService) Start(seconds int) (AnalyzeState, error) {
 		return AnalyzeState{}, fmt.Errorf("解析に使うエンジンが 1 つも選ばれていません（設定タブで選んでください）")
 	}
 
+	// 走っているものがあれば打ち切る。
+	//
+	// ⚠️ **畳まれるまで待つこと**（2026-09-09。以前は待っていなかった）。
+	// 待たないと、**前の世代の `runOne` が `runMu` を掴んだまま**新しい世代が
+	// 積み上がり、1 つの接続に対して**局面の違う探索が何本も並ぶ**。
+	// フロント側は世代で捨てるので画面は破綻しないが、**エンジンは前の局面を
+	// 読み続けたまま次の `position` を待つ**ことになり、連続解析では
+	// 「他の手も同時に解析している」「そのうち止まる」という形で出る。
+	//
+	// ⚠️ **待ちは有界にすること。** 行儀の悪いエンジンが `bestmove` を返さないと
+	// ここで止まる（`client.Session` の猶予も含めて `cancelGrace` で見切る）。
+	// **見切ったら諦めて始める** —— 始められないより、重なるほうがまし（設計原則3）。
 	s.mu.Lock()
-	// 走っているものがあれば打ち切る。**待たない**（前の探索は自分で畳んで
-	// analyze:done を出すが、seq が古いのでフロントが捨てる）。
-	if s.cancel != nil {
-		s.cancel()
+	prev, prevCancel := s.done, s.cancel
+	s.mu.Unlock()
+	if prevCancel != nil {
+		prevCancel()
 	}
+	if prev != nil {
+		select {
+		case <-prev:
+		case <-time.After(cancelGrace):
+			s.logger.Warn("前の解析が畳まれるのを待ちきれませんでした。重なったまま始めます")
+		}
+	}
+
+	s.mu.Lock()
 	s.seq++
 	seq := s.seq
 	ctx, cancel := context.WithCancel(context.Background())
@@ -570,7 +619,26 @@ func (s *AnalyzeService) runOne(
 	s.emit("analyze:done", AnalyzeProgress{
 		Seq: seq, EngineID: entry.ID, EngineName: res.Engine,
 		Progress: res.Progress, Done: true, StartupMS: res.StartupMS, Reused: res.Reused,
+		Interrupted: interruptedRun(opt.Movetime, res.Progress.ElapsedMS, res.Stopped),
 	})
+}
+
+// interruptedRun は**考える時間を使い切る前に外から止められたか**を返す。
+//
+// ⚠️ **`stopped` だけでは区別できない。** 時間切れもこちらから `stop` を送って
+// 終わるので、**普通に考え切ったときも立つ**。見るのは**頼んだ秒数に届いたか。**
+//
+// ⚠️ **`stopped` が false なら常に false** —— エンジンが自分で `bestmove` を
+// 返したとき（詰み・固定深さのエンジン）は、早く終わっても**正常な終わり方**。
+// ここを落とすと、**詰みの局面で連続解析が止まる。**
+//
+// ⚠️ **「無制限」（movetime が 0）では判断しない。** 止めて終わるのが普通の
+// 終わり方なので、区別のしようが無い。
+func interruptedRun(movetime time.Duration, elapsedMS int64, stopped bool) bool {
+	if movetime <= 0 || !stopped {
+		return false
+	}
+	return elapsedMS+interruptSlack.Milliseconds() < movetime.Milliseconds()
 }
 
 // Stop は走っている解析を打ち切る。**打ち切っても評価値は出る**ので、
