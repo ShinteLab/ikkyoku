@@ -49,6 +49,19 @@ export function mountGraphScreen(root: HTMLElement) {
       </div>
       <div id="eval-graph" class="eval-graph"
            title="押すとその局面に戻ります（手順は消えません）。横にドラッグするとその範囲に絞ります"></div>
+      <!-- 連続解析のあいだ被せる幕。⚠️ **この窓にも要る**（2026-09-09 に踏んだ）——
+           ⚠️ template literal の中なので、コメントにバッククォートを使わないこと
+           （文字列がそこで切れる）。
+           **点を押すと GoTo が飛ぶ**ので、1 手ずつ局面を動かしている最中に
+           押されると**自分の操作と連続解析が同じ局面を取り合って壊れる。**
+           ⚠️ **止める口を中に置くこと**（幕は下を全部塞ぐ。ここには「停止」も
+           手順も無いので、出口が無いと窓を閉じるしかなくなる）。 -->
+      <div id="batch-veil" class="veil" hidden>
+        <div class="veil-box">
+          <p id="batch-veil-note" class="veil-note">連続解析中…</p>
+          <button id="batch-veil-cancel" class="veil-btn" type="button">解析をキャンセル</button>
+        </div>
+      </div>
     </div>
   `;
 
@@ -109,6 +122,30 @@ export function mountGraphScreen(root: HTMLElement) {
     if (!document.hidden) {
       pane.relayout();
       refresh();
+    }
+  });
+
+  // ---- 連続解析の幕 --------------------------------------------------------
+  //
+  // ⚠️ **状態は持たない。** 走っているかを知っているのは**解析の列**（`sidepane.ts`）
+  // なので、そちらが `study:busy` で知らせてくる。**ここで数えないこと。**
+  // ⚠️ **出しているのは「今使われている側の列」だけ**（ドックならメイン画面、
+  // 切り離していればその窓）。隠れているほうも配ると、**1 手ごとに幕が瞬く。**
+  const veil = q<HTMLElement>("#batch-veil");
+  const veilNote = q<HTMLElement>("#batch-veil-note");
+  Events.On("study:busy", (event: { data: { on: boolean; note: string } }) => {
+    veil.hidden = !event.data?.on;
+    veilNote.textContent = event.data?.note ?? "";
+  });
+  // ⚠️ **止めるのは持ち主に頼むこと**（`study:cancel`）。連続解析を持っているのは
+  // 解析の列で、**この窓は状態を持たない**。直に `AnalyzeService.Stop()` を呼ぶと、
+  // 今の 1 手が止まるだけで**次の手が始まる**（止めたのに止まらない）。
+  const cancel = q<HTMLButtonElement>("#batch-veil-cancel");
+  cancel.addEventListener("click", () => void Events.Emit("study:cancel", null));
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !veil.hidden) {
+      e.preventDefault();
+      void Events.Emit("study:cancel", null);
     }
   });
 

@@ -2292,6 +2292,9 @@ html.is-graph #app {
 }
 
 .graph-screen {
+  /* 連続解析の幕（`.veil`）の基準。⚠️ **窓ごと被せること** —— 点を押すと
+     `GoTo` が飛ぶので、**連続解析の最中に押されると局面を取り合う。** */
+  position: relative;
   height: 100%;
   display: flex;
   flex-direction: column;

@@ -2082,9 +2082,16 @@ ${st.turnLabel}${n}`;
     },
     // 連続解析の幕。⚠️ **盤も塞ぐこと**（1 手ずつ動かしている最中に触られると、
     // 自分の操作と連続解析が同じ局面を取り合う）。
+    // ⚠️ **評価値グラフの窓にも知らせること**（2026-09-09 に踏んだ）。あちらは
+    // **点を押すと `GoTo` が飛ぶ**ので、塞がないと連続解析と局面を取り合う。
+    // ⚠️ **配るのは「この列が使われているとき」だけ**（切り離していれば向こうが
+    // 配る）。両方が配ると、**1 手ごとに幕が瞬く。**
     onBusy: (on, note) => {
       batchVeil.hidden = !on;
       batchVeilNote.textContent = note;
+      if (sideDetached !== true) {
+        void Events.Emit("study:busy", { on, note });
+      }
     },
     // 設定を書き換えたら設定タブも描き直す（色・候補手の本数）。
     onSettings: (st) => showSettings(st),
@@ -2094,6 +2101,16 @@ ${st.turnLabel}${n}`;
   });
   // ⚠️ **幕の出口はここ**（幕は下を全部塞ぐので、側の列の「停止」も押せない）。
   batchVeilCancel.addEventListener("click", () => sidePane.cancelBatch());
+  // ⚠️ **別の窓の幕からも止められること**（`study:cancel`）。評価値グラフの窓には
+  // 「停止」も手順も無いので、**出口がここに繋がっていないと窓を閉じるしかない。**
+  // ⚠️ **持ち主だけが応じること** —— 切り離しているあいだ連続解析を持っているのは
+  // 向こうの窓で、こちらが応じても止める相手が居ない。
+  Events.On("study:cancel", () => {
+    if (sideDetached === true) {
+      return;
+    }
+    sidePane.cancelBatch();
+  });
 
   // 評価値グラフ（2026-08-12）。**手順の 1 手ごとの最善手の評価値**を折れ線にする。
   //

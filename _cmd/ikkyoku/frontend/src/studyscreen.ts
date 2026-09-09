@@ -166,6 +166,14 @@ export function mountStudyScreen(root: HTMLElement) {
   });
 
   q<HTMLButtonElement>("#batch-veil-cancel").addEventListener("click", () => pane.cancelBatch());
+  // ⚠️ **別の窓の幕からも止められること**（`study:cancel`。評価値グラフの窓）。
+  // ⚠️ **持ち主だけが応じること**（連続解析を持っているのは使われている側の列）。
+  Events.On("study:cancel", () => {
+    if (!sideDetached) {
+      return;
+    }
+    pane.cancelBatch();
+  });
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && !veil.hidden) {
       pane.cancelBatch();
