@@ -64,6 +64,29 @@ export function mountStudyScreen(root: HTMLElement) {
   // （マウントし終わるまで中身は無いが、呼ばれるのはそのあと）。
   let pane: SidePaneHandle;
 
+  // この窓が今使われているか（＝**切り離しているか**）。
+  //
+  // ⚠️ **窓は切り離していなくても作られている**（`Hidden: true` で作って
+  // `Show()` するだけ）ので、**中身は起動した時点から動いている。**
+  // ⚠️ **使われていないあいだは窓をまたぐ知らせを出さないこと**（下の `tell`）。
+  let sideDetached = false;
+
+  // tell は**盤に効く知らせ**をメイン画面へ送る（`Events.Emit` は Go を経由して
+  // 全部の窓へ配られる）。
+  //
+  // ⚠️ **使われていないあいだは出さないこと**（2026-09-09 に踏んだ）。隠れている
+  // この窓にも `study:changed` は届き、描き直しのたびに `onBusy` が呼ばれる ——
+  // そこで `study:busy { on: false }` を出していたので、**連続解析の最中に
+  // メイン画面の幕が 1 手ごとに消えてはまた出る**（チカチカする）。
+  // ⚠️ **ドックしているあいだの知らせはメイン画面が自分のコールバックで持っている**
+  // ので、こちらから送る相手も居ない（同じ値を 2 経路で描かないこと）。
+  const tell = (name: string, data: unknown) => {
+    if (!sideDetached) {
+      return;
+    }
+    void Events.Emit(name, data);
+  };
+
   // 最後に描いた状態の版（`StudyState.rev`）。
   //
   // ⚠️ **メイン画面と同じ形にすること**（あちらの `studyRev`）。`study:changed` は
@@ -91,9 +114,9 @@ export function mountStudyScreen(root: HTMLElement) {
     // （盤は `study:changed` を受けて自分で追随する）。
     onState: (st) => showStudy(st),
     // 候補手を選んだ → **盤の矢印**。窓をまたぐ唯一の「見せるだけ」の連動。
-    onHint: (usi) => void Events.Emit("study:hint", usi),
+    onHint: (usi) => tell("study:hint", usi),
     // 勝率バーは盤の上にある（＝別の窓）。
-    onScores: (scores) => void Events.Emit("study:scores", scores),
+    onScores: (scores) => tell("study:scores", scores),
     // 幕は**両方の窓**に要る（盤も触らせない）。
     onBusy: (on, note) => {
       veil.hidden = !on;
@@ -102,13 +125,13 @@ export function mountStudyScreen(root: HTMLElement) {
         // **キーボードでも止められるように**、出したらフォーカスを移す。
         q<HTMLButtonElement>("#batch-veil-cancel").focus();
       }
-      void Events.Emit("study:busy", { on, note });
+      tell("study:busy", { on, note });
     },
     // 設定を書き換えた（色・候補手の本数）。⚠️ **設定タブは別の窓**なので、
     // 描き直しは向こうに任せる（こちらは自分の写しを入れ直すだけ）。
     onSettings: (s) => {
       pane.setEngines(s.engines ?? [], s.engineColors ?? [], s.analyzeSeconds);
-      void Events.Emit("settings:changed", null);
+      tell("settings:changed", null);
     },
   });
 
@@ -137,7 +160,6 @@ export function mountStudyScreen(root: HTMLElement) {
   };
   // ⚠️ **切り離しの状態を持っているのは設定**（`Config.StudyPaneDetached`）。
   // Go 側が切り替えるたびに知らせてくるので、ここで作らないこと。
-  let sideDetached = false;
   Events.On("side:detached", (event: { data: boolean }) => {
     sideDetached = !!event.data;
     applyActive(sideDetached);

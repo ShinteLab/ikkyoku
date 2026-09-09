@@ -2383,16 +2383,32 @@ ${st.turnLabel}${n}`;
   // ⚠️ **フロントの `Events.Emit` は Go を経由して全部の窓へ配られる**
   // （`EmitEvent` → `dispatchEventToWindows`）。ドックしているあいだは
   // **コールバックで直に渡している**ので、こちらは飛んでこない。
+  //
+  // ⚠️ **ドックしているあいだは聞かないこと**（2026-09-09 に踏んだ）。切り離しの窓は
+  // **切り離していなくても作られていて中身が動いている**ので、こちらが自分の
+  // コールバックで描いているものを**向こうの描き直しが上書きする** ——
+  // 実際、連続解析の最中に**幕が 1 手ごとに消えてはまた出た**（チカチカする）。
+  // **同じ値を 2 経路で描かない**、が元からの約束（向こうも出さないようにしてある）。
+  const fromSideWindow = () => sideDetached === true;
   Events.On("study:hint", (event: { data: string | null }) => {
+    if (!fromSideWindow()) {
+      return;
+    }
     studyBoardUI.showHint(event.data ?? null);
   });
   Events.On("study:scores", (event: { data: EngineScore[] }) => {
+    if (!fromSideWindow()) {
+      return;
+    }
     winrateScores = event.data ?? [];
     renderWinRate();
   });
   // ⚠️ **幕は盤にも被せること** —— 連続解析は 1 手ずつ局面を動かすので、
   // その最中に盤を触ると自分の操作と取り合う。
   Events.On("study:busy", (event: { data: { on: boolean; note: string } }) => {
+    if (!fromSideWindow()) {
+      return;
+    }
     batchVeil.hidden = !event.data?.on;
     batchVeilNote.textContent = event.data?.note ?? "";
   });

@@ -1096,7 +1096,16 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
     // 幕だけ残って何も触れなくなる）。
     // ⚠️ **幕そのものは呼び出し側が持つ**（2026-09-08）——**盤も塞ぐ必要がある**
     // ので、切り離した窓の中だけに被せても足りない。
-    onBusy(batchActive(), "連続解析中…");
+    //
+    // ⚠️ **変わったときだけ知らせること**（2026-09-09 に踏んだ）。ここは
+    // **局面が変わるたび・設定が届くたびに通る**ので、毎回配ると
+    // **窓をまたぐ知らせ（`study:busy`）が連続解析の最中に何度も飛び**、
+    // 向こうの幕が瞬く。**幕は連続解析の状態であって、描き直しの結果ではない。**
+    // ⚠️ **出ているあいだは触らないこと。** 文言は `showBatchProgress` が
+    // 1 秒ごとに入れているので、ここから配り直すと**残り時間が消えて戻る。**
+    if (batchActive() !== busyShown) {
+      showBusy(batchActive(), "連続解析中…");
+    }
     // ⚠️ **どこから始まるかをボタン自身に出す**（2026-08-15。以前は「連続解析」の
     // 一言で、始点はツールチップにしか無かった）。始点は**今どこを見ているか**で
     // 決まるので、**押す前に読めないと押せない**（範囲の欄を置かない代わりの表示）。
@@ -1173,11 +1182,24 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
 
   // 幕に出す「今どこまで来たか」。⚠️ **手数は指した手の番号**（手順リストと
   // 揃える。ボタンの「x手目から」とは 1 つずれるが、あちらは考えさせる手の番号）。
+  // 幕を出しているか。**同じ値は配らない**（上の ⚠️）。
+  let busyShown = false;
+
+  // showBusy は幕の出し入れと文言を知らせる。
+  //
+  // ⚠️ **出し入れの判断はここには無い**（呼ぶ側が持つ）。ここは
+  // **「今出ているか」を控える**だけ —— それが無いと、描き直しのたびに
+  // 同じ値を配ってしまう。
+  const showBusy = (on: boolean, note: string) => {
+    busyShown = on;
+    onBusy(on, note);
+  };
+
   const showBatchProgress = (n: number) => {
     const left = batchEndAt > 0 ? (batchEndAt - Date.now()) / 1000 : 0;
     // ⚠️ **見積もりを過ぎても「終わった」と書かないこと**（まだ走っている）。
     const rest = left > 0 ? `／残り約 ${durationText(left)}` : "／まもなく終わります";
-    onBusy(true, `連続解析中… ${n} / ${batchLast}手目${rest}`);
+    showBusy(true, `連続解析中… ${n} / ${batchLast}手目${rest}`);
   };
 
   // startBatchTick は残り時間を 1 秒ごとに描き直す。
