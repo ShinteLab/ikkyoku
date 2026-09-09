@@ -655,6 +655,54 @@ func TestSetStudyPaneDetached(t *testing.T) {
 	}
 }
 
+// TestSetHideWinRateBar は勝率バー（評価値バー）の表示を固定する（2026-09-10）。
+//
+// ⚠️ **一番の要点は「既定が表示であること」。** `Show...` で持つと、bool の
+// ゼロ値（false）が「隠す」になり、**この項目を知らない古い設定ファイルで
+// 開いたときに帯が消えたまま始まる。**
+//
+// ⚠️ **残すこと自体も要点**（切り離しと同じ。画面の組み方の好みなので、
+// 次の起動でも同じ形で始まってほしい）。
+func TestSetHideWinRateBar(t *testing.T) {
+	s := newTestSettings(t, nil)
+
+	// 何もしていない状態は**表示**。
+	if s.Settings().HideWinRateBar {
+		t.Error("既定が「隠す」になっています（設定を触っていないのに帯が出ません）")
+	}
+
+	st, err := s.SetHideWinRateBar(true)
+	if err != nil {
+		t.Fatalf("SetHideWinRateBar: %v", err)
+	}
+	if !st.HideWinRateBar {
+		t.Errorf("HideWinRateBar = false, want true")
+	}
+	cfg, err := ikkyoku.LoadConfig(s.path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if !cfg.HideWinRateBar {
+		t.Error("保存されていません（次の起動で帯が戻ってしまう）")
+	}
+
+	// 戻せること（**帯を消したまま戻せないと詰む**）。
+	st, err = s.SetHideWinRateBar(false)
+	if err != nil {
+		t.Fatalf("SetHideWinRateBar(false): %v", err)
+	}
+	if st.HideWinRateBar {
+		t.Error("戻っていません")
+	}
+	cfg, err = ikkyoku.LoadConfig(s.path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.HideWinRateBar {
+		t.Errorf("保存された HideWinRateBar = true, want false")
+	}
+}
+
 // ⚠️ **エンジンが名乗った名前は設定ファイルに残すこと。**
 //
 // 名乗りは**繋がないと分からない**ので、メモリだけで持つとアプリを閉じた時点で

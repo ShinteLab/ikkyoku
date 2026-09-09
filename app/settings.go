@@ -39,6 +39,14 @@ type AppSettings struct {
 	// StudyPaneDetached は**盤の右の列**を別ウィンドウに切り離しているか
 	// （2026-09-08）。⚠️ **評価値グラフとは別の設定**（片方だけ切り離す使い方が普通）。
 	StudyPaneDetached bool `json:"studyPaneDetached"`
+	// HideWinRateBar は解析タブの**勝率バー（評価値バー）を隠しているか**
+	// （2026-09-10）。
+	//
+	// ⚠️ **設定タブには出していない**（切り離しと同じ）。切り替えるのは
+	// **解析タブの盤の右クリック** —— 見えているものを消す操作なので、
+	// その場で切り替えるほうが素直。ここに載せてあるのは、**起動時に
+	// どちらで始めるかをフロントが知る必要がある**から。
+	HideWinRateBar bool `json:"hideWinRateBar"`
 	// Training は訂正した局面を suteme へ登録する設定。
 	Training TrainingSettings `json:"training"`
 	// Engines は登録した USI エンジンの一覧（登録順）。
@@ -348,6 +356,7 @@ func (s *SettingsService) settings() AppSettings {
 		ClickThrough:      s.cfg.ClickThrough,
 		EvalGraphDetached: s.cfg.EvalGraphDetached,
 		StudyPaneDetached: s.cfg.StudyPaneDetached,
+		HideWinRateBar:    s.cfg.HideWinRateBar,
 		Training:          trainingSettings(s.cfg.Training),
 		Engines:           engines,
 		EngineColors:      ikkyoku.EngineColors,
@@ -1082,6 +1091,17 @@ func (s *SettingsService) SetStudyPaneDetached(v bool) (AppSettings, error) {
 		s.OnStudyPaneDetached(v)
 	}
 	return st, nil
+}
+
+// SetHideWinRateBar は解析タブの勝率バー（評価値バー）の表示を切り替えて保存する。
+//
+// ⚠️ **効かせるのは画面だけ**（切り離しと違って窓の出し入れが無いので、
+// `On...` の呼び戻しは持たない）。**解析そのものは止めない** —— 帯を出さない
+// だけで、候補手も評価値も右の列には今までどおり出る。
+func (s *SettingsService) SetHideWinRateBar(v bool) (AppSettings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.save(func(cfg *ikkyoku.Config) { cfg.HideWinRateBar = v })
 }
 
 // SetSutemeSource は認識器の読み込み元を切り替えて保存し、**その場で読み直す。**

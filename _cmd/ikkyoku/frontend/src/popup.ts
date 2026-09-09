@@ -19,6 +19,10 @@ export interface PopupItem {
   // ⚠️ **色だけの行にしないこと**（label は必ず出す）。色の名前が無いと、
   // 読み上げでも「今どれを選んでいるのか」でも区別が付かない。
   swatch?: string;
+  // checked は**入り切りする行**（チェックの印を頭に出す）。`undefined` なら
+  // ただの行。⚠️ **印の場所は入っていなくても空けておくこと** —— 詰めると
+  // 押すたびに文字が横へ動き、同じ行をもう一度押すのに狙い直すことになる。
+  checked?: boolean;
   onPick(): void;
 }
 
@@ -52,6 +56,16 @@ export function openPopup(x: number, y: number, opts: PopupOptions): PopupHandle
     const b = document.createElement("button");
     b.type = "button";
     b.className = "popup-btn" + (item.kind ? ` is-${item.kind}` : "");
+    if (item.checked !== undefined) {
+      // ⚠️ **`role`/`aria-checked` も付けること**（読み上げでは印が見えない）。
+      b.setAttribute("role", "menuitemcheckbox");
+      b.setAttribute("aria-checked", item.checked ? "true" : "false");
+      const mark = document.createElement("span");
+      mark.className = "popup-check";
+      mark.textContent = item.checked ? "✓" : "";
+      mark.setAttribute("aria-hidden", "true");
+      b.appendChild(mark);
+    }
     if (item.swatch) {
       const dot = document.createElement("span");
       dot.className = "popup-swatch";

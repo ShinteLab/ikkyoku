@@ -74,6 +74,7 @@ import { mountLibrary } from "./library";
 import { mountFetchCards } from "./fetchcards";
 import { mountEvalPane } from "./evalgraphpane";
 import { mountSidePane, type EngineScore } from "./sidepane";
+import { openPopup } from "./popup";
 import { mountStudyBoard } from "./study";
 import type { RecognizerStatus } from "../bindings/ikkyoku/models";
 import type {
@@ -1793,12 +1794,61 @@ export function mountMainScreen(root: HTMLElement): void {
     renderWinRate();
   });
 
+  // ---- 勝率バーを隠す（2026-09-10）------------------------------------------
+  //
+  // **中継を観ながら使うので「評価値を見たくない」場面がある。** 盤の真上の帯は
+  // 目に入るのを避けようが無いので、消せるようにした。切り替えるのは
+  // **盤の右クリック**（設定タブには置いていない —— 見えているものを消す操作は、
+  // その場で切り替えるほうが素直）。
+  //
+  // ⚠️ **解析は止めない。** 消えるのは帯だけで、候補手も評価値も右の列には
+  // 今までどおり出る（**見たくないものだけを消す**）。
+  //
+  // ⚠️ **盤の大きさは変わらない。** 1 行目には対局者名が残るので、帯を消しても
+  // 空くのは数 px しかない。`--board-size` の引き算（`--winrate-h`）は
+  // **触らないこと** —— 引く量だけ減らすと、名前のぶん盤が縦にはみ出す。
+  let winrateHidden = false;
+
+  // applyWinRateBar は**画面だけ**に効かせる（保存は呼び出し側）。
+  //
+  // ⚠️ **`syncStudyChrome` と条件を揃えること。** 帯が出るのは
+  // 「局面があって、かつ隠していない」ときだけで、**判断は 2 か所にある**。
+  const applyWinRateBar = (hidden: boolean) => {
+    winrateHidden = hidden;
+    winrateRow.hidden = hidden || !studyLoaded;
+  };
+
+  // 盤の右クリックのメニュー（**駒を掴んでいないときだけ出る**）。
+  //
+  // ⚠️ **`window.confirm` と同じで、押した場所に出すこと**（`popup.ts`）。
+  const openBoardMenu = (x: number, y: number) => {
+    openPopup(x, y, {
+      label: "盤の表示",
+      items: [
+        {
+          label: "評価値バー表示",
+          checked: !winrateHidden,
+          onPick: () => {
+            const hide = !winrateHidden;
+            // **先に画面へ効かせる**（押した手応えを保存の往復まで待たせない）。
+            applyWinRateBar(hide);
+            // ⚠️ **設定に残すこと** —— 画面の組み方の好みなので、次の起動でも
+            // 同じ形で始まってほしい（切り離しと同じ扱い）。
+            void SettingsService.SetHideWinRateBar(hide);
+          },
+        },
+      ],
+    });
+  };
+
   // syncStudyChrome は**盤の周りの出し入れ**（局面があるかどうかだけで決まる）。
   //
   // ⚠️ **まだ結果が無くても枠は出す。** 出たり消えたりすると盤が上下に動くうえ、
   // 勝率バーは盤の**上**なので、動くと盤ごと押し下げる。
   const syncStudyChrome = (loaded: boolean) => {
-    winrateRow.hidden = !loaded;
+    // ⚠️ **隠してあるなら局面があっても出さない**（盤の右クリックの
+    // 「評価値バー表示」。`applyWinRateBar` と条件を揃えること）。
+    winrateRow.hidden = !loaded || winrateHidden;
     playerNames.black.hidden = !loaded;
     playerNames.white.hidden = !loaded;
     // 視点のボタンも盤と一緒（盤が出ていないのに向きだけ変えても意味が無い）。
@@ -1994,6 +2044,9 @@ ${st.turnLabel}${n}`;
     // 空文字は「理由を消す」（駒を掴み直したときなど）。**出しっぱなしにしないこと** ——
     // 前の操作の理由が残っていると、今の操作が失敗したように見える。
     onError: (message) => sidePane.setStatus(message),
+    // 盤の右クリック（**駒を掴んでいないとき**）。掴んでいるときは向こうが
+    // 「離す」に使うので、ここには来ない。
+    onMenu: openBoardMenu,
   });
 
   // ---- 十字キーの上下で手順を辿る（2026-08-18）----------------------------
@@ -4073,6 +4126,8 @@ ${st.turnLabel}${n}`;
     evalGraphDetached: boolean;
     // 盤の右の列を別ウィンドウに切り離しているか（2026-09-08）。
     studyPaneDetached: boolean;
+    // 勝率バー（評価値バー）を隠しているか（2026-09-10。盤の右クリック）。
+    hideWinRateBar: boolean;
     path: string;
     training: { enabled: boolean; host: string; port: number; token: string; target: string };
     engines: EngineSettings[] | null;
@@ -4102,6 +4157,9 @@ ${st.turnLabel}${n}`;
     // 購読していない**ので、起動直後の形はここで決まる。
     applyGraphDetached(!!s.evalGraphDetached);
     applySideDetached(!!s.studyPaneDetached);
+    // ⚠️ **勝率バーの表示も設定から受け取る**（2026-09-10）。切り替えは盤の
+    // 右クリックだが、**起動直後にどちらで始まるかはここで決まる。**
+    applyWinRateBar(!!s.hideWinRateBar);
     // ⚠️ **評価値グラフの折れ線の色はここが持つ**（側の列とは別）。
     // 切り離すと側の列は別の窓に居るので、**あちらから引けない**。
     graphColors.clear();
