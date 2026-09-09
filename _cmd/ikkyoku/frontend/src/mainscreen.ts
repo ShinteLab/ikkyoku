@@ -1818,7 +1818,12 @@ export function mountMainScreen(root: HTMLElement): void {
     winrateRow.hidden = hidden || !studyLoaded;
   };
 
-  // 盤の右クリックのメニュー（**駒を掴んでいないときだけ出る**）。
+  // 解析タブの**空いているところ**（盤・駒台・帯・右の列のどれでもない黒地）の
+  // 右クリックで出すメニュー（2026-09-10）。
+  //
+  // ⚠️ **盤と駒台の上では出さない。** あちらの右クリックは**掴んだ駒を離す**
+  // 操作（2026-08-29）で、指す先を探している最中にメニューが出ると
+  // **やめる操作がメニューを閉じる操作に化ける。**
   //
   // ⚠️ **`window.confirm` と同じで、押した場所に出すこと**（`popup.ts`）。
   const openBoardMenu = (x: number, y: number) => {
@@ -1840,6 +1845,36 @@ export function mountMainScreen(root: HTMLElement): void {
       ],
     });
   };
+
+  // isStudyBackdrop は「解析タブの、何も置いていないところを押したか」。
+  //
+  // ⚠️ **判定は「押した先が入れ物そのものか」で行う。除外リストを持たないこと** ——
+  // 盤・駒台・帯・ボタン・右の列・幕はどれも**中身の要素が受ける**ので、入れ物まで
+  // 抜けてくるのは何も置いていないところを押したときだけ。除外リストにすると、
+  // **行を足すたびに書き足すことになり、書き忘れた場所でだけメニューが出る。**
+  //
+  // ⚠️ **`#panel-study` の中に限ること。** `.board-area` は訂正タブにもある。
+  const isStudyBackdrop = (t: EventTarget | null): boolean => {
+    const el = t as HTMLElement | null;
+    if (!el?.closest?.("#panel-study")) {
+      return false;
+    }
+    return (
+      el.id === "panel-study" ||
+      el.id === "study-board-with-hands" ||
+      el.classList.contains("board-area")
+    );
+  };
+
+  root.addEventListener("contextmenu", (e) => {
+    if (!isStudyBackdrop(e.target)) {
+      return;
+    }
+    // ⚠️ **webview の既定メニューは止める**（盤まわりでは意味が無いうえ、
+    // こちらのメニューと二重に出る）。
+    e.preventDefault();
+    openBoardMenu(e.clientX, e.clientY);
+  });
 
   // syncStudyChrome は**盤の周りの出し入れ**（局面があるかどうかだけで決まる）。
   //
@@ -2044,9 +2079,6 @@ ${st.turnLabel}${n}`;
     // 空文字は「理由を消す」（駒を掴み直したときなど）。**出しっぱなしにしないこと** ——
     // 前の操作の理由が残っていると、今の操作が失敗したように見える。
     onError: (message) => sidePane.setStatus(message),
-    // 盤の右クリック（**駒を掴んでいないとき**）。掴んでいるときは向こうが
-    // 「離す」に使うので、ここには来ない。
-    onMenu: openBoardMenu,
   });
 
   // ---- 十字キーの上下で手順を辿る（2026-08-18）----------------------------

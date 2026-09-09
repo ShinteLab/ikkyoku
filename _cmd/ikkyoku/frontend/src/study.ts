@@ -95,17 +95,10 @@ export interface StudyBoardOptions {
   onState(state: StudyState): void;
   // onError は手が通らなかったときの理由。
   onError(message: string): void;
-  // onMenu は**盤の右クリック**（駒を掴んでいないとき）。盤まわりの表示の
-  // 入り切りをその場で聞くための口で、中身は呼び出し側が組む（`mainscreen.ts`）。
-  //
-  // ⚠️ **掴んでいるときは呼ばれない** —— 右クリックはまず「掴んだ駒を離す」
-  // （2026-08-29 の約束）。指す先を探している最中にメニューが出ると、
-  // **やめる操作がメニューを閉じる操作に化ける。**
-  onMenu?(x: number, y: number): void;
 }
 
 export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
-  const { stage, handSlots, onState, onError, onMenu } = opts;
+  const { stage, handSlots, onState, onError } = opts;
 
   // ---- 盤に重ねるグリッド -------------------------------------------------
   //
@@ -538,9 +531,6 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
     }
     e.preventDefault();
     if (!pick) {
-      // 掴んでいないなら**メニュー**（2026-09-10）。⚠️ **順番を入れ替えないこと** ——
-      // 掴んでいるときは「離す」が先で、メニューは出さない。
-      onMenu?.(e.clientX, e.clientY);
       return;
     }
     pick = null;
