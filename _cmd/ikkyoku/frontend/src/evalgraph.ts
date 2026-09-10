@@ -66,20 +66,23 @@ export interface EvalGraphOptions {
   // host はグラフを描く箱。**高さは CSS で固定しておくこと**（中身で伸び縮みすると
   // 盤ごと画面が上下に跳ねる）。
   host: HTMLElement;
-  // range は横軸の決め方（"all" = 全て / "custom" = 自由入力）。
+  // all は「全て」のチェック（2026-09-10 に select からこちらへ変えた）。
   //
-  // ⚠️ **既定は「全て」**（＝**指した手が全部見えている状態**）。
+  // ⚠️ **既定は入っている**（＝**指した手が全部見えている状態**）。
+  // **外すと下の from / to がそのまま横軸になる。**
   // 「1 から」ではない —— 根は初期局面とは限らないので、撮った 40 手目の局面から
   // 始めたなら 40 手目から始まるのが「全て」。
-  range: HTMLSelectElement;
-  // from / to は自由入力の範囲（手数）。**既定は 1-150。**
+  all: HTMLInputElement;
+  // from / to は横軸の範囲（手数）。**既定は 1-150。**
   //
   // 少ししか指していなくても「1-150 の中のどこに居るか」で読みたいことがあるので、
   // **全体表示とは別に、手で範囲を決められる口が要る。**
+  //
+  // ⚠️ **「全て」のあいだも隠さないこと**（2026-09-10）。以前は欄ごと消していたが、
+  // **今どの範囲を見ているのかが画面から読めなくなる**。「全て」のあいだは
+  // **触れなくして（disabled）、実際の範囲を書き込む**（＝見えている数字が今の範囲）。
   from: HTMLInputElement;
   to: HTMLInputElement;
-  // fields は自由入力の欄を包む要素（"全て" のときは隠す）。
-  fields: HTMLElement;
   // legend はどの色がどのエンジンかを出す場所。
   //
   // ⚠️ **グラフの中に描かないこと。** 高さ 116px の絵に文字を重ねると
@@ -102,7 +105,7 @@ export interface EvalGraphOptions {
 }
 
 export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
-  const { host, range, from, to, fields, legend, readout, colorOf, onSeek } = opts;
+  const { host, all, from, to, legend, readout, colorOf, onSeek } = opts;
 
   const svg = document.createElementNS(NS, "svg");
   svg.setAttribute("class", "eval-graph-svg");
@@ -138,7 +141,7 @@ export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
   // 「1-150 の中のどこに居るか」で読めるようにするための口で、
   // **ドラッグで絞ったときの行き先でもある**（絞った値がそのまま欄に入る）。
   const domain = (): { x0: number; x1: number } => {
-    if (range.value === "custom") {
+    if (!all.checked) {
       const a = Math.max(0, Math.floor(Number(from.value) || 0));
       const b = Math.floor(Number(to.value) || 0);
       // ⚠️ **逆さや潰れた範囲でも描けること。** 打っている途中の欄は普通に
@@ -151,9 +154,25 @@ export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
     return { x0: first, x1: Math.max(last, first + 10) };
   };
 
-  // 自由入力の欄は「自由入力」のときだけ出す（"全て" のときは意味が無い）。
+  // 欄は**常に出したまま**、「全て」のあいだだけ触れなくする（2026-09-10）。
+  //
+  // ⚠️ **隠さないこと。** 以前は「全て」のときに欄ごと消していたが、
+  // **今どの範囲を見ているのかが画面から読めなくなる。** 実際の範囲は下の
+  // `reflect` が書き込むので、「全て」を外した瞬間から**見えていた数字が
+  // そのまま自由入力の初期値**になり、続けて手で直せる。
   const syncFields = () => {
-    fields.hidden = range.value !== "custom";
+    from.disabled = all.checked;
+    to.disabled = all.checked;
+  };
+
+  // reflect は「全て」のあいだ、実際の横軸の範囲を欄に書き戻す。
+  // ⚠️ **自由入力のときは書き換えないこと**（打っている途中の値を潰す）。
+  const reflect = (x0: number, x1: number) => {
+    if (!all.checked) {
+      return;
+    }
+    from.value = String(x0);
+    to.value = String(x1);
   };
 
   // useRange はドラッグで選んだ範囲を横軸にする。
@@ -162,7 +181,7 @@ export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
   // （欄とドラッグ）に持つと、どちらが今の範囲か分からなくなる。
   // **見えている数字がそのまま今の範囲**なら、続けて手で直せる。
   const useRange = (a: number, b: number) => {
-    range.value = "custom";
+    all.checked = false;
     from.value = String(Math.min(a, b));
     to.value = String(Math.max(a, b));
     syncFields();
@@ -188,6 +207,8 @@ export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
     svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
 
     const { x0, x1 } = domain();
+    // 「全て」のあいだも、今の範囲をそのまま欄に出す（欄は隠さない）。
+    reflect(x0, x1);
     const span = Math.max(x1 - x0, 1);
     const left = PAD.left;
     const right = w - PAD.right;
@@ -493,7 +514,7 @@ export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
   // 端まで引いて離したときに掴んだままになる）。
   window.addEventListener("mouseup", finishDrag);
 
-  range.addEventListener("change", () => {
+  all.addEventListener("change", () => {
     syncFields();
     draw();
   });

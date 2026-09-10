@@ -26,12 +26,17 @@ export function mountGraphScreen(root: HTMLElement) {
     <div class="graph-screen">
       <div class="eval-graph-head">
         <span class="field-label">評価値</span>
-        <select id="eval-graph-range" class="eval-graph-range"
-                title="横軸の範囲。「全て」は指した手が全部見える範囲、「自由入力」は書いたとおりの手数です">
-          <option value="all" selected>全て</option>
-          <option value="custom">自由入力</option>
-        </select>
-        <span id="eval-graph-fields" class="eval-graph-fields" hidden>
+        <label class="eval-graph-all"
+               title="全て: 指した手が全部見える範囲にします。外すと右の欄の手数がそのまま横軸になります">
+          <input id="eval-graph-all" type="checkbox" checked />
+          <span>全て</span>
+        </label>
+        <!-- 横軸の範囲の欄。⚠️ **「全て」のときも隠さないこと**（2026-09-10）——
+             今どの範囲を見ているのかが画面から読めなくなる。「全て」のあいだは
+             触れなくして、実際の範囲（根の手数〜最終手）を書き込む。
+             ⚠️ **「自由入力」という札は要らない** —— チェックを外せば
+             触れるようになる欄そのものが、そう言っている。 -->
+        <span id="eval-graph-fields" class="eval-graph-fields">
           <input id="eval-graph-from" class="eval-graph-num" type="number"
                  min="0" max="999" step="1" value="1" title="左端の手数" />
           <span class="eval-graph-dash">-</span>
@@ -84,10 +89,9 @@ export function mountGraphScreen(root: HTMLElement) {
 
   const pane = mountEvalPane({
     host: q<HTMLElement>("#eval-graph"),
-    range: q<HTMLSelectElement>("#eval-graph-range"),
+    all: q<HTMLInputElement>("#eval-graph-all"),
     from: q<HTMLInputElement>("#eval-graph-from"),
     to: q<HTMLInputElement>("#eval-graph-to"),
-    fields: q<HTMLElement>("#eval-graph-fields"),
     legend: q<HTMLElement>("#eval-graph-legend"),
     readout: q<HTMLElement>("#eval-graph-readout"),
     colorOf: (id) => colors.get(id) ?? UNKNOWN_ENGINE_COLOR,

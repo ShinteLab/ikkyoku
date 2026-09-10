@@ -923,12 +923,17 @@ export function mountMainScreen(root: HTMLElement): void {
                  **絞るのはグラフの上をドラッグする**のが本筋で、選んだ範囲は
                  そのまま下の欄に入る（＝見えている数字が今の範囲）。
                  「1-150 の中のどこに居るか」で読みたいときは欄に直接書く。 -->
-            <select id="eval-graph-range" class="eval-graph-range"
-                    title="横軸の範囲。「全て」は指した手が全部見える範囲、「自由入力」は書いたとおりの手数です">
-              <option value="all" selected>全て</option>
-              <option value="custom">自由入力</option>
-            </select>
-            <span id="eval-graph-fields" class="eval-graph-fields" hidden>
+            <label class="eval-graph-all"
+                   title="全て: 指した手が全部見える範囲にします。外すと右の欄の手数がそのまま横軸になります">
+              <input id="eval-graph-all" type="checkbox" checked />
+              <span>全て</span>
+            </label>
+            <!-- 横軸の範囲の欄。⚠️ **「全て」のときも隠さないこと**（2026-09-10）——
+                 今どの範囲を見ているのかが画面から読めなくなる。「全て」のあいだは
+                 触れなくして、実際の範囲（根の手数〜最終手）を書き込む。
+                 ⚠️ **「自由入力」という札は要らない** —— チェックを外せば
+                 触れるようになる欄そのものが、そう言っている。 -->
+            <span id="eval-graph-fields" class="eval-graph-fields">
               <input id="eval-graph-from" class="eval-graph-num" type="number"
                      min="0" max="999" step="1" value="1" title="左端の手数" />
               <span class="eval-graph-dash">-</span>
@@ -2235,10 +2240,9 @@ ${st.turnLabel}${n}`;
   // フロントにも溜めると、戻って別の手を指したときに片方だけ古い値が残る。
   const evalGraphUI = mountEvalPane({
     host: root.querySelector<HTMLElement>("#eval-graph")!,
-    range: root.querySelector<HTMLSelectElement>("#eval-graph-range")!,
+    all: root.querySelector<HTMLInputElement>("#eval-graph-all")!,
     from: root.querySelector<HTMLInputElement>("#eval-graph-from")!,
     to: root.querySelector<HTMLInputElement>("#eval-graph-to")!,
-    fields: root.querySelector<HTMLElement>("#eval-graph-fields")!,
     legend: root.querySelector<HTMLElement>("#eval-graph-legend")!,
     readout: root.querySelector<HTMLElement>("#eval-graph-readout")!,
     // 折れ線の色は**エンジンごと**（登場順ではない）。⚠️ **設定を直に読ませない** ——

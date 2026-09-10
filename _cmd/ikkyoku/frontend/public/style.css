@@ -2360,7 +2360,6 @@ html.is-graph #app {
   padding-bottom: 6px;
 }
 
-.eval-graph-range,
 .eval-graph-num {
   padding: 2px 6px;
   font-size: 12.5px;
@@ -2379,8 +2378,28 @@ html.is-graph #app {
   flex: 0 0 auto;
 }
 
-/* 自由入力の範囲。**ドラッグで絞ったときの行き先でもある**（選んだ値がここに入る）
-   ので、「全て」のときだけ隠す。 */
+/* 「全て」のチェック（2026-09-10 に select からこちらへ変えた）。
+   ⚠️ **札は「全て」だけ** —— もう一方（自由入力）は札を持たない。
+   チェックを外せば触れるようになる欄そのものが、そう言っている。 */
+.eval-graph-all {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  font-size: 12.5px;
+  color: #cfd6e6;
+  user-select: none;
+  cursor: pointer;
+}
+
+.eval-graph-all input {
+  margin: 0;
+  cursor: pointer;
+}
+
+/* 横軸の範囲。**ドラッグで絞ったときの行き先でもある**（選んだ値がここに入る）。
+   ⚠️ **「全て」のときも隠さないこと**（2026-09-10）—— 今どの範囲を見ているのかが
+   画面から読めなくなる。**触れなくするだけ**で、値は実際の範囲が入る。 */
 .eval-graph-fields {
   display: flex;
   align-items: center;
@@ -2388,12 +2407,17 @@ html.is-graph #app {
   flex: 0 0 auto;
 }
 
-.eval-graph-fields[hidden] {
-  display: none;
-}
-
 .eval-graph-num {
   width: 56px;
+}
+
+/* 「全て」のあいだ。**読めるが触れない**ことが見て分かる濃さにする
+   （消してしまうと、そこに数字があること自体に気づけない）。 */
+.eval-graph-num:disabled {
+  color: #9aa6c0;
+  background: #1c1e25;
+  border-color: #32353e;
+  cursor: default;
 }
 
 .eval-graph-dash {
