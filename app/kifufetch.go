@@ -3,11 +3,9 @@ package app
 import (
 	"context"
 	"fmt"
-	"net/http"
-	"net/url"
 	"strings"
 
-	"github.com/ShinteLab/kicho/scrape"
+	"github.com/ShinteLab/kicho"
 )
 
 // kifuFetch は URL から取ってきた棋譜。
@@ -27,81 +25,51 @@ type kifuFetch struct {
 	URL string
 }
 
+// kifuFetcher は URL から棋譜を取ってくる側（**DB を持たない**）。
+//
+// ⚠️ **`kicho.Library` ではなく `kicho.NewFetcher()` を使うのが要点。**
+// あちらは棚（SQLite）を開けていないと作れないが、**URL から棋譜を読むのは
+// 棚に依らない操作**（設計原則3）。DB が壊れていても貼った URL は解析できる。
+//
+// ⚠️ **1 つを使い回してよい**（持っているのは HTTP クライアントだけ。読売の
+// ペイロードを評価する goja の VM は 1 回ごとに作られる）。
+var kifuFetcher = kicho.NewFetcher()
+
 // fetchKIF は URL から棋譜を取ってくる（解析タブの「棋譜の URL」と「再読み込み」）。
 //
-// **中身の解釈は `kicho/scrape` に寄せてある**（2026-09-04 に `ikkyoku/kifuweb` を
-// 畳んだ）。文字コードの判別（`DecodeKIF`）・上限つきの読み取り（`ReadLimited`）・
-// **HTML から .kif を辿る**（`LooksLikeHTML` / `KifURLFromHTML`）はどれも向こうの実装。
+// **取得元の判別も中身の解釈も `kicho.Fetcher.Fetch` に寄せてある**（2026-09-12）。
+// 連盟の中継・読売（竜王戦）・それ以外のサイトの .kif を、**呼び出し側が
+// 見分けずに**同じ 1 本で扱える。
 //
-// ⚠️ **`kicho.Library` を経由していないのが要点。** あちらは棋譜データベースを
-// 開けていないと使えないが、**URL から棋譜を読むのは棚に依らない操作**
-// （設計原則3「段階的に劣化すること」）。DB が壊れていても貼った棋譜は解析できる。
+// ⚠️ **ここに「このサイトならこちら」を書かないこと。** 取得元の知識は kicho
+// （親 `CLAUDE.md`）。以前はこの関数が .kif を読むだけだったので、**読売の URL は
+// 通らず、画面は「棋譜の URL」と「中継から取得」の 2 つの入力欄を持っていた。**
 //
-// ⚠️ **HTML を辿れるようになったのは移行の副産物。** 連盟の中継の `source_url` は
-// **中継ページ（HTML）の URL** なので、辿れないと棚から解析タブへ送った中継棋譜を
-// 「再読み込み」で追えない（`ikkyoku/kifuweb` はここで断っていた）。
+// ⚠️ **`kicho.Library` を経由していないのが要点**（上の `kifuFetcher`）。
+//
+// ⚠️ **HTML から .kif を辿れるのは今までどおり**（`Fetcher` の中）。連盟の中継の
+// `source_url` は中継ページ（HTML）の URL なので、辿れないと棚から解析タブへ
+// 送った中継棋譜を「再読み込み」で追えない。
 func fetchKIF(ctx context.Context, rawURL string) (kifuFetch, error) {
-	u, err := parseKifuURL(rawURL)
-	if err != nil {
-		return kifuFetch{}, err
-	}
-
-	b, err := getLimited(ctx, u)
-	if err != nil {
-		return kifuFetch{}, err
-	}
-	// HTML が返ってきたら、そこに書かれた .kif を辿る。
-	// **ページから対局内容を読み取るわけではない**（取り込むのは .kif の原本）。
-	if scrape.LooksLikeHTML(b) {
-		kifURL, err := scrape.KifURLFromHTML(u, b)
-		if err != nil {
-			return kifuFetch{}, err
-		}
-		if b, err = getLimited(ctx, kifURL); err != nil {
-			return kifuFetch{}, err
+	in := strings.TrimSpace(rawURL)
+	// ⚠️ **http / https 以外のスキームを弾くこと。** `file://` を通すと URL 欄から
+	// 手元のファイルを読めてしまう（ファイルの読み込みは別の口として作るもの）。
+	// ⚠️ **スキームが無い入力は弾かない** —— 棋譜 ID として扱える（kicho が判別する）。
+	if i := strings.Index(in, "://"); i >= 0 {
+		switch strings.ToLower(in[:i]) {
+		case "http", "https":
+		default:
+			return kifuFetch{}, fmt.Errorf("http または https の URL を指定してください: %s", rawURL)
 		}
 	}
 
-	text, encoding, err := scrape.DecodeKIF(b)
+	got, err := kifuFetcher.Fetch(ctx, in)
 	if err != nil {
 		return kifuFetch{}, err
 	}
-	// ⚠️ **辿った先ではなく、指定された URL を返す**（上のコメント）。
-	return kifuFetch{Text: text, Encoding: encoding, URL: u.String()}, nil
-}
-
-// parseKifuURL は入力を http/https の URL として読む。
-//
-// ⚠️ **http / https 以外を受けないこと。** `file://` を通すと、URL 欄から
-// 手元のファイルを読めてしまう（ファイルの読み込みは口として別に作るもの）。
-func parseKifuURL(rawURL string) (*url.URL, error) {
-	u, err := url.Parse(strings.TrimSpace(rawURL))
-	if err != nil {
-		return nil, fmt.Errorf("URL の形式が正しくありません: %w", err)
+	if got.Empty() {
+		return kifuFetch{}, fmt.Errorf("棋譜が空でした: %s", rawURL)
 	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return nil, fmt.Errorf("http または https の URL を指定してください: %s", rawURL)
-	}
-	return u, nil
-}
-
-// getLimited は URL の中身を上限つきで読む。
-//
-// 上限は `scrape.MaxKifuBytes`（4MiB）。**棋譜 1 局は数十 KB** なので、
-// これで足りないのは相手が棋譜を返していないとき。
-func getLimited(ctx context.Context, u *url.URL) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("取得できませんでした: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("取得できませんでした（HTTP %d）: %s", resp.StatusCode, u)
-	}
-	return scrape.ReadLimited(resp.Body)
+	// ⚠️ **辿った先ではなく、指定された URL を返す**（`URL` のコメント）。
+	return kifuFetch{Text: got.KIF, Encoding: got.Encoding, URL: in}, nil
 }
