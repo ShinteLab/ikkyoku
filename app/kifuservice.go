@@ -657,6 +657,16 @@ func (s *KifuService) PreviewURL(rawURL string) (GameDetail, error) {
 }
 
 // ImportURL は URL から KIF を取得して棚に入れる。
+//
+// ⚠️ **画面からは呼んでいない**（2026-09-12 に入力タブの「棋譜に登録する」を
+// URL の行から外した）。ここを通すと `source` が `url`・`source_id` が**毎回 UUID**
+// になるので、**同じ棋譜が登録のたびに増え、`Refresh` でも追えない**
+// （kicho の `importDocument`）。**URL から棚に入れる口は `Fetch` + `Save`
+// （入力タブの「中継から取得」）に一本化してある。**
+//
+// ⚠️ **画面にボタンを戻すなら、先に取得元の判別を kicho 側で済ませること** ——
+// 取得元の知識を ikkyoku に書かない（親 CLAUDE.md）。残してあるのは、
+// 連盟・読売以外のサイトの .kif を入れる道が他に無いため。
 func (s *KifuService) ImportURL(rawURL string) (GameSummary, error) {
 	lib, err := s.library()
 	if err != nil {
