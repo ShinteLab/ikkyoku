@@ -321,7 +321,7 @@ kicho の `store` は接続を 1 本に絞っているので、止まらない�
 | ボタン | 行き先 | 棚 |
 |---|---|---|
 | 読み込む / URL から読み込む | **解析タブ**（`StudyService.LoadKifu` / `LoadKifuURL`） | 入らない |
-| 棚に登録する | **棚**（`KifuService.ImportKIF` / `ImportURL`） | 入る。**解析タブは触らない** |
+| 棚に登録する | **棚**（`KifuService.ImportKIF` / `ImportURL`） | 入る。**解析タブは触らない**。⚠️ **`ImportURL` は `Fetch` + `Save`**（2026-09-12）—— `kicho.Library.ImportURL` は何を渡しても `source` が `url` になるので、**連盟・読売の URL で中継としての ID を捨てる** |
 
 - ⚠️ **入力欄を 2 つに増やさないこと。** 同じ入力の**行き先が 2 つある**だけで、
   欄を分けると「どちらに貼ったか」で挙動が変わる面になる
