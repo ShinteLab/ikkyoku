@@ -431,7 +431,7 @@ export function mountMainScreen(root: HTMLElement): void {
             <strong>指し手を全て反映した局面</strong>で<strong>解析タブ</strong>が開きます。
             手順は盤の右に並ぶので、押せばその局面まで戻れます。
             <strong>訂正タブは通りません</strong>（棋譜の局面は初期局面と手順で決まるため）。
-            <strong>「棚に登録する」を押すと棋譜タブに残ります</strong>
+            <strong>「棋譜に登録する」を押すと棋譜タブに残ります</strong>
             （読み込むだけでは残りません）。
           </span>
           <!-- URL から取る（2026-08-12）。日本将棋連盟の棋譜中継のように
@@ -445,7 +445,7 @@ export function mountMainScreen(root: HTMLElement): void {
                    placeholder="http://live.shogi.or.jp/.../oui202607290101.kif" />
             <button id="kifu-load-url" class="ghost-btn" type="button">URL から読み込む</button>
             <button id="kifu-import-url" class="ghost-btn" type="button"
-                    title="この URL の棋譜を棚（棋譜タブ）に登録します">棚に登録する</button>
+                    title="この URL の棋譜を棋譜タブに登録します">棋譜に登録する</button>
           </div>
           <textarea id="kifu-text" class="kifu-text" spellcheck="false"
                     placeholder="手数----指手---------消費時間--&#10;   1 ７六歩(77)   ( 0:16/00:00:16)&#10;   2 ３四歩(33)   ( 0:04/00:00:04)"></textarea>
@@ -453,12 +453,12 @@ export function mountMainScreen(root: HTMLElement): void {
                だけなので、欄を分けると「どちらに貼ったか」で挙動が変わる面になる。
 
                ⚠️ **二系統を残してある**（2026-09-04）——「読み込む」は棚に入らず
-               解析タブへ直行し、「棚に登録する」は棚へ入れるだけで解析タブを触らない。
+               解析タブへ直行し、「棋譜に登録する」は棚へ入れるだけで解析タブを触らない。
                **棚は解析の前提条件ではない**（設計原則3）。 -->
           <div class="setting-fields">
             <button id="kifu-load" class="ghost-btn" type="button">読み込む</button>
             <button id="kifu-import" class="ghost-btn" type="button"
-                    title="貼り付けた棋譜を棚（棋譜タブ）に登録します">棚に登録する</button>
+                    title="貼り付けた棋譜を棋譜タブに登録します">棋譜に登録する</button>
             <button id="kifu-clear" class="ghost-btn" type="button">消す</button>
           </div>
           <p id="kifu-status" class="status" role="status" aria-live="polite" hidden></p>
@@ -479,7 +479,7 @@ export function mountMainScreen(root: HTMLElement): void {
             <span class="hint-para">
             <strong>読売（竜王戦）</strong>の対局ページと
             <strong>日本将棋連盟の棋譜中継</strong>から取れます。URL か棋譜 ID を入れてください。
-            <strong>取得しただけでは棚に入りません</strong>（カードの「この内容を保存」で入ります）。
+            <strong>取得しただけでは棋譜タブに入りません</strong>（カードの「この内容を保存」で入ります）。
             対局中は棋譜が伸びるので、「更新」で取り直してから保存し直してください。
             </span>
           <!-- ⚠️ **カードは再起動しても残る**（仮の一覧 / kicho の watches）。
@@ -501,7 +501,7 @@ export function mountMainScreen(root: HTMLElement): void {
             <button id="fetch-refresh-all" class="ghost-btn" type="button"
                     title="並んでいるカードを順にサイトから取り直します（復元した直後に使います）">すべて更新</button>
             <button id="fetch-clear" class="ghost-btn" type="button"
-                    title="入力とカードをすべて捨てます（仮の一覧も空にします。棚の棋譜は消えません）">クリア</button>
+                    title="入力とカードをすべて捨てます（仮の一覧も空にします。棋譜タブの棋譜は消えません）">クリア</button>
           </div>
           <p id="fetch-status" class="status" role="status" aria-live="polite" hidden></p>
           <!-- 取得結果。**新しいものが先頭。** 同じ棋譜を取り直したときは
@@ -524,7 +524,7 @@ export function mountMainScreen(root: HTMLElement): void {
         <div class="library-head">
           <span id="library-count" class="field-label">棋譜一覧</span>
           <button id="library-reload" class="ghost-btn" type="button"
-                  title="棚を読み直します">再読み込み</button>
+                  title="棋譜を読み直します">再読み込み</button>
         </div>
 
         <!-- 検索。⚠️ **打つたびには検索しない**（Enter か「検索」で実行）。
@@ -1201,7 +1201,7 @@ export function mountMainScreen(root: HTMLElement): void {
             <span id="fold-kifudb-sum" class="setting-fold-sum"></span>
           </summary>
           <span id="hint-kifudb" class="setting-note is-hint">
-            棋譜タブの「棚」を置くファイルです。変えるとその場で開き直します。
+            棋譜タブに溜める棋譜を置くファイルです。変えるとその場で開き直します。
             <strong>既定のままで動きます</strong>ので、置き場所を変えたいときだけ
             触ってください。<strong>開けなくても撮影・訂正・解析はそのまま使えます</strong>
             （棋譜タブだけが使えなくなります）。
@@ -3749,17 +3749,17 @@ ${st.turnLabel}${n}`;
     button.disabled = true;
     kifuImport.disabled = true;
     kifuImportURL.disabled = true;
-    showKifuStatus("棚に登録しています…");
+    showKifuStatus("棋譜に登録しています…");
     try {
       const rec = await save();
       libraryUI.refresh();
       const who = [rec.black, rec.white].filter(Boolean).join(" - ");
       showKifuStatus(
-        `棚に登録しました: ${[rec.event, who].filter(Boolean).join(" / ") || "(棋戦名なし)"}`,
+        `棋譜に登録しました: ${[rec.event, who].filter(Boolean).join(" / ") || "(棋戦名なし)"}`,
       );
     } catch (err) {
       showKifuStatus(
-        `棚に登録できませんでした: ${String(err instanceof Error ? err.message : err)}`,
+        `棋譜に登録できませんでした: ${String(err instanceof Error ? err.message : err)}`,
         "error",
       );
     } finally {

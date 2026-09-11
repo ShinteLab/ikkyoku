@@ -124,7 +124,7 @@ const refreshNotice = (prev: FetchCard, g: GameDetail): string => {
   if (isRestored(prev)) return "サイトから取り直しました";
   if (g.moves === prev.game.moves) return "最新化しました（手数は変わっていません）";
   const head = `最新化しました（${prev.game.moves} → ${g.moves} 手）`;
-  return prev.saved ? `${head}。保存し直すと棚の棋譜も最新になります` : head;
+  return prev.saved ? `${head}。保存し直すと棋譜タブの棋譜も最新になります` : head;
 };
 
 export function mountFetchCards(
@@ -274,8 +274,8 @@ export function mountFetchCards(
         saved: rec,
         watched: rec.finished ? false : card.watched,
         notice: rec.finished
-          ? "棚に保存しました（終局しているので仮の一覧から外しました）"
-          : "棚に保存しました",
+          ? "棋譜タブに保存しました（終局しているので仮の一覧から外しました）"
+          : "棋譜タブに保存しました",
         error: "",
       });
       opts.onSaved();
@@ -347,7 +347,7 @@ export function mountFetchCards(
       focus: 1,
       items: [
         {
-          label: "カードを閉じる（棚の棋譜は消えません）",
+          label: "カードを閉じる（棋譜タブの棋譜は消えません）",
           kind: "danger",
           onPick: () => void removeCard(card),
         },
@@ -401,7 +401,7 @@ export function mountFetchCards(
     closeBtn.type = "button";
     closeBtn.className = "danger-btn";
     closeBtn.textContent = "閉じる";
-    closeBtn.title = "このカードを画面と仮の一覧から外します（棚の棋譜は消えません）";
+    closeBtn.title = "このカードを画面と仮の一覧から外します（棋譜タブの棋譜は消えません）";
     closeBtn.disabled = busy;
     closeBtn.addEventListener("click", (e) => askRemove(e, card));
     head.append(refreshBtn, closeBtn);
@@ -425,7 +425,7 @@ export function mountFetchCards(
         "前回のカードを復元しました。棋譜本文はまだありません" +
         "（覚えているのは「どのサイトのどの棋譜か」だけです）。" +
         "「取り直して解析」ならそのまま進めます。" +
-        "棚に入れるときは先に「更新」を押してください。";
+        "棋譜タブに入れるときは先に「更新」を押してください。";
       box.append(hint);
     } else if (!game.finished) {
       // ⚠️ **未終局の注意は出すこと。** 保存は画面の内容をそのまま書き込むので、
@@ -434,7 +434,7 @@ export function mountFetchCards(
       hint.className = "setting-note";
       hint.textContent =
         "まだ終局していません。保存はいま表示している内容をそのまま書き込むので、" +
-        "最新を棚に入れたいときは先に「更新」を押してください（同じ棋譜なら増えません）。";
+        "最新を棋譜タブに入れたいときは先に「更新」を押してください（同じ棋譜なら増えません）。";
       box.append(hint);
     }
 
@@ -465,8 +465,8 @@ export function mountFetchCards(
         ? "取り直して解析"
         : "解析する";
     analyzeBtn.title = restored
-      ? "サイトから取り直してから解析タブで開きます（棚には入りません）"
-      : "この内容を解析タブで開きます（棚には入りません。最新手は「更新」してから）";
+      ? "サイトから取り直してから解析タブで開きます（棋譜タブには入りません）"
+      : "この内容を解析タブで開きます（棋譜タブには入りません。最新手は「更新」してから）";
     // ⚠️ **`sourceId` を見るのは取り直すときだけ。** 本文があるカードは
     // 送るだけなので、取得元の ID は要らない。
     analyzeBtn.disabled = busy || (restored && !game.sourceId);
@@ -481,7 +481,7 @@ export function mountFetchCards(
     // 本文の無いカードは押せないままにしてある。
     saveBtn.title = restored
       ? "先に「更新」でサイトから取り直してください（棋譜本文がまだありません）"
-      : "いま表示している内容を棚（棋譜タブ）に書き込みます";
+      : "いま表示している内容を棋譜タブに書き込みます";
     saveBtn.disabled = busy || restored;
     saveBtn.addEventListener("click", () => void save(card));
 
