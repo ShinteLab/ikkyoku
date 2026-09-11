@@ -1345,16 +1345,22 @@ export function mountMainScreen(root: HTMLElement): void {
     //
     // **走っている解析（連続解析を含む）も止まる。** タブを移ると止まるのは
     // そういう約束で、**そこまでの評価値は残る**（設計原則3）。
-    // ⚠️ **切り離しているあいだは手放さないこと**（2026-09-08）。エンジンの寿命を
-    // 解析タブに紐づけているのは**そこに解析の面があるから**で、別ウィンドウに
-    // 出しているなら**タブを移っても見えている**（止めると、見ている目の前で
-    // 解析が消える）。窓を閉じればドックに戻るので、そのとき普通に効く。
-    if (
-      sideDetached !== true &&
-      target !== studyTab &&
-      studyTab.classList.contains("is-active")
-    ) {
-      // ⚠️ **連続解析も止めること**（側の列が持っている）。
+    //
+    // ⚠️ **2026-09-12 に「切り離しているあいだは手放さない」を外した。**
+    // あの例外の理由は「別ウィンドウに出しているならタブを移っても見えている」
+    // だったが、**切り離した窓も解析タブと一緒に隠れる**ようになったので
+    // （`CaptureService.SetStudyTabActive`）、見えている相手が居ない。
+    // **見えないところで局面が進み続けるほうが困る。**
+    if (target !== studyTab && studyTab.classList.contains("is-active")) {
+      // ⚠️ **連続解析は持ち主に止めさせること**（2026-09-12）。切り離していると
+      // 回しているのは**別の窓**なので、こちらで `Stop()` しても
+      // **今の 1 手が止まるだけで次の手が始まる**（`cancelBatch` が持ち主でなければ
+      // `study:cancel` を飛ばす）。
+      // ⚠️ **走っているときだけ頼むこと** —— 走っていないのに頼むと、
+      // 向こうの面に「連続解析を止めました」とだけ出る。
+      if (sidePane.stepping()) {
+        sidePane.cancelBatch();
+      }
       sidePane.release();
       void AnalyzeService.Release();
     }
@@ -1364,6 +1370,12 @@ export function mountMainScreen(root: HTMLElement): void {
     if (target !== editTab && editTab.classList.contains("is-active")) {
       editor.release();
     }
+    // ⚠️ **切り離した窓は解析タブと一緒に出し入れする**（2026-09-12）。
+    // 評価値グラフも候補手も手順も**解析タブの中身**なので、他のタブに居るあいだ
+    // 出しておいても読む相手が居ない（起動直後の入力タブも同じ）。
+    // ⚠️ **設定は変わらない** —— Go 側がやるのは `Show`/`Hide` だけで、
+    // 「切り離しているか」はそのまま（**タブに戻れば同じ形で出し直す**）。
+    void CaptureService.SetStudyTabActive(target === studyTab);
     for (const { tab, panel } of tabs) {
       const active = tab === target;
       tab.classList.toggle("is-active", active);

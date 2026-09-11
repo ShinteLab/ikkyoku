@@ -177,6 +177,30 @@ func main() {
 	settingsSvc.OnEvalGraphDetached = captureSvc.applyEvalGraphDetached
 	settingsSvc.OnStudyPaneDetached = captureSvc.applyStudyPaneDetached
 	settingsSvc.OnMovePaneDetached = captureSvc.applyMovePaneDetached
+	// 切り離した窓を出せなかったときにドックへ戻す口（設計原則3）。
+	// ⚠️ **`CaptureService` から `SettingsService` を直に触らせないための関数**
+	// （ダイアログやイベントと同じ扱い。窓を持っているのはあちら、設定はこちら）。
+	captureSvc.onPaneShowFailed = func(kind string) {
+		var err error
+		switch kind {
+		case "graph":
+			_, err = settingsSvc.SetEvalGraphDetached(false)
+		case "side":
+			_, err = settingsSvc.SetStudyPaneDetached(false)
+		case "moves":
+			_, err = settingsSvc.SetMovePaneDetached(false)
+		}
+		if err != nil {
+			logger.Error("ドックに戻せませんでした", "window", kind, "error", err)
+		}
+	}
+	// ⚠️ **起動時の設定を `CaptureService` にも入れておくこと**（2026-09-12）。
+	// 窓を出すかどうかは「切り離しているか × 解析タブを見ているか」で決まるので、
+	// **前者を知らないと、解析タブを開いても出てこない**（設定タブで触るまで
+	// `applyXxxDetached` が呼ばれないため）。
+	// ⚠️ **ここで `Show()` はしない**（`app.Run()` の前は何も起きない。
+	// 2026-09-08 に踏んだ罠）。出すのはフロントが解析タブを開いたとき。
+	captureSvc.initPaneDetached(cfg.EvalGraphDetached, cfg.StudyPaneDetached, cfg.MovePaneDetached)
 	settingsSvc.OnSutemeSource = captureSvc.applyRecognizerSource
 	settingsSvc.OnSutemeDataDir = captureSvc.applyRecognizerDir
 	captureSvc.applyClickThrough(cfg.ClickThrough)
@@ -197,9 +221,9 @@ func main() {
 
 	registerFrameHooks(app, wins, state.Frame, captureSvc, cfg.FitOnStartup, logger)
 	registerMainHooks(app, wins, state.Main, quit)
-	registerGraphHooks(wins, state.Graph, cfg.EvalGraphDetached, settingsSvc, logger)
-	registerSideHooks(wins, state.Side, cfg.StudyPaneDetached, settingsSvc, logger)
-	registerMovesHooks(wins, state.Moves, cfg.MovePaneDetached, settingsSvc, logger)
+	registerGraphHooks(wins, state.Graph, settingsSvc, logger)
+	registerSideHooks(wins, state.Side, settingsSvc, logger)
+	registerMovesHooks(wins, state.Moves, settingsSvc, logger)
 	registerHotkey(app, captureSvc, logger)
 	registerVisibilityLog(wins, logger)
 	diagSvc.Watch()
@@ -391,7 +415,7 @@ func newMovesWindow(app *application.App, st guide.Window) *application.WebviewW
 
 // registerMovesHooks は手順の窓の位置の復元と、**閉じたらドックに戻す**を仕込む
 // （`registerSideHooks` と同じ形。**揃えておくこと**）。
-func registerMovesHooks(wins *appWindows, st guide.Window, detached bool, settings *ikkyokuapp.SettingsService, logger *slog.Logger) {
+func registerMovesHooks(wins *appWindows, st guide.Window, settings *ikkyokuapp.SettingsService, logger *slog.Logger) {
 	moves := wins.moves
 	moves.RegisterHook(events.Common.WindowRuntimeReady, func(e *application.WindowEvent) {
 		if st.X != unsetPosition || st.Y != unsetPosition {
@@ -399,19 +423,9 @@ func registerMovesHooks(wins *appWindows, st guide.Window, detached bool, settin
 			moves.SetSize(w, h)
 			moves.SetPosition(x, y)
 		}
-		if !detached {
-			return
-		}
-		// ⚠️ **出すのはここ**（`app.Run()` の前の `Show()` は何も起きない）。
-		// **`Focus()` は呼ばない**（起動直後にメイン画面からフォーカスを奪う）。
-		moves.Show()
-		// ⚠️ **出せなかったらドックへ戻すこと**（設計原則3）。
-		if !moves.IsVisible() {
-			logger.Warn("手順の窓を出せませんでした。ドックに戻します")
-			if _, err := settings.SetMovePaneDetached(false); err != nil {
-				logger.Error("ドックに戻せませんでした", "error", err)
-			}
-		}
+		// ⚠️ **ここでは出さない**（2026-09-12）。切り離した 3 つは**解析タブの
+		// 中身**なので、**解析タブを開いたときに `CaptureService.syncPaneWindows`
+		// が出す**（起動直後に出るのは入力タブ）。
 	})
 	moves.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
 		e.Cancel()
@@ -425,7 +439,7 @@ func registerMovesHooks(wins *appWindows, st guide.Window, detached bool, settin
 
 // registerSideHooks は右の列の窓の位置の復元と、**閉じたらドックに戻す**を仕込む
 // （`registerGraphHooks` と同じ形。**揃えておくこと**）。
-func registerSideHooks(wins *appWindows, st guide.Window, detached bool, settings *ikkyokuapp.SettingsService, logger *slog.Logger) {
+func registerSideHooks(wins *appWindows, st guide.Window, settings *ikkyokuapp.SettingsService, logger *slog.Logger) {
 	side := wins.side
 	side.RegisterHook(events.Common.WindowRuntimeReady, func(e *application.WindowEvent) {
 		if st.X != unsetPosition || st.Y != unsetPosition {
@@ -433,19 +447,7 @@ func registerSideHooks(wins *appWindows, st guide.Window, detached bool, setting
 			side.SetSize(w, h)
 			side.SetPosition(x, y)
 		}
-		if !detached {
-			return
-		}
-		// ⚠️ **出すのはここ**（`app.Run()` の前の `Show()` は何も起きない。
-		// グラフの窓で踏んだのと同じ罠）。**`Focus()` は呼ばない。**
-		side.Show()
-		// ⚠️ **出せなかったらドックへ戻すこと**（設計原則3）。
-		if !side.IsVisible() {
-			logger.Warn("解析の列の窓を出せませんでした。ドックに戻します")
-			if _, err := settings.SetStudyPaneDetached(false); err != nil {
-				logger.Error("ドックに戻せませんでした", "error", err)
-			}
-		}
+		// ⚠️ **ここでは出さない**（2026-09-12。`registerMovesHooks` と同じ）。
 	})
 	side.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
 		e.Cancel()
@@ -467,7 +469,7 @@ func registerSideHooks(wins *appWindows, st guide.Window, detached bool, setting
 // ⚠️ **設定の側も戻すこと。** 窓だけ隠して設定が「切り離している」のままだと、
 // **次の起動で中身の見えない窓が出る**。だから `SetEvalGraphDetached(false)` を
 // 通す（そこから `applyEvalGraphDetached` が呼ばれて、メイン画面へも知らせが行く）。
-func registerGraphHooks(wins *appWindows, st guide.Window, detached bool, settings *ikkyokuapp.SettingsService, logger *slog.Logger) {
+func registerGraphHooks(wins *appWindows, st guide.Window, settings *ikkyokuapp.SettingsService, logger *slog.Logger) {
 	graph := wins.graph
 	graph.RegisterHook(events.Common.WindowRuntimeReady, func(e *application.WindowEvent) {
 		if st.X != unsetPosition || st.Y != unsetPosition {
@@ -475,25 +477,10 @@ func registerGraphHooks(wins *appWindows, st guide.Window, detached bool, settin
 			graph.SetSize(w, h)
 			graph.SetPosition(x, y)
 		}
-		if !detached {
-			return
-		}
-		// ⚠️ **切り離したまま終了したら、次の起動でも出すこと。**
-		// ⚠️ **出すのはここ**（`app.Run()` の前に `Show()` を呼んでも何も起きない。
-		// 2026-09-08 に踏んだ —— 設定は「切り離し」のままなのに窓が出ず、
-		// **グラフがどこにも無い**状態になった）。
-		// ⚠️ **`Focus()` は呼ばないこと** —— 起動直後にメイン画面から
-		// フォーカスを奪う（ユーザーが押した結果ではないので、前に出す理由が無い）。
-		graph.Show()
-		// ⚠️ **出せなかったらドックへ戻すこと**（設計原則3）。窓が出ないまま
-		// 設定だけ「切り離し」で残ると、**グラフがどこにも無いうえ戻す入口も無い**
-		// （戻す口はその窓の中にある）。
-		if !graph.IsVisible() {
-			logger.Warn("評価値グラフの窓を出せませんでした。ドックに戻します")
-			if _, err := settings.SetEvalGraphDetached(false); err != nil {
-				logger.Error("ドックに戻せませんでした", "error", err)
-			}
-		}
+		// ⚠️ **ここでは出さない**（2026-09-12。`registerMovesHooks` と同じ）。
+		// 切り離した 3 つは**解析タブの中身**なので、出すのは
+		// `CaptureService.syncPaneWindows`（解析タブを開いたとき）。
+		// **出せなかったときにドックへ戻す歯止めもあちらへ移した**（`onPaneShowFailed`）。
 	})
 	graph.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
 		e.Cancel()

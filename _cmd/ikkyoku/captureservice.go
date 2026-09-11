@@ -102,6 +102,28 @@ type CaptureService struct {
 	// mouseThrough は今 WS_EX_TRANSPARENT を立てているか。
 	// **設定そのものではない**（設定が入でも、カーソルがツールバーの上に居るあいだは false）。
 	mouseThrough bool
+
+	// ---- 切り離した窓の表示（2026-09-12）----------------------------------
+	//
+	// ⚠️ **「切り離しているか」と「今出ているか」は別**。前者は設定
+	// （`config.json`）、後者は**解析タブを見ているか**との掛け合わせ。
+	// 切り離した 3 つはどれも**解析タブの中身**なので、他のタブに居るあいだ
+	// 出しっぱなしにしても読む相手が居ない（起動直後も同じ）。
+	//
+	// ⚠️ **設定のほうを書き換えて隠さないこと。** それは「ドックに戻す」であって、
+	// **タブに戻ったときに窓へ出し直せなくなる**（人が畳んだのか、タブを離れた
+	// だけなのかが区別できなくなる）。ここは `Show`/`Hide` だけ。
+
+	// paneDetached は切り離しの設定（graph / side / moves）。
+	paneDetached struct{ graph, side, moves bool }
+	// studyTabActive は解析タブを見ているか（フロントが `SetStudyTabActive` で伝える）。
+	studyTabActive bool
+	// onPaneShowFailed は窓を出せなかったときにドックへ戻すための口
+	// （実体は `SettingsService.Set*Detached(false)`。main.go が差し込む）。
+	//
+	// ⚠️ **落とさないこと**（設計原則3）。出せないまま設定が「切り離し」で残ると、
+	// **中身がどこにも無いうえ戻す入口も無い**（戻す口はその窓の中にある）。
+	onPaneShowFailed func(kind string)
 }
 
 func NewCaptureService(logger *slog.Logger, recognizerDir, recognizerSource string) *CaptureService {
@@ -973,19 +995,96 @@ func (s *CaptureService) captureWithoutSelf(disp ikkyoku.Region) (image.Image, e
 // ⚠️ **メイン画面へ知らせること**（`graph:detached`）。窓を閉じて戻したときに
 // これが無いと、**メイン画面のペインが出てこない**（グラフがどこにも無くなる）。
 func (s *CaptureService) applyEvalGraphDetached(detached bool) {
-	if s.wins == nil || s.wins.graph == nil {
-		return
-	}
-	if detached {
-		s.wins.graph.Show()
+	s.paneDetached.graph = detached
+	s.syncPaneWindows()
+	// ⚠️ **前に出すのは人が押したときだけ**（`syncPaneWindows` では呼ばない）。
+	// タブを移っただけでフォーカスを奪うと、**解析タブに戻るたびに
+	// キーボードが別の窓へ行く**。
+	if detached && s.studyTabActive && s.wins != nil && s.wins.graph != nil {
 		s.wins.graph.Focus()
-	} else {
-		s.wins.graph.Hide()
 	}
 	if s.app != nil {
 		s.app.Event.Emit("graph:detached", detached)
 	}
 	s.logger.Info("評価値グラフの置き場所を変えました", "detached", detached)
+}
+
+// initPaneDetached は起動時の切り離しの設定を控える（2026-09-12）。
+//
+// ⚠️ **ここでは出さない。** `app.Run()` の前の `Show()` は何も起きないし、
+// そもそも起動直後に出るのは入力タブ。**出すのはフロントが解析タブを開いたとき**
+// （`SetStudyTabActive`）。
+//
+// ⚠️ **控えること自体が要点。** これが無いと、設定タブで触るまで
+// `applyXxxDetached` が呼ばれないので、**切り離したまま終了して起動し直すと、
+// 解析タブを開いても窓が出てこない**（設定は「切り離し」のままなので
+// メイン画面の列も出ない ＝ 中身がどこにも無い）。
+func (s *CaptureService) initPaneDetached(graph, side, moves bool) {
+	s.paneDetached.graph = graph
+	s.paneDetached.side = side
+	s.paneDetached.moves = moves
+}
+
+// SetStudyTabActive は**解析タブを見ているか**を受け取る（2026-09-12）。
+//
+// 切り離した 3 つの窓（評価値グラフ・候補手・手順）は**どれも解析タブの中身**なので、
+// 他のタブに居るあいだ出しておいても読む相手が居ない。**起動直後も同じ**
+// （最初に出るのは入力タブ）。
+//
+// ⚠️ **設定は触らない。** ここでやるのは `Show`/`Hide` だけで、「切り離しているか」は
+// `config.json` のまま —— **タブに戻ったら同じ形で出し直す**ためにそうする。
+// ⚠️ **`*:detached` のイベントもここでは出さない** —— あれは設定が変わった知らせで、
+// フロントはあれを見て**ドック側のペインを出し入れする**。タブを移るたびに流すと、
+// **メイン画面の右の列が勝手に戻ってくる。**
+func (s *CaptureService) SetStudyTabActive(on bool) {
+	if s.studyTabActive == on {
+		return
+	}
+	s.studyTabActive = on
+	s.syncPaneWindows()
+}
+
+// syncPaneWindows は「切り離しの設定 × 解析タブを見ているか」で 3 つの窓を出し入れする。
+//
+// ⚠️ **破棄しないこと**（`Hide` だけ）。破棄すると次に出すときに作り直しになり、
+// **位置も大きさも失う**（枠と同じ扱い）。
+// ⚠️ **中身は隠れていても動いている**ので、出し直しに待ち時間は無い
+// （`studyscreen.ts` / `graphscreen.ts` の「切り離していない窓も動いている」）。
+func (s *CaptureService) syncPaneWindows() {
+	if s.wins == nil {
+		return
+	}
+	for _, w := range []struct {
+		kind     string
+		name     string
+		win      *application.WebviewWindow
+		detached bool
+	}{
+		{"graph", "評価値グラフの窓", s.wins.graph, s.paneDetached.graph},
+		{"side", "候補手の窓", s.wins.side, s.paneDetached.side},
+		{"moves", "手順の窓", s.wins.moves, s.paneDetached.moves},
+	} {
+		if w.win == nil {
+			continue
+		}
+		want := w.detached && s.studyTabActive
+		if !want {
+			if w.win.IsVisible() {
+				w.win.Hide()
+			}
+			continue
+		}
+		if w.win.IsVisible() {
+			continue
+		}
+		w.win.Show()
+		// ⚠️ **出せなかったらドックへ戻すこと**（設計原則3）。設定だけが
+		// 「切り離し」で残ると、**中身がどこにも無いうえ戻す入口も無い。**
+		if !w.win.IsVisible() && s.onPaneShowFailed != nil {
+			s.logger.Warn("窓を出せませんでした。ドックに戻します", "window", w.name)
+			s.onPaneShowFailed(w.kind)
+		}
+	}
 }
 
 // applyStudyPaneDetached は**候補手の面**の切り離しを窓に反映する（2026-09-08。
@@ -994,14 +1093,10 @@ func (s *CaptureService) applyEvalGraphDetached(detached bool) {
 // **`applyEvalGraphDetached` と同じ形。揃えておくこと** —— 2 つの窓で作法が違うと、
 // どちらがどうだったかを覚えることになる。
 func (s *CaptureService) applyStudyPaneDetached(detached bool) {
-	if s.wins == nil || s.wins.side == nil {
-		return
-	}
-	if detached {
-		s.wins.side.Show()
+	s.paneDetached.side = detached
+	s.syncPaneWindows()
+	if detached && s.studyTabActive && s.wins != nil && s.wins.side != nil {
 		s.wins.side.Focus()
-	} else {
-		s.wins.side.Hide()
 	}
 	if s.app != nil {
 		s.app.Event.Emit("side:detached", detached)
@@ -1017,14 +1112,10 @@ func (s *CaptureService) applyStudyPaneDetached(detached bool) {
 // ⚠️ **メイン画面へ知らせること**（`moves:detached`）。窓を閉じて戻したときに
 // これが無いと、**メイン画面の手順が出てこない**（手順がどこにも無くなる）。
 func (s *CaptureService) applyMovePaneDetached(detached bool) {
-	if s.wins == nil || s.wins.moves == nil {
-		return
-	}
-	if detached {
-		s.wins.moves.Show()
+	s.paneDetached.moves = detached
+	s.syncPaneWindows()
+	if detached && s.studyTabActive && s.wins != nil && s.wins.moves != nil {
 		s.wins.moves.Focus()
-	} else {
-		s.wins.moves.Hide()
 	}
 	if s.app != nil {
 		s.app.Event.Emit("moves:detached", detached)
