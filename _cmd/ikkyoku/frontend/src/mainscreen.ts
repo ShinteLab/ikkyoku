@@ -2697,8 +2697,11 @@ ${st.turnLabel}${n}`;
     if (sideLocked) {
       return;
     }
-    if (sideDetached === true || studySideW === 0 || boardW() <= 0) {
-      return; // 切り離し / 畳んでいる / タブが隠れている（測れない）
+    // ⚠️ **見るのは `bothDetached()`**（2026-09-12）。`sideDetached` は
+    // **候補手の面だけ**を指すようになったので、ここで見ると
+    // **手順だけ残っている列でバーが死ぬ**（掴んでも 1px も動かない。実際に踏んだ）。
+    if (bothDetached() || studySideW === 0 || boardW() <= 0) {
+      return; // 両方とも切り離し / 畳んでいる / タブが隠れている（測れない）
     }
     // ⚠️ **折り畳みのアニメーション中は測らない。** 盤の幅が動いている最中なので、
     // 二分探索が途中の値を掴んで**でたらめな幅で確定する**。終わったら呼び直す。
@@ -2733,8 +2736,10 @@ ${st.turnLabel}${n}`;
 
   // setStudySideW は幅を変える。**効果が無い方向へは動かさない。**
   const setStudySideW = (px: number) => {
-    if (sideDetached === true || studySideW === 0 || boardW() <= 0) {
-      return; // 切り離し / 畳んでいるあいだは幅を変えない（戻すのはトグルの仕事）
+    // ⚠️ **`bothDetached()` で見ること**（`settleStudySide` と同じ ⚠️）。
+    // 列が 1 つでも残っているなら、幅は今までどおり変えられなければならない。
+    if (bothDetached() || studySideW === 0 || boardW() <= 0) {
+      return; // 両方とも切り離し / 畳んでいるあいだは幅を変えない（戻すのはトグルの仕事）
     }
     const next = Math.max(Math.round(px), STUDY_SIDE_MIN);
     if (next === studySideW) {
