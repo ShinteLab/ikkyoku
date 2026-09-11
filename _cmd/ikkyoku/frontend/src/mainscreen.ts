@@ -17,10 +17,11 @@
 //            (自由編集・合法性を問わない・手番も駒台の先後も未決でよい)
 //   解析   … **確定した局面**の面。評価値を出し、今後ここに手順と分岐ツリーが乗る
 //            (合法手だけを辿る)
-//   設定   … 設定。**関わりでまとめてある**(2026-09-12。撮る / 解析 / 盤の表示 /
+//   設定   … 設定。**関わりでまとめてある**(2026-09-12。撮る / 解析 / 駒の字 /
 //            棋譜データベース / 盤面認識(suteme))。⚠️ **足した順に積まないこと。**
-//            ⚠️ **区切りの見出しは 2 つ以上をまとめるときだけ** —— 中身が 1 つなら
-//            その項目自身を畳む(棋譜データベース・盤面認識がそれ)。
+//            ⚠️ **畳むのは区切りの単位で、中でもう一度畳まない**(解析エンジンは
+//            「解析」の中の 1 項目)。⚠️ **見出し(.setting-section)は 2 つ以上を
+//            畳まずに並べるときだけ** —— 今は「撮る」だけ。
 //            ⚠️ **並びの基準は「どれだけの人が触るか」** —— よく触るものが上、
 //            **既定のままで動くものは下**。⚠️ **盤面認識をベース機能だからと上へ
 //            戻さないこと**(認識器の置き場所や学習データへの登録は相当な上級者の操作)。
@@ -1019,64 +1020,69 @@ export function mountMainScreen(root: HTMLElement): void {
           </span>
         </label>
 
-        <h3 class="setting-section">解析</h3>
-        <!-- 解析エンジン。**繋ぎ先は「USI を話すプロセス」なら何でもよい**
-             （やねうら王・水匠・prokishi.exe・同梱のエンジン）。検討ツールとして
-             実用になるかは繋ぐエンジンの棋力で決まるので、ここで差し替えられる。
-
-             ⚠️ **1 つに絞らない**（2026-08-11）。**複数登録でき、「解析に使う」を
-             付けたものが同時に走る。** どのエンジンが正しいかは局面によって違うので、
-             評価が食い違うところを並べて読めることに意味がある。
-
-             ⚠️ **「外部を使う」のチェックボックスは置かない。** パスが空なら同梱、
-             入っていれば外部。2 つ持つと「パスが入っているのに無効」という
-             食い違いが起きる。 -->
-        <details id="fold-engine" class="setting-group setting-fold">
+        <details id="fold-analyze" class="setting-group setting-fold">
           <summary class="setting-fold-head">
-            <span class="setting-title">解析エンジン</span>
-            <span id="fold-engine-sum" class="setting-fold-sum"></span>
+            <span class="setting-title">解析</span>
+            <span id="fold-analyze-sum" class="setting-fold-sum"></span>
           </summary>
-          <span class="setting-note">
-            USI を話すエンジンの実行ファイルを登録します（やねうら王・水匠など）。
-            <strong>「解析に使う」を付けたエンジンが同時に走り、解析タブに結果が並びます。</strong>
-            実行ファイルを<strong>空にするとその登録は同梱のエンジン</strong>になります。
-            同じエンジンを <code>setoption</code> 違いで 2 つ登録して比べることもできます。
-            <strong>「接続を確認」を押すと、そのエンジンの設定項目（option）を読み込んで
-            各行の「エンジンの設定」から変えられるようになります。</strong>
-            変えた値は次の解析から送られます。
-          </span>
-          <ul id="engine-list" class="engine-list"></ul>
-          <div class="setting-fields">
-            <button id="engine-add" class="ghost-btn" type="button"
-                    title="実行ファイルを選んで登録します">エンジンを追加…</button>
-            <button id="engine-add-builtin" class="ghost-btn" type="button"
-                    title="同梱のエンジンを登録します">同梱エンジンを追加</button>
+          <!-- 勝率バーの変換に使う定数（解析タブ。2026-08-12）。
+               **評価値の尺度はエンジンによって違う**ので、ここで合わせられるように
+               してある（⚠️ 自作エンジンの評価値の絶対値は当てにならない）。
+               ⚠️ **既定値（1500）は Go 側が解決して返す。フロントに書かないこと。** -->
+          <div class="setting-group">
+            <span class="setting-title">勝率の表示</span>
+            <span class="setting-note">
+              解析タブの盤の上に出る勝率バーの計算に使います。
+              <code>勝率(先手) = 1 / (1 + exp(-評価値 / ポナンザ定数))</code>。
+              <strong>小さくするほど、同じ評価値でも勝率が振り切れます。</strong>
+              空欄にすると既定に戻ります。
+            </span>
+            <div class="setting-fields">
+              <label class="field">
+                <span class="field-label">ポナンザ定数</span>
+                <input id="ponanza-constant" class="port" type="number" min="1" max="100000"
+                       step="10" title="評価値を勝率に直すときの定数（既定 1500）" />
+              </label>
+            </div>
           </div>
-          <p id="engine-status" class="status" role="status" aria-live="polite"></p>
+
+          <!-- 解析エンジン。**繋ぎ先は「USI を話すプロセス」なら何でもよい**
+               （やねうら王・水匠・prokishi.exe・同梱のエンジン）。検討ツールとして
+               実用になるかは繋ぐエンジンの棋力で決まるので、ここで差し替えられる。
+
+               ⚠️ **1 つに絞らない**（2026-08-11）。**複数登録でき、「解析に使う」を
+               付けたものが同時に走る。** どのエンジンが正しいかは局面によって違うので、
+               評価が食い違うところを並べて読めることに意味がある。
+
+               ⚠️ **「外部を使う」のチェックボックスは置かない。** パスが空なら同梱、
+               入っていれば外部。2 つ持つと「パスが入っているのに無効」という
+               食い違いが起きる。 -->
+          <div class="setting-group">
+            <div class="setting is-block">
+              <span class="setting-body">
+                <span class="setting-title">解析エンジン</span>
+                <span class="setting-note">
+                  USI を話すエンジンの実行ファイルを登録します（やねうら王・水匠など）。
+                  <strong>「解析に使う」を付けたエンジンが同時に走り、解析タブに結果が並びます。</strong>
+                  実行ファイルを<strong>空にするとその登録は同梱のエンジン</strong>になります。
+                  同じエンジンを <code>setoption</code> 違いで 2 つ登録して比べることもできます。
+                  <strong>「接続を確認」を押すと、そのエンジンの設定項目（option）を読み込んで
+                  各行の「エンジンの設定」から変えられるようになります。</strong>
+                  変えた値は次の解析から送られます。
+                </span>
+              </span>
+            </div>
+            <ul id="engine-list" class="engine-list"></ul>
+            <div class="setting-fields">
+              <button id="engine-add" class="ghost-btn" type="button"
+                      title="実行ファイルを選んで登録します">エンジンを追加…</button>
+              <button id="engine-add-builtin" class="ghost-btn" type="button"
+                      title="同梱のエンジンを登録します">同梱エンジンを追加</button>
+            </div>
+            <p id="engine-status" class="status" role="status" aria-live="polite"></p>
+          </div>
         </details>
 
-        <!-- 勝率バーの変換に使う定数（解析タブ。2026-08-12）。
-             **評価値の尺度はエンジンによって違う**ので、ここで合わせられるように
-             してある（⚠️ 自作エンジンの評価値の絶対値は当てにならない）。
-             ⚠️ **既定値（1500）は Go 側が解決して返す。フロントに書かないこと。** -->
-        <div class="setting-group">
-          <span class="setting-title">勝率の表示</span>
-          <span class="setting-note">
-            解析タブの盤の上に出る勝率バーの計算に使います。
-            <code>勝率(先手) = 1 / (1 + exp(-評価値 / ポナンザ定数))</code>。
-            <strong>小さくするほど、同じ評価値でも勝率が振り切れます。</strong>
-            空欄にすると既定に戻ります。
-          </span>
-          <div class="setting-fields">
-            <label class="field">
-              <span class="field-label">ポナンザ定数</span>
-              <input id="ponanza-constant" class="port" type="number" min="1" max="100000"
-                     step="10" title="評価値を勝率に直すときの定数（既定 1500）" />
-            </label>
-          </div>
-        </div>
-
-        <h3 class="setting-section">盤の表示</h3>
         <!-- 駒の字（2026-08-16）。**端末に入っているフォントから駒の字を焼いて使う。**
 
              同梱できる駒フォントは「派生物の作成と再配布を認める」ライセンスの
@@ -3863,8 +3869,10 @@ ${st.turnLabel}${n}`;
   const engineStatus = root.querySelector<HTMLParagraphElement>("#engine-status")!;
   // 畳んでいるときの 1 行（見出しの右）。⚠️ **中身の代わりにはしない** ——
   // 開かなくても「今どうなっているか」が分かるだけの添え物。
-  const engineFold = root.querySelector<HTMLDetailsElement>("#fold-engine")!;
-  const engineFoldSum = root.querySelector<HTMLElement>("#fold-engine-sum")!;
+  // ⚠️ **畳んでいるのは「解析」の区切りごと**（2026-09-12）。エンジンの一覧は
+  // その中の 1 項目で、自分では畳まない（親が畳むので二重にしない）。
+  const analyzeFold = root.querySelector<HTMLDetailsElement>("#fold-analyze")!;
+  const analyzeFoldSum = root.querySelector<HTMLElement>("#fold-analyze-sum")!;
 
   // ---- 駒の字（2026-08-16）----
   //
@@ -4515,7 +4523,7 @@ ${st.turnLabel}${n}`;
     engineStatus.textContent = String(err instanceof Error ? err.message : err);
     engineStatus.classList.add("is-error");
     // 畳んでいても開く（理由が閉じた中に隠れてはいけない）。
-    engineFold.open = true;
+    analyzeFold.open = true;
   };
 
   // 設定の書き換えはどれも AppSettings を返すので、返ってきたものでそのまま描き直す。
@@ -4802,10 +4810,10 @@ ${st.turnLabel}${n}`;
 
     // 畳んでいるときは「何個登録していて、何個が走るか」だけ出す。
     const useCount = engines.filter((e) => e.enabled).length;
-    engineFoldSum.textContent =
+    analyzeFoldSum.textContent =
       engines.length === 0
-        ? "登録なし"
-        : `${engines.length} 個の登録 / 解析に使う ${useCount} 個`;
+        ? "エンジンの登録なし"
+        : `エンジン ${engines.length} 個 / 解析に使う ${useCount} 個`;
 
     engineList.replaceChildren();
     for (const [index, e] of engines.entries()) {

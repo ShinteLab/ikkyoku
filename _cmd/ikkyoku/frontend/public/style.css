@@ -1077,7 +1077,9 @@ html.is-main #app {
 .setting-section + .setting,
 .setting-section + .setting-group,
 .setting-section-note + .setting,
-.setting-section-note + .setting-group {
+.setting-section-note + .setting-group,
+/* 畳んだ区切りの中の先頭も同じ（見出しは summary が兼ねている）。 */
+.setting-fold > summary + .setting-group {
   padding-top: 0;
   border-top: none;
 }
