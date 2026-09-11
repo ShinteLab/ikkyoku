@@ -17,9 +17,11 @@
 //            (自由編集・合法性を問わない・手番も駒台の先後も未決でよい)
 //   解析   … **確定した局面**の面。評価値を出し、今後ここに手順と分岐ツリーが乗る
 //            (合法手だけを辿る)
-//   設定   … 設定。**5 つの区切りに分けてある**(2026-09-12。撮る / 盤面認識(suteme) /
-//            解析 / 盤の表示 / ファイルの場所)。⚠️ **足した順ではなく関わりでまとめる** ——
-//            並びは処理の流れの順で、**既定のままで動くもの(ファイルの場所)は下**。
+//   設定   … 設定。**5 つの区切りに分けてある**(2026-09-12。撮る / 解析 / 盤の表示 /
+//            ファイルの場所 / 盤面認識(suteme))。⚠️ **足した順ではなく関わりでまとめる。**
+//            ⚠️ **並びの基準は「どれだけの人が触るか」** —— よく触るものが上、
+//            **既定のままで動くものは下**。⚠️ **盤面認識をベース機能だからと上へ
+//            戻さないこと**(認識器の置き場所や学習データへの登録は相当な上級者の操作)。
 //            ⚠️ **認識器の読み込み元と「訂正盤面を suteme に登録する」を離さないこと**
 //            (相手が同じ suteme)。項目を足すときはこの 5 つのどれかに入れる。
 //            詳しくは `_docs/ui/screens.md`
@@ -1015,90 +1017,6 @@ export function mountMainScreen(root: HTMLElement): void {
           </span>
         </label>
 
-        <h3 class="setting-section">盤面認識（suteme）</h3>
-        <p class="setting-section-note">
-          認識に使う学習データと、訂正した局面の戻し先。<strong>どちらも相手は
-          suteme</strong> なので、片方だけ設定しても噛み合いません。
-        </p>
-        <!-- 認識器の読み込み元（2026-08-27）。
-
-             **exe 1 つで配れる形と、学習データを育てながら使う形の両方が要る。**
-             配布ビルド（-tags embedmodel）は認識器を焼き込んであるので、
-             suteme のリポジトリが無い環境でもそのまま動く。開発中は
-             ディレクトリを指しておけば、データを更新した結果がすぐ反映される。
-
-             ⚠️ **「自動」はディレクトリ優先。** 焼き込みは固定したデータなので、
-             ここが焼き込みへ倒れると**学習データを更新しても反映されない**という
-             最も気づきにくい事故になる（Go 側 resolveRecognizerSource）。 -->
-        <div class="setting-group">
-          <div class="setting is-block">
-            <span class="setting-body">
-              <span class="setting-title">認識器の読み込み元</span>
-              <span class="setting-note">
-                盤面認識に使う suteme の学習データをどこから読むかです。
-                切り替えるとその場で読み直します。
-              </span>
-            </span>
-          </div>
-          <div class="setting-fields">
-            <label class="field">
-              <span class="field-label">読み込み元</span>
-              <select id="suteme-source">
-                <option value="auto">自動（ディレクトリ優先）</option>
-                <option value="dir">学習データのディレクトリ</option>
-                <option value="embed">このアプリに焼き込んだデータ</option>
-              </select>
-            </label>
-            <label class="field is-wide">
-              <span class="field-label">ディレクトリ</span>
-              <input id="suteme-data-dir" type="text" spellcheck="false"
-                     placeholder="(空なら suteme 既定の探索)" />
-            </label>
-          </div>
-          <p id="suteme-source-note" class="setting-note"></p>
-        </div>
-
-        <!-- 訂正結果を suteme の学習データに戻す設定。**自動送信のスイッチではない**
-             (2026-08-07 の決定: 自動で送ると、人が直した 1 マス以外は推論結果のまま
-             なので自分の出力を正解として食う)。ここで有効にすると、確定した局面ごとに
-             「訂正データを送信」が出るだけ。 -->
-        <div class="setting-group">
-          <label class="setting">
-            <input id="train-enabled" type="checkbox" />
-            <span class="setting-body">
-              <span class="setting-title">訂正盤面を suteme に登録する</span>
-              <span class="setting-note">
-                確定した盤面を suteme の学習データとして送れるようにします。
-                <strong>送るのはボタンを押したときだけ</strong>で、自動では送りません。
-                向こうには「未確認」として入り、suteme の解析タブで人が確認するまで
-                学習には使われません。
-                <strong>画面に見えていない駒を知識で補った局面は送らないでください</strong>
-                （テロップで盤が隠れているときなど。ラベルが画素と一致しなくなります）。
-              </span>
-            </span>
-          </label>
-          <div class="setting-fields">
-            <label class="field">
-              <span class="field-label">サーバ</span>
-              <input id="train-host" type="text" placeholder="127.0.0.1" spellcheck="false" />
-            </label>
-            <label class="field">
-              <span class="field-label">ポート</span>
-              <input id="train-port" class="port" type="number" min="1" max="65535" />
-            </label>
-            <!-- トークンは**同じマシンなら要らない**(suteme はループバックを
-                 認証免除にしている)。別のマシンへ送るときだけ入れる。 -->
-            <label class="field">
-              <span class="field-label">トークン</span>
-              <input id="train-token" type="password" placeholder="同じマシンなら不要"
-                     spellcheck="false" autocomplete="off" />
-            </label>
-            <button id="train-check" class="ghost-btn" type="button"
-                    title="suteme が登録を受け付けられる状態か確かめます">接続を確認</button>
-          </div>
-          <p id="train-check-status" class="status" role="status" aria-live="polite"></p>
-        </div>
-
         <h3 class="setting-section">解析</h3>
         <!-- 解析エンジン。**繋ぎ先は「USI を話すプロセス」なら何でもよい**
              （やねうら王・水匠・prokishi.exe・同梱のエンジン）。検討ツールとして
@@ -1290,6 +1208,91 @@ export function mountMainScreen(root: HTMLElement): void {
             <button id="kifudb-browse" type="button">参照…</button>
           </div>
           <p id="kifudb-note" class="setting-note"></p>
+        </div>
+
+        <h3 class="setting-section">盤面認識（suteme）</h3>
+        <p class="setting-section-note">
+          認識に使う学習データと、訂正した局面の戻し先。<strong>どちらも既定のままで
+          動きます</strong>ので、<strong>認識の精度を自分で育てるとき</strong>だけ
+          触ってください。相手はどちらも suteme なので、片方だけ設定しても噛み合いません。
+        </p>
+        <!-- 認識器の読み込み元（2026-08-27）。
+
+             **exe 1 つで配れる形と、学習データを育てながら使う形の両方が要る。**
+             配布ビルド（-tags embedmodel）は認識器を焼き込んであるので、
+             suteme のリポジトリが無い環境でもそのまま動く。開発中は
+             ディレクトリを指しておけば、データを更新した結果がすぐ反映される。
+
+             ⚠️ **「自動」はディレクトリ優先。** 焼き込みは固定したデータなので、
+             ここが焼き込みへ倒れると**学習データを更新しても反映されない**という
+             最も気づきにくい事故になる（Go 側 resolveRecognizerSource）。 -->
+        <div class="setting-group">
+          <div class="setting is-block">
+            <span class="setting-body">
+              <span class="setting-title">認識器の読み込み元</span>
+              <span class="setting-note">
+                盤面認識に使う suteme の学習データをどこから読むかです。
+                切り替えるとその場で読み直します。
+              </span>
+            </span>
+          </div>
+          <div class="setting-fields">
+            <label class="field">
+              <span class="field-label">読み込み元</span>
+              <select id="suteme-source">
+                <option value="auto">自動（ディレクトリ優先）</option>
+                <option value="dir">学習データのディレクトリ</option>
+                <option value="embed">このアプリに焼き込んだデータ</option>
+              </select>
+            </label>
+            <label class="field is-wide">
+              <span class="field-label">ディレクトリ</span>
+              <input id="suteme-data-dir" type="text" spellcheck="false"
+                     placeholder="(空なら suteme 既定の探索)" />
+            </label>
+          </div>
+          <p id="suteme-source-note" class="setting-note"></p>
+        </div>
+
+        <!-- 訂正結果を suteme の学習データに戻す設定。**自動送信のスイッチではない**
+             (2026-08-07 の決定: 自動で送ると、人が直した 1 マス以外は推論結果のまま
+             なので自分の出力を正解として食う)。ここで有効にすると、確定した局面ごとに
+             「訂正データを送信」が出るだけ。 -->
+        <div class="setting-group">
+          <label class="setting">
+            <input id="train-enabled" type="checkbox" />
+            <span class="setting-body">
+              <span class="setting-title">訂正盤面を suteme に登録する</span>
+              <span class="setting-note">
+                確定した盤面を suteme の学習データとして送れるようにします。
+                <strong>送るのはボタンを押したときだけ</strong>で、自動では送りません。
+                向こうには「未確認」として入り、suteme の解析タブで人が確認するまで
+                学習には使われません。
+                <strong>画面に見えていない駒を知識で補った局面は送らないでください</strong>
+                （テロップで盤が隠れているときなど。ラベルが画素と一致しなくなります）。
+              </span>
+            </span>
+          </label>
+          <div class="setting-fields">
+            <label class="field">
+              <span class="field-label">サーバ</span>
+              <input id="train-host" type="text" placeholder="127.0.0.1" spellcheck="false" />
+            </label>
+            <label class="field">
+              <span class="field-label">ポート</span>
+              <input id="train-port" class="port" type="number" min="1" max="65535" />
+            </label>
+            <!-- トークンは**同じマシンなら要らない**(suteme はループバックを
+                 認証免除にしている)。別のマシンへ送るときだけ入れる。 -->
+            <label class="field">
+              <span class="field-label">トークン</span>
+              <input id="train-token" type="password" placeholder="同じマシンなら不要"
+                     spellcheck="false" autocomplete="off" />
+            </label>
+            <button id="train-check" class="ghost-btn" type="button"
+                    title="suteme が登録を受け付けられる状態か確かめます">接続を確認</button>
+          </div>
+          <p id="train-check-status" class="status" role="status" aria-live="polite"></p>
         </div>
 
         <p id="settings-status" class="status" role="status" aria-live="polite"></p>
