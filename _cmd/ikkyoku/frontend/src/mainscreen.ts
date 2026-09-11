@@ -377,8 +377,8 @@ export function mountMainScreen(root: HTMLElement): void {
              対局モード（片側を人、もう片側をエンジンが指す）を入れる段になったら、
              この選択がそのまま「自分の側」になる。 -->
         <div class="setting-group">
-          <span class="setting-title">新しく対局を始める</span>
-          <span class="setting-note">
+          <span class="setting-title" data-hint="hint-newgame">新しく対局を始める</span>
+          <span id="hint-newgame" class="setting-note is-hint">
             初期局面から始めます。<strong>解析タブ</strong>が開いて、
             盤の駒を押せばそのまま手を進められます。
             <strong>あなたの手番に選んだ側が手前に来ます</strong>
@@ -406,8 +406,8 @@ export function mountMainScreen(root: HTMLElement): void {
              どちらも「枠を出してから枠に対してやること」なので、
              入力タブに置くとタブを行き来することになる。ここに残すのは案内だけ。 -->
         <div class="setting-group">
-          <span class="setting-title">画面から撮る</span>
-          <span class="setting-note">
+          <span class="setting-title" data-hint="hint-capture">画面から撮る</span>
+          <span id="hint-capture" class="setting-note is-hint">
             タイトルバーの<strong>「枠を表示」</strong>でガイド枠を出し、
             中継の盤面に合わせてから、枠のツールバーのカメラを押します
             （枠の □ で盤に合わせられます）。
@@ -425,8 +425,8 @@ export function mountMainScreen(root: HTMLElement): void {
         <!-- 棋譜を貼り付ける。**画像を通らない 2 つめの入口**なので、行き先も違う
              （撮影は認識を通るので訂正タブ、棋譜は既に確定しているので解析タブ）。 -->
         <div class="setting-group">
-          <span class="setting-title">棋譜を貼り付ける</span>
-          <span class="setting-note">
+          <span class="setting-title" data-hint="hint-paste">棋譜を貼り付ける</span>
+          <span id="hint-paste" class="setting-note is-hint">
             KIF 形式の棋譜を貼るか、<strong>.kif の URL</strong> を入れて読み込むと、
             <strong>指し手を全て反映した局面</strong>で<strong>解析タブ</strong>が開きます。
             手順は盤の右に並ぶので、押せばその局面まで戻れます。
@@ -474,22 +474,24 @@ export function mountMainScreen(root: HTMLElement): void {
              ⚠️ **日本将棋連盟の中継はこちらで扱うこと。** 上の URL 欄から入れると
              source_id が毎回 UUID になり、取り込むたびに別の棋譜として増える。 -->
         <div class="setting-group">
-          <span class="setting-title">中継から取得する</span>
-          <span class="setting-note">
+          <span class="setting-title" data-hint="hint-fetch">中継から取得する</span>
+          <span id="hint-fetch" class="setting-note is-hint">
+            <span class="hint-para">
             <strong>読売（竜王戦）</strong>の対局ページと
             <strong>日本将棋連盟の棋譜中継</strong>から取れます。URL か棋譜 ID を入れてください。
             <strong>取得しただけでは棚に入りません</strong>（カードの「この内容を保存」で入ります）。
             対局中は棋譜が伸びるので、「更新」で取り直してから保存し直してください。
-          </span>
+            </span>
           <!-- ⚠️ **カードは再起動しても残る**（仮の一覧 / kicho の watches）。
                2 日制の対局で翌日また URL を貼り直さずに済ませるためのもので、
                **覚えているのは「どのサイトのどの棋譜か」だけ**（棋譜そのものではない）。 -->
-          <span class="setting-note">
+            <span class="hint-para">
             <strong>カードは再起動しても残ります。</strong>2 日制の対局で翌日また URL を
             貼り直さずに済むよう、「どのサイトのどの棋譜か」を覚えておきます
             （<strong>棋譜そのものではありません</strong>）。復元したカードは中身が空なので
             「更新」でサイトから取り直してください。追うのをやめるときはカードの「閉じる」で外します
             （<strong>保存済みの棋譜は消えません</strong>）。終局した棋譜を保存したときは自動で外れます。
+            </span>
           </span>
           <div class="setting-fields">
             <span class="field-label">URL / 棋譜 ID</span>
@@ -1318,10 +1320,11 @@ export function mountMainScreen(root: HTMLElement): void {
     </div>
   `;
 
-  // 設定の説明をホバーで出す（2026-09-12。`hint.ts`）。
-  // ⚠️ **呼ぶのはここ 1 回だけ**（innerHTML を組んだ直後）。設定タブの中身は
-  // 描き直さないので、付け直しは要らない。
-  attachHints(root.querySelector<HTMLElement>("#panel-settings")!);
+  // 項目の説明をホバーで出す（2026-09-12。`hint.ts`）。**設定タブと入力タブ。**
+  // ⚠️ **呼ぶのはここ 1 回だけ**（innerHTML を組んだ直後）。どちらのタブも
+  // 中身を描き直さないので、付け直しは要らない。
+  // ⚠️ **対象は `root` 全体**（`data-hint` の付いたものだけが拾われる）。
+  attachHints(root);
 
   const reloadBtn = root.querySelector<HTMLButtonElement>("#reload-btn")!;
   const recognizer = root.querySelector<HTMLParagraphElement>("#recognizer")!;
