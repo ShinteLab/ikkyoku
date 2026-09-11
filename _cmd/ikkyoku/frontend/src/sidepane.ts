@@ -67,6 +67,12 @@ export interface SidePaneHandle {
   // **両方が連続モードで解析を起こし合う**（互いの解析を打ち切り続ける）ので、
   // 使われていない側は**自動解析をしない**。
   setActive(on: boolean): void;
+  // setParts は**この窓が出す面**（2026-09-12）。候補手と手順は別々に切り離せるので、
+  // **同じ 1 つの面が、窓によって違う半分だけを出す。**
+  //
+  // ⚠️ **出さない面も中身は生きている**（`setActive` と同じ考え方）——
+  // 隠すのは見た目だけで、局面も設定もそのまま届く。
+  setParts(parts: { analyze: boolean; moves: boolean }): void;
 }
 
 export interface SidePaneOptions {
@@ -82,14 +88,19 @@ export interface SidePaneOptions {
   onBusy(on: boolean, note: string): void;
   // onSettings は設定を書き換えたとき（設定タブを描き直すのは呼び出し側）。
   onSettings(settings: AppSettings): void;
-  // action は**解析の行の右端**に置くもの（2026-09-09）。
+  // analyzeAction は**解析の行の右端**に置くもの（2026-09-09）。
   //
-  // 切り離した窓の「ドックに戻す」がこれ。⚠️ **ドックしているときは渡さないこと**
-  // —— あちらに戻す相手が居ない（戻す口はバーの上のトグル）。
+  // ドックしているときは「切り離す」、切り離した窓では「ドックに戻す」。
+  // ⚠️ **どちらの状態でも同じ場所**にすること（探す場所が変わらないのが要点）。
   //
   // ⚠️ **見出しの行を別に作らないこと。** 窓の一番上に 1 行足すと、そのぶん
   // **候補手と手順の取り分が減る**（切り離すのは大きく見たいからで、逆行する）。
-  action?: HTMLElement;
+  analyzeAction?: HTMLElement;
+  // movesAction は**手順の見出しの行の右端**に置くもの（2026-09-12）。
+  //
+  // ⚠️ **候補手の側（`analyzeAction`）と作法を揃えること** —— 出す/戻すが
+  // その面の中の同じ場所にある、という約束は面が 2 つになっても変わらない。
+  movesAction?: HTMLElement;
 }
 
 export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
@@ -99,7 +110,7 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
                  正しい」局面があるため。設計原則3）。変な評価値が出たときの手掛かり。
                  ⚠️ **盤の上に置かないこと**（2026-08-12 に上段ごと外した）——
                  めったに出ないもののために、盤の高さを常に削ることになる。 -->
-            <ul id="study-warnings" class="warnings is-compact" hidden></ul>
+            <ul id="study-warnings" class="warnings is-compact side-part-analyze" hidden></ul>
             <!-- エンジン解析（Phase 4）。**確定した局面にだけかかる。**
                  確定していない局面はそもそもこのタブに来ない（Go 側の
                  StudyService.Adopt が断る）ので、ここでの「押せない理由」は
@@ -107,7 +118,7 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
 
                  ⚠️ **局面を採り直したら結果を消す。** 評価値は「その局面の」値なので、
                  盤が変わったあとも残っていると、別の局面の値を今の盤の評価だと読ませる。 -->
-            <div id="analyze-row" class="analyze-row" hidden>
+            <div id="analyze-row" class="analyze-row side-part-analyze" hidden>
               <button id="analyze-run" class="ghost-btn" type="button">解析</button>
               <!-- 連続モード（2026-08-11）。**既定で入**。
                    手を進めるたびに勝手に解析し直すので、押す操作が要らなくなる。
@@ -164,16 +175,16 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
                  ⚠️ **エンジンをまたいで結果を合成しないこと**（平均も多数決も取らない）。
                  並べて人が読む。中の候補手（MultiPV）は **1 本しか来なくても一覧の形で
                  出す** —— 次善手を辿るのが構想の中心なので、複数本になるのが前提の作り。 -->
-            <div id="analyze-engines" class="analyze-engines" hidden></div>
+            <div id="analyze-engines" class="analyze-engines side-part-analyze" hidden></div>
             <!-- エンジンの結果と手順の境目（2026-08-15）。**高さは人が決める。**
                  ⚠️ **候補の本数で自動では動かさない** —— 動かすと、手で決めた高さが
                  解析のたびに上書きされる。書き換えるのは --analyze-engines-h
                  ただ 1 つで、余りは手順のリストがもらう。
                  ⚠️ **他の 2 本（評価値グラフ・解析の列）と操作の形を揃えること。** -->
-            <div id="analyze-split" class="split-bar" role="separator" hidden
+            <div id="analyze-split" class="split-bar side-part-analyze" role="separator" hidden
                  aria-orientation="horizontal" aria-label="解析結果の高さ" tabindex="0"
                  title="ドラッグで解析結果の高さを変えます（余りは手順に渡ります）。上下キーでも動きます"></div>
-            <p id="analyze-status" class="note is-caution" hidden></p>
+            <p id="analyze-status" class="note is-caution side-part-analyze" hidden></p>
             <!-- 手順（Phase 5「手を進める UI」）。**盤の右の列の下半分。**
                  ⚠️ **高さを中身に依存させないこと**（中でスクロールさせる）。 -->
             <!-- 手順の見出しの行。**連続解析もここに置く**（2026-08-12）。
@@ -207,7 +218,7 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
                  ⚠️ **出す条件は StudyState.sourceUrl。** 入力タブの URL 欄の
                  中身で判断しないこと（欄はいつでも書き換えられるので、
                  **今の手順がどこから来たか**とは別物になる）。 -->
-            <div class="study-move-head">
+            <div class="study-move-head side-part-moves">
               <!-- ⚠️ **十字キーの上下で辿れることは title でしか言っていない**
                    （2026-08-18）。行に文字を足すと、そのぶん手順のリストが
                    短くなる（この列は縦の取り合いが厳しい）。 -->
@@ -231,20 +242,53 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
                  消えるのは**その手とその先**。ボタンは「今どこを見ているか」に
                  依存していて、戻って見ている最中に押すと何が消えるのか
                  画面から読めなかった。**ボタンを戻さないこと。** -->
-            <div id="study-moves" class="study-moves"></div>
-            <p id="study-move-status" class="note is-caution" hidden></p>
+            <div id="study-moves" class="study-moves side-part-moves"></div>
+            <p id="study-move-status" class="note is-caution side-part-moves" hidden></p>
 `;
   const q = <T extends Element>(sel: string) => host.querySelector<T>(sel)!;
 
   // この面が今使われているか（**切り離すと、ドック側は隠れたまま生き続ける**）。
   // ⚠️ **false のあいだは自動解析をしないこと** —— 両方が起こし合う。
+  //
+  // ⚠️ **`active` は「連続解析と自動解析の持ち主か」**（2026-09-12）。持ち主は
+  // **候補手の面を出している窓**ただ 1 つ。手順だけの窓（と、候補手を切り離した
+  // あとのメイン画面）は持ち主ではないので、**連続解析は持ち主へ頼む。**
   let active = true;
+
+  // 持ち主の側で連続解析が走っているか（**持ち主でないときだけ見る**）。
+  //
+  // ⚠️ **手順の窓にも連続解析のボタンがある**ので、走っているかどうかが分からないと
+  // **「停止」に変わらないし、押しても二重に起こすことになる。** 状態は
+  // `study:busy` で届く（幕と同じ知らせ）。
+  // ⚠️ **ここで数えないこと**（持っているのは持ち主だけ。2 か所で数えると食い違う）。
+  let remoteBusy = false;
+
+  // この窓が出す面（2026-09-12。`setParts`）。⚠️ **出さない面も中身は動いている。**
+  let showAnalyze = true;
+  let showMoves = true;
+
+  // applyParts は**出す面**を器のクラスで切り替える（2026-09-12）。
+  //
+  // ⚠️ **要素ごとに `hidden` を立てないこと。** `hidden` は「局面があるか」を
+  // 表しているので（`render`）、**切り離しという別の理由で同じ属性を使うと、
+  // 戻したときにどちらの理由で消えているのか読めなくなる**（評価値グラフで
+  // 踏んだのと同じ話）。ここは**器のクラスと CSS**で消す。
+  const applyParts = () => {
+    host.classList.toggle("is-no-analyze", !showAnalyze);
+    host.classList.toggle("is-no-moves", !showMoves);
+  };
 
   // ⚠️ **右端へ寄せるのは `margin-left: auto`**（`.analyze-row-action`）。
   // 解析の行は `flex-wrap` するので、**幅が足りなければ次の行へ回る**。
-  if (opts.action) {
-    opts.action.classList.add("analyze-row-action");
-    q<HTMLElement>("#analyze-row").appendChild(opts.action);
+  if (opts.analyzeAction) {
+    opts.analyzeAction.classList.add("analyze-row-action");
+    q<HTMLElement>("#analyze-row").appendChild(opts.analyzeAction);
+  }
+  // 手順の側は**連続解析のボタンの右**（あちらが `margin-left: auto` で寄っているので、
+  // そのあとに足せば行の右端に付く）。⚠️ **見出しの「手順」の隣に置かないこと** ——
+  // あそこは「再読み込み」の場所で、**取り直す相手を位置で示している。**
+  if (opts.movesAction) {
+    q<HTMLElement>(".study-move-head").appendChild(opts.movesAction);
   }
 
   const studyWarnings = q<HTMLUListElement>("#study-warnings");
@@ -1076,6 +1120,13 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
 
   const batchActive = () => batchLast >= 0;
 
+  // batchBusy は**ボタンの見た目に使う「走っているか」**。
+  //
+  // ⚠️ **持ち主でなければ、走っているのは自分ではない**（`study:busy` で届く）。
+  // これを見ないと、手順だけの窓のボタンが「連続解析」のまま押せてしまい、
+  // **持ち主に二重に頼む**ことになる。
+  const batchBusy = () => (active ? batchActive() : remoteBusy);
+
   // 連続解析を始められない理由。**空なら押せる。**
   const batchBlockedReason = (): string => {
     if (!analyzeReady) {
@@ -1113,14 +1164,14 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
     // **秒数も出す**（「3秒毎2手目から解析」）。⚠️ **これが何分かかるかを決めている**
     // ので、押す前に**手数と一緒に**読めるのが要る（残り時間は手数 × 秒数）。
     // ⚠️ **秒数が決まっていないときは書かない**（「無制限」。0 秒と書かないこと）。
-    batchRun.textContent = batchActive()
+    batchRun.textContent = batchBusy()
       ? "停止"
       : `${batchSecondsLabel()}${batchFrom()}手目から解析`;
-    batchRun.classList.toggle("is-active", batchActive());
+    batchRun.classList.toggle("is-active", batchBusy());
     // 走っている最中は止められる。走っていないときは、解析できる局面かつ
     // 秒数が決まっているときだけ押せる。
-    batchRun.disabled = !batchActive() && (!analyzeReady || blocked !== "");
-    batchRun.title = batchActive()
+    batchRun.disabled = !batchBusy() && (!analyzeReady || blocked !== "");
+    batchRun.title = batchBusy()
       ? "連続解析を止めます（そこまでの評価値は残ります）"
       : blocked || batchRangeText();
   };
@@ -1347,7 +1398,8 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
     }
   });
 
-  batchRun.addEventListener("click", () => {
+  // toggleBatch は連続解析の入切（**持ち主だけが実際に回す**）。
+  const toggleBatch = () => {
     if (batchActive()) {
       cancelBatch();
       return;
@@ -1359,6 +1411,38 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
     batchLast = studyFirst + studyMoveCount;
     syncBatchButton();
     void batchStep();
+  };
+
+  batchRun.addEventListener("click", () => {
+    // ⚠️ **持ち主でなければ頼むだけ**（2026-09-12）。手順を切り離すと、
+    // ボタンは**候補手の面を持っていない窓**に居る —— そこで自分が回すと、
+    // **エンジンを持っている側と局面を取り合う**（互いの解析を打ち切り合う）。
+    // ⚠️ **持ち主は「候補手の面を出している窓」ただ 1 つ**（`setActive`）。
+    if (!active) {
+      void Events.Emit("study:batch", null);
+      return;
+    }
+    toggleBatch();
+  });
+
+  // ⚠️ **頼まれる側。持ち主だけが応じること**（`study:cancel` と同じ形）。
+  // 応じる相手が複数居ると、**押した 1 回で入って即座に切れる。**
+  Events.On("study:batch", () => {
+    if (!active) {
+      return;
+    }
+    toggleBatch();
+  });
+
+  // 持ち主の側の連続解析の状態（**ボタンの文字がこれで決まる**）。
+  // ⚠️ **持ち主のときは聞かないこと** —— 自分が持っている値のほうが正しく、
+  // 自分が出した知らせで上書きすると 1 手ごとにちらつく。
+  Events.On("study:busy", (event: { data: { on: boolean } }) => {
+    if (active) {
+      return;
+    }
+    remoteBusy = !!event.data?.on;
+    syncBatchButton();
   });
   analyzeSeconds.addEventListener("change", syncBatchButton);
 
@@ -1686,10 +1770,17 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
       void AnalyzeService.Stop();
     },
     cancelBatch() {
+      // ⚠️ **持ち主でなければ頼むだけ**（`study:batch` と同じ理由）。幕の出口は
+      // どの窓にもあるが、**止められるのは持っている窓だけ。**
+      if (!active) {
+        void Events.Emit("study:cancel", null);
+        return;
+      }
       cancelBatch();
     },
     stepping() {
-      return batchActive();
+      // ⚠️ **別の窓が回していても「走っている」**（十字キーを横取りさせない）。
+      return batchBusy();
     },
     setActive(on: boolean) {
       if (active === on) {
@@ -1701,6 +1792,15 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
         // エンジンを掴んだままだと、切り離した先の解析と取り合う。
         stopBatch("");
       }
+      // ⚠️ **持ち主が変われば「走っているか」の出どころも変わる**ので、
+      // 引き継いだ値を捨てて描き直す（持ち主になった瞬間は自分の値が正）。
+      remoteBusy = false;
+      syncBatchButton();
+    },
+    setParts(parts: { analyze: boolean; moves: boolean }) {
+      showAnalyze = parts.analyze;
+      showMoves = parts.moves;
+      applyParts();
     },
   };
 }

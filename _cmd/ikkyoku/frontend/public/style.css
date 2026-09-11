@@ -3581,6 +3581,29 @@ html.is-graph #app {
   overflow-y: auto;
 }
 
+/* 出さない面（2026-09-12。候補手と手順は別々に切り離せる）。
+   ⚠️ **`hidden` で消さないこと。** あの属性は「局面があるか」を表しているので
+   （`sidepane.ts` の `render`）、**切り離しという別の理由で同じ属性を使うと、
+   戻したときにどちらの理由で消えているのか読めなくなる。** ここは器のクラスで消す。 */
+.study-side.is-no-analyze .side-part-analyze,
+.study-side.is-no-moves .side-part-moves {
+  display: none;
+}
+
+/* ⚠️ **境目のバーは「手順が居ないと意味が無い」**（分ける相手が居ない）。
+   候補手だけの窓で線だけ浮くのを避ける。 */
+.study-side.is-no-moves #analyze-split {
+  display: none;
+}
+
+/* 候補手だけの窓では、エンジンの枠が**余った高さを全部もらう**。
+   ⚠️ **`--analyze-engines-h` を触らないこと** —— あれは**ドック側で人が決めた値**で、
+   窓の都合で書き換えると**戻したときに手で決めた高さが消えている。** */
+.study-side.is-no-moves .analyze-engines {
+  flex: 1 1 0;
+  height: auto;
+}
+
 /* 右の列の先頭に出す警告（解析タブ）。⚠️ **盤の上に戻さないこと** ——
    めったに出ないもののために盤の高さを常に削ることになる。 */
 .study-side > .warnings {

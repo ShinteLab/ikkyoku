@@ -9,8 +9,11 @@
 //     起動時は非表示で、最初のキャプチャで現れる。閉じるとアプリが終了する。
 //   - ?window=evalgraph … 切り離した評価値グラフ(2026-09-08)。**閉じてもアプリは
 //     終わらない**(ドックに戻るだけ)。出すかどうかは設定 `evalGraphDetached`。
-//   - ?window=study … 切り離した**盤の右の列**(候補手・手順・解析の操作。2026-09-08)。
-//     扱いは evalgraph と同じ。出すかどうかは設定 `studyPaneDetached`。
+//   - ?window=study … 切り離した**候補手の面**(警告・解析の行・エンジンのカード。
+//     2026-09-08)。扱いは evalgraph と同じ。出すかどうかは設定 `studyPaneDetached`。
+//   - ?window=moves … 切り離した**手順の面**(見出しの行・手順のツリー。2026-09-12)。
+//     出すかどうかは設定 `movePaneDetached`。⚠️ **study と中身は同じモジュール**
+//     (`studyscreen.ts` が両方をまかなう。器の作法を写して分けないため)。
 
 // ⚠️ この素の import を消さないこと。
 // Frameless ウィンドウのドラッグ移動(--wails-draggable: drag)とリサイズ(ウィンドウ端の
@@ -91,9 +94,14 @@ if (windowName === "frame") {
   document.documentElement.classList.add("is-graph");
   mountGraphScreen(app);
 } else if (windowName === "study") {
-  document.title = "解析 - ikkyoku";
+  document.title = "候補手 - ikkyoku";
   document.documentElement.classList.add("is-study");
-  mountStudyScreen(app);
+  mountStudyScreen(app, "analyze");
+} else if (windowName === "moves") {
+  // ⚠️ **`is-study` を付けること**（器の CSS は候補手の窓と共通）。
+  document.title = "手順 - ikkyoku";
+  document.documentElement.classList.add("is-study");
+  mountStudyScreen(app, "moves");
 } else {
   document.title = "ikkyoku";
   document.documentElement.classList.add("is-main");

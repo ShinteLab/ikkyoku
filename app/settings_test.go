@@ -655,6 +655,63 @@ func TestSetStudyPaneDetached(t *testing.T) {
 	}
 }
 
+// TestSetMovePaneDetached は**手順の面**の切り離しを固定する（2026-09-12）。
+//
+// ⚠️ **一番の要点は「候補手とは別の設定であること」。** 2026-09-12 に右の列を
+// **候補手と手順に割った**ので、片方だけ外に出す使い方が普通になった ——
+// 1 つにまとめると、**手順を大きく見たいだけで候補手まで外へ飛ぶ。**
+//
+// ⚠️ **戻したことも残ること**（切り離しの 2 つと同じ。キーが消えると、手で
+// 編集する側から存在に気づけない）。
+func TestSetMovePaneDetached(t *testing.T) {
+	s := newTestSettings(t, nil)
+	var got []bool
+	s.OnMovePaneDetached = func(v bool) { got = append(got, v) }
+
+	// 何もしていない状態は**ドック**（両方とも右の列の中）。
+	if s.Settings().MovePaneDetached {
+		t.Fatal("既定で切り離されています")
+	}
+
+	if _, err := s.SetStudyPaneDetached(true); err != nil {
+		t.Fatalf("SetStudyPaneDetached: %v", err)
+	}
+	st, err := s.SetMovePaneDetached(true)
+	if err != nil {
+		t.Fatalf("SetMovePaneDetached: %v", err)
+	}
+	if !st.MovePaneDetached || !st.StudyPaneDetached {
+		t.Errorf("両方立っているはずです: moves=%v study=%v",
+			st.MovePaneDetached, st.StudyPaneDetached)
+	}
+	if len(got) != 1 || !got[0] {
+		t.Errorf("フックの呼ばれ方 = %v, want [true]", got)
+	}
+
+	// ⚠️ **片方を戻してももう一方は残ること**（候補手を巻き添えにしない）。
+	st, err = s.SetMovePaneDetached(false)
+	if err != nil {
+		t.Fatalf("SetMovePaneDetached(false): %v", err)
+	}
+	if st.MovePaneDetached {
+		t.Error("戻っていません")
+	}
+	if !st.StudyPaneDetached {
+		t.Error("候補手まで戻っています（別の設定であること）")
+	}
+	cfg, err := ikkyoku.LoadConfig(s.path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.MovePaneDetached || !cfg.StudyPaneDetached {
+		t.Errorf("保存された値が違います: moves=%v study=%v",
+			cfg.MovePaneDetached, cfg.StudyPaneDetached)
+	}
+	if len(got) != 2 || got[1] {
+		t.Errorf("フックの呼ばれ方 = %v, want [true false]", got)
+	}
+}
+
 // TestSetHideWinRateBar は勝率バー（評価値バー）の表示を固定する（2026-09-10）。
 //
 // ⚠️ **一番の要点は「既定が表示であること」。** `Show...` で持つと、bool の

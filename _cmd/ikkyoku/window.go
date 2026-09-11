@@ -54,12 +54,20 @@ const (
 	minGraphWidth      = 320
 	minGraphHeight     = 140
 
-	// 盤の右の列の窓（切り離したとき。2026-09-08）。**縦に長いほうが読める**
-	// ——手順が縦に積まれる面なので、横に広げても余るだけ。
+	// 候補手の窓（切り離したとき。2026-09-08）。**縦に長いほうが読める**
+	// ——エンジンのカードが縦に積まれる面なので、横に広げても余るだけ。
 	defaultSideWidth  = 420
 	defaultSideHeight = 720
 	minSideWidth      = 300
 	minSideHeight     = 240
+
+	// 手順の窓（切り離したとき。2026-09-12）。**候補手の窓と同じ既定にしてある**
+	// ——どちらも縦に積まれる面で、片方だけ別の形で出てくる理由が無い。
+	// ⚠️ **下限は候補手より低くてよい**（連続解析のボタン 1 行と手順のリストだけ）。
+	defaultMovesWidth  = 420
+	defaultMovesHeight = 720
+	minMovesWidth      = 260
+	minMovesHeight     = 200
 
 	maxReasonableSize = 4000
 
@@ -81,9 +89,12 @@ const (
 type appState struct {
 	Frame guide.Window `json:"frame"`
 	Main  guide.Window `json:"main"`
-	// Side は切り離した**盤の右の列**の窓（2026-09-08）。⚠️ **Graph とは別** ——
+	// Side は切り離した**候補手の面**の窓（2026-09-08）。⚠️ **Graph とは別** ——
 	// 片方だけ切り離す使い方が普通なので、位置も別に覚える。
 	Side guide.Window `json:"side"`
+	// Moves は切り離した**手順の面**の窓（2026-09-12）。⚠️ **Side とも別** ——
+	// 同上（候補手だけ／手順だけを外に出す使い方のどちらもある）。
+	Moves guide.Window `json:"moves"`
 	// Graph は切り離した評価値グラフの窓（2026-09-08）。
 	//
 	// ⚠️ **「切り離しているか」はここには無い**（`config.json` の
@@ -98,6 +109,7 @@ func defaultAppState() appState {
 		Main:  guide.Window{X: unsetPosition, Y: unsetPosition, Width: defaultMainWidth, Height: defaultMainHeight},
 		Graph: guide.Window{X: unsetPosition, Y: unsetPosition, Width: defaultGraphWidth, Height: defaultGraphHeight},
 		Side:  guide.Window{X: unsetPosition, Y: unsetPosition, Width: defaultSideWidth, Height: defaultSideHeight},
+		Moves: guide.Window{X: unsetPosition, Y: unsetPosition, Width: defaultMovesWidth, Height: defaultMovesHeight},
 	}
 }
 
@@ -139,6 +151,9 @@ func loadAppState() appState {
 	}
 	if st.Side.Width <= 0 || st.Side.Height <= 0 {
 		st.Side = def.Side
+	}
+	if st.Moves.Width <= 0 || st.Moves.Height <= 0 {
+		st.Moves = def.Moves
 	}
 	return st
 }

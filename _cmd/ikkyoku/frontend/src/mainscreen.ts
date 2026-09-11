@@ -1927,10 +1927,12 @@ export function mountMainScreen(root: HTMLElement): void {
     // 側の列と、その境目のバー。
     // ⚠️ **切り離しているあいだは出さないこと**（2026-09-08）。別ウィンドウに
     // 出ているので、**同じ値を 2 か所に描くことになる**。
-    studySide.hidden = sideDetached === true || !loaded;
+    // ⚠️ **消えるのは「両方とも切り離したとき」だけ**（2026-09-12）。片方だけなら
+    // 列は残り、**残った面がその幅を全部もらう**（`sidePane.setParts`）。
+    studySide.hidden = bothDetached() || !loaded;
     // ⚠️ **縦のスプリットバーも局面があるときだけ出す。** 局面が無いときは
     // 分ける相手（解析の列）が出ていないので、バーだけが宙に浮く。
-    studySplit.hidden = sideDetached === true || !loaded;
+    studySplit.hidden = bothDetached() || !loaded;
     // ⚠️ **評価値グラフは切り離しているあいだ出さないこと**（2026-09-08）。
     // 別ウィンドウに出ているので、**同じ値を 2 か所に描くことになる**。
     evalGraphRow.hidden = graphDetached === true || !loaded;
@@ -2181,9 +2183,22 @@ ${st.turnLabel}${n}`;
   studySplitDetach.className = "icon-btn";
   studySplitDetach.type = "button";
   studySplitDetach.innerHTML = iconMarkup(FiExternalLink);
-  studySplitDetach.setAttribute("aria-label", "解析の列を切り離す");
+  studySplitDetach.setAttribute("aria-label", "候補手を切り離す");
   studySplitDetach.title =
-    "切り離す: 解析の列を別ウィンドウに出します（盤の大きさに効かなくなります）";
+    "切り離す: 候補手を別ウィンドウに出します（盤の大きさに効かなくなります）";
+
+  // 手順の側の「切り離す」（2026-09-12）。⚠️ **置き場所は手順の見出しの行の右端**
+  // —— 切り離した窓の「ドックに戻す」と同じ場所。**候補手の側と作法を揃えること。**
+  // ⚠️ **候補手のボタンと 1 つにまとめないこと** —— どちらを外に出すかは
+  // そのときの読み方で変わるので、**別々に押せることが要る。**
+  const studyMovesDetach = document.createElement("button");
+  studyMovesDetach.id = "study-moves-detach";
+  studyMovesDetach.className = "icon-btn";
+  studyMovesDetach.type = "button";
+  studyMovesDetach.innerHTML = iconMarkup(FiExternalLink);
+  studyMovesDetach.setAttribute("aria-label", "手順を切り離す");
+  studyMovesDetach.title =
+    "切り離す: 手順を別ウィンドウに出します（盤の大きさに効かなくなります）";
 
   // 盤の右の列（2026-09-08 に `sidepane.ts` へ切り出した）。
   //
@@ -2216,9 +2231,10 @@ ${st.turnLabel}${n}`;
     },
     // 設定を書き換えたら設定タブも描き直す（色・候補手の本数）。
     onSettings: (st) => showSettings(st),
-    // ⚠️ **解析の行の右端に置くもの。** ドックしているときは「切り離す」、
+    // ⚠️ **その面の中の同じ場所に置くもの。** ドックしているときは「切り離す」、
     // 切り離した窓では「ドックに戻す」——**同じ場所**にすること。
-    action: studySplitDetach,
+    analyzeAction: studySplitDetach,
+    movesAction: studyMovesDetach,
   });
   // ⚠️ **幕の出口はここ**（幕は下を全部塞ぐので、側の列の「停止」も押せない）。
   batchVeilCancel.addEventListener("click", () => sidePane.cancelBatch());
@@ -2483,36 +2499,73 @@ ${st.turnLabel}${n}`;
   // **作りは評価値グラフと同じ**（設定が状態を持ち、切り替えは必ず
   // `SettingsService.SetStudyPaneDetached` を通る）。**揃えておくこと。**
 
+  // ⚠️ **2 つある**（2026-09-12。候補手 / 手順）。**1 つにまとめないこと** ——
+  // 片方だけ外に出す使い方が普通で、**どちらを出すかはそのときの読み方で変わる。**
+  //
+  // ⚠️ **`sideDetached` が指すのは候補手の面だけ**（2026-09-12 に意味が狭まった）。
+  // 名前は設定・イベント（`studyPaneDetached` / `side:detached`）と揃えてある。
   let sideDetached: boolean | null = null;
+  let movesDetached: boolean | null = null;
+
+  // 列そのものが要らなくなるのは**両方とも外に出したとき**だけ。
+  const bothDetached = () => sideDetached === true && movesDetached === true;
+
+  // applyPanes は列の見た目を今の 2 つの状態に合わせる（**書き換える場所はここ 1 つ**）。
+  //
+  // ⚠️ **「局面があるか」は `studyLoaded` から読むこと。** 他の要素の `hidden` から
+  // 読まないこと —— 切り離すと**別の理由で `hidden` になる**ので、戻したときに
+  // 「局面が無い」と誤読する（2026-09-09 に踏んだ）。
+  const applyPanes = () => {
+    const both = bothDetached();
+    // ⚠️ **列ごと消すのは両方切り離したときだけ**（バーも）。
+    panelStudy.classList.toggle("is-side-detached", both);
+    studySide.hidden = both || !studyLoaded;
+    studySplit.hidden = both || !studyLoaded;
+    // ⚠️ **盤の式が読む幅も 0 にすること。** 列が出ていないのに幅を予約したままだと、
+    // **そのぶん盤が小さいまま**になる（何も無い余白ができる）。
+    rawSide(both ? 0 : studySideW);
+    // ⚠️ **ドック側が出す面は「切り離していないほう」**（同じ値を 2 か所に描かない）。
+    sidePane.setParts({ analyze: sideDetached !== true, moves: movesDetached !== true });
+    // ⚠️ **使われていない側は自動解析をしないこと**（2026-09-08）。切り離しても
+    // ドック側のペインは隠れたまま生きているので、**両方が起こし合う**。
+    // ⚠️ **持ち主を決めるのは候補手の面だけ**（エンジンを掴んでいるのがあちら）——
+    // 手順を切り離しても、解析はこちらが持ったまま。
+    sidePane.setActive(sideDetached !== true);
+    studyBoardUI.relayout();
+    evalGraphUI.relayout();
+    if (!both) {
+      settleStudySide();
+    }
+  };
 
   const applySideDetached = (on: boolean) => {
     if (sideDetached === on) {
       return;
     }
     sideDetached = on;
-    // ⚠️ **列ごと消すこと**（バーも）。同じ値を 2 か所に描かない。
-    panelStudy.classList.toggle("is-side-detached", on);
-    studySide.hidden = on || !studyLoaded;
-    studySplit.hidden = on || !studyLoaded;
-    // ⚠️ **盤の式が読む幅も 0 にすること。** 列が出ていないのに幅を予約したままだと、
-    // **そのぶん盤が小さいまま**になる（何も無い余白ができる）。
-    rawSide(on ? 0 : studySideW);
-    // ⚠️ **使われていない側は自動解析をしないこと**（2026-09-08）。切り離しても
-    // ドック側のペインは隠れたまま生きているので、**両方が起こし合う**。
-    sidePane.setActive(!on);
-    studyBoardUI.relayout();
-    evalGraphUI.relayout();
-    if (!on) {
-      settleStudySide();
+    applyPanes();
+  };
+
+  const applyMovesDetached = (on: boolean) => {
+    if (movesDetached === on) {
+      return;
     }
+    movesDetached = on;
+    applyPanes();
   };
 
   studySplitDetach.addEventListener("click", () => {
     void SettingsService.SetStudyPaneDetached(true);
   });
+  studyMovesDetach.addEventListener("click", () => {
+    void SettingsService.SetMovePaneDetached(true);
+  });
 
   Events.On("side:detached", (event: { data: boolean }) => {
     applySideDetached(!!event.data);
+  });
+  Events.On("moves:detached", (event: { data: boolean }) => {
+    applyMovesDetached(!!event.data);
   });
 
   // ---- 切り離した窓からの知らせ（**盤に効くもの**）--------------------------
@@ -4191,8 +4244,11 @@ ${st.turnLabel}${n}`;
     clickThrough: boolean;
     // 評価値グラフを別ウィンドウに切り離しているか（2026-09-08）。
     evalGraphDetached: boolean;
-    // 盤の右の列を別ウィンドウに切り離しているか（2026-09-08）。
+    // **候補手の面**を別ウィンドウに切り離しているか（2026-09-08）。
     studyPaneDetached: boolean;
+    // **手順の面**を別ウィンドウに切り離しているか（2026-09-12）。
+    // ⚠️ **候補手とは別の設定**（両方外に出すと右の列そのものが消える）。
+    movePaneDetached: boolean;
     // 勝率バー（評価値バー）を隠しているか（2026-09-10。黒地の右クリック）。
     hideWinRateBar: boolean;
     // 対局者名を隠しているか（2026-09-10。⚠️ **帯とは別の設定**）。
@@ -4226,6 +4282,7 @@ ${st.turnLabel}${n}`;
     // 購読していない**ので、起動直後の形はここで決まる。
     applyGraphDetached(!!s.evalGraphDetached);
     applySideDetached(!!s.studyPaneDetached);
+    applyMovesDetached(!!s.movePaneDetached);
     // ⚠️ **盤の上の 1 行の出し入れも設定から受け取る**（2026-09-10）。切り替えは
     // 黒地の右クリックだが、**起動直後にどちらで始まるかはここで決まる。**
     winrateHidden = !!s.hideWinRateBar;

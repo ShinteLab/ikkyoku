@@ -36,9 +36,13 @@ type AppSettings struct {
 	// 切り替えるのが素直**）。ここに載せてあるのは、**起動時にどちらで始めるかを
 	// フロントが知る必要がある**から。
 	EvalGraphDetached bool `json:"evalGraphDetached"`
-	// StudyPaneDetached は**盤の右の列**を別ウィンドウに切り離しているか
-	// （2026-09-08）。⚠️ **評価値グラフとは別の設定**（片方だけ切り離す使い方が普通）。
+	// StudyPaneDetached は**候補手の面**を別ウィンドウに切り離しているか
+	// （2026-09-08。2026-09-12 に**手順を分けた**ので、右の列まるごとではない）。
+	// ⚠️ **評価値グラフとは別の設定**（片方だけ切り離す使い方が普通）。
 	StudyPaneDetached bool `json:"studyPaneDetached"`
+	// MovePaneDetached は**手順の面**を別ウィンドウに切り離しているか（2026-09-12）。
+	// ⚠️ **候補手とは別の設定。** 両方切り離すとメイン画面の右の列ごと消える。
+	MovePaneDetached bool `json:"movePaneDetached"`
 	// HideWinRateBar は解析タブの**勝率バー（評価値バー）を隠しているか**
 	// （2026-09-10）。
 	//
@@ -278,9 +282,15 @@ type SettingsService struct {
 	// ⚠️ **SettingsService からウィンドウを直に触らないこと**（持っていない）。
 	OnEvalGraphDetached func(bool)
 
-	// OnStudyPaneDetached は**盤の右の列**の切り離しを切り替えたときに呼ぶ
+	// OnStudyPaneDetached は**候補手の面**の切り離しを切り替えたときに呼ぶ
 	// （`CaptureService.applyStudyPaneDetached`）。
 	OnStudyPaneDetached func(bool)
+
+	// OnMovePaneDetached は**手順の面**の切り離しを切り替えたときに呼ぶ
+	// （`CaptureService.applyMovePaneDetached`。2026-09-12）。
+	// ⚠️ **OnStudyPaneDetached と揃えておくこと** —— 2 つの窓で作法が違うと、
+	// どちらがどうだったかを覚えることになる。
+	OnMovePaneDetached func(bool)
 
 	// OnClickThrough は「枠の内側で後ろの画面を操作する」を切り替えたときに呼ぶ。
 	// 実体は `CaptureService.applyClickThrough`（枠の HWND を触るのはあちらの仕事）。
@@ -359,6 +369,7 @@ func (s *SettingsService) settings() AppSettings {
 		ClickThrough:      s.cfg.ClickThrough,
 		EvalGraphDetached: s.cfg.EvalGraphDetached,
 		StudyPaneDetached: s.cfg.StudyPaneDetached,
+		MovePaneDetached:  s.cfg.MovePaneDetached,
 		HideWinRateBar:    s.cfg.HideWinRateBar,
 		HidePlayerNames:   s.cfg.HidePlayerNames,
 		Training:          trainingSettings(s.cfg.Training),
@@ -1093,6 +1104,24 @@ func (s *SettingsService) SetStudyPaneDetached(v bool) (AppSettings, error) {
 	}
 	if s.OnStudyPaneDetached != nil {
 		s.OnStudyPaneDetached(v)
+	}
+	return st, nil
+}
+
+// SetMovePaneDetached は**手順の面**の切り離しを切り替えて保存し、**その場で効かせる。**
+//
+// ⚠️ **入口は 2 つある**（手順の見出しの行の右端のボタンと、**その窓を閉じる操作**）。
+// どちらもここを通るので、**設定と窓の状態が食い違わない**（候補手の面と同じ形。
+// **揃えておくこと**）。
+func (s *SettingsService) SetMovePaneDetached(v bool) (AppSettings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st, err := s.save(func(cfg *ikkyoku.Config) { cfg.MovePaneDetached = v })
+	if err != nil {
+		return st, err
+	}
+	if s.OnMovePaneDetached != nil {
+		s.OnMovePaneDetached(v)
 	}
 	return st, nil
 }

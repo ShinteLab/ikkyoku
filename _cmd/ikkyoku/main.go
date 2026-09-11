@@ -45,7 +45,8 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
-// appWindows はウィンドウ 2 枚と、その位置・サイズの追跡をまとめたもの。
+// appWindows はウィンドウ 5 枚と、その位置・サイズの追跡をまとめたもの
+// （枠 / メイン画面 / 評価値グラフ / 候補手 / 手順。2026-09-12 に手順を分けた）。
 type appWindows struct {
 	// frame は枠ウィンドウ。**キャプチャ領域はこのウィンドウのクライアント矩形そのもの。**
 	frame *application.WebviewWindow
@@ -54,13 +55,17 @@ type appWindows struct {
 	// graph は切り離した評価値グラフの窓（2026-09-08）。**閉じてもアプリは
 	// 終わらない**（ドックに戻るだけ）。⚠️ **枠と違って破棄せず隠す**のも同じ。
 	graph *application.WebviewWindow
-	// side は切り離した**盤の右の列**の窓（2026-09-08）。扱いは graph と同じ。
+	// side は切り離した**候補手の面**の窓（2026-09-08）。扱いは graph と同じ。
 	side *application.WebviewWindow
+	// moves は切り離した**手順の面**の窓（2026-09-12）。扱いは side と同じ。
+	// ⚠️ **side と 1 つにまとめないこと** —— 片方だけ外に出す使い方が普通。
+	moves *application.WebviewWindow
 
 	frameGeom *geometryTracker
 	mainGeom  *geometryTracker
 	graphGeom *geometryTracker
 	sideGeom  *geometryTracker
+	movesGeom *geometryTracker
 
 	// mainHasSavedPos は前回終了時の位置を復元したか。復元しているなら初回表示で
 	// 枠の外へ動かさない(ユーザーが決めた位置を上書きしないため)。
@@ -125,22 +130,26 @@ func main() {
 	main, mainHasSavedPos := newMainWindow(app, state.Main)
 	graph := newGraphWindow(app, state.Graph)
 	side := newSideWindow(app, state.Side)
+	moves := newMovesWindow(app, state.Moves)
 
 	wins := &appWindows{
 		frame:           frame,
 		main:            main,
 		graph:           graph,
 		side:            side,
+		moves:           moves,
 		frameGeom:       newGeometryTracker("frame", state.Frame, logger),
 		mainGeom:        newGeometryTracker("main", state.Main, logger),
 		graphGeom:       newGeometryTracker("graph", state.Graph, logger),
 		sideGeom:        newGeometryTracker("side", state.Side, logger),
+		movesGeom:       newGeometryTracker("moves", state.Moves, logger),
 		mainHasSavedPos: mainHasSavedPos,
 	}
 	wins.frameGeom.attach(frame)
 	wins.mainGeom.attach(main)
 	wins.graphGeom.attach(graph)
 	wins.sideGeom.attach(side)
+	wins.movesGeom.attach(moves)
 	captureSvc.bind(app, wins)
 	// ⚠️ **Wails の口はここで差し込む。** Service 本体は ikkyoku/app にあり
 	// wails3 を import していないので、ダイアログとイベントだけを関数で渡す。
@@ -167,6 +176,7 @@ func main() {
 	// **窓を出し入れするのは CaptureService**（SettingsService はウィンドウを持たない）。
 	settingsSvc.OnEvalGraphDetached = captureSvc.applyEvalGraphDetached
 	settingsSvc.OnStudyPaneDetached = captureSvc.applyStudyPaneDetached
+	settingsSvc.OnMovePaneDetached = captureSvc.applyMovePaneDetached
 	settingsSvc.OnSutemeSource = captureSvc.applyRecognizerSource
 	settingsSvc.OnSutemeDataDir = captureSvc.applyRecognizerDir
 	captureSvc.applyClickThrough(cfg.ClickThrough)
@@ -189,6 +199,7 @@ func main() {
 	registerMainHooks(app, wins, state.Main, quit)
 	registerGraphHooks(wins, state.Graph, cfg.EvalGraphDetached, settingsSvc, logger)
 	registerSideHooks(wins, state.Side, cfg.StudyPaneDetached, settingsSvc, logger)
+	registerMovesHooks(wins, state.Moves, cfg.MovePaneDetached, settingsSvc, logger)
 	registerHotkey(app, captureSvc, logger)
 	registerVisibilityLog(wins, logger)
 	diagSvc.Watch()
@@ -332,7 +343,8 @@ func newGraphWindow(app *application.App, st guide.Window) *application.WebviewW
 	return app.Window.NewWithOptions(opts)
 }
 
-// newSideWindow は切り離した**盤の右の列**の窓を作る（2026-09-08）。
+// newSideWindow は切り離した**候補手の面**の窓を作る（2026-09-08。2026-09-12 に
+// 手順を `newMovesWindow` へ分けたので、右の列まるごとではない）。
 //
 // **盤の大きさに依存しない大きさで見たい**というのが切り離しの目的
 // （`--board-size` は右の列の幅を引いている）。
@@ -345,7 +357,7 @@ func newSideWindow(app *application.App, st guide.Window) *application.WebviewWi
 
 	opts := application.WebviewWindowOptions{
 		Hidden:    true,
-		Title:     "解析 - ikkyoku",
+		Title:     "候補手 - ikkyoku",
 		Width:     w,
 		Height:    h,
 		MinWidth:  minSideWidth,
@@ -354,6 +366,61 @@ func newSideWindow(app *application.App, st guide.Window) *application.WebviewWi
 	}
 	applyPosition(&opts, st)
 	return app.Window.NewWithOptions(opts)
+}
+
+// newMovesWindow は切り離した**手順の面**の窓を作る（2026-09-12）。
+//
+// **候補手と手順は別々に外へ出せる**（どちらを大きく見たいかはそのときの読み方で
+// 変わる）。⚠️ **作りは候補手の窓と同じ**（Frameless にしない・AlwaysOnTop も
+// 付けない・常に隠して作る）。**揃えておくこと。**
+func newMovesWindow(app *application.App, st guide.Window) *application.WebviewWindow {
+	w, h := safeFallback(st, defaultMovesWidth, defaultMovesHeight)
+
+	opts := application.WebviewWindowOptions{
+		Hidden:    true,
+		Title:     "手順 - ikkyoku",
+		Width:     w,
+		Height:    h,
+		MinWidth:  minMovesWidth,
+		MinHeight: minMovesHeight,
+		URL:       "/?window=moves",
+	}
+	applyPosition(&opts, st)
+	return app.Window.NewWithOptions(opts)
+}
+
+// registerMovesHooks は手順の窓の位置の復元と、**閉じたらドックに戻す**を仕込む
+// （`registerSideHooks` と同じ形。**揃えておくこと**）。
+func registerMovesHooks(wins *appWindows, st guide.Window, detached bool, settings *ikkyokuapp.SettingsService, logger *slog.Logger) {
+	moves := wins.moves
+	moves.RegisterHook(events.Common.WindowRuntimeReady, func(e *application.WindowEvent) {
+		if st.X != unsetPosition || st.Y != unsetPosition {
+			x, y, w, h := clampToScreen(st, defaultMovesWidth, defaultMovesHeight)
+			moves.SetSize(w, h)
+			moves.SetPosition(x, y)
+		}
+		if !detached {
+			return
+		}
+		// ⚠️ **出すのはここ**（`app.Run()` の前の `Show()` は何も起きない）。
+		// **`Focus()` は呼ばない**（起動直後にメイン画面からフォーカスを奪う）。
+		moves.Show()
+		// ⚠️ **出せなかったらドックへ戻すこと**（設計原則3）。
+		if !moves.IsVisible() {
+			logger.Warn("手順の窓を出せませんでした。ドックに戻します")
+			if _, err := settings.SetMovePaneDetached(false); err != nil {
+				logger.Error("ドックに戻せませんでした", "error", err)
+			}
+		}
+	})
+	moves.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
+		e.Cancel()
+		// ⚠️ **窓を直に隠さないこと**（設定も一緒に戻さないと、次の起動で
+		// 中身の見えない窓が出る）。
+		if _, err := settings.SetMovePaneDetached(false); err != nil {
+			moves.Hide()
+		}
+	})
 }
 
 // registerSideHooks は右の列の窓の位置の復元と、**閉じたらドックに戻す**を仕込む
@@ -612,6 +679,7 @@ func registerVisibilityLog(wins *appWindows, logger *slog.Logger) {
 	watch("main", wins.main)
 	watch("graph", wins.graph)
 	watch("side", wins.side)
+	watch("moves", wins.moves)
 }
 
 // saveWindowState は枠とメイン画面の位置・サイズを保存する。
@@ -627,6 +695,7 @@ func saveWindowState(wins *appWindows, logger *slog.Logger) {
 		Main:  wins.mainGeom.snapshot(),
 		Graph: wins.graphGeom.snapshot(),
 		Side:  wins.sideGeom.snapshot(),
+		Moves: wins.movesGeom.snapshot(),
 	}
 	if err := saveAppState(st); err != nil {
 		logger.Error("ウィンドウ状態の保存に失敗しました", "error", err)

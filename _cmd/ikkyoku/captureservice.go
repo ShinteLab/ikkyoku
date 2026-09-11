@@ -988,7 +988,8 @@ func (s *CaptureService) applyEvalGraphDetached(detached bool) {
 	s.logger.Info("評価値グラフの置き場所を変えました", "detached", detached)
 }
 
-// applyStudyPaneDetached は**盤の右の列**の切り離しを窓に反映する（2026-09-08）。
+// applyStudyPaneDetached は**候補手の面**の切り離しを窓に反映する（2026-09-08。
+// 2026-09-12 に手順を分けたので、右の列まるごとではない）。
 //
 // **`applyEvalGraphDetached` と同じ形。揃えておくこと** —— 2 つの窓で作法が違うと、
 // どちらがどうだったかを覚えることになる。
@@ -1005,7 +1006,30 @@ func (s *CaptureService) applyStudyPaneDetached(detached bool) {
 	if s.app != nil {
 		s.app.Event.Emit("side:detached", detached)
 	}
-	s.logger.Info("解析の列の置き場所を変えました", "detached", detached)
+	s.logger.Info("候補手の置き場所を変えました", "detached", detached)
+}
+
+// applyMovePaneDetached は**手順の面**の切り離しを窓に反映する（2026-09-12）。
+//
+// **`applyStudyPaneDetached` と同じ形。揃えておくこと** —— 3 つの窓で作法が違うと、
+// どれがどうだったかを覚えることになる。
+//
+// ⚠️ **メイン画面へ知らせること**（`moves:detached`）。窓を閉じて戻したときに
+// これが無いと、**メイン画面の手順が出てこない**（手順がどこにも無くなる）。
+func (s *CaptureService) applyMovePaneDetached(detached bool) {
+	if s.wins == nil || s.wins.moves == nil {
+		return
+	}
+	if detached {
+		s.wins.moves.Show()
+		s.wins.moves.Focus()
+	} else {
+		s.wins.moves.Hide()
+	}
+	if s.app != nil {
+		s.app.Event.Emit("moves:detached", detached)
+	}
+	s.logger.Info("手順の置き場所を変えました", "detached", detached)
 }
 
 // maskWindows は撮った画像から、まだ写っている自分のウィンドウを塗り潰す。
@@ -1034,7 +1058,8 @@ func (s *CaptureService) maskWindows(img image.Image, disp ikkyoku.Region) {
 	}{
 		{"メイン画面", s.wins.main},
 		{"評価値グラフの窓", s.wins.graph},
-		{"解析の列の窓", s.wins.side},
+		{"候補手の窓", s.wins.side},
+		{"手順の窓", s.wins.moves},
 	} {
 		if w.win == nil || !w.win.IsVisible() || w.win.IsMinimised() {
 			continue

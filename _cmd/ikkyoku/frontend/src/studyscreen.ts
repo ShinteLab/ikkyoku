@@ -1,10 +1,19 @@
-// 切り離した**盤の右の列**の窓（2026-09-08。`?window=study`）。
+// 切り離した**盤の右の列**の窓（2026-09-08。2026-09-12 に**候補手と手順に割った**）。
+//
+// ⚠️ **この 1 ファイルで 2 つの窓をまかなう**（`?window=study` = 候補手 /
+// `?window=moves` = 手順）。**写して分けないこと** —— 器の作法（幕・「ドックに
+// 戻す」・版の捨て方）は 2 つとも同じで、写すと片方だけ古くなる。
 //
 // **盤の大きさに依存しない大きさで見たい**というのが切り離しの目的
 // （`--board-size` は右の列の幅を引いている）。
 //
 // ⚠️ **中身はドックしたときと同じ**（`sidepane.ts`）。ここが持つのは
 // **窓としての体裁**（幕・「ドックに戻す」）と、**イベントの配線**だけ。
+//
+// ⚠️ **連続解析を持っているのは候補手の窓だけ**（エンジンを掴んでいるのがあちら）。
+// **手順の窓のボタンと幕の出口は「持ち主へ頼む」**（`sidepane.ts` の
+// `study:batch` / `study:cancel`）。**手順の窓で回そうとしないこと** ——
+// 2 か所が起こすと互いの解析を打ち切り合う。
 //
 // ⚠️ **盤に効くものは窓をまたいで送る**（`study:hint` / `study:scores` /
 // `study:busy`）。フロントの `Events.Emit` は Go を経由して**全部の窓へ**配られる
@@ -22,7 +31,12 @@ import type { StudyState } from "../bindings/github.com/ShinteLab/ikkyoku/app/mo
 import { iconMarkup } from "./icon";
 import { mountSidePane, type SidePaneHandle } from "./sidepane";
 
-export function mountStudyScreen(root: HTMLElement) {
+// どちらの面の窓か。⚠️ **候補手と手順は別々に切り離せる**ので、設定・イベント・
+// 戻す口はそれぞれ別に持つ。
+export type StudyScreenPart = "analyze" | "moves";
+
+export function mountStudyScreen(root: HTMLElement, part: StudyScreenPart = "analyze") {
+  const isAnalyze = part === "analyze";
   root.innerHTML = `
     <div class="study-screen">
       <div id="study-side" class="study-side"></div>
@@ -41,24 +55,40 @@ export function mountStudyScreen(root: HTMLElement) {
   const veil = q<HTMLElement>("#batch-veil");
   const veilNote = q<HTMLElement>("#batch-veil-note");
 
-  // ⚠️ **「ドックに戻す」は解析の行の右端に入れる**（2026-09-09）。
-  // 窓の一番上に見出しの行を作ると、そのぶん**候補手と手順の取り分が減る**
-  // —— 切り離すのは大きく見たいからなので、行を積むのは逆行する。
+  // ⚠️ **「ドックに戻す」はその面の中に入れる**（2026-09-09）。候補手なら
+  // **解析の行の右端**、手順なら**見出しの行の右端**。窓の一番上に見出しの行を
+  // 作ると、そのぶん**中身の取り分が減る** —— 切り離すのは大きく見たいからなので、
+  // 行を積むのは逆行する。
   // ⚠️ **戻す入口はこれと「窓を閉じる」の 2 つ。** どちらも同じ
-  // `SettingsService.SetStudyPaneDetached(false)` を通るので食い違わない。
+  // `SettingsService.Set*PaneDetached(false)` を通るので食い違わない。
   // ⚠️ **アイコンだけなので、意味は `aria-label` と `title` が持つ**
   // （手順の「再読み込み」と同じ。**`title` を空にしないこと** —— 文字が無いぶん、
   // 何のボタンかはこれでしか読めない）。
+  // ⚠️ **2 つの窓で同じ絵にすること**（どちらがどうだったかを覚える羽目になる）。
   const dock = document.createElement("button");
-  dock.id = "side-dock";
+  dock.id = isAnalyze ? "side-dock" : "moves-dock";
   dock.className = "icon-btn";
   dock.type = "button";
   dock.innerHTML = iconMarkup(FiMinimize2);
   dock.setAttribute("aria-label", "ドックに戻す");
-  dock.title = "ドックに戻す: 解析の列をメイン画面の中へ戻します（窓を閉じても同じです）";
+  dock.title = isAnalyze
+    ? "ドックに戻す: 候補手をメイン画面の中へ戻します（窓を閉じても同じです）"
+    : "ドックに戻す: 手順をメイン画面の中へ戻します（窓を閉じても同じです）";
   dock.addEventListener("click", () => {
-    void SettingsService.SetStudyPaneDetached(false);
+    void (isAnalyze
+      ? SettingsService.SetStudyPaneDetached(false)
+      : SettingsService.SetMovePaneDetached(false));
   });
+
+  // showVeil は連続解析の幕。⚠️ **出したらフォーカスを出口へ移すこと**
+  // （キーボードでも止められるように）。
+  const showVeil = (on: boolean, note: string) => {
+    veil.hidden = !on;
+    veilNote.textContent = note;
+    if (on) {
+      q<HTMLButtonElement>("#batch-veil-cancel").focus();
+    }
+  };
 
   // ⚠️ **`pane` は自分の options から参照するので `let` で先に置く**
   // （マウントし終わるまで中身は無いが、呼ばれるのはそのあと）。
@@ -69,7 +99,7 @@ export function mountStudyScreen(root: HTMLElement) {
   // ⚠️ **窓は切り離していなくても作られている**（`Hidden: true` で作って
   // `Show()` するだけ）ので、**中身は起動した時点から動いている。**
   // ⚠️ **使われていないあいだは窓をまたぐ知らせを出さないこと**（下の `tell`）。
-  let sideDetached = false;
+  let detached = false;
 
   // tell は**盤に効く知らせ**をメイン画面へ送る（`Events.Emit` は Go を経由して
   // 全部の窓へ配られる）。
@@ -80,8 +110,10 @@ export function mountStudyScreen(root: HTMLElement) {
   // メイン画面の幕が 1 手ごとに消えてはまた出る**（チカチカする）。
   // ⚠️ **ドックしているあいだの知らせはメイン画面が自分のコールバックで持っている**
   // ので、こちらから送る相手も居ない（同じ値を 2 経路で描かないこと）。
+  // ⚠️ **手順の窓は何も送らない**（2026-09-12）—— あちらは連続解析も候補手も
+  // 持っていないので、送る材料そのものが無い（幕は**受け取る側**）。
   const tell = (name: string, data: unknown) => {
-    if (!sideDetached) {
+    if (!detached || !isAnalyze) {
       return;
     }
     void Events.Emit(name, data);
@@ -108,8 +140,10 @@ export function mountStudyScreen(root: HTMLElement) {
 
   pane = mountSidePane({
     host: q<HTMLElement>("#study-side"),
-    // ⚠️ **窓のときだけ置く**（ドック側に戻す相手は居ない）。
-    action: dock,
+    // ⚠️ **この窓が出す面の中に置く**（2026-09-12）。ドック側は自分で
+    // 「切り離す」ボタンを作って同じ場所に渡している（**場所を揃えること**）。
+    analyzeAction: isAnalyze ? dock : undefined,
+    movesAction: isAnalyze ? undefined : dock,
     // 手順の操作で局面が変わった。**盤は別の窓**なので、ここで描くのは自分だけ
     // （盤は `study:changed` を受けて自分で追随する）。
     onState: (st) => showStudy(st),
@@ -117,14 +151,11 @@ export function mountStudyScreen(root: HTMLElement) {
     onHint: (usi) => tell("study:hint", usi),
     // 勝率バーは盤の上にある（＝別の窓）。
     onScores: (scores) => tell("study:scores", scores),
-    // 幕は**両方の窓**に要る（盤も触らせない）。
+    // 幕は**全部の窓**に要る（盤も手順も触らせない）。
+    // ⚠️ **手順の窓はここを通らない**（連続解析を持っていないので `onBusy` が
+    // 走らない）。あちらの幕は下の `study:busy` で出す。
     onBusy: (on, note) => {
-      veil.hidden = !on;
-      veilNote.textContent = note;
-      if (on) {
-        // **キーボードでも止められるように**、出したらフォーカスを移す。
-        q<HTMLButtonElement>("#batch-veil-cancel").focus();
-      }
+      showVeil(on, note);
       tell("study:busy", { on, note });
     },
     // 設定を書き換えた（色・候補手の本数）。⚠️ **設定タブは別の窓**なので、
@@ -149,30 +180,50 @@ export function mountStudyScreen(root: HTMLElement) {
   //
   // ⚠️ **既定は「使われていない」に倒すこと。** 設定が届く前に 1 手進んだだけでも
   // 上が起きるので、**出ていると分かってから起こす。**
+  //
+  // ⚠️ **手順の窓は一度も持ち主にならない**（2026-09-12）。エンジンを掴んでいるのは
+  // 候補手の面なので、**あちらが出ているかどうかに関わらず false のまま。**
   pane.setActive(false);
+
+  // ⚠️ **出す面はこの窓の担当ぶんだけ**（2026-09-12）。中身は 2 つとも生きているが、
+  // **同じ値を 2 か所に描かない**ために片方しか出さない。
+  pane.setParts({ analyze: isAnalyze, moves: !isAnalyze });
 
   // ⚠️ **見るのは「切り離しているか」の 1 つだけ。** `document.hidden` を条件に
   // 足さないこと —— 窓が他の窓に隠れただけでも下りることがあり、
   // **見ている目の前で連続解析が黙って止まる**（`setActive(false)` は止める）。
   // 切り離していないあいだ、この窓は `Hide()` されているので条件はこれで足りる。
-  const applyActive = (detached: boolean) => {
-    pane.setActive(detached);
+  const applyActive = (on: boolean) => {
+    pane.setActive(isAnalyze && on);
   };
-  // ⚠️ **切り離しの状態を持っているのは設定**（`Config.StudyPaneDetached`）。
-  // Go 側が切り替えるたびに知らせてくるので、ここで作らないこと。
-  Events.On("side:detached", (event: { data: boolean }) => {
-    sideDetached = !!event.data;
-    applyActive(sideDetached);
+  // ⚠️ **切り離しの状態を持っているのは設定**（`Config.StudyPaneDetached` /
+  // `Config.MovePaneDetached`）。Go 側が切り替えるたびに知らせてくるので、
+  // ここで作らないこと。
+  Events.On(isAnalyze ? "side:detached" : "moves:detached", (event: { data: boolean }) => {
+    detached = !!event.data;
+    applyActive(detached);
   });
 
+  // ⚠️ **幕の出口は持ち主へ繋がっていること**（`SidePaneHandle.cancelBatch` が
+  // 持ち主でなければ `study:cancel` を飛ばす）。手順の窓には「停止」も候補手も
+  // 無いので、**出口が繋がっていないと窓を閉じるしかない。**
   q<HTMLButtonElement>("#batch-veil-cancel").addEventListener("click", () => pane.cancelBatch());
   // ⚠️ **別の窓の幕からも止められること**（`study:cancel`。評価値グラフの窓）。
-  // ⚠️ **持ち主だけが応じること**（連続解析を持っているのは使われている側の列）。
+  // ⚠️ **持ち主だけが応じること**（連続解析を持っているのは候補手の面）。
   Events.On("study:cancel", () => {
-    if (!sideDetached) {
+    if (!isAnalyze || !detached) {
       return;
     }
     pane.cancelBatch();
+  });
+  // ⚠️ **手順の窓の幕は受け取るもの**（2026-09-12）。連続解析を持っていないので
+  // `onBusy` は走らない —— **これが無いと、手順を切り離したときだけ幕が出ず、
+  // 連続解析の最中に手順を押して局面を取り合える。**
+  Events.On("study:busy", (event: { data: { on: boolean; note: string } }) => {
+    if (isAnalyze) {
+      return;
+    }
+    showVeil(!!event.data?.on, event.data?.note ?? "");
   });
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && !veil.hidden) {
@@ -200,10 +251,10 @@ export function mountStudyScreen(root: HTMLElement) {
         const s = await SettingsService.Settings();
         pane.setEngines(s.engines ?? [], s.engineColors ?? [], s.analyzeSeconds);
         // ⚠️ **起動直後の形は設定から読むこと。** Go 側は起動時にも
-        // `side:detached` を出すが、**その時点でこの窓はまだ購読していない**
-        // （グラフの窓で踏んだのと同じ罠）。
-        sideDetached = !!s.studyPaneDetached;
-        applyActive(sideDetached);
+        // `side:detached` / `moves:detached` を出すが、**その時点でこの窓は
+        // まだ購読していない**（グラフの窓で踏んだのと同じ罠）。
+        detached = !!(isAnalyze ? s.studyPaneDetached : s.movePaneDetached);
+        applyActive(detached);
       } catch {
         // 読めなくても既定の色と本数で動く（設計原則3）。
       }
