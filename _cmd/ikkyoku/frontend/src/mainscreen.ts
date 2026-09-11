@@ -1084,8 +1084,11 @@ export function mountMainScreen(root: HTMLElement): void {
              ⚠️ **焼いた字を書き出す口を作らないこと**（Go 側にも無い）。
              書き出せると「その端末で表示する」を越えてしまい、元フォントの
              条項が効く側の話になる。 -->
-        <div class="setting-group">
-          <span class="setting-title">駒の字</span>
+        <details id="fold-piecefont" class="setting-group setting-fold">
+          <summary class="setting-fold-head">
+            <span class="setting-title">駒の字</span>
+            <span id="fold-piecefont-sum" class="setting-fold-sum"></span>
+          </summary>
           <span class="setting-note">
             盤に並ぶ駒の書体です。端末に入っているフォントから、駒に要る
             <code id="font-required"></code> の字だけを抜き出して使います。
@@ -1172,7 +1175,7 @@ export function mountMainScreen(root: HTMLElement): void {
                  分からないと打つ手が無い。** -->
             <p id="font-dirs" class="setting-path"></p>
           </div>
-        </div>
+        </details>
 
         <!-- 解析エンジン。**繋ぎ先は「USI を話すプロセス」なら何でもよい**
              （やねうら王・水匠・prokishi.exe・同梱のエンジン）。検討ツールとして
@@ -1185,8 +1188,11 @@ export function mountMainScreen(root: HTMLElement): void {
              ⚠️ **「外部を使う」のチェックボックスは置かない。** パスが空なら同梱、
              入っていれば外部。2 つ持つと「パスが入っているのに無効」という
              食い違いが起きる。 -->
-        <div class="setting-group">
-          <span class="setting-title">解析エンジン</span>
+        <details id="fold-engine" class="setting-group setting-fold">
+          <summary class="setting-fold-head">
+            <span class="setting-title">解析エンジン</span>
+            <span id="fold-engine-sum" class="setting-fold-sum"></span>
+          </summary>
           <span class="setting-note">
             USI を話すエンジンの実行ファイルを登録します（やねうら王・水匠など）。
             <strong>「解析に使う」を付けたエンジンが同時に走り、解析タブに結果が並びます。</strong>
@@ -1204,7 +1210,7 @@ export function mountMainScreen(root: HTMLElement): void {
                     title="同梱のエンジンを登録します">同梱エンジンを追加</button>
           </div>
           <p id="engine-status" class="status" role="status" aria-live="polite"></p>
-        </div>
+        </details>
 
         <!-- 勝率バーの変換に使う定数（解析タブ。2026-08-12）。
              **評価値の尺度はエンジンによって違う**ので、ここで合わせられるように
@@ -3828,6 +3834,10 @@ ${st.turnLabel}${n}`;
   const engineAdd = root.querySelector<HTMLButtonElement>("#engine-add")!;
   const engineAddBuiltin = root.querySelector<HTMLButtonElement>("#engine-add-builtin")!;
   const engineStatus = root.querySelector<HTMLParagraphElement>("#engine-status")!;
+  // 畳んでいるときの 1 行（見出しの右）。⚠️ **中身の代わりにはしない** ——
+  // 開かなくても「今どうなっているか」が分かるだけの添え物。
+  const engineFold = root.querySelector<HTMLDetailsElement>("#fold-engine")!;
+  const engineFoldSum = root.querySelector<HTMLElement>("#fold-engine-sum")!;
 
   // ---- 駒の字（2026-08-16）----
   //
@@ -3851,6 +3861,8 @@ ${st.turnLabel}${n}`;
   const fontInkOpacity = root.querySelector<HTMLInputElement>("#font-ink-opacity")!;
   const fontInkOpacityValue = root.querySelector<HTMLOutputElement>("#font-ink-opacity-value")!;
   const fontInkReset = root.querySelector<HTMLButtonElement>("#font-ink-reset")!;
+  const fontFold = root.querySelector<HTMLDetailsElement>("#fold-piecefont")!;
+  const fontFoldSum = root.querySelector<HTMLElement>("#fold-piecefont-sum")!;
 
   // 王/玉・左馬を当てる相手。**2 つの盤の両方**（訂正タブと解析タブ）。
   // ⚠️ **片方だけだと、採った瞬間に字が変わって見える。**
@@ -3870,6 +3882,11 @@ ${st.turnLabel}${n}`;
     fontStatus.textContent = msg;
     fontStatus.classList.toggle("is-error", kind === "error");
     fontStatus.classList.toggle("is-warn", kind === "warn");
+    // ⚠️ **知らせるときは畳んでいても開く。** 畳めるようにした以上、
+    // 起動時に焼けなかった等の理由が**閉じた中に隠れてはいけない**。
+    if (msg && kind) {
+      fontFold.open = true;
+    }
   };
 
   // 一覧の 1 行。**先頭は必ず同梱**（id は空文字）で、ラジオで 1 つだけ選ぶ。
@@ -4008,6 +4025,12 @@ ${st.turnLabel}${n}`;
     // ⚠️ **見本の色をここで当てないこと。** `.font-sample` も CSS で
     // `--shogi-piece-color` を見ているので、当てると同じ値を 2 経路で書くことになる
     // （実際に盤へ出る濃さのまま見える、という狙いは CSS 側で満たされている）。
+
+    // 畳んでいるときは「今どの書体か」だけ見出しの右に出す。
+    fontFoldSum.textContent =
+      st.current === ""
+        ? st.builtinName
+        : (st.fonts ?? []).find((f) => f.id === st.current)?.name ?? st.builtinName;
 
     fontList.replaceChildren();
     fontList.appendChild(
@@ -4464,6 +4487,8 @@ ${st.turnLabel}${n}`;
   const engineFailed = (err: unknown) => {
     engineStatus.textContent = String(err instanceof Error ? err.message : err);
     engineStatus.classList.add("is-error");
+    // 畳んでいても開く（理由が閉じた中に隠れてはいけない）。
+    engineFold.open = true;
   };
 
   // 設定の書き換えはどれも AppSettings を返すので、返ってきたものでそのまま描き直す。
@@ -4747,6 +4772,13 @@ ${st.turnLabel}${n}`;
     // option の欄はクラス名が全部同じなので、**どの項目だったか**も覚えておく
     // （名前で引き直す。⚠️ 落とすと、1 つ変えるたびに一覧の先頭へフォーカスが飛ぶ）。
     const keepOption = active?.closest<HTMLElement>(".engine-option")?.dataset.name;
+
+    // 畳んでいるときは「何個登録していて、何個が走るか」だけ出す。
+    const useCount = engines.filter((e) => e.enabled).length;
+    engineFoldSum.textContent =
+      engines.length === 0
+        ? "登録なし"
+        : `${engines.length} 個の登録 / 解析に使う ${useCount} 個`;
 
     engineList.replaceChildren();
     for (const [index, e] of engines.entries()) {
