@@ -1212,6 +1212,13 @@ html.is-main #app {
   color: #9aa6c0;
 }
 
+/* タブの一番上の項目は区切り線を引かない（上に何も無いので線が浮く）。 */
+.panel > .setting-group:first-child,
+.panel > .setting-fold:first-child {
+  padding-top: 0;
+  border-top: none;
+}
+
 .setting-section + .setting,
 .setting-section + .setting-group,
 .setting-section-note + .setting,

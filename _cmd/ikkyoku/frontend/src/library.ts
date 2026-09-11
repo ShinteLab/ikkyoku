@@ -183,7 +183,7 @@ export function mountLibrary(
   // 消えてしまわないように。手順を消すときと同じ）。
   const askRemove = (e: MouseEvent, id: string, label: string) => {
     openPopup(e.clientX, e.clientY, {
-      label: `${label} を棚から削除`,
+      label: `${label} を棋譜タブから削除`,
       focus: 1,
       items: [
         { label: `「${label}」を削除`, kind: "danger", onPick: () => void remove(id) },
@@ -256,7 +256,7 @@ export function mountLibrary(
       delBtn.type = "button";
       delBtn.className = "danger-btn";
       delBtn.textContent = "削除";
-      delBtn.title = "棚から削除します";
+      delBtn.title = "棋譜タブから削除します";
       delBtn.addEventListener("click", (e) => {
         askRemove(e, g.id, g.event || g.black || g.id);
       });
@@ -279,7 +279,7 @@ export function mountLibrary(
       setStatus(
         hasConditions()
           ? "条件に合う棋譜がありません。"
-          : "まだ棋譜がありません。入力タブの「棚に登録する」や「中継から取得」で追加してください。",
+          : "まだ棋譜がありません。入力タブの「棋譜に登録する」や「中継から取得」で追加してください。",
         "warn",
       );
     } else if (res.truncated) {
