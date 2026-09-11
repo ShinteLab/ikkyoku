@@ -394,11 +394,15 @@ func TestKifuServiceWatchRoundTrip(t *testing.T) {
 	}
 }
 
-// ⚠️ **貼り付け・URL 取り込みは仮の一覧に載せない。**
+// ⚠️ **貼り付けた棋譜は仮の一覧に載せない。**
 //
-// 取得元での一意な ID が無く `source_id` が毎回新しくなるので、復元しても
-// 「更新」が必ず失敗するカードになる。**判断は kicho（`ErrUnsupportedSource`）** で、
-// ここではその種類が落ちずに、ikkyoku 側の直し方が付いていることだけを見る。
+// 取りに行く先が無いので、復元しても「更新」が必ず失敗するカードになる。
+// **判断は kicho（`ErrUnsupportedSource`）** で、ここではその種類が落ちずに、
+// ikkyoku 側の直し方が付いていることだけを見る。
+//
+// ⚠️ **URL 取り込みを一緒に弾かないこと**（2026-09-12）—— あちらの `source_id` は
+// URL そのものになったので取り直せる。「取り込み系はまとめて弾く」に戻すと、
+// .kif の URL のカードが復元できなくなる。
 func TestKifuServiceWatchRejectsUnrefetchable(t *testing.T) {
 	svc, _ := newTestKifuService(t)
 
@@ -409,8 +413,23 @@ func TestKifuServiceWatchRejectsUnrefetchable(t *testing.T) {
 	if !errors.Is(err, kicho.ErrUnsupportedSource) {
 		t.Fatalf("sentinel が落ちています: %v", err)
 	}
-	if !strings.Contains(err.Error(), "中継から取得") {
-		t.Errorf("何が載せられるのかが分かる文言になっていません: %v", err)
+	if !strings.Contains(err.Error(), "貼り付けた棋譜") {
+		t.Errorf("何が載せられないのかが分かる文言になっていません: %v", err)
+	}
+
+	// URL 由来は載る（取りに行く先がある）。
+	w, err := svc.Watch(GameDetail{
+		GameSummary: GameSummary{
+			Source:   store.SourceURL,
+			SourceID: "https://example.test/kifu/x.kif",
+		},
+		KIF: testKIF,
+	})
+	if err != nil {
+		t.Fatalf("URL 由来を追跡できません: %v", err)
+	}
+	if w.SourceURL != "https://example.test/kifu/x.kif" {
+		t.Errorf("SourceURL = %q", w.SourceURL)
 	}
 }
 

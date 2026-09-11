@@ -158,9 +158,11 @@ func describeKifuError(err error) error {
 		// **棋譜そのものを指しているか**を確かめてもらう。
 		return fmt.Errorf("%w。棋譜そのもの（.kif）を指しているか確かめてください", err)
 	case errors.Is(err, kicho.ErrUnsupportedSource):
-		// 取り直せるのは取得元での ID を持つもの（中継）だけ。
-		// 貼り付け・URL 取り込みには取りに行く先が無い。
-		return fmt.Errorf("%w。取り直せるのは中継から取得した棋譜だけです", err)
+		// 取り直せるのは取りに行く先があるものだけ。
+		// ⚠️ **貼り付けを「中継だけ」と言わないこと**（2026-09-12）——
+		// URL から取った棋譜も取り直せるようになったので、残っているのは
+		// 「貼り付けた棋譜には取りに行く先が無い」だけ。
+		return fmt.Errorf("%w。貼り付けた棋譜は取りに行く先が無いので取り直せません", err)
 	}
 	return err
 }
@@ -545,23 +547,25 @@ func (s *KifuService) SendToStudyGame(d GameDetail) (KifuLoad, error) {
 	return s.study.loadKifuFrom(d.KIF, kicho.RefetchableURL(d.Source, d.SourceURL))
 }
 
-// Fetch はライブ中継から棋譜を取得する（**保存はしない**）。
+// Fetch は URL（か棋譜 ID）から棋譜を取得する（**保存はしない**）。
 //
 // 取得元は入力から判別する（判別も取得も kicho 側）。
 //
 //   - live.shogi.or.jp の URL  → 日本将棋連盟の棋譜中継
-//   - それ以外（URL / 棋譜 ID）→ 読売（竜王戦）
+//   - yomiuri.co.jp の URL     → 読売（竜王戦）
+//   - それ以外の http(s) URL   → その中身を .kif として読む
+//   - URL でない文字列         → 読売の棋譜 ID
 //
 // 対局中の棋譜も取得できる（その場合 Finished は false）。
+//
+// ⚠️ **棚（DB）を要らないこと**（2026-09-12。`kifuFetcher`）。取得は棚を 1 度も
+// 触らないので、**棚が開けていないことと取得できないことを繋げない**（設計原則3）。
+// 棚が要るのは `Save` のほう。
 func (s *KifuService) Fetch(input string) (GameDetail, error) {
-	lib, err := s.library()
-	if err != nil {
-		return GameDetail{}, err
-	}
 	ctx, cancel := kifuNetContext()
 	defer cancel()
 
-	f, err := lib.Fetch(ctx, input)
+	f, err := kifuFetcher.Fetch(ctx, input)
 	if err != nil {
 		return GameDetail{}, describeKifuError(err)
 	}
@@ -573,14 +577,11 @@ func (s *KifuService) Fetch(input string) (GameDetail, error) {
 // 入力欄からの Fetch と違って**取得元が分かっている**ので、判別も
 // 中継ページ → 棋譜 ID の往復も挟まらず、棋譜 ID で直接取りに行く。
 func (s *KifuService) Refresh(source, sourceID string) (GameDetail, error) {
-	lib, err := s.library()
-	if err != nil {
-		return GameDetail{}, err
-	}
 	ctx, cancel := kifuNetContext()
 	defer cancel()
 
-	f, err := lib.Refresh(ctx, source, sourceID)
+	// ⚠️ **Fetch と同じで棚は要らない**（`kifuFetcher`）。
+	f, err := kifuFetcher.Refresh(ctx, source, sourceID)
 	if err != nil {
 		return GameDetail{}, describeKifuError(err)
 	}
@@ -656,26 +657,31 @@ func (s *KifuService) PreviewURL(rawURL string) (GameDetail, error) {
 	return fetchedToDetail(f), nil
 }
 
-// ImportURL は URL から KIF を取得して棚に入れる。
+// ImportURL は URL（か棋譜 ID）から棋譜を取って棚に入れる。
 //
-// ⚠️ **画面からは呼んでいない**（2026-09-12 に入力タブの「棋譜に登録する」を
-// URL の行から外した）。ここを通すと `source` が `url`・`source_id` が**毎回 UUID**
-// になるので、**同じ棋譜が登録のたびに増え、`Refresh` でも追えない**
-// （kicho の `importDocument`）。**URL から棚に入れる口は `Fetch` + `Save`
-// （入力タブの「中継から取得」）に一本化してある。**
+// ⚠️ **`kicho.Library.ImportURL` ではなく `Fetch` + `Save`**（2026-09-12）。
+// あちらは何を渡しても `source` が `url` になるので、**連盟や読売の URL を
+// 入れたときに中継としての ID を捨ててしまう**（取り直せない棋譜として入る）。
+// `Fetch` を通せば取得元ごとに正しい `source` / `source_id` が付くので、
+// **どのサイトの URL でも「登録し直しても増えない・更新で追える」形で入る。**
 //
-// ⚠️ **画面にボタンを戻すなら、先に取得元の判別を kicho 側で済ませること** ——
-// 取得元の知識を ikkyoku に書かない（親 CLAUDE.md）。残してあるのは、
-// 連盟・読売以外のサイトの .kif を入れる道が他に無いため。
+// ⚠️ **取得元ごとの分岐をここに書かないこと** —— 判別は kicho（親 CLAUDE.md）。
 func (s *KifuService) ImportURL(rawURL string) (GameSummary, error) {
 	lib, err := s.library()
 	if err != nil {
 		return GameSummary{}, err
 	}
-	ctx, cancel := kifuNetContext()
-	defer cancel()
+	netCtx, cancelNet := kifuNetContext()
+	defer cancelNet()
 
-	rec, err := lib.ImportURL(ctx, rawURL)
+	f, err := kifuFetcher.Fetch(netCtx, rawURL)
+	if err != nil {
+		return GameSummary{}, describeKifuError(err)
+	}
+	dbCtx, cancelDB := kifuDBContext()
+	defer cancelDB()
+
+	rec, err := lib.Save(dbCtx, f)
 	if err != nil {
 		return GameSummary{}, describeKifuError(err)
 	}
@@ -693,8 +699,9 @@ func (s *KifuService) ImportURL(rawURL string) (GameSummary, error) {
 // `Save`（棚）の役目で、**役割を混ぜないこと。**
 //
 // ⚠️ **どれを載せられるか・諸元をどう決めるかは kicho 側**（`Library.Watch`）。
-// ライブ中継（読売・連盟）だけが対象で、貼り付け・URL 取り込みは取得元での
-// 一意な ID を持たないため向こうが `ErrUnsupportedSource` で弾く。
+// 載るのは**取り直せるもの**だけで、向こうが `ErrUnsupportedSource` で弾く
+// （2026-09-12 時点では貼り付けだけが弾かれる。URL は `source_id` が URL
+// そのものになったので取り直せる）。
 // **ここに取得元ごとの分岐を書かないこと**（この節の外にある約束と同じ）。
 
 // WatchEntry は仮の一覧 1 件。
