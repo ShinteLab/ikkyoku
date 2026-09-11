@@ -29,11 +29,6 @@ import type {
   WatchEntry,
 } from "../bindings/github.com/ShinteLab/ikkyoku/app/models";
 
-export type FetchCardsHandle = {
-  // clear は入力とカードを全部捨てる（仮の一覧も空にする）。
-  clear: () => void;
-};
-
 // SOURCE_LABELS は取得元の表示名。
 //
 // ⚠️ **載っていない取得元も来る**（2026-09-12）。URL 欄はどのサイトでも受けるので、
@@ -139,7 +134,7 @@ export function mountFetchCards(
     // onSaved は棚に入れたとき（棋譜タブの一覧を取り直す）。
     onSaved: () => void;
   },
-): FetchCardsHandle {
+) {
   // ⚠️ **入力欄は「棋譜の URL から」の 1 つだけで、持ち主はここ**（2026-09-12）。
   // **`#fetch-input` に戻さないこと** —— 同じ URL を入れる場所が 2 か所あると、
   // どちらに入れたかで通る道が変わる（それを畳んだのがこの変更）。
@@ -148,8 +143,6 @@ export function mountFetchCards(
   // 動いたのかが追えなくなる）。
   const input = root.querySelector<HTMLInputElement>("#kifu-url")!;
   const run = root.querySelector<HTMLButtonElement>("#fetch-run")!;
-  const refreshAllBtn = root.querySelector<HTMLButtonElement>("#fetch-refresh-all")!;
-  const clearBtn = root.querySelector<HTMLButtonElement>("#fetch-clear")!;
   const status = root.querySelector<HTMLParagraphElement>("#fetch-status")!;
   const host = root.querySelector<HTMLElement>("#fetch-cards")!;
 
@@ -213,9 +206,12 @@ export function mountFetchCards(
     dl.append(dt, dd);
   };
 
+  // busyKeys は今サイトへ取りに行っているカード。
+  //
+  // ⚠️ **1 枚ずつ塞ぐ**（2026-09-12 に「すべて更新」を外したので、全部を
+  // まとめて塞ぐ状態が無くなった）。**カードは 2〜3 枚が普通**で、まとめて
+  // 回す口は要らない —— 1 枚ずつ「更新」を押す。
   const busyKeys = new Set<string>();
-  // busyAll は「すべて更新」で回っているあいだ（1 枚ずつ順に取りに行く）。
-  let busyAll = false;
 
   // fetchInto はサイトから取り直してカードへ反映する（取れたら新しい中身を返す）。
   //
@@ -245,27 +241,6 @@ export function mountFetchCards(
       await fetchInto(card);
     } finally {
       busyKeys.delete(card.key);
-      render();
-    }
-  };
-
-  // refreshAll は並んでいるカードを順に取り直す（復元した直後に使う）。
-  //
-  // ⚠️ **1 枚ずつ順に。** サイトへ同時に投げない。
-  const refreshAll = async () => {
-    if (busyAll || cards.length === 0) return;
-    busyAll = true;
-    setStatus("");
-    render();
-    try {
-      // ⚠️ **回している最中に配列が差し替わる**（mergeCard が作り直す）ので、
-      // 走る前の並びを控えてから 1 枚ずつ引き当てる。
-      for (const key of cards.map((c) => c.key)) {
-        const card = cards.find((c) => c.key === key);
-        if (card) await refresh(card);
-      }
-    } finally {
-      busyAll = false;
       render();
     }
   };
@@ -368,11 +343,9 @@ export function mountFetchCards(
 
   const renderCard = (card: FetchCard): HTMLElement => {
     const { game, saved, notice, error } = card;
-    // ⚠️ **「通信中…」を出すのは今取りに行っているカードだけ。** 「すべて更新」で
-    // 回っているあいだは全部のボタンを塞ぐが、**そこで全部が「通信中…」になると
-    // 何枚目を取っているのか分からなくなる。**
+    // 「通信中…」を出すのは今取りに行っているカードだけ。
     const fetching = busyKeys.has(card.key);
-    const busy = fetching || busyAll;
+    const busy = fetching;
     // 復元しただけで、まだサイトから取り直していないカード（本文が無い）。
     const restored = isRestored(card);
 
@@ -513,11 +486,6 @@ export function mountFetchCards(
 
   const render = () => {
     host.replaceChildren(...cards.map(renderCard));
-    // 「すべて更新」はカードがあるときだけ。回っているあいだは入口を全部塞ぐ
-    // （1 枚ずつ順に取りに行くので、横から取得を足されると順番が崩れる）。
-    refreshAllBtn.disabled = busyAll || cards.length === 0;
-    clearBtn.disabled = busyAll;
-    run.disabled = busyAll;
   };
 
   const fetchNow = async () => {
@@ -545,7 +513,6 @@ export function mountFetchCards(
   };
 
   run.addEventListener("click", () => void fetchNow());
-  refreshAllBtn.addEventListener("click", () => void refreshAll());
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       e.preventDefault();
@@ -553,31 +520,11 @@ export function mountFetchCards(
     }
   });
 
-  // クリアは仮の一覧ごと捨てる。
-  //
-  // ⚠️ **画面から消すだけにしないこと** —— 再起動でカードが戻ってくる。
-  // **棚の棋譜は消えない**（消えるのは「翌日また並べ直す」という約束だけ）。
-  const clearAll = async () => {
-    if (cards.length > 0) {
-      try {
-        await KifuService.UnwatchAll();
-      } catch (err) {
-        setStatus(`仮の一覧を空にできませんでした: ${String(err)}`, "error");
-        return;
-      }
-    }
-    input.value = "";
-    cards = [];
-    setStatus("");
-    render();
-  };
-  clearBtn.addEventListener("click", () => void clearAll());
-
   // 起動時に仮の一覧からカードを復元する。
   //
   // ⚠️ **ここではサイトへ取りに行かない。** 起動のたびに追跡ぶんの通信が走ると
   // 待たされるうえ、中継を追っていない日でも毎回外へ出ることになる。
-  // 中身が要るときはカードの「更新」または「すべて更新」を押す。
+  // 中身が要るときはカードの「更新」を押す（または「取り直して解析」）。
   //
   // ⚠️ **棚を開き直したとき（設定タブ）に復元し直していない。** 復元は
   // メタだけで作り直すので、**今日取ったカードの本文（KIF）を捨てることになる。**
@@ -601,5 +548,4 @@ export function mountFetchCards(
   void restore();
 
   render();
-  return { clear: () => void clearAll() };
 }
