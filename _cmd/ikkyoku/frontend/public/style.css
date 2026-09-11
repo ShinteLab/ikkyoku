@@ -564,7 +564,7 @@ html.is-main #app {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding-top:6px;
+  padding-top:12px;
   --wails-draggable: no-drag;
 }
 
@@ -743,7 +743,7 @@ html.is-main #app {
   display: none;
   flex-direction: column;
   gap: 10px;
-  padding: 8px 16px 14px;
+  padding: 24px 16px 14px;
 }
 
 .panel.is-active {
