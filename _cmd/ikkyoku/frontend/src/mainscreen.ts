@@ -2682,13 +2682,28 @@ ${st.turnLabel}${n}`;
 
   // lockSide は列の幅を人が決めたことにする（**バーを掴んだ / キーで動かした**）。
   //
-  // ⚠️ **`settleStudySide` のあとに呼ぶこと。** 先に固定すると、**遊びを消す前の
-  // 幅（＝今の見た目より広い値）で固まる**ので、掴んだ瞬間に列が太る。
+  // ⚠️ **固定する値は「画面に出ている幅」を測って決めること**（2026-09-12 に踏んだ）。
+  // `.study-side` は **`min-width: 0`** なので、`--study-side-min` は
+  // **盤の式の引き算としてしか効かず、列の実幅は「余り」で決まっている** ——
+  // つまり `studySideW`（`settleStudySide` が式から逆算した値）と
+  // **実幅は一致するとは限らない。** その差のぶん、**掴んだ瞬間に列が飛ぶ**
+  // （固定したあとは両者が一致するので、**2 回目以降だけ綺麗**という形で出る）。
+  //
+  // ⚠️ **`settleStudySide` のあとに呼ぶこと。** あちらが `--study-side-min` を
+  // 詰めていないと、**盤の式が実幅と食い違ったまま固定される。**
   const lockSide = () => {
     if (sideLocked) {
       return;
     }
+    const shown = Math.round(studySide.getBoundingClientRect().width);
     sideLocked = true;
+    // ⚠️ **測れないときは今の値のまま**（タブが隠れている等。0 で固定すると
+    // 列が消える）。
+    if (shown > 0) {
+      studySideW = Math.max(shown, STUDY_SIDE_MIN);
+      studySideOpenW = studySideW;
+      studySplit.setAttribute("aria-valuenow", String(studySideW));
+    }
     rawSide(studySideW);
   };
 
@@ -2790,6 +2805,9 @@ ${st.turnLabel}${n}`;
     studySplit.setPointerCapture(e.pointerId);
     studySplit.classList.add("is-dragging");
     const startX = e.clientX;
+    // ⚠️ **起点は `lockSide` のあとに読むこと** —— あちらが実測で
+    // `studySideW` を入れ直すので、先に読むと**1 回目のドラッグだけ
+    // 見た目とずれた位置を掴む。**
     const startW = studySideW;
     // **右へ引く = 盤を広げる = 右の列を詰める。**
     const onMove = (ev: PointerEvent) => setStudySideW(startW - (ev.clientX - startX));
