@@ -17,7 +17,12 @@
 //            (自由編集・合法性を問わない・手番も駒台の先後も未決でよい)
 //   解析   … **確定した局面**の面。評価値を出し、今後ここに手順と分岐ツリーが乗る
 //            (合法手だけを辿る)
-//   設定   … 設定
+//   設定   … 設定。**5 つの区切りに分けてある**(2026-09-12。撮る / 盤面認識(suteme) /
+//            解析 / 盤の表示 / ファイルの場所)。⚠️ **足した順ではなく関わりでまとめる** ——
+//            並びは処理の流れの順で、**既定のままで動くもの(ファイルの場所)は下**。
+//            ⚠️ **認識器の読み込み元と「訂正盤面を suteme に登録する」を離さないこと**
+//            (相手が同じ suteme)。項目を足すときはこの 5 つのどれかに入れる。
+//            詳しくは `_docs/ui/screens.md`
 //
 // 「認識詳細情報」(訂正タブの中の折りたたみ。旧デバッグタブ)は
 // **認識精度を追う**ところ(認識器の状態・検出の信頼度・盤面領域・推論器・
@@ -976,6 +981,7 @@ export function mountMainScreen(root: HTMLElement): void {
       </div>
 
       <div id="panel-settings" class="panel" role="tabpanel" aria-labelledby="tab-settings" hidden>
+        <h3 class="setting-section">撮る</h3>
         <label class="setting">
           <input id="fit-on-startup" type="checkbox" />
           <span class="setting-body">
@@ -986,6 +992,7 @@ export function mountMainScreen(root: HTMLElement): void {
             </span>
           </span>
         </label>
+
         <!-- 枠の内側で後ろの画面を操作する（2026-08-19）。
 
              枠は中継の「上」に重ねる最前面のウィンドウなので、合わせたあとは
@@ -1007,6 +1014,12 @@ export function mountMainScreen(root: HTMLElement): void {
             </span>
           </span>
         </label>
+
+        <h3 class="setting-section">盤面認識（suteme）</h3>
+        <p class="setting-section-note">
+          認識に使う学習データと、訂正した局面の戻し先。<strong>どちらも相手は
+          suteme</strong> なので、片方だけ設定しても噛み合いません。
+        </p>
         <!-- 認識器の読み込み元（2026-08-27）。
 
              **exe 1 つで配れる形と、学習データを育てながら使う形の両方が要る。**
@@ -1045,35 +1058,105 @@ export function mountMainScreen(root: HTMLElement): void {
           <p id="suteme-source-note" class="setting-note"></p>
         </div>
 
-        <!-- 棋譜データベース（棚）。**実装は kicho のままで、ikkyoku は利用する側。**
-
-             ⚠️ **棚は解析の前提条件ではない**（設計原則3）。開けなくても
-             撮った 1 局面と貼った棋譜の解析は今までどおり動き、棋譜タブだけが
-             理由を出して機能しない。**ここでエラーを赤く出しても、他の機能は
-             壊れていないことが分かるように書くこと。** -->
+        <!-- 訂正結果を suteme の学習データに戻す設定。**自動送信のスイッチではない**
+             (2026-08-07 の決定: 自動で送ると、人が直した 1 マス以外は推論結果のまま
+             なので自分の出力を正解として食う)。ここで有効にすると、確定した局面ごとに
+             「訂正データを送信」が出るだけ。 -->
         <div class="setting-group">
-          <div class="setting is-block">
+          <label class="setting">
+            <input id="train-enabled" type="checkbox" />
             <span class="setting-body">
-              <span class="setting-title">棋譜データベース</span>
+              <span class="setting-title">訂正盤面を suteme に登録する</span>
               <span class="setting-note">
-                棋譜タブの「棚」を置くファイルです。変えるとその場で開き直します。
-                <strong>開けなくても撮影・訂正・解析はそのまま使えます</strong>
-                （棋譜タブだけが使えなくなります）。
+                確定した盤面を suteme の学習データとして送れるようにします。
+                <strong>送るのはボタンを押したときだけ</strong>で、自動では送りません。
+                向こうには「未確認」として入り、suteme の解析タブで人が確認するまで
+                学習には使われません。
+                <strong>画面に見えていない駒を知識で補った局面は送らないでください</strong>
+                （テロップで盤が隠れているときなど。ラベルが画素と一致しなくなります）。
               </span>
             </span>
-          </div>
+          </label>
           <div class="setting-fields">
-            <label class="field is-wide">
-              <span class="field-label">場所</span>
-              <input id="kifudb-path" type="text" spellcheck="false"
-                     placeholder="(空なら既定の場所)" />
+            <label class="field">
+              <span class="field-label">サーバ</span>
+              <input id="train-host" type="text" placeholder="127.0.0.1" spellcheck="false" />
             </label>
-            <button id="kifudb-browse" type="button">参照…</button>
+            <label class="field">
+              <span class="field-label">ポート</span>
+              <input id="train-port" class="port" type="number" min="1" max="65535" />
+            </label>
+            <!-- トークンは**同じマシンなら要らない**(suteme はループバックを
+                 認証免除にしている)。別のマシンへ送るときだけ入れる。 -->
+            <label class="field">
+              <span class="field-label">トークン</span>
+              <input id="train-token" type="password" placeholder="同じマシンなら不要"
+                     spellcheck="false" autocomplete="off" />
+            </label>
+            <button id="train-check" class="ghost-btn" type="button"
+                    title="suteme が登録を受け付けられる状態か確かめます">接続を確認</button>
           </div>
-          <p id="kifudb-note" class="setting-note"></p>
+          <p id="train-check-status" class="status" role="status" aria-live="polite"></p>
         </div>
-        <p id="settings-status" class="status" role="status" aria-live="polite"></p>
 
+        <h3 class="setting-section">解析</h3>
+        <!-- 解析エンジン。**繋ぎ先は「USI を話すプロセス」なら何でもよい**
+             （やねうら王・水匠・prokishi.exe・同梱のエンジン）。検討ツールとして
+             実用になるかは繋ぐエンジンの棋力で決まるので、ここで差し替えられる。
+
+             ⚠️ **1 つに絞らない**（2026-08-11）。**複数登録でき、「解析に使う」を
+             付けたものが同時に走る。** どのエンジンが正しいかは局面によって違うので、
+             評価が食い違うところを並べて読めることに意味がある。
+
+             ⚠️ **「外部を使う」のチェックボックスは置かない。** パスが空なら同梱、
+             入っていれば外部。2 つ持つと「パスが入っているのに無効」という
+             食い違いが起きる。 -->
+        <details id="fold-engine" class="setting-group setting-fold">
+          <summary class="setting-fold-head">
+            <span class="setting-title">解析エンジン</span>
+            <span id="fold-engine-sum" class="setting-fold-sum"></span>
+          </summary>
+          <span class="setting-note">
+            USI を話すエンジンの実行ファイルを登録します（やねうら王・水匠など）。
+            <strong>「解析に使う」を付けたエンジンが同時に走り、解析タブに結果が並びます。</strong>
+            実行ファイルを<strong>空にするとその登録は同梱のエンジン</strong>になります。
+            同じエンジンを <code>setoption</code> 違いで 2 つ登録して比べることもできます。
+            <strong>「接続を確認」を押すと、そのエンジンの設定項目（option）を読み込んで
+            各行の「エンジンの設定」から変えられるようになります。</strong>
+            変えた値は次の解析から送られます。
+          </span>
+          <ul id="engine-list" class="engine-list"></ul>
+          <div class="setting-fields">
+            <button id="engine-add" class="ghost-btn" type="button"
+                    title="実行ファイルを選んで登録します">エンジンを追加…</button>
+            <button id="engine-add-builtin" class="ghost-btn" type="button"
+                    title="同梱のエンジンを登録します">同梱エンジンを追加</button>
+          </div>
+          <p id="engine-status" class="status" role="status" aria-live="polite"></p>
+        </details>
+
+        <!-- 勝率バーの変換に使う定数（解析タブ。2026-08-12）。
+             **評価値の尺度はエンジンによって違う**ので、ここで合わせられるように
+             してある（⚠️ 自作エンジンの評価値の絶対値は当てにならない）。
+             ⚠️ **既定値（1500）は Go 側が解決して返す。フロントに書かないこと。** -->
+        <div class="setting-group">
+          <span class="setting-title">勝率の表示</span>
+          <span class="setting-note">
+            解析タブの盤の上に出る勝率バーの計算に使います。
+            <code>勝率(先手) = 1 / (1 + exp(-評価値 / ポナンザ定数))</code>。
+            <strong>小さくするほど、同じ評価値でも勝率が振り切れます。</strong>
+            空欄にすると既定に戻ります。
+          </span>
+          <div class="setting-fields">
+            <label class="field">
+              <span class="field-label">ポナンザ定数</span>
+              <input id="ponanza-constant" class="port" type="number" min="1" max="100000"
+                     step="10" title="評価値を勝率に直すときの定数（既定 1500）" />
+            </label>
+          </div>
+        </div>
+
+        <h3 class="setting-section">盤の表示</h3>
         <!-- 駒の字（2026-08-16）。**端末に入っているフォントから駒の字を焼いて使う。**
 
              同梱できる駒フォントは「派生物の作成と再配布を認める」ライセンスの
@@ -1177,103 +1260,39 @@ export function mountMainScreen(root: HTMLElement): void {
           </div>
         </details>
 
-        <!-- 解析エンジン。**繋ぎ先は「USI を話すプロセス」なら何でもよい**
-             （やねうら王・水匠・prokishi.exe・同梱のエンジン）。検討ツールとして
-             実用になるかは繋ぐエンジンの棋力で決まるので、ここで差し替えられる。
+        <h3 class="setting-section">ファイルの場所</h3>
+        <p class="setting-section-note">
+          <strong>既定のままで動きます。</strong>置き場所を変えたいときだけ触ってください。
+        </p>
+        <!-- 棋譜データベース（棚）。**実装は kicho のままで、ikkyoku は利用する側。**
 
-             ⚠️ **1 つに絞らない**（2026-08-11）。**複数登録でき、「解析に使う」を
-             付けたものが同時に走る。** どのエンジンが正しいかは局面によって違うので、
-             評価が食い違うところを並べて読めることに意味がある。
-
-             ⚠️ **「外部を使う」のチェックボックスは置かない。** パスが空なら同梱、
-             入っていれば外部。2 つ持つと「パスが入っているのに無効」という
-             食い違いが起きる。 -->
-        <details id="fold-engine" class="setting-group setting-fold">
-          <summary class="setting-fold-head">
-            <span class="setting-title">解析エンジン</span>
-            <span id="fold-engine-sum" class="setting-fold-sum"></span>
-          </summary>
-          <span class="setting-note">
-            USI を話すエンジンの実行ファイルを登録します（やねうら王・水匠など）。
-            <strong>「解析に使う」を付けたエンジンが同時に走り、解析タブに結果が並びます。</strong>
-            実行ファイルを<strong>空にするとその登録は同梱のエンジン</strong>になります。
-            同じエンジンを <code>setoption</code> 違いで 2 つ登録して比べることもできます。
-            <strong>「接続を確認」を押すと、そのエンジンの設定項目（option）を読み込んで
-            各行の「エンジンの設定」から変えられるようになります。</strong>
-            変えた値は次の解析から送られます。
-          </span>
-          <ul id="engine-list" class="engine-list"></ul>
-          <div class="setting-fields">
-            <button id="engine-add" class="ghost-btn" type="button"
-                    title="実行ファイルを選んで登録します">エンジンを追加…</button>
-            <button id="engine-add-builtin" class="ghost-btn" type="button"
-                    title="同梱のエンジンを登録します">同梱エンジンを追加</button>
-          </div>
-          <p id="engine-status" class="status" role="status" aria-live="polite"></p>
-        </details>
-
-        <!-- 勝率バーの変換に使う定数（解析タブ。2026-08-12）。
-             **評価値の尺度はエンジンによって違う**ので、ここで合わせられるように
-             してある（⚠️ 自作エンジンの評価値の絶対値は当てにならない）。
-             ⚠️ **既定値（1500）は Go 側が解決して返す。フロントに書かないこと。** -->
+             ⚠️ **棚は解析の前提条件ではない**（設計原則3）。開けなくても
+             撮った 1 局面と貼った棋譜の解析は今までどおり動き、棋譜タブだけが
+             理由を出して機能しない。**ここでエラーを赤く出しても、他の機能は
+             壊れていないことが分かるように書くこと。** -->
         <div class="setting-group">
-          <span class="setting-title">勝率の表示</span>
-          <span class="setting-note">
-            解析タブの盤の上に出る勝率バーの計算に使います。
-            <code>勝率(先手) = 1 / (1 + exp(-評価値 / ポナンザ定数))</code>。
-            <strong>小さくするほど、同じ評価値でも勝率が振り切れます。</strong>
-            空欄にすると既定に戻ります。
-          </span>
-          <div class="setting-fields">
-            <label class="field">
-              <span class="field-label">ポナンザ定数</span>
-              <input id="ponanza-constant" class="port" type="number" min="1" max="100000"
-                     step="10" title="評価値を勝率に直すときの定数（既定 1500）" />
-            </label>
-          </div>
-        </div>
-
-        <!-- 訂正結果を suteme の学習データに戻す設定。**自動送信のスイッチではない**
-             (2026-08-07 の決定: 自動で送ると、人が直した 1 マス以外は推論結果のまま
-             なので自分の出力を正解として食う)。ここで有効にすると、確定した局面ごとに
-             「訂正データを送信」が出るだけ。 -->
-        <div class="setting-group">
-          <label class="setting">
-            <input id="train-enabled" type="checkbox" />
+          <div class="setting is-block">
             <span class="setting-body">
-              <span class="setting-title">訂正盤面を suteme に登録する</span>
+              <span class="setting-title">棋譜データベース</span>
               <span class="setting-note">
-                確定した盤面を suteme の学習データとして送れるようにします。
-                <strong>送るのはボタンを押したときだけ</strong>で、自動では送りません。
-                向こうには「未確認」として入り、suteme の解析タブで人が確認するまで
-                学習には使われません。
-                <strong>画面に見えていない駒を知識で補った局面は送らないでください</strong>
-                （テロップで盤が隠れているときなど。ラベルが画素と一致しなくなります）。
+                棋譜タブの「棚」を置くファイルです。変えるとその場で開き直します。
+                <strong>開けなくても撮影・訂正・解析はそのまま使えます</strong>
+                （棋譜タブだけが使えなくなります）。
               </span>
             </span>
-          </label>
-          <div class="setting-fields">
-            <label class="field">
-              <span class="field-label">サーバ</span>
-              <input id="train-host" type="text" placeholder="127.0.0.1" spellcheck="false" />
-            </label>
-            <label class="field">
-              <span class="field-label">ポート</span>
-              <input id="train-port" class="port" type="number" min="1" max="65535" />
-            </label>
-            <!-- トークンは**同じマシンなら要らない**(suteme はループバックを
-                 認証免除にしている)。別のマシンへ送るときだけ入れる。 -->
-            <label class="field">
-              <span class="field-label">トークン</span>
-              <input id="train-token" type="password" placeholder="同じマシンなら不要"
-                     spellcheck="false" autocomplete="off" />
-            </label>
-            <button id="train-check" class="ghost-btn" type="button"
-                    title="suteme が登録を受け付けられる状態か確かめます">接続を確認</button>
           </div>
-          <p id="train-check-status" class="status" role="status" aria-live="polite"></p>
+          <div class="setting-fields">
+            <label class="field is-wide">
+              <span class="field-label">場所</span>
+              <input id="kifudb-path" type="text" spellcheck="false"
+                     placeholder="(空なら既定の場所)" />
+            </label>
+            <button id="kifudb-browse" type="button">参照…</button>
+          </div>
+          <p id="kifudb-note" class="setting-note"></p>
         </div>
 
+        <p id="settings-status" class="status" role="status" aria-live="polite"></p>
         <p class="setting-path">設定ファイル: <code id="settings-path">-</code></p>
       </div>
     </div>
