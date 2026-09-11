@@ -32,15 +32,26 @@ import type {
 export type FetchCardsHandle = {
   // clear は入力とカードを全部捨てる（仮の一覧も空にする）。
   clear: () => void;
+  // setStatus はこの群の状態の行に書く。
+  //
+  // ⚠️ **貸し出しているのは「群が 1 つなら状態の行も 1 つ」にするため**
+  // （2026-09-12）。URL 欄は 1 つで、そこから解析・登録・取得の 3 つへ分かれる。
+  // 解析と登録を持っているのは `mainscreen.ts` 側なので、返事の出し先だけ借りる。
+  // **2 つ目の行を足さないこと** —— どのボタンの返事なのかが読めなくなる。
+  setStatus: (msg: string, kind?: "" | "error" | "warn") => void;
 };
 
-// SOURCE_LABELS はライブ取得できる取得元の表示名。
+// SOURCE_LABELS は取得元の表示名。
 //
-// ⚠️ **ここに載っているものが「ライブ取得できる取得元」**（`Refresh` で
-// 取り直せる相手）。URL 取り込み・貼り付けは取得元での一意な ID が無いので入らない。
+// ⚠️ **載っていない取得元も来る**（2026-09-12）。URL 欄はどのサイトでも受けるので、
+// 連盟・読売以外の .kif は `url` で返ってくる（`Refresh` で取り直せる ——
+// あちらの `source_id` は URL そのもの）。**出せないのは名前だけ**なので、
+// 引き当たらなければ取得元の値をそのまま出す（`?? game.source`）。
+// ⚠️ **ここに無い取得元をエラー扱いにしないこと。**
 const SOURCE_LABELS: Record<string, string> = {
   yomiuri: "読売（竜王戦）",
   shogilive: "将棋連盟 中継",
+  url: "URL",
 };
 
 // cardKey はカードの識別子。
@@ -136,7 +147,10 @@ export function mountFetchCards(
     onSaved: () => void;
   },
 ): FetchCardsHandle {
-  const input = root.querySelector<HTMLInputElement>("#fetch-input")!;
+  // ⚠️ **入力欄は「棋譜の URL から」の 1 つだけ**（2026-09-12）。
+  // **`#fetch-input` に戻さないこと** —— 同じ URL を入れる場所が 2 か所あると、
+  // どちらに入れたかで通る道が変わる（それを畳んだのがこの変更）。
+  const input = root.querySelector<HTMLInputElement>("#kifu-url")!;
   const run = root.querySelector<HTMLButtonElement>("#fetch-run")!;
   const refreshAllBtn = root.querySelector<HTMLButtonElement>("#fetch-refresh-all")!;
   const clearBtn = root.querySelector<HTMLButtonElement>("#fetch-clear")!;
@@ -591,5 +605,5 @@ export function mountFetchCards(
   void restore();
 
   render();
-  return { clear: () => void clearAll() };
+  return { clear: () => void clearAll(), setStatus };
 }
