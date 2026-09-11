@@ -117,8 +117,18 @@ export const attachHints = (root: ParentNode) => {
     });
     zone.addEventListener("pointerleave", hide);
     // キーボードで辿ったときも出す（**待たない**。自分で合わせて止めた操作なので）。
-    owner.addEventListener("focus", () => show(trigger, note));
-    owner.addEventListener("blur", hide);
+    //
+    // ⚠️ **文字を打つ欄では出さない。** 吹き出しは項目名の下に出るので、
+    // **入力欄に触れたとたんに欄の上へ被る**（URL を打っているあいだ出たまま
+    // になる）。フォーカスが「その項目に居る」と言えるのは
+    // **畳みの見出しとチェックボックス**だけ。
+    const focusOpens =
+      owner.tagName === "SUMMARY" ||
+      (owner instanceof HTMLInputElement && owner.type === "checkbox");
+    if (focusOpens) {
+      owner.addEventListener("focus", () => show(trigger, note));
+      owner.addEventListener("blur", hide);
+    }
   }
 };
 

@@ -1153,6 +1153,19 @@ html.is-main #app {
   pointer-events: none;
 }
 
+/* 説明が 2 段になるもの（中継から取得する）。⚠️ **項目 1 つに吹き出し 1 つ** ——
+   `.setting-note` を 2 つ並べても片方しか引き当たらないので、1 つにまとめて
+   中で段を分ける。 */
+.hint-bubble .hint-para {
+  display: block;
+}
+
+.hint-bubble .hint-para + .hint-para {
+  margin-top: 7px;
+  padding-top: 7px;
+  border-top: 1px solid #2f333d;
+}
+
 .hint-bubble strong {
   color: #f2f3f5;
 }
