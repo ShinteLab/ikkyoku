@@ -358,6 +358,27 @@ export function mountMainScreen(root: HTMLElement): void {
            SFEN・KIF・画像ファイルの入口が並ぶ（そのとき行き先が分かれる:
            画像は認識を通るので訂正タブへ、SFEN/KIF は確定済みなので解析タブへ）。 -->
       <div id="panel-input" class="panel is-active" role="tabpanel" aria-labelledby="tab-input">
+        <!-- ⚠️ **ボタンはここに戻さないこと**（2026-08-18）。枠を出すのは
+             **タイトルバーのトグル**、盤に合わせるのは**枠のツールバーの □**。
+             どちらも「枠を出してから枠に対してやること」なので、
+             入力タブに置くとタブを行き来することになる。ここに残すのは案内だけ。 -->
+        <div class="setting-group">
+          <span class="setting-title" data-hint="hint-capture">画面から撮る</span>
+          <span id="hint-capture" class="setting-note is-hint">
+            タイトルバーの<strong>「枠を表示」</strong>でガイド枠を出し、
+            中継の盤面に合わせてから、枠のツールバーのカメラを押します
+            （枠の □ で盤に合わせられます）。
+            撮ると<strong>訂正タブ</strong>が開きます。
+            <strong>枠が出ていないあいだは撮れません</strong>
+            （どこを撮るのかが画面に見えていない状態で撮らないため）。
+            撮った画像のファイル名は<strong>訂正タブの「認識詳細情報」</strong>に出ます
+            （押すとフルパスをコピーできます）。
+          </span>
+        </div>
+        <p id="status" class="status" role="status" aria-live="polite">
+          ガイド枠を盤面に合わせて撮影してください。
+        </p>
+
         <!-- 何もないところから始める（2026-08-13）。**3 つめの入力の口。**
              行き先は棋譜と同じ**解析タブ**で、訂正タブは通らない
              （初期局面は手合割で一意に決まるので、直すものが無い）。
@@ -400,27 +421,6 @@ export function mountMainScreen(root: HTMLElement): void {
           </div>
           <p id="newgame-status" class="status" role="status" aria-live="polite" hidden></p>
         </div>
-
-        <!-- ⚠️ **ボタンはここに戻さないこと**（2026-08-18）。枠を出すのは
-             **タイトルバーのトグル**、盤に合わせるのは**枠のツールバーの □**。
-             どちらも「枠を出してから枠に対してやること」なので、
-             入力タブに置くとタブを行き来することになる。ここに残すのは案内だけ。 -->
-        <div class="setting-group">
-          <span class="setting-title" data-hint="hint-capture">画面から撮る</span>
-          <span id="hint-capture" class="setting-note is-hint">
-            タイトルバーの<strong>「枠を表示」</strong>でガイド枠を出し、
-            中継の盤面に合わせてから、枠のツールバーのカメラを押します
-            （枠の □ で盤に合わせられます）。
-            撮ると<strong>訂正タブ</strong>が開きます。
-            <strong>枠が出ていないあいだは撮れません</strong>
-            （どこを撮るのかが画面に見えていない状態で撮らないため）。
-            撮った画像のファイル名は<strong>訂正タブの「認識詳細情報」</strong>に出ます
-            （押すとフルパスをコピーできます）。
-          </span>
-        </div>
-        <p id="status" class="status" role="status" aria-live="polite">
-          ガイド枠を盤面に合わせて撮影してください。
-        </p>
 
         <!-- 棋譜を貼り付ける。**画像を通らない 2 つめの入口**なので、行き先も違う
              （撮影は認識を通るので訂正タブ、棋譜は既に確定しているので解析タブ）。 -->
