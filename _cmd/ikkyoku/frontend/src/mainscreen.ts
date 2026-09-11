@@ -2615,15 +2615,24 @@ ${st.turnLabel}${n}`;
 
   // ---- 盤と解析の列の幅（縦のスプリットバー。2026-08-13）--------------------
   //
-  // ⚠️ **書き換えるのは `--study-side-min` ただ 1 つ。** 盤の大きさ
-  // （`--board-size`）がこれを引いているので、詰めれば盤が大きくなる。
+  // ⚠️ **書き換えるのは `--study-side-min`**（＋掴んだあとは `--study-side-max`）。
+  // 盤の大きさ（`--board-size`）が前者を引いているので、詰めれば盤が大きくなる。
   // ⚠️ **`#panel-study` の inline style に入れること** —— あの変数は
   // `#panel-study` 自身が定義しているので、`:root` へ書いても負ける
   // （`--eval-graph-h` などとは事情が違う）。
   //
-  // ⚠️ **盤がこれ以上大きくならないところより下へは詰めない**（ユーザーの要求）。
-  // 盤は**縦（＝評価値グラフの高さ）でも決まる**ので、そこまで詰めたら、それ以上
-  // 右へ引いても盤は伸びず**遊びになるだけ**。
+  // ⚠️ **掴むまでは列が余りを全部もらう**（`.study-side` は `flex: 1 1 auto`）。
+  // つまり**列の実幅は「窓幅 − 盤」で決まっていて、`--study-side-min` は
+  // 盤の式の引き算としてしか効かない。** 盤は縦（＝評価値グラフの高さ）でも
+  // 決まるので、**盤が高さで頭打ちになったところから先は列が 1px も動かない** ——
+  // 広い窓では列が 600px を超えたまま狭められなかった（2026-09-12 に外した制限）。
+  //
+  // ⚠️ **掴んだら列の幅を固定する**（`lockSide`。`--study-side-max`）。そこから先は
+  // **1px 引けば 1px 動く**。⚠️ **余ったぶんは盤の側に出る**（盤は中央へ寄る。
+  // 盤が高さで頭打ちのあいだは、引いたぶんがそのまま余白になる）。
+  //
+  // ⚠️ **掴むまでは固定しないこと。** 既定を「余りを全部もらう」にしておかないと、
+  // **起動のたびに列が下限（300px）で始まる**（幅は設定に持っていない）。
   //
   // ⚠️ **判定は「実際の盤の幅を測って」行う。式の定数を JS に写さないこと。**
   // `--board-size` の式（`110px` や `1.4`）を写すと、CSS を直したときに
@@ -2642,10 +2651,34 @@ ${st.turnLabel}${n}`;
   // 開き直すときの幅。**畳む前の幅に戻す**（既定に戻すと、広げたのが失われる）。
   let studySideOpenW = STUDY_SIDE_MIN;
 
+  // 人が幅を決めたか（2026-09-12）。**決めたら列は余りをもらわなくなる。**
+  // ⚠️ **一度決めたら戻さないこと** —— 窓を広げるたびに列が太るのは、
+  // 幅を決めたあとの振る舞いとしては裏切りになる（広がるのは盤の側）。
+  let sideLocked = false;
+
   // 盤の実寸（`.board-stage` の幅 = `--board-size`）。タブが隠れていれば 0。
   const boardW = () => studyStage.getBoundingClientRect().width;
-  const rawSide = (px: number) =>
-    panelStudy.style.setProperty("--study-side-min", `${Math.round(px)}px`);
+  // ⚠️ **決めたあとは min と max の両方に入れること。** `min-width` だけでは
+  // 列は余りをもらったままなので、**下げても狭くならない**（この節の冒頭）。
+  const rawSide = (px: number) => {
+    const v = `${Math.round(px)}px`;
+    panelStudy.style.setProperty("--study-side-min", v);
+    if (sideLocked) {
+      panelStudy.style.setProperty("--study-side-max", v);
+    }
+  };
+
+  // lockSide は列の幅を人が決めたことにする（**バーを掴んだ / キーで動かした**）。
+  //
+  // ⚠️ **`settleStudySide` のあとに呼ぶこと。** 先に固定すると、**遊びを消す前の
+  // 幅（＝今の見た目より広い値）で固まる**ので、掴んだ瞬間に列が太る。
+  const lockSide = () => {
+    if (sideLocked) {
+      return;
+    }
+    sideLocked = true;
+    rawSide(studySideW);
+  };
 
   // settleStudySide は「盤が上限に張り付いたまま取れる最大の幅」まで詰める。
   //
@@ -2658,6 +2691,12 @@ ${st.turnLabel}${n}`;
   const settleStudySide = () => {
     // ⚠️ **切り離しているあいだは触らない**（2026-09-08）。列が出ていないので
     // 詰める相手が居ない（畳んでいるときと同じ扱い）。
+    // ⚠️ **幅を決めたあとは触らないこと**（2026-09-12）。ここは「盤が上限に
+    // 張り付いたまま取れる最大の幅まで詰める」処理なので、**人が決めた幅を
+    // その最大値へ押し戻してしまう**（狭めた直後に元へ戻る）。
+    if (sideLocked) {
+      return;
+    }
     if (sideDetached === true || studySideW === 0 || boardW() <= 0) {
       return; // 切り離し / 畳んでいる / タブが隠れている（測れない）
     }
@@ -2702,15 +2741,16 @@ ${st.turnLabel}${n}`;
       return;
     }
     const before = studySideW;
-    const beforeBoard = boardW();
     rawSide(next);
     const afterBoard = boardW();
-    // ⚠️ **詰めても盤が大きくならないなら、詰めない**（ユーザーの要求そのもの）。
-    // ⚠️ **広げすぎて盤が潰れるのも止める。**
-    if (
-      (next < before && afterBoard <= beforeBoard + 0.5) ||
-      (next > before && afterBoard < STUDY_BOARD_MIN)
-    ) {
+    // ⚠️ **広げすぎて盤が潰れるのは止める**（下限は `STUDY_BOARD_MIN`）。
+    //
+    // ⚠️ **「詰めても盤が大きくならないなら詰めない」は外した**（2026-09-12）。
+    // あれは列が余りをもらう作りが前提で、**盤が高さで頭打ちになった時点で
+    // 列がそれ以上狭められない**という壁になっていた（広い窓で 600px 超）。
+    // 今は `lockSide` で列の幅そのものを持つので、**盤が伸びない範囲でも
+    // 狭められる**（余ったぶんは盤の側の余白になり、盤は中央へ寄る）。
+    if (next > before && afterBoard < STUDY_BOARD_MIN) {
       rawSide(before);
       return;
     }
@@ -2727,7 +2767,9 @@ ${st.turnLabel}${n}`;
   studySplit.addEventListener("pointerdown", (e) => {
     e.preventDefault();
     cancelAnimation();
+    // ⚠️ **順番を変えないこと。** 遊びを消してから固定する（`lockSide` の ⚠️）。
     settleStudySide();
+    lockSide();
     studySplit.setPointerCapture(e.pointerId);
     studySplit.classList.add("is-dragging");
     const startX = e.clientX;
@@ -2747,14 +2789,15 @@ ${st.turnLabel}${n}`;
 
   studySplit.addEventListener("keydown", (e) => {
     const step = e.shiftKey ? 32 : 8;
-    if (e.key === "ArrowLeft") {
-      e.preventDefault();
-      setStudySideW(studySideW + step);
-    } else if (e.key === "ArrowRight") {
-      e.preventDefault();
-      settleStudySide();
-      setStudySideW(studySideW - step);
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") {
+      return;
     }
+    e.preventDefault();
+    // ⚠️ **ドラッグと同じ順で**（遊びを消してから固定する）。キーでも
+    // 固定しないと、**右キーで狭めたつもりが 1px も動かない。**
+    settleStudySide();
+    lockSide();
+    setStudySideW(studySideW + (e.key === "ArrowLeft" ? step : -step));
   });
 
   studySplit.setAttribute("aria-valuenow", String(studySideW));
