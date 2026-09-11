@@ -564,6 +564,7 @@ html.is-main #app {
   display: flex;
   align-items: center;
   gap: 6px;
+  padding-top:6px;
   --wails-draggable: no-drag;
 }
 
@@ -583,8 +584,9 @@ html.is-main #app {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 4px 8px;
-  font-size: 15px;
+  padding: 4px 4px;
+  font-size: 20px;
+  padding-top: 6px;
   line-height: 1;
 }
 
@@ -620,11 +622,11 @@ html.is-main #app {
 }
 
 .win-btn {
-  width: 42px;
+  width: 46px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
+  font-size: 18px;
   color: #9aa6c0;
   background: transparent;
   border: none;
@@ -675,13 +677,15 @@ html.is-main #app {
    ⚠️ **下の角は落とさない**（タイトルバーの境界線に乗っている見え方にする）。 */
 .tab {
   position: relative;
-  padding: 5px 14px;
-  font-size: 13px;
+  /*padding: 8px 14px;*/
+  padding: 4px 13px 6px;
+  font-size: 16px;
   color: #9aa6c0;
   background: #23262e;
   border: none;
   border-radius: 6px 6px 0 0;
   cursor: pointer;
+  margin-bottom: -8px;
 }
 
 /* ⚠️ **選択中（#1b1d23）とは逆向きに動かすこと** —— 暗くすると、
@@ -705,7 +709,7 @@ html.is-main #app {
   border: 1px solid #333844;
   border-bottom: none;
   padding: 4px 13px 6px;
-  margin-bottom: -1px;
+  margin-bottom: -10px;
 }
 
 /* タブに点を出して「見に行くべきものがある」ことだけ伝える(開けば消える)。
