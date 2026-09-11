@@ -1131,6 +1131,14 @@ html.is-main #app {
   color: #ffffff;
 }
 
+/* 中身は見出し（summary）の本文と同じ字下げに揃える。⚠️ **他の区切りは
+   `.setting.is-block` が 22px の字下げを持っているが、畳んだものは summary が
+   その役なので、直下の説明文にも同じ字下げが要る。** */
+.setting-fold > .setting-note,
+.setting-fold > .setting-section-note {
+  padding-left: 22px;
+}
+
 /* 畳んでいるときに中身の当たりが付くように、見出しの右へ 1 行だけ添える
    （使っている駒の字・登録したエンジンの数）。⚠️ **ここに操作を置かないこと** ——
    summary の中は押すと開閉するので、ボタンを入れると意図と違う動きになる。 */

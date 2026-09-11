@@ -17,8 +17,10 @@
 //            (自由編集・合法性を問わない・手番も駒台の先後も未決でよい)
 //   解析   … **確定した局面**の面。評価値を出し、今後ここに手順と分岐ツリーが乗る
 //            (合法手だけを辿る)
-//   設定   … 設定。**5 つの区切りに分けてある**(2026-09-12。撮る / 解析 / 盤の表示 /
-//            ファイルの場所 / 盤面認識(suteme))。⚠️ **足した順ではなく関わりでまとめる。**
+//   設定   … 設定。**関わりでまとめてある**(2026-09-12。撮る / 解析 / 盤の表示 /
+//            棋譜データベース / 盤面認識(suteme))。⚠️ **足した順に積まないこと。**
+//            ⚠️ **区切りの見出しは 2 つ以上をまとめるときだけ** —— 中身が 1 つなら
+//            その項目自身を畳む(棋譜データベース・盤面認識がそれ)。
 //            ⚠️ **並びの基準は「どれだけの人が触るか」** —— よく触るものが上、
 //            **既定のままで動くものは下**。⚠️ **盤面認識をベース機能だからと上へ
 //            戻さないこと**(認識器の置き場所や学習データへの登録は相当な上級者の操作)。
@@ -1178,27 +1180,23 @@ export function mountMainScreen(root: HTMLElement): void {
           </div>
         </details>
 
-        <h3 class="setting-section">ファイルの場所</h3>
-        <p class="setting-section-note">
-          <strong>既定のままで動きます。</strong>置き場所を変えたいときだけ触ってください。
-        </p>
         <!-- 棋譜データベース（棚）。**実装は kicho のままで、ikkyoku は利用する側。**
 
              ⚠️ **棚は解析の前提条件ではない**（設計原則3）。開けなくても
              撮った 1 局面と貼った棋譜の解析は今までどおり動き、棋譜タブだけが
              理由を出して機能しない。**ここでエラーを赤く出しても、他の機能は
              壊れていないことが分かるように書くこと。** -->
-        <div class="setting-group">
-          <div class="setting is-block">
-            <span class="setting-body">
-              <span class="setting-title">棋譜データベース</span>
-              <span class="setting-note">
-                棋譜タブの「棚」を置くファイルです。変えるとその場で開き直します。
-                <strong>開けなくても撮影・訂正・解析はそのまま使えます</strong>
-                （棋譜タブだけが使えなくなります）。
-              </span>
-            </span>
-          </div>
+        <details id="fold-kifudb" class="setting-group setting-fold">
+          <summary class="setting-fold-head">
+            <span class="setting-title">棋譜データベース</span>
+            <span id="fold-kifudb-sum" class="setting-fold-sum"></span>
+          </summary>
+          <span class="setting-note">
+            棋譜タブの「棚」を置くファイルです。変えるとその場で開き直します。
+            <strong>既定のままで動きます</strong>ので、置き場所を変えたいときだけ
+            触ってください。<strong>開けなくても撮影・訂正・解析はそのまま使えます</strong>
+            （棋譜タブだけが使えなくなります）。
+          </span>
           <div class="setting-fields">
             <label class="field is-wide">
               <span class="field-label">場所</span>
@@ -1208,92 +1206,97 @@ export function mountMainScreen(root: HTMLElement): void {
             <button id="kifudb-browse" type="button">参照…</button>
           </div>
           <p id="kifudb-note" class="setting-note"></p>
-        </div>
+        </details>
 
-        <h3 class="setting-section">盤面認識（suteme）</h3>
-        <p class="setting-section-note">
-          認識に使う学習データと、訂正した局面の戻し先。<strong>どちらも既定のままで
-          動きます</strong>ので、<strong>認識の精度を自分で育てるとき</strong>だけ
-          触ってください。相手はどちらも suteme なので、片方だけ設定しても噛み合いません。
-        </p>
-        <!-- 認識器の読み込み元（2026-08-27）。
+        <details id="fold-recognize" class="setting-group setting-fold">
+          <summary class="setting-fold-head">
+            <span class="setting-title">盤面認識（suteme）</span>
+            <span class="setting-fold-sum">認識の精度を自分で育てるとき</span>
+          </summary>
+          <p class="setting-section-note">
+            認識に使う学習データと、訂正した局面の戻し先。<strong>どちらも既定のままで
+            動きます</strong>ので、普通に使うぶんには触らなくてかまいません。
+            相手はどちらも suteme なので、片方だけ設定しても噛み合いません。
+          </p>
+          <!-- 認識器の読み込み元（2026-08-27）。
 
-             **exe 1 つで配れる形と、学習データを育てながら使う形の両方が要る。**
-             配布ビルド（-tags embedmodel）は認識器を焼き込んであるので、
-             suteme のリポジトリが無い環境でもそのまま動く。開発中は
-             ディレクトリを指しておけば、データを更新した結果がすぐ反映される。
+               **exe 1 つで配れる形と、学習データを育てながら使う形の両方が要る。**
+               配布ビルド（-tags embedmodel）は認識器を焼き込んであるので、
+               suteme のリポジトリが無い環境でもそのまま動く。開発中は
+               ディレクトリを指しておけば、データを更新した結果がすぐ反映される。
 
-             ⚠️ **「自動」はディレクトリ優先。** 焼き込みは固定したデータなので、
-             ここが焼き込みへ倒れると**学習データを更新しても反映されない**という
-             最も気づきにくい事故になる（Go 側 resolveRecognizerSource）。 -->
-        <div class="setting-group">
-          <div class="setting is-block">
-            <span class="setting-body">
-              <span class="setting-title">認識器の読み込み元</span>
-              <span class="setting-note">
-                盤面認識に使う suteme の学習データをどこから読むかです。
-                切り替えるとその場で読み直します。
+               ⚠️ **「自動」はディレクトリ優先。** 焼き込みは固定したデータなので、
+               ここが焼き込みへ倒れると**学習データを更新しても反映されない**という
+               最も気づきにくい事故になる（Go 側 resolveRecognizerSource）。 -->
+          <div class="setting-group">
+            <div class="setting is-block">
+              <span class="setting-body">
+                <span class="setting-title">認識器の読み込み元</span>
+                <span class="setting-note">
+                  盤面認識に使う suteme の学習データをどこから読むかです。
+                  切り替えるとその場で読み直します。
+                </span>
               </span>
-            </span>
+            </div>
+            <div class="setting-fields">
+              <label class="field">
+                <span class="field-label">読み込み元</span>
+                <select id="suteme-source">
+                  <option value="auto">自動（ディレクトリ優先）</option>
+                  <option value="dir">学習データのディレクトリ</option>
+                  <option value="embed">このアプリに焼き込んだデータ</option>
+                </select>
+              </label>
+              <label class="field is-wide">
+                <span class="field-label">ディレクトリ</span>
+                <input id="suteme-data-dir" type="text" spellcheck="false"
+                       placeholder="(空なら suteme 既定の探索)" />
+              </label>
+            </div>
+            <p id="suteme-source-note" class="setting-note"></p>
           </div>
-          <div class="setting-fields">
-            <label class="field">
-              <span class="field-label">読み込み元</span>
-              <select id="suteme-source">
-                <option value="auto">自動（ディレクトリ優先）</option>
-                <option value="dir">学習データのディレクトリ</option>
-                <option value="embed">このアプリに焼き込んだデータ</option>
-              </select>
-            </label>
-            <label class="field is-wide">
-              <span class="field-label">ディレクトリ</span>
-              <input id="suteme-data-dir" type="text" spellcheck="false"
-                     placeholder="(空なら suteme 既定の探索)" />
-            </label>
-          </div>
-          <p id="suteme-source-note" class="setting-note"></p>
-        </div>
 
-        <!-- 訂正結果を suteme の学習データに戻す設定。**自動送信のスイッチではない**
-             (2026-08-07 の決定: 自動で送ると、人が直した 1 マス以外は推論結果のまま
-             なので自分の出力を正解として食う)。ここで有効にすると、確定した局面ごとに
-             「訂正データを送信」が出るだけ。 -->
-        <div class="setting-group">
-          <label class="setting">
-            <input id="train-enabled" type="checkbox" />
-            <span class="setting-body">
-              <span class="setting-title">訂正盤面を suteme に登録する</span>
-              <span class="setting-note">
-                確定した盤面を suteme の学習データとして送れるようにします。
-                <strong>送るのはボタンを押したときだけ</strong>で、自動では送りません。
-                向こうには「未確認」として入り、suteme の解析タブで人が確認するまで
-                学習には使われません。
-                <strong>画面に見えていない駒を知識で補った局面は送らないでください</strong>
-                （テロップで盤が隠れているときなど。ラベルが画素と一致しなくなります）。
+          <!-- 訂正結果を suteme の学習データに戻す設定。**自動送信のスイッチではない**
+               (2026-08-07 の決定: 自動で送ると、人が直した 1 マス以外は推論結果のまま
+               なので自分の出力を正解として食う)。ここで有効にすると、確定した局面ごとに
+               「訂正データを送信」が出るだけ。 -->
+          <div class="setting-group">
+            <label class="setting">
+              <input id="train-enabled" type="checkbox" />
+              <span class="setting-body">
+                <span class="setting-title">訂正盤面を suteme に登録する</span>
+                <span class="setting-note">
+                  確定した盤面を suteme の学習データとして送れるようにします。
+                  <strong>送るのはボタンを押したときだけ</strong>で、自動では送りません。
+                  向こうには「未確認」として入り、suteme の解析タブで人が確認するまで
+                  学習には使われません。
+                  <strong>画面に見えていない駒を知識で補った局面は送らないでください</strong>
+                  （テロップで盤が隠れているときなど。ラベルが画素と一致しなくなります）。
+                </span>
               </span>
-            </span>
-          </label>
-          <div class="setting-fields">
-            <label class="field">
-              <span class="field-label">サーバ</span>
-              <input id="train-host" type="text" placeholder="127.0.0.1" spellcheck="false" />
             </label>
-            <label class="field">
-              <span class="field-label">ポート</span>
-              <input id="train-port" class="port" type="number" min="1" max="65535" />
-            </label>
-            <!-- トークンは**同じマシンなら要らない**(suteme はループバックを
-                 認証免除にしている)。別のマシンへ送るときだけ入れる。 -->
-            <label class="field">
-              <span class="field-label">トークン</span>
-              <input id="train-token" type="password" placeholder="同じマシンなら不要"
-                     spellcheck="false" autocomplete="off" />
-            </label>
-            <button id="train-check" class="ghost-btn" type="button"
-                    title="suteme が登録を受け付けられる状態か確かめます">接続を確認</button>
+            <div class="setting-fields">
+              <label class="field">
+                <span class="field-label">サーバ</span>
+                <input id="train-host" type="text" placeholder="127.0.0.1" spellcheck="false" />
+              </label>
+              <label class="field">
+                <span class="field-label">ポート</span>
+                <input id="train-port" class="port" type="number" min="1" max="65535" />
+              </label>
+              <!-- トークンは**同じマシンなら要らない**(suteme はループバックを
+                   認証免除にしている)。別のマシンへ送るときだけ入れる。 -->
+              <label class="field">
+                <span class="field-label">トークン</span>
+                <input id="train-token" type="password" placeholder="同じマシンなら不要"
+                       spellcheck="false" autocomplete="off" />
+              </label>
+              <button id="train-check" class="ghost-btn" type="button"
+                      title="suteme が登録を受け付けられる状態か確かめます">接続を確認</button>
+            </div>
+            <p id="train-check-status" class="status" role="status" aria-live="polite"></p>
           </div>
-          <p id="train-check-status" class="status" role="status" aria-live="polite"></p>
-        </div>
+        </details>
 
         <p id="settings-status" class="status" role="status" aria-live="polite"></p>
         <p class="setting-path">設定ファイル: <code id="settings-path">-</code></p>
@@ -3839,6 +3842,8 @@ ${st.turnLabel}${n}`;
   const kifuDBPath = root.querySelector<HTMLInputElement>("#kifudb-path")!;
   const kifuDBBrowse = root.querySelector<HTMLButtonElement>("#kifudb-browse")!;
   const kifuDBNote = root.querySelector<HTMLParagraphElement>("#kifudb-note")!;
+  const kifuDBFold = root.querySelector<HTMLDetailsElement>("#fold-kifudb")!;
+  const kifuDBFoldSum = root.querySelector<HTMLElement>("#fold-kifudb-sum")!;
   const settingsStatus = root.querySelector<HTMLParagraphElement>("#settings-status")!;
   const settingsPath = root.querySelector<HTMLElement>("#settings-path")!;
   const trainEnabledInput = root.querySelector<HTMLInputElement>("#train-enabled")!;
@@ -5030,16 +5035,22 @@ ${st.turnLabel}${n}`;
     } catch (err) {
       kifuDBNote.textContent = `状態を取得できませんでした: ${String(err)}`;
       kifuDBNote.classList.add("is-error");
+      kifuDBFoldSum.textContent = "状態が取れません";
+      kifuDBFold.open = true;
       return;
     }
     if (st.ready) {
       kifuDBNote.textContent = `開いています（${st.count}件）。`;
       kifuDBNote.classList.remove("is-error");
+      kifuDBFoldSum.textContent = `${st.count}件`;
     } else {
       kifuDBNote.textContent = st.error
         ? `開けていません: ${st.error}（棋譜タブだけが使えません）`
         : "開けていません（棋譜タブだけが使えません）。";
       kifuDBNote.classList.add("is-error");
+      kifuDBFoldSum.textContent = "開けていません";
+      // ⚠️ **開けていないときは畳んでいても開く**（理由が閉じた中に隠れてはいけない）。
+      kifuDBFold.open = true;
     }
   };
 
