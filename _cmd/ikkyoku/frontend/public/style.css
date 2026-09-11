@@ -1038,6 +1038,88 @@ html.is-main #app {
   border-top: 1px solid #2a2d36;
 }
 
+/* 設定の説明はホバーで出す（2026-09-12。`hint.ts`）。
+
+   **1 つずつは要る文章だが、並ぶと画面が説明で埋まって設定そのものが探しにくい。**
+   ⚠️ **文章を消したのではない。** マークアップは項目の隣に置いたまま、
+   **面積だけ潰して**（`display: none` にしない）読み上げには残し、
+   ホバーのときだけ吹き出しに写す。⚠️ **`display: none` にしないこと** ——
+   `aria-describedby` で結んでいるので、消すと読み上げからも消える。
+
+   ⚠️ **状態を出す行（`#kifudb-note` / `#suteme-source-note` / `.status`）は
+   `is-hint` を付けないこと。** あれは説明ではなく**今どうなっているか**で、
+   隠すと開けていない理由が読めなくなる。 */
+.setting-note.is-hint,
+.setting-section-note.is-hint {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* 「ここに説明がある」ことが読めるように項目の右へ付ける小さな印。
+   ⚠️ **消さないこと** —— ホバーで出るものは、出ると分からなければ誰も触らない。 */
+/* 説明があることは形でも分かるように（印だけに頼らない）。 */
+[data-hint] {
+  cursor: help;
+}
+
+.hint-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  margin-left: 5px;
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 1;
+  color: #8d98b0;
+  vertical-align: 1px;
+  border: 1px solid #454a57;
+  border-radius: 50%;
+}
+
+[data-hint]:hover .hint-mark,
+.setting:hover .hint-mark,
+.setting-fold-head:hover .hint-mark {
+  color: #cfd6e6;
+  border-color: #6ad3ff;
+}
+
+/* 説明の吹き出し。⚠️ **`position: fixed` で body に置く**（`hint.ts` が座標を書く）
+   —— 設定タブは `overflow: auto` なので、項目の中に絶対配置すると
+   **下のほうの項目で切り落とされる。** */
+.hint-bubble {
+  position: fixed;
+  z-index: 60;
+  max-width: 420px;
+  padding: 8px 10px;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: #d7dcea;
+  background: #1b1e25;
+  border: 1px solid #3a3f4b;
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  /* ⚠️ **触れないようにする。** 吹き出しの上にカーソルが乗ると
+     項目から出たことになり、出たり消えたりを繰り返す。 */
+  pointer-events: none;
+}
+
+.hint-bubble strong {
+  color: #f2f3f5;
+}
+
+.hint-bubble code {
+  font-size: 11px;
+  color: #9fe3ff;
+}
+
 /* 設定の区切り（2026-09-12）。**足した順ではなく、関わりでまとめる。**
 
    以前は実装した順に上から積んでいたので、**同じものを相手にする設定が離れていた**
