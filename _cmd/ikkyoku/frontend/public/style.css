@@ -1038,6 +1038,48 @@ html.is-main #app {
   border-top: 1px solid #2a2d36;
 }
 
+/* 設定ファイルの場所（2026-09-12）。**設定の項目ではない**（触るものが無い）ので、
+   区切りの外・一番下の**右端**に小さく置く。⚠️ **左端に戻さないこと** ——
+   他の項目と同じ位置に同じ字で並ぶと、**何かの設定に見える**。 */
+.setting-footer {
+  align-self: flex-end;
+  margin: 6px 0 0;
+  text-align: right;
+}
+
+/* 押すとフルパスがクリップボードに入る（撮った PNG のパスと同じ作法）。
+   ⚠️ **ボタンらしく見せないこと** —— 設定の一部に見えてはいけないので、
+   枠も背景も持たず、ホバーで初めて押せると分かる程度にする。 */
+.path-btn {
+  padding: 0;
+  font: inherit;
+  font-size: 11px;
+  color: #6f7995;
+  text-align: right;
+  word-break: break-all;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.path-btn:hover:not(:disabled) {
+  color: #9aa6c0;
+  text-decoration: underline;
+}
+
+.path-btn:disabled {
+  cursor: default;
+}
+
+.path-btn.is-copied {
+  color: #7ee0a0;
+  text-decoration: none;
+}
+
+.path-btn.is-copied::after {
+  content: "（コピーしました）";
+}
+
 /* 設定の説明はホバーで出す（2026-09-12。`hint.ts`）。
 
    **1 つずつは要る文章だが、並ぶと画面が説明で埋まって設定そのものが探しにくい。**
