@@ -9,7 +9,7 @@
 //
 // ⚠️ **「棋譜 URL をコピー」は置かない**（kicho の UI にはある）。あれは
 // ShogiHome 等の外部ツールへ渡すためのもので、ikkyoku では渡す先が自分自身。
-// **代わりに置くのが「解析する」。**
+// **代わりに置くのが「解析」（行の左端）。**
 import { KifuService } from "../bindings/github.com/ShinteLab/ikkyoku/app";
 import { openPopup } from "./popup";
 import type {
@@ -64,7 +64,7 @@ const movesText = (g: GameSummary): string => {
 export function mountLibrary(
   root: ParentNode,
   opts: {
-    // onAnalyze は「解析する」を押したとき（解析タブへ移って描くのは呼び出し側）。
+    // onAnalyze は「解析」を押したとき（解析タブへ移って描くのは呼び出し側）。
     onAnalyze: (load: KifuLoad) => void;
   },
 ): LibraryHandle {
@@ -220,22 +220,19 @@ export function mountLibrary(
     for (const g of games) {
       const tr = document.createElement("tr");
       tr.dataset.id = g.id;
-      cell(tr, formatDate(g.startedAt));
-      cell(tr, g.event || "-").title = SOURCE_LABELS[g.source] ?? g.source;
-      cell(tr, g.black || "-");
-      cell(tr, g.white || "-");
-      const moves = cell(tr, movesText(g), "is-num");
-      if (g.endMark) moves.title = g.endMark;
 
-      const actions = document.createElement("td");
-      actions.className = "is-actions";
+      // ⚠️ **「解析」「表示」は行の左端**（2026-09-12）。一覧から拾って解析へ送るのが
+      // この面の主目的なので、日付や棋戦名の長さで押す位置が動かないようにしてある。
+      // ⚠️ **「削除」だけは右端に残すこと**（間違って押される場所に置かない）。
+      const lead = document.createElement("td");
+      lead.className = "is-actions is-lead";
 
-      // ⚠️ **「解析する」が主役。** kicho の「棋譜 URL をコピー」の置き換えで、
+      // ⚠️ **「解析」が主役。** kicho の「棋譜 URL をコピー」の置き換えで、
       // ikkyoku で棚を持つ理由そのもの。
       const analyzeBtn = document.createElement("button");
       analyzeBtn.type = "button";
       analyzeBtn.className = "ghost-btn is-primary";
-      analyzeBtn.textContent = "解析する";
+      analyzeBtn.textContent = "解析";
       analyzeBtn.title = "この棋譜を解析タブで開きます";
       analyzeBtn.addEventListener("click", () => void analyze(g.id, analyzeBtn));
 
@@ -252,6 +249,19 @@ export function mountLibrary(
         void show(g.id);
       });
 
+      lead.append(analyzeBtn, showBtn);
+      tr.append(lead);
+
+      cell(tr, formatDate(g.startedAt));
+      cell(tr, g.event || "-").title = SOURCE_LABELS[g.source] ?? g.source;
+      cell(tr, g.black || "-");
+      cell(tr, g.white || "-");
+      const moves = cell(tr, movesText(g), "is-num");
+      if (g.endMark) moves.title = g.endMark;
+
+      const actions = document.createElement("td");
+      actions.className = "is-actions";
+
       const delBtn = document.createElement("button");
       delBtn.type = "button";
       delBtn.className = "danger-btn";
@@ -261,7 +271,7 @@ export function mountLibrary(
         askRemove(e, g.id, g.event || g.black || g.id);
       });
 
-      actions.append(analyzeBtn, showBtn, delBtn);
+      actions.append(delBtn);
       tr.append(actions);
       rows.append(tr);
     }

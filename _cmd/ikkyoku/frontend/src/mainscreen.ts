@@ -569,6 +569,9 @@ export function mountMainScreen(root: HTMLElement): void {
           <table class="library-table">
             <thead>
               <tr>
+                <!-- ⚠️ **先頭の空欄は「解析」「表示」の列**（2026-09-12 に左へ移した）。
+                     末尾の空欄は「削除」。**2 つに割れていることを崩さないこと。** -->
+                <th></th>
                 <th>開始日</th>
                 <th>棋戦</th>
                 <th>先手</th>

@@ -5031,8 +5031,10 @@ html.is-graph #app {
   text-overflow: ellipsis;
 }
 
-/* 棋戦名は長いので、ここだけ残りをもらって省略する。 */
-.library-table tbody td:nth-child(2) {
+/* 棋戦名は長いので、ここだけ残りをもらって省略する。
+   ⚠️ **先頭に「解析 / 表示」の列があるので 3 番目**（2026-09-12）。
+   列を足したらここの番号も直すこと。 */
+.library-table tbody td:nth-child(3) {
   max-width: 0;
   width: 100%;
 }
@@ -5056,6 +5058,11 @@ html.is-graph #app {
   display: flex;
   gap: 6px;
   justify-content: flex-end;
+}
+
+/* 行の左端に置く「解析 / 表示」。⚠️ **右端の「削除」とは寄せる向きが逆。** */
+.library-table .is-actions.is-lead {
+  justify-content: flex-start;
 }
 
 /* ⚠️ **.danger-btn の margin-left: auto を打ち消すこと。**
