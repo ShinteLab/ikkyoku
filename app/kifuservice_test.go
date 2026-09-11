@@ -495,7 +495,10 @@ func TestKifuServiceUnwatchMissingIsNotError(t *testing.T) {
 	}
 }
 
-// 「クリア」は仮の一覧ごと捨てる（画面から消しただけでは再起動で戻ってくる）。
+// UnwatchAll は仮の一覧ごと捨てる（画面から消しただけでは再起動で戻ってくる）。
+//
+// ⚠️ **画面の口は外してある**（2026-09-12 の「クリア」）。**API は残っているので
+// 歯止めも残す** —— 戻すときに「画面から消すだけ」の実装にしないため。
 func TestKifuServiceUnwatchAll(t *testing.T) {
 	svc, _ := newTestKifuService(t)
 

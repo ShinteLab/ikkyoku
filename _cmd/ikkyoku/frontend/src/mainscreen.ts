@@ -488,7 +488,8 @@ export function mountMainScreen(root: HTMLElement): void {
             <strong>カードは再起動しても残ります。</strong>2 日制の対局で翌日また URL を
             貼り直さずに済むよう、「どのサイトのどの棋譜か」を覚えておきます
             （<strong>棋譜そのものではありません</strong>）。復元したカードは中身が空なので
-            「更新」でサイトから取り直してください。追うのをやめるときはカードの「閉じる」で外します
+            「更新」でサイトから取り直してください（「取り直して解析」なら 1 回で済みます）。
+            追うのをやめるときはカードの「閉じる」で外します
             （<strong>保存済みの棋譜は消えません</strong>）。終局した棋譜を保存したときは自動で外れます。
             </span>
           </span>
@@ -504,12 +505,6 @@ export function mountMainScreen(root: HTMLElement): void {
                    placeholder="http://live.shogi.or.jp/oui/kifu/67/oui202607290101.html" />
             <button id="fetch-run" class="ghost-btn is-primary" type="button"
                     title="この URL の棋譜を取ってカードに出します（解析・登録はカードから）">取得</button>
-          </div>
-          <div class="setting-fields">
-            <button id="fetch-refresh-all" class="ghost-btn" type="button"
-                    title="並んでいるカードを順にサイトから取り直します（復元した直後に使います）">すべて更新</button>
-            <button id="fetch-clear" class="ghost-btn" type="button"
-                    title="入力とカードをすべて捨てます（仮の一覧も空にします。棋譜タブの棋譜は消えません）">クリア</button>
           </div>
           <!-- ⚠️ **この群の状態表示は 1 つ**（#fetch-status）。解析・登録・取得の
                どれもここへ出す（持ち主は fetchcards.ts。setStatus を借りる）。

@@ -813,7 +813,12 @@ func (s *KifuService) Unwatch(source, sourceID string) error {
 	return nil
 }
 
-// UnwatchAll は仮の一覧を空にする（入力タブの「クリア」）。消した件数を返す。
+// UnwatchAll は仮の一覧を空にする。消した件数を返す。
+//
+// ⚠️ **画面からは呼んでいない**（2026-09-12 に入力タブの「クリア」を外した）。
+// 1 枚ずつ「閉じる」で足りる（カードは 2〜3 枚）うえ、**「閉じる」は問い合わせ
+// があるのに全部消すクリアは問い合わせ無し**という不揃いな操作だった。
+// ⚠️ **画面に戻すなら「閉じる」と同じ作法（問い合わせ）にすること。**
 func (s *KifuService) UnwatchAll() (int, error) {
 	lib, err := s.library()
 	if err != nil {
