@@ -1038,6 +1038,50 @@ html.is-main #app {
   border-top: 1px solid #2a2d36;
 }
 
+/* 設定の区切り（2026-09-12）。**足した順ではなく、関わりでまとめる。**
+
+   以前は実装した順に上から積んでいたので、**同じものを相手にする設定が離れていた**
+   （認識器の読み込み元と「訂正盤面を suteme に登録する」は、どちらも相手が suteme
+   なのにあいだに 4 つ挟まっていた）。並びは
+   **撮る → 盤面認識 → 解析 → 盤の表示 → ファイルの場所**（＝処理の流れの順）で、
+   ⚠️ **既定のままで動くもの（ファイルの場所）は下へ置く。**
+
+   ⚠️ **見出しの直後の項目は自分の区切り線を引かないこと** —— 見出しの線と
+   二重になる（下の `+` の規則）。 */
+.setting-section {
+  align-self: stretch;
+  margin: 12px 0 0;
+  padding-top: 12px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: #8d98b0;
+  border-top: 1px solid #3a3f4b;
+}
+
+.setting-section:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+/* 区切りの 1 行（なぜここに集めたのか・既定のままでよいのか）。 */
+.setting-section-note {
+  align-self: stretch;
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: #9aa6c0;
+}
+
+.setting-section + .setting,
+.setting-section + .setting-group,
+.setting-section-note + .setting,
+.setting-section-note + .setting-group {
+  padding-top: 0;
+  border-top: none;
+}
+
 /* 展開式の設定（2026-09-12）。**「駒の字」と「解析エンジン」だけ。**
 
    どちらも中身が縦に長く（フォントの一覧・エンジンの登録・option の欄）、
