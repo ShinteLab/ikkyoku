@@ -85,6 +85,7 @@ import { mountFetchCards } from "./fetchcards";
 import { mountEvalPane } from "./evalgraphpane";
 import { mountSidePane, type EngineScore } from "./sidepane";
 import { openPopup } from "./popup";
+import { attachHints, hideHint } from "./hint";
 import { mountStudyBoard } from "./study";
 import type { RecognizerStatus } from "../bindings/ikkyoku/models";
 import type {
@@ -990,8 +991,8 @@ export function mountMainScreen(root: HTMLElement): void {
         <label class="setting">
           <input id="fit-on-startup" type="checkbox" />
           <span class="setting-body">
-            <span class="setting-title">起動時に盤面を探す</span>
-            <span class="setting-note">
+            <span class="setting-title" data-hint="hint-fit">起動時に盤面を探す</span>
+            <span id="hint-fit" class="setting-note is-hint">
               起動のたびに一度だけ画面から盤を探して、ガイド枠を合わせます。
               見つからなければ枠はそのままです。
             </span>
@@ -1010,8 +1011,8 @@ export function mountMainScreen(root: HTMLElement): void {
         <label class="setting">
           <input id="click-through" type="checkbox" />
           <span class="setting-body">
-            <span class="setting-title">枠の内側で後ろの画面を操作する</span>
-            <span class="setting-note">
+            <span class="setting-title" data-hint="hint-clickthrough">枠の内側で後ろの画面を操作する</span>
+            <span id="hint-clickthrough" class="setting-note is-hint">
               ガイド枠の内側（撮る範囲）のクリックとホイールを、後ろにある中継の画面へ
               そのまま通します。枠をどかさずにシークや再生ができます。
               ツールバーと枠の縁は今までどおり押せます（移動・リサイズ・撮影）。
@@ -1030,8 +1031,8 @@ export function mountMainScreen(root: HTMLElement): void {
                してある（⚠️ 自作エンジンの評価値の絶対値は当てにならない）。
                ⚠️ **既定値（1500）は Go 側が解決して返す。フロントに書かないこと。** -->
           <div class="setting-group">
-            <span class="setting-title">勝率の表示</span>
-            <span class="setting-note">
+            <span class="setting-title" data-hint="hint-winrate">勝率の表示</span>
+            <span id="hint-winrate" class="setting-note is-hint">
               解析タブの盤の上に出る勝率バーの計算に使います。
               <code>勝率(先手) = 1 / (1 + exp(-評価値 / ポナンザ定数))</code>。
               <strong>小さくするほど、同じ評価値でも勝率が振り切れます。</strong>
@@ -1060,8 +1061,8 @@ export function mountMainScreen(root: HTMLElement): void {
           <div class="setting-group">
             <div class="setting is-block">
               <span class="setting-body">
-                <span class="setting-title">解析エンジン</span>
-                <span class="setting-note">
+                <span class="setting-title" data-hint="hint-engine">解析エンジン</span>
+                <span id="hint-engine" class="setting-note is-hint">
                   USI を話すエンジンの実行ファイルを登録します（やねうら王・水匠など）。
                   <strong>「解析に使う」を付けたエンジンが同時に走り、解析タブに結果が並びます。</strong>
                   実行ファイルを<strong>空にするとその登録は同梱のエンジン</strong>になります。
@@ -1095,10 +1096,10 @@ export function mountMainScreen(root: HTMLElement): void {
              条項が効く側の話になる。 -->
         <details id="fold-piecefont" class="setting-group setting-fold">
           <summary class="setting-fold-head">
-            <span class="setting-title">駒の字</span>
+            <span class="setting-title" data-hint="hint-piecefont">駒の字</span>
             <span id="fold-piecefont-sum" class="setting-fold-sum"></span>
           </summary>
-          <span class="setting-note">
+          <span id="hint-piecefont" class="setting-note is-hint">
             盤に並ぶ駒の書体です。端末に入っているフォントから、駒に要る
             <code id="font-required"></code> の字だけを抜き出して使います。
             <strong>抜き出した字はこのアプリの表示に使うだけで、ファイルとしては
@@ -1194,10 +1195,10 @@ export function mountMainScreen(root: HTMLElement): void {
              壊れていないことが分かるように書くこと。** -->
         <details id="fold-kifudb" class="setting-group setting-fold">
           <summary class="setting-fold-head">
-            <span class="setting-title">棋譜データベース</span>
+            <span class="setting-title" data-hint="hint-kifudb">棋譜データベース</span>
             <span id="fold-kifudb-sum" class="setting-fold-sum"></span>
           </summary>
-          <span class="setting-note">
+          <span id="hint-kifudb" class="setting-note is-hint">
             棋譜タブの「棚」を置くファイルです。変えるとその場で開き直します。
             <strong>既定のままで動きます</strong>ので、置き場所を変えたいときだけ
             触ってください。<strong>開けなくても撮影・訂正・解析はそのまま使えます</strong>
@@ -1216,10 +1217,10 @@ export function mountMainScreen(root: HTMLElement): void {
 
         <details id="fold-recognize" class="setting-group setting-fold">
           <summary class="setting-fold-head">
-            <span class="setting-title">盤面認識（suteme）</span>
+            <span class="setting-title" data-hint="hint-recognize">盤面認識（suteme）</span>
             <span class="setting-fold-sum">認識の精度を自分で育てるとき</span>
           </summary>
-          <p class="setting-section-note">
+          <p id="hint-recognize" class="setting-section-note is-hint">
             認識に使う学習データと、訂正した局面の戻し先。<strong>どちらも既定のままで
             動きます</strong>ので、普通に使うぶんには触らなくてかまいません。
             相手はどちらも suteme なので、片方だけ設定しても噛み合いません。
@@ -1237,8 +1238,8 @@ export function mountMainScreen(root: HTMLElement): void {
           <div class="setting-group">
             <div class="setting is-block">
               <span class="setting-body">
-                <span class="setting-title">認識器の読み込み元</span>
-                <span class="setting-note">
+                <span class="setting-title" data-hint="hint-sutemesource">認識器の読み込み元</span>
+                <span id="hint-sutemesource" class="setting-note is-hint">
                   盤面認識に使う suteme の学習データをどこから読むかです。
                   切り替えるとその場で読み直します。
                 </span>
@@ -1270,8 +1271,8 @@ export function mountMainScreen(root: HTMLElement): void {
             <label class="setting">
               <input id="train-enabled" type="checkbox" />
               <span class="setting-body">
-                <span class="setting-title">訂正盤面を suteme に登録する</span>
-                <span class="setting-note">
+                <span class="setting-title" data-hint="hint-training">訂正盤面を suteme に登録する</span>
+                <span id="hint-training" class="setting-note is-hint">
                   確定した盤面を suteme の学習データとして送れるようにします。
                   <strong>送るのはボタンを押したときだけ</strong>で、自動では送りません。
                   向こうには「未確認」として入り、suteme の解析タブで人が確認するまで
@@ -1309,6 +1310,11 @@ export function mountMainScreen(root: HTMLElement): void {
       </div>
     </div>
   `;
+
+  // 設定の説明をホバーで出す（2026-09-12。`hint.ts`）。
+  // ⚠️ **呼ぶのはここ 1 回だけ**（innerHTML を組んだ直後）。設定タブの中身は
+  // 描き直さないので、付け直しは要らない。
+  attachHints(root.querySelector<HTMLElement>("#panel-settings")!);
 
   const reloadBtn = root.querySelector<HTMLButtonElement>("#reload-btn")!;
   const recognizer = root.querySelector<HTMLParagraphElement>("#recognizer")!;
@@ -1375,6 +1381,8 @@ export function mountMainScreen(root: HTMLElement): void {
   const debugSummary = root.querySelector<HTMLElement>("#debug-summary")!;
 
   const selectTab = (target: HTMLButtonElement) => {
+    // 設定の説明の吹き出しは、タブを移ったら消す（関係の無い面に残る）。
+    hideHint();
     // ⚠️ **解析タブを離れたらエンジンを手放す**（2026-08-12）。接続は解析を
     // またいで使い回すようになったので、**放っておくとタブを移ったあとも
     // `USI_Hash` ぶん（GB 級になりうる）のメモリを掴んだまま**になる。
