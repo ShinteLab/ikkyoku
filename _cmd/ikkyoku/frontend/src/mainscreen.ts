@@ -584,15 +584,21 @@ export function mountMainScreen(root: HTMLElement): void {
           </table>
         </div>
 
-        <!-- 詳細。**KIF の原本をそのまま出す**（整形し直さない）。 -->
-        <div id="library-preview" class="library-preview" hidden>
+        <!-- 詳細。**モーダル**（2026-09-12。それまでは一覧の下に開いていた）。
+             ⚠️ **KIF の本文は出さない** —— 150 手を流しても読む場面が無く、
+             詳細だけで画面が埋まっていた。**代わりに「KIF をコピー」**を置いて、
+             原本が要るときは他のツールへ持っていってもらう。
+             ⚠️ **開く口は棋戦名のリンク**（「表示」ボタンは廃止）。 -->
+        <dialog id="library-modal" class="library-modal">
           <div class="library-head">
-            <span id="library-preview-title" class="field-label"></span>
-            <button id="library-preview-close" class="ghost-btn" type="button">閉じる</button>
+            <span id="library-modal-title" class="field-label"></span>
+            <button id="library-modal-close" class="ghost-btn" type="button">閉じる</button>
           </div>
-          <dl id="library-preview-meta" class="library-meta"></dl>
-          <pre id="library-preview-kif" class="library-kif"></pre>
-        </div>
+          <dl id="library-modal-meta" class="library-meta"></dl>
+          <div class="library-modal-foot">
+            <button id="library-modal-copy" class="ghost-btn" type="button">KIF をコピー</button>
+          </div>
+        </dialog>
       </div>
 
       <!-- 訂正タブ。**認識の誤りを直す面。ここに居ること自体が訂正モード**

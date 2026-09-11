@@ -10,6 +10,7 @@
 // ⚠️ **「棋譜 URL をコピー」は置かない**（kicho の UI にはある）。あれは
 // ShogiHome 等の外部ツールへ渡すためのもので、ikkyoku では渡す先が自分自身。
 // **代わりに置くのが「解析」（行の左端）。**
+import { Clipboard } from "@wailsio/runtime";
 import { KifuService } from "../bindings/github.com/ShinteLab/ikkyoku/app";
 import { openPopup } from "./popup";
 import type {
@@ -79,14 +80,16 @@ export function mountLibrary(
   const hint = root.querySelector<HTMLParagraphElement>("#library-hint")!;
   const status = root.querySelector<HTMLParagraphElement>("#library-status")!;
   const rows = root.querySelector<HTMLTableSectionElement>("#library-rows")!;
-  const preview = root.querySelector<HTMLElement>("#library-preview")!;
-  const previewTitle = root.querySelector<HTMLElement>("#library-preview-title")!;
-  const previewClose = root.querySelector<HTMLButtonElement>("#library-preview-close")!;
-  const previewMeta = root.querySelector<HTMLElement>("#library-preview-meta")!;
-  const previewKif = root.querySelector<HTMLElement>("#library-preview-kif")!;
+  // 詳細はモーダル（2026-09-12）。**開く口は棋戦名のリンクだけ。**
+  const modal = root.querySelector<HTMLDialogElement>("#library-modal")!;
+  const modalTitle = root.querySelector<HTMLElement>("#library-modal-title")!;
+  const modalClose = root.querySelector<HTMLButtonElement>("#library-modal-close")!;
+  const modalMeta = root.querySelector<HTMLElement>("#library-modal-meta")!;
+  const modalCopy = root.querySelector<HTMLButtonElement>("#library-modal-copy")!;
 
-  // 今開いている詳細の ID（行の強調に使う）。
-  let openID = "";
+  // 今開いている詳細の KIF（原本）。**「KIF をコピー」が渡すのはこれ。**
+  // ⚠️ **画面には出さない**（本文を出すのをやめたのが 2026-09-12 の変更）。
+  let openKif = "";
   // 読み込み中は多重に走らせない（検索ボタン連打・タブの出入り）。
   let busy = false;
 
@@ -112,17 +115,9 @@ export function mountLibrary(
   };
 
   const closePreview = () => {
-    openID = "";
-    preview.hidden = true;
-    previewKif.textContent = "";
-    previewMeta.replaceChildren();
-    paintSelection();
-  };
-
-  const paintSelection = () => {
-    for (const tr of rows.querySelectorAll<HTMLTableRowElement>("tr")) {
-      tr.classList.toggle("is-selected", tr.dataset.id === openID && openID !== "");
-    }
+    openKif = "";
+    modalCopy.classList.remove("is-copied");
+    if (modal.open) modal.close();
   };
 
   const addMeta = (label: string, value: string) => {
@@ -131,13 +126,13 @@ export function mountLibrary(
     dt.textContent = label;
     const dd = document.createElement("dd");
     dd.textContent = value;
-    previewMeta.append(dt, dd);
+    modalMeta.append(dt, dd);
   };
 
   const showPreview = (d: GameDetail) => {
-    openID = d.id;
-    previewTitle.textContent = d.event || "(棋戦名なし)";
-    previewMeta.replaceChildren();
+    openKif = d.kif;
+    modalTitle.textContent = d.event || "(棋戦名なし)";
+    modalMeta.replaceChildren();
     addMeta("先手", d.black);
     addMeta("後手", d.white);
     addMeta("手合割", d.handicap);
@@ -146,11 +141,12 @@ export function mountLibrary(
     addMeta("手数", movesText(d));
     addMeta("取得元", SOURCE_LABELS[d.source] ?? d.source);
     addMeta("取得元 URL", d.sourceUrl);
-    // ⚠️ **KIF は原本をそのまま出す**（整形し直さない）。保存されているのも
-    // 原本なので、画面と棚の中身を食い違わせない。
-    previewKif.textContent = d.kif;
-    preview.hidden = false;
-    paintSelection();
+    // ⚠️ **KIF の本文は画面に出さない**（2026-09-12）。持ち出す口は
+    // 「KIF をコピー」だけで、渡すのは**原本のまま**（整形し直さない）——
+    // 保存されているのも原本なので、渡すものと棚の中身を食い違わせない。
+    modalCopy.classList.remove("is-copied");
+    modalCopy.disabled = openKif === "";
+    if (!modal.open) modal.showModal();
   };
 
   const show = async (id: string) => {
@@ -166,7 +162,7 @@ export function mountLibrary(
     setStatus("");
     try {
       await KifuService.Delete(id);
-      if (openID === id) closePreview();
+      closePreview();
       await load();
     } catch (err) {
       setStatus(`削除できませんでした: ${String(err)}`, "error");
@@ -221,7 +217,7 @@ export function mountLibrary(
       const tr = document.createElement("tr");
       tr.dataset.id = g.id;
 
-      // ⚠️ **「解析」「表示」は行の左端**（2026-09-12）。一覧から拾って解析へ送るのが
+      // ⚠️ **「解析」は行の左端**（2026-09-12）。一覧から拾って解析へ送るのが
       // この面の主目的なので、日付や棋戦名の長さで押す位置が動かないようにしてある。
       // ⚠️ **「削除」だけは右端に残すこと**（間違って押される場所に置かない）。
       const lead = document.createElement("td");
@@ -236,24 +232,23 @@ export function mountLibrary(
       analyzeBtn.title = "この棋譜を解析タブで開きます";
       analyzeBtn.addEventListener("click", () => void analyze(g.id, analyzeBtn));
 
-      const showBtn = document.createElement("button");
-      showBtn.type = "button";
-      showBtn.className = "ghost-btn";
-      showBtn.textContent = "表示";
-      showBtn.title = "KIF の原本を見ます";
-      showBtn.addEventListener("click", () => {
-        if (openID === g.id) {
-          closePreview();
-          return;
-        }
-        void show(g.id);
-      });
-
-      lead.append(analyzeBtn, showBtn);
+      lead.append(analyzeBtn);
       tr.append(lead);
 
       cell(tr, formatDate(g.startedAt));
-      cell(tr, g.event || "-").title = SOURCE_LABELS[g.source] ?? g.source;
+
+      // 棋戦名は**詳細を開くリンク**（2026-09-12。「表示」ボタンの置き換え）。
+      // ⚠️ **行の押せる場所を増やさないこと** —— 行そのものを押して開く作りに
+      // すると、選ぶつもりの操作で毎回モーダルが出る。**開く口は棋戦名だけ。**
+      const event = cell(tr, "");
+      const link = document.createElement("button");
+      link.type = "button";
+      link.className = "library-link";
+      link.textContent = g.event || "(棋戦名なし)";
+      link.title = `${SOURCE_LABELS[g.source] ?? g.source} ／ クリックで詳細`;
+      link.addEventListener("click", () => void show(g.id));
+      event.append(link);
+
       cell(tr, g.black || "-");
       cell(tr, g.white || "-");
       const moves = cell(tr, movesText(g), "is-num");
@@ -275,7 +270,6 @@ export function mountLibrary(
       tr.append(actions);
       rows.append(tr);
     }
-    paintSelection();
 
     // 件数。条件を付けているときだけ「N / 全体」にする。
     // ⚠️ **並べた行数ではなく該当件数（matched）を出す。** 上限で切られていると
@@ -363,7 +357,21 @@ export function mountLibrary(
     finishedOnly.checked = false;
     runSearch();
   });
-  previewClose.addEventListener("click", closePreview);
+  modalClose.addEventListener("click", closePreview);
+  // Esc で閉じたときも状態を揃える（`<dialog>` は自前で閉じる）。
+  modal.addEventListener("close", () => {
+    openKif = "";
+    modalCopy.classList.remove("is-copied");
+  });
+  // ⚠️ **クリップボードは Wails ランタイム**（`navigator.clipboard` は secure context
+  // 前提で、カスタムスキーム配信のこの webview では当てにできない）。
+  modalCopy.addEventListener("click", () => {
+    if (!openKif) return;
+    void Clipboard.SetText(openKif).then(() => {
+      modalCopy.classList.add("is-copied");
+      window.setTimeout(() => modalCopy.classList.remove("is-copied"), 900);
+    });
+  });
 
   return {
     reveal: () => void load(),

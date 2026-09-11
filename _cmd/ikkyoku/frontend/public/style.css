@@ -5043,10 +5043,32 @@ html.is-graph #app {
   background: #22252c;
 }
 
-/* 詳細を開いている行。⚠️ **消える範囲の赤（.is-doomed）とは別の意味**なので
-   色を揃えないこと。 */
-.library-table tbody tr.is-selected td {
-  background: #23303f;
+/* 棋戦名のリンク。**詳細（モーダル）を開く唯一の口**（2026-09-12。
+   「表示」ボタンの置き換え）。⚠️ **セルの省略（…）を殺さないこと** ——
+   ボタンにすると既定で縮まないので、幅を継いで自分で省略する。 */
+.library-link {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  overflow: hidden;
+  font: inherit;
+  color: #8fc0ff;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.library-link:hover {
+  color: #b6d6ff;
+  text-decoration: underline;
+}
+
+.library-link:focus-visible {
+  outline: 2px solid #5ea0ff;
+  outline-offset: 1px;
 }
 
 .library-table .is-num {
@@ -5076,21 +5098,48 @@ html.is-graph #app {
   font-size: 12px;
 }
 
-/* 詳細。**KIF の原本をそのまま出す**（整形し直さない）。 */
-.library-preview {
-  flex: 0 1 auto;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 8px 10px;
+/* 詳細のモーダル（2026-09-12）。**KIF の本文は出さない** ——
+   持ち出す口は「KIF をコピー」だけ。
+   ⚠️ **`<dialog>` の既定の白地を上書きすること**（暗い画面で 1 枚だけ光る）。 */
+.library-modal {
+  width: min(520px, calc(100vw - 48px));
+  max-height: calc(100vh - 96px);
+  padding: 12px 14px;
+  color: #dfe3ea;
   background: #1f2229;
-  border: 1px solid #2c303a;
-  border-radius: 6px;
+  border: 1px solid #3a3f4b;
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgb(0 0 0 / 55%);
 }
 
-.library-preview[hidden] {
-  display: none;
+.library-modal[open] {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.library-modal::backdrop {
+  background: rgb(0 0 0 / 45%);
+}
+
+/* 一覧と同じで、縦に伸びるのは中身だけ（見出しと足は動かない）。 */
+.library-modal .library-meta {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.library-modal-foot {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* コピーできたことの合図。**文字は変えずに色だけ**（path-btn と同じ流儀）——
+   ラベルが伸び縮みするとボタンの幅が動いて、押した直後に隣がずれる。 */
+.library-modal-foot .ghost-btn.is-copied {
+  color: #8fdc9b;
+  border-color: #8fdc9b;
 }
 
 .library-meta {
@@ -5109,22 +5158,6 @@ html.is-graph #app {
   margin: 0;
   color: #dfe3ea;
   word-break: break-all;
-}
-
-/* 本文。⚠️ **高さを頭打ちにすること** —— 150 手の棋譜をそのまま流すと
-   詳細だけで画面が埋まり、上の一覧に戻れなくなる。 */
-.library-kif {
-  max-height: 220px;
-  margin: 0;
-  padding: 8px;
-  overflow: auto;
-  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
-  font-size: 12px;
-  line-height: 1.5;
-  color: #c7cbd4;
-  white-space: pre;
-  background: #17191f;
-  border-radius: 5px;
 }
 
 /* ---- 中継から取得（入力タブ）----------------------------------------------
