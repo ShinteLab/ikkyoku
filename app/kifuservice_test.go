@@ -109,15 +109,19 @@ func TestKifuServiceSaveKeepsIDOnResave(t *testing.T) {
 	}
 }
 
-// ⚠️ **読売の取得元 URL は解析タブへ渡さないこと**（`kicho.RefetchableURL`）。
+// ⚠️ **取り直せる取得元 URL は解析タブへ渡すこと**（`kicho.RefetchableURL`）。
 //
-// あちらは Nuxt のページで .kif を置いておらず、KIF は構造化データから
-// 組み立てている。渡すと**再読み込みのアイコンが出るのに押すと必ず失敗する**
-// という、画面からは理由の分からない壊れ方になる（取り直す口は取得カードの「更新」）。
+// これが付いていると解析タブに「再読み込み」が出る。あちらは**食い違ったところ
+// から先だけを差し替えて検討の枝と評価値を残す**ので、**中継を追いながら検討する
+// 流れはこれでしか成立しない**（カードの「更新 → 解析」は根ごと入れ替わる）。
+//
+// ⚠️ **読売を落とさないこと**（2026-09-12 に変わった）。読売が .kif を置いて
+// いないのは今も同じだが、`Fetch` がビューアの URL を棋譜 ID に解決するので
+// **取り直せる**。⚠️ **落とすのは貼り付けだけ**（取得元が無い）。
 //
 // **判断は kicho が持つ**（取得元の性質を知っているのはあちら）。ここでは
 // SendToStudyGame がその判断を通していることだけを見る。
-func TestSendToStudyGameDropsUnrefetchableURL(t *testing.T) {
+func TestSendToStudyGamePassesRefetchableURL(t *testing.T) {
 	page := "http://live.shogi.or.jp/oui/kifu/67/oui202607290101.html"
 	if got := kicho.RefetchableURL(store.SourceShogiLive, page); got != page {
 		t.Errorf("連盟の中継ページを落としています: %q", got)
@@ -126,7 +130,7 @@ func TestSendToStudyGameDropsUnrefetchableURL(t *testing.T) {
 		t.Errorf("URL 取り込みの取得元を落としています")
 	}
 
-	// 読売の棋譜を解析タブへ送っても、取得元 URL は付かない。
+	// 読売の棋譜を解析タブへ送ったら、ビューアの URL が付くこと。
 	svc, study := newTestKifuService(t)
 	viewer := "https://www.yomiuri.co.jp/kifu/s/66f2539c848c20bac7cb8002/"
 	if _, err := svc.SendToStudyGame(GameDetail{
@@ -135,8 +139,19 @@ func TestSendToStudyGameDropsUnrefetchableURL(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SendToStudyGame: %v", err)
 	}
+	if got := study.State().SourceURL; got != viewer {
+		t.Errorf("読売の URL が渡っていません: %q", got)
+	}
+
+	// 貼り付けは取得元が無いので付かない。
+	if _, err := svc.SendToStudyGame(GameDetail{
+		GameSummary: GameSummary{Source: store.SourcePaste},
+		KIF:         testKIF,
+	}); err != nil {
+		t.Fatalf("SendToStudyGame（貼り付け）: %v", err)
+	}
 	if got := study.State().SourceURL; got != "" {
-		t.Errorf("読売の URL を渡してしまっています: %q", got)
+		t.Errorf("貼り付けに取得元 URL が付いています: %q", got)
 	}
 }
 

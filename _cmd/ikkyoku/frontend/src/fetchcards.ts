@@ -32,13 +32,6 @@ import type {
 export type FetchCardsHandle = {
   // clear は入力とカードを全部捨てる（仮の一覧も空にする）。
   clear: () => void;
-  // setStatus はこの群の状態の行に書く。
-  //
-  // ⚠️ **貸し出しているのは「群が 1 つなら状態の行も 1 つ」にするため**
-  // （2026-09-12）。URL 欄は 1 つで、そこから解析・登録・取得の 3 つへ分かれる。
-  // 解析と登録を持っているのは `mainscreen.ts` 側なので、返事の出し先だけ借りる。
-  // **2 つ目の行を足さないこと** —— どのボタンの返事なのかが読めなくなる。
-  setStatus: (msg: string, kind?: "" | "error" | "warn") => void;
 };
 
 // SOURCE_LABELS は取得元の表示名。
@@ -147,9 +140,12 @@ export function mountFetchCards(
     onSaved: () => void;
   },
 ): FetchCardsHandle {
-  // ⚠️ **入力欄は「棋譜の URL から」の 1 つだけ**（2026-09-12）。
+  // ⚠️ **入力欄は「棋譜の URL から」の 1 つだけで、持ち主はここ**（2026-09-12）。
   // **`#fetch-input` に戻さないこと** —— 同じ URL を入れる場所が 2 か所あると、
   // どちらに入れたかで通る道が変わる（それを畳んだのがこの変更）。
+  // ⚠️ **URL からできることは「取得」だけ。** 解析も登録も**カード**が持つので、
+  // `mainscreen.ts` はこの欄を読まない（読む側が 2 つあると、どちらの値で
+  // 動いたのかが追えなくなる）。
   const input = root.querySelector<HTMLInputElement>("#kifu-url")!;
   const run = root.querySelector<HTMLButtonElement>("#fetch-run")!;
   const refreshAllBtn = root.querySelector<HTMLButtonElement>("#fetch-refresh-all")!;
@@ -605,5 +601,5 @@ export function mountFetchCards(
   void restore();
 
   render();
-  return { clear: () => void clearAll(), setStatus };
+  return { clear: () => void clearAll() };
 }
