@@ -427,48 +427,14 @@ export function mountMainScreen(root: HTMLElement): void {
         <div class="setting-group">
           <span class="setting-title" data-hint="hint-paste">棋譜を貼り付ける</span>
           <span id="hint-paste" class="setting-note is-hint">
-            <span class="hint-para">
-            KIF 形式の棋譜を貼るか、URL を入れて<strong>「解析する」</strong>を押すと、
+            KIF 形式の棋譜を貼って<strong>「解析する」</strong>を押すと、
             <strong>指し手を全て反映した局面</strong>で<strong>解析タブ</strong>が開きます。
             手順は盤の右に並ぶので、押せばその局面まで戻れます。
             <strong>訂正タブは通りません</strong>（棋譜の局面は初期局面と手順で決まるため）。
             <strong>「棋譜に登録する」を押すと棋譜タブに残ります</strong>
             （解析するだけでは残りません）。
-            </span>
-            <span class="hint-para">
-            <strong>URL はどのサイトのものでもかまいません。</strong>
-            <strong>読売（竜王戦）の対局ページ</strong>・<strong>日本将棋連盟の棋譜中継</strong>・
-            ほかのサイトの <code>.kif</code> を同じ欄で扱います（中身は自動で見分けます）。
-            <strong>同じ URL を登録し直しても棋譜は増えません</strong>（更新されます）。
-            対局中の中継を追いかけたいときは、<strong>下の「中継から取得する」</strong>が
-            カードとして積んで「更新」で取り直せます。
-            </span>
+            URL から取り込むときは<strong>下の「棋譜の URL から」</strong>です。
           </span>
-          <!-- URL から取る（2026-08-12）。**欄は 1 つ**で、どのサイトの URL でも
-               ここに入れる（2026-09-12）。
-
-               ⚠️ **取得元ごとに欄を分けないこと。** ユーザが持っているのは
-               「棋譜の URL」1 つで、それが読売なのか連盟なのかは**こちらの都合**。
-               判別は kicho の Fetch がやる（連盟 / 読売 / それ以外の .kif /
-               棋譜 ID）。⚠️ **ここに「このサイトならこちら」を書かないこと。**
-
-               ⚠️ **「棋譜に登録する」も置く**（2026-09-12 に戻した）。一度外したのは
-               URL から登録すると source_id が毎回 UUID で**登録のたびに増えて**
-               いたためで、**その原因は kicho 側で直した**（source_id が URL 自体に
-               なった）。⚠️ **「増えるから外す」に戻さないこと** —— 増える理由が
-               無くなっている。
-
-               ⚠️ **取得も文字コードの判別も Go 側**（kicho）。webview の fetch では
-               CORS で弾かれるうえ、**中継の .kif は Shift_JIS** なので、
-               いずれにせよこちらでは扱えない。 -->
-          <div class="setting-fields kifu-url-row">
-            <span class="field-label">URL</span>
-            <input id="kifu-url" type="url" spellcheck="false"
-                   placeholder="http://live.shogi.or.jp/.../oui202607290101.kif" />
-            <button id="kifu-load-url" class="ghost-btn" type="button">URL から解析する</button>
-            <button id="kifu-import-url" class="ghost-btn" type="button"
-                    title="この URL の棋譜を棋譜タブに登録します（同じ URL なら増えません）">URL を棋譜に登録する</button>
-          </div>
           <textarea id="kifu-text" class="kifu-text" spellcheck="false"
                     placeholder="手数----指手---------消費時間--&#10;   1 ７六歩(77)   ( 0:16/00:00:16)&#10;   2 ３四歩(33)   ( 0:04/00:00:04)"></textarea>
           <!-- ⚠️ **入力欄を 2 つに増やさない。** 同じ入力の**行き先が 2 つある**
@@ -486,27 +452,38 @@ export function mountMainScreen(root: HTMLElement): void {
           <p id="kifu-status" class="status" role="status" aria-live="polite" hidden></p>
         </div>
 
-        <!-- 中継から取得する（kicho の「取得」タブ）。**対局中の棋譜を追う口。**
+        <!-- 棋譜の URL から（2026-09-12 に「中継から取得する」と URL 欄を 1 つにした）。
 
-             ⚠️ **上の「棋譜を貼り付ける」とは扱いが違う。** あちらは終局後の
-             .kif を単発で取り込む口で、こちらは**取得元での一意な ID がある**ので
-             取り直しても同じ棋譜として更新される（棚でも増えない）。
-             だから**カードとして積んで「更新」で取り直す**形にしてある。
+             ⚠️ **URL の入力欄を 2 つにしないこと。** ユーザが持っているのは
+             「棋譜の URL」1 つで、それが読売なのか連盟なのか他サイトの .kif なのかは
+             **こちらの都合**。以前は「棋譜を貼り付ける」の中と「中継から取得する」に
+             欄が 1 つずつあり、**同じ URL を入れる場所が 2 か所あって、どちらに
+             入れるかで通る道が変わっていた**（連盟の URL を上に入れると増える、など）。
+             **入り口は 1 つにして、中で分岐する。**
 
-             ⚠️ **日本将棋連盟の中継はこちらで扱うこと。** 上の URL 欄から入れると
-             source_id が毎回 UUID になり、取り込むたびに別の棋譜として増える。 -->
+             ⚠️ **判別を画面に書かないこと。** 連盟 / 読売 / それ以外の .kif /
+             棋譜 ID の見分けは kicho の Fetch がやる（親 CLAUDE.md）。
+
+             **行き先が 3 つあるだけ**（どれも同じ 1 つの入力から）:
+               解析する         … 解析タブへ直行（棋譜タブには入らない）
+               棋譜に登録する    … 棋譜タブへ入れるだけ（解析タブは触らない）
+               取得して追う      … カードに積む（更新で取り直す・再起動後も残る） -->
         <div class="setting-group">
-          <span class="setting-title" data-hint="hint-fetch">中継から取得する</span>
-          <span id="hint-fetch" class="setting-note is-hint">
+          <span class="setting-title" data-hint="hint-url">棋譜の URL から</span>
+          <span id="hint-url" class="setting-note is-hint">
             <span class="hint-para">
-            <strong>読売（竜王戦）</strong>の対局ページと
-            <strong>日本将棋連盟の棋譜中継</strong>から取れます。URL か棋譜 ID を入れてください。
-            <strong>取得しただけでは棋譜タブに入りません</strong>（カードの「この内容を保存」で入ります）。
-            対局中は棋譜が伸びるので、「更新」で取り直してから保存し直してください。
+            <strong>どのサイトの URL でもかまいません。</strong>
+            <strong>読売（竜王戦）の対局ページ</strong>・<strong>日本将棋連盟の棋譜中継</strong>・
+            ほかのサイトの <code>.kif</code>・読売の棋譜 ID を、この 1 つの欄で扱います
+            （<strong>どこのものかは自動で見分けます</strong>）。
             </span>
-          <!-- ⚠️ **カードは再起動しても残る**（仮の一覧 / kicho の watches）。
-               2 日制の対局で翌日また URL を貼り直さずに済ませるためのもので、
-               **覚えているのは「どのサイトのどの棋譜か」だけ**（棋譜そのものではない）。 -->
+            <span class="hint-para">
+            行き先は 3 つです。<strong>「解析する」</strong>は解析タブへ直行（棋譜タブには
+            入りません）。<strong>「棋譜に登録する」</strong>は棋譜タブへ入れるだけ
+            （解析タブは変わりません。<strong>同じ URL を登録し直しても増えません</strong>）。
+            <strong>「取得して追う」</strong>はカードに積んで、対局中の棋譜を
+            「更新」で取り直せるようにします。
+            </span>
             <span class="hint-para">
             <strong>カードは再起動しても残ります。</strong>2 日制の対局で翌日また URL を
             貼り直さずに済むよう、「どのサイトのどの棋譜か」を覚えておきます
@@ -515,16 +492,32 @@ export function mountMainScreen(root: HTMLElement): void {
             （<strong>保存済みの棋譜は消えません</strong>）。終局した棋譜を保存したときは自動で外れます。
             </span>
           </span>
-          <div class="setting-fields">
+          <!-- ⚠️ **入力欄はこの 1 つだけ**（#kifu-url）。⚠️ **#fetch-input に
+               戻さないこと** —— 取得（カード）も解析も登録も同じ欄を読む。
+
+               ⚠️ **取得も文字コードの判別も Go 側**（kicho）。webview の fetch では
+               CORS で弾かれるうえ、**中継の .kif は Shift_JIS** なので、
+               いずれにせよこちらでは扱えない。 -->
+          <div class="setting-fields kifu-url-row">
             <span class="field-label">URL / 棋譜 ID</span>
-            <input id="fetch-input" type="text" spellcheck="false"
+            <input id="kifu-url" type="text" spellcheck="false"
                    placeholder="http://live.shogi.or.jp/oui/kifu/67/oui202607290101.html" />
-            <button id="fetch-run" class="ghost-btn is-primary" type="button">取得</button>
+            <button id="kifu-load-url" class="ghost-btn is-primary" type="button">解析する</button>
+            <button id="kifu-import-url" class="ghost-btn" type="button"
+                    title="この URL の棋譜を棋譜タブに登録します（同じ URL なら増えません）">棋譜に登録する</button>
+            <button id="fetch-run" class="ghost-btn" type="button"
+                    title="カードに積んで、対局中の棋譜を「更新」で取り直せるようにします">取得して追う</button>
+          </div>
+          <div class="setting-fields">
             <button id="fetch-refresh-all" class="ghost-btn" type="button"
                     title="並んでいるカードを順にサイトから取り直します（復元した直後に使います）">すべて更新</button>
             <button id="fetch-clear" class="ghost-btn" type="button"
                     title="入力とカードをすべて捨てます（仮の一覧も空にします。棋譜タブの棋譜は消えません）">クリア</button>
           </div>
+          <!-- ⚠️ **この群の状態表示は 1 つ**（#fetch-status）。解析・登録・取得の
+               どれもここへ出す（持ち主は fetchcards.ts。setStatus を借りる）。
+               **群が 1 つなら状態の行も 1 つ** —— 2 つ置くと、どのボタンの返事なのかが
+               読めなくなる。 -->
           <p id="fetch-status" class="status" role="status" aria-live="polite" hidden></p>
           <!-- 取得結果。**新しいものが先頭。** 同じ棋譜を取り直したときは
                カードを増やさず中身だけ差し替える（key = 取得元:棋譜 ID）。
@@ -3091,7 +3084,10 @@ ${st.turnLabel}${n}`;
   // ---- 中継から取得（入力タブ）--------------------------------------------
   //
   // ⚠️ **取得元の判別も取得も Go 側（KifuService）。** ここは行き先を繋ぐだけ。
-  mountFetchCards(root, {
+  // ⚠️ **戻りを受けること**（2026-09-12）。URL 欄は 1 つで、そこから
+  // 解析・登録・取得の 3 つへ分かれる。**群の状態の行はあちらが持っている**ので、
+  // 解析と登録の返事も `setStatus` を借りてそこへ出す。
+  const fetchCards = mountFetchCards(root, {
     onAnalyze: (got) => {
       // 棚を通らない経路だが、**描き方は棚から送ったときと同じ**（KifuLoad）。
       selectTab(studyTab);
@@ -3704,13 +3700,28 @@ ${st.turnLabel}${n}`;
     showKifuStatus("");
     kifuText.focus();
   });
+  // 返事の出し先。**群ごとに 1 つ**（2026-09-12）。
+  //
+  // ⚠️ **貼り付けの群と URL の群は別の行に出す。** 押した場所から離れたところに
+  // 文が出ると、何の話か読めない（設定タブで 1 度やって直したのと同じ）。
+  // URL の群の行を持っているのは `fetchcards.ts`（取得・更新・クリアもそこへ出す）。
+  type KifuReport = (message: string, kind?: "warn" | "error") => void;
+  const showURLStatus: KifuReport = (message, kind) => {
+    fetchCards.setStatus(message, kind ?? "");
+  };
+
   // 貼り付けでも URL でも、読み込んだあとにやることは同じ。
   // **1 か所にまとめてある**（2 つに分けると、片方だけ直したときに挙動が食い違う）。
-  const runKifuLoad = async (button: HTMLButtonElement, load: () => Promise<KifuLoad>) => {
+  // ⚠️ **違うのは返事の出し先だけ**（`report`）。
+  const runKifuLoad = async (
+    button: HTMLButtonElement,
+    load: () => Promise<KifuLoad>,
+    report: KifuReport,
+  ) => {
     button.disabled = true;
     kifuLoad.disabled = true;
     kifuLoadURL.disabled = true;
-    showKifuStatus("読み込んでいます…");
+    report("読み込んでいます…");
     try {
       const got = await load();
       // ⚠️ **タブを先に開いてから描くこと。** 手順のリストは「今見ている手」を
@@ -3723,12 +3734,12 @@ ${st.turnLabel}${n}`;
       showStudy(got.state);
       // ⚠️ **note が空でないことをエラー扱いしないこと。** 途中で止まっても
       // そこまでの手順は正しく、その局面は解析できる（設計原則3）。
-      showKifuStatus(
+      report(
         got.note ? `${got.summary}（${got.note}）` : got.summary,
         got.note ? "warn" : undefined,
       );
     } catch (err) {
-      showKifuStatus(
+      report(
         `棋譜を読み込めませんでした: ${String(err instanceof Error ? err.message : err)}`,
         "error",
       );
@@ -3743,17 +3754,17 @@ ${st.turnLabel}${n}`;
       showKifuStatus("棋譜が空です。KIF 形式のテキストを貼り付けてください。", "error");
       return;
     }
-    void runKifuLoad(kifuLoad, () => StudyService.LoadKifu(text));
+    void runKifuLoad(kifuLoad, () => StudyService.LoadKifu(text), showKifuStatus);
   });
   // URL から取る。**取得は Go 側**（webview の fetch は CORS で弾かれるうえ、
   // 中継の .kif は Shift_JIS なのでどのみちこちらでは読めない）。
   const loadFromURL = () => {
     const url = kifuURL.value.trim();
     if (!url) {
-      showKifuStatus("URL が空です。.kif ファイルの URL を入れてください。", "error");
+      showURLStatus("URL が空です。棋譜の URL か棋譜 ID を入れてください。", "error");
       return;
     }
-    void runKifuLoad(kifuLoadURL, () => StudyService.LoadKifuURL(url));
+    void runKifuLoad(kifuLoadURL, () => StudyService.LoadKifuURL(url), showURLStatus);
   };
   kifuLoadURL.addEventListener("click", loadFromURL);
 
@@ -3770,20 +3781,24 @@ ${st.turnLabel}${n}`;
   // ⚠️ **タブは移らない。** 登録は「あとで探せるようにする」操作で、今すぐ見る
   // わけではない（今すぐ見たいなら「解析する」）。**代わりに一覧は取り直す**
   // （棋譜タブを開いたときに反映されていないと、登録できたのか分からない）。
-  const runKifuImport = async (button: HTMLButtonElement, save: () => Promise<GameSummary>) => {
+  const runKifuImport = async (
+    button: HTMLButtonElement,
+    save: () => Promise<GameSummary>,
+    report: KifuReport,
+  ) => {
     button.disabled = true;
     kifuImport.disabled = true;
     kifuImportURL.disabled = true;
-    showKifuStatus("棋譜に登録しています…");
+    report("棋譜に登録しています…");
     try {
       const rec = await save();
       libraryUI.refresh();
       const who = [rec.black, rec.white].filter(Boolean).join(" - ");
-      showKifuStatus(
+      report(
         `棋譜に登録しました: ${[rec.event, who].filter(Boolean).join(" / ") || "(棋戦名なし)"}`,
       );
     } catch (err) {
-      showKifuStatus(
+      report(
         `棋譜に登録できませんでした: ${String(err instanceof Error ? err.message : err)}`,
         "error",
       );
@@ -3798,7 +3813,7 @@ ${st.turnLabel}${n}`;
       showKifuStatus("棋譜が空です。KIF 形式のテキストを貼り付けてください。", "error");
       return;
     }
-    void runKifuImport(kifuImport, () => KifuService.ImportKIF(text));
+    void runKifuImport(kifuImport, () => KifuService.ImportKIF(text), showKifuStatus);
   });
   // ⚠️ **URL の登録も同じ 1 か所を通す**（`runKifuImport`）。行き先も文言も同じで、
   // 違うのは何を渡すかだけ。⚠️ **取得元で分岐しないこと** —— Go 側（`ImportURL`）が
@@ -3806,10 +3821,10 @@ ${st.turnLabel}${n}`;
   kifuImportURL.addEventListener("click", () => {
     const url = kifuURL.value.trim();
     if (!url) {
-      showKifuStatus("URL が空です。棋譜の URL を入れてください。", "error");
+      showURLStatus("URL が空です。棋譜の URL か棋譜 ID を入れてください。", "error");
       return;
     }
-    void runKifuImport(kifuImportURL, () => KifuService.ImportURL(url));
+    void runKifuImport(kifuImportURL, () => KifuService.ImportURL(url), showURLStatus);
   });
   // URL 欄で Enter を押したら読み込む（打ってからボタンへ手を戻さずに済む）。
   kifuURL.addEventListener("keydown", (e) => {
