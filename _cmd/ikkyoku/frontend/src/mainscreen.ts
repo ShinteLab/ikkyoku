@@ -1306,7 +1306,14 @@ export function mountMainScreen(root: HTMLElement): void {
         </details>
 
         <p id="settings-status" class="status" role="status" aria-live="polite"></p>
-        <p class="setting-path">設定ファイル: <code id="settings-path">-</code></p>
+        <!-- 設定ファイルの場所。⚠️ **設定の項目ではない**（触るものが何も無い）ので、
+             区切りの外・一番下の右端に小さく置く。以前は他の項目と同じ左端に
+             並んでいたため、**何かの設定に見えていた。**
+             押すとフルパスがクリップボードに入る（撮った PNG のパスと同じ作法）。 -->
+        <p class="setting-footer">
+          <button id="settings-path" class="path-btn" type="button"
+                  title="押すとフルパスをクリップボードにコピーします">-</button>
+        </p>
       </div>
     </div>
   `;
@@ -3859,7 +3866,19 @@ ${st.turnLabel}${n}`;
   const kifuDBFold = root.querySelector<HTMLDetailsElement>("#fold-kifudb")!;
   const kifuDBFoldSum = root.querySelector<HTMLElement>("#fold-kifudb-sum")!;
   const settingsStatus = root.querySelector<HTMLParagraphElement>("#settings-status")!;
-  const settingsPath = root.querySelector<HTMLElement>("#settings-path")!;
+  const settingsPath = root.querySelector<HTMLButtonElement>("#settings-path")!;
+  // ⚠️ **クリップボードは Wails ランタイム**（`navigator.clipboard` は secure context
+  // 前提で、カスタムスキーム配信のこの webview では当てにできない）。
+  settingsPath.addEventListener("click", () => {
+    const path = settingsPath.dataset.path ?? "";
+    if (!path) {
+      return;
+    }
+    void Clipboard.SetText(path).then(() => {
+      settingsPath.classList.add("is-copied");
+      window.setTimeout(() => settingsPath.classList.remove("is-copied"), 900);
+    });
+  });
   const trainEnabledInput = root.querySelector<HTMLInputElement>("#train-enabled")!;
   const trainHost = root.querySelector<HTMLInputElement>("#train-host")!;
   const trainPort = root.querySelector<HTMLInputElement>("#train-port")!;
@@ -4418,7 +4437,13 @@ ${st.turnLabel}${n}`;
     // ⚠️ **既定値の解決は Go 側**（`analyze.PonanzaConstantOr`）。返ってきた値を
     // そのまま入れるだけにすること（フロントに既定を書くと 2 か所に散る）。
     ponanzaConstant.value = String(s.ponanzaConstant);
-    settingsPath.textContent = s.path || "(保存先を決められませんでした)";
+    // ⚠️ **押せるかどうかは場所が分かっているかで決める**（決められなかったときに
+    // 空をコピーさせない）。コピーするのは `dataset` のほうで、表示は短くしない。
+    settingsPath.textContent = s.path
+      ? `設定ファイル: ${s.path}`
+      : "設定ファイル: (保存先を決められませんでした)";
+    settingsPath.dataset.path = s.path ?? "";
+    settingsPath.disabled = !s.path;
     // エンジンの色（評価値グラフ・見出しの色見本）。**設定が唯一の出所**で、
     // 既定色の解決も Go 側が済ませてある（`EngineSettings.Color` は常に入っている）。
     // ⚠️ **評価値グラフの置き場所も設定から受け取る**（2026-09-08）。
@@ -5003,9 +5028,6 @@ ${st.turnLabel}${n}`;
       settingsStatus.classList.remove("is-error");
       try {
         showSettings(await SettingsService.SetFitOnStartup(want));
-        settingsStatus.textContent = want
-          ? "次の起動から、盤面を探してガイド枠を合わせます。"
-          : "起動時には探しません。枠のツールバーの □ からはいつでも実行できます。";
       } catch (err) {
         fitOnStartup.checked = !want;
         settingsStatus.textContent = `設定を保存できませんでした: ${String(err)}`;
@@ -5025,9 +5047,6 @@ ${st.turnLabel}${n}`;
       settingsStatus.classList.remove("is-error");
       try {
         showSettings(await SettingsService.SetClickThrough(want));
-        settingsStatus.textContent = want
-          ? "ガイド枠の内側をクリックすると、後ろの画面に届きます。ツールバーと枠の縁はそのまま押せます。"
-          : "ガイド枠の内側のクリックは後ろへ通しません。";
       } catch (err) {
         clickThrough.checked = !want;
         settingsStatus.textContent = `設定を保存できませんでした: ${String(err)}`;
@@ -5081,7 +5100,6 @@ ${st.turnLabel}${n}`;
       // ⚠️ **開き直した結果はここで取り直す**（showSettings は設定しか映さない）。
       await refreshKifuDBNote();
       onKifuDBChanged?.();
-      settingsStatus.textContent = "棋譜データベースを開き直しました。";
     } catch (err) {
       settingsStatus.textContent = `設定を保存できませんでした: ${String(err)}`;
       settingsStatus.classList.add("is-error");
@@ -5135,7 +5153,6 @@ ${st.turnLabel}${n}`;
       try {
         showSettings(await SettingsService.SetSutemeSource(want));
         await reloadRecognizerView();
-        settingsStatus.textContent = "認識器を読み込み直しました。";
       } catch (err) {
         settingsStatus.textContent = `設定を保存できませんでした: ${String(err)}`;
         settingsStatus.classList.add("is-error");
@@ -5161,7 +5178,6 @@ ${st.turnLabel}${n}`;
       try {
         showSettings(await SettingsService.SetSutemeDataDir(want));
         await reloadRecognizerView();
-        settingsStatus.textContent = "認識器を読み込み直しました。";
       } catch (err) {
         settingsStatus.textContent = `設定を保存できませんでした: ${String(err)}`;
         settingsStatus.classList.add("is-error");
