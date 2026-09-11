@@ -77,7 +77,7 @@ export function mountLibrary(
   const finishedOnly = root.querySelector<HTMLInputElement>("#library-finished")!;
   const search = root.querySelector<HTMLButtonElement>("#library-search")!;
   const clear = root.querySelector<HTMLButtonElement>("#library-clear")!;
-  const hint = root.querySelector<HTMLParagraphElement>("#library-hint")!;
+  const hint = root.querySelector<HTMLElement>("#library-hint")!;
   const status = root.querySelector<HTMLParagraphElement>("#library-status")!;
   const rows = root.querySelector<HTMLTableSectionElement>("#library-rows")!;
   // 詳細はモーダル（2026-09-12）。**開く口は棋戦名のリンクだけ。**
@@ -103,14 +103,19 @@ export function mountLibrary(
   const hasConditions = (): boolean =>
     text.value !== "" || from.value !== "" || to.value !== "" || finishedOnly.checked;
 
-  // 3 文字未満の案内。**索引が効かないので全件走査になる**ことを先に出す
+  // 3 文字未満の案内。**索引が効かないので全件走査になる**ことを知らせる
   // （件数が増えたときに「急に遅くなった」と見えないように）。
+  //
+  // ⚠️ **打っている途中には出さない**（2026-09-12）。1 文字ごとに出入りすると
+  // **案内そのものがちらつく**うえ、以前は検索欄の下に置いていたので
+  // **下の表まで動いていた。** 出すのは**検索を走らせたとき**だけで、
+  // 場所は**見出しの行**（高さが再読み込みボタンで決まっているのでずれない）。
   const showHint = () => {
     const n = [...text.value].length;
     const short = n > 0 && n < MIN_SEARCH_LENGTH;
     hint.hidden = !short;
     if (short) {
-      hint.textContent = `検索語が ${MIN_SEARCH_LENGTH} 文字未満です。索引が使えないため全件を走査します（件数が増えると遅くなります）。`;
+      hint.textContent = `${MIN_SEARCH_LENGTH} 文字未満のため索引を使わず全件を走査しました（件数が増えると遅くなります）`;
     }
   };
 
@@ -346,7 +351,6 @@ export function mountLibrary(
   text.addEventListener("keydown", (e) => {
     if (e.key === "Enter") runSearch();
   });
-  text.addEventListener("input", showHint);
   for (const el of [from, to, finishedOnly]) {
     el.addEventListener("change", runSearch);
   }

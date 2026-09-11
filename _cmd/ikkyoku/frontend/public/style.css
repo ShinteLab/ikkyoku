@@ -4939,6 +4939,21 @@ html.is-graph #app {
   margin-left: auto;
 }
 
+/* 索引が効かないときの案内。⚠️ **見出しの行に出す**（2026-09-12）——
+   検索欄の下に置いていた頃は、打つたびに 1 行が出入りして**表がポコポコ
+   動いていた。** ⚠️ **行の高さを押し上げないこと**（伸びたら結局ずれる）ので、
+   1 行に収めて溢れたら省略する。 */
+.library-hint {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.2;
+  color: #d8b46a;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* 検索の行。⚠️ **折り返しを許すこと** —— 窓を狭めると 6 つは 1 行に入らない。 */
 .library-search {
   flex: 0 0 auto;

@@ -538,6 +538,11 @@ export function mountMainScreen(root: HTMLElement): void {
       <div id="panel-library" class="panel" role="tabpanel" aria-labelledby="tab-library">
         <div class="library-head">
           <span id="library-count" class="field-label">棋譜一覧</span>
+          <!-- 索引が効かないときの案内。⚠️ **見出しの行に出すこと**（2026-09-12）——
+               検索欄の下に置いていた頃は、**打つたびに 1 行が出入りして
+               下の表がポコポコ動いていた。** ここなら行の高さは再読み込み
+               ボタンで決まっているので、出ても表はずれない。 -->
+          <span id="library-hint" class="library-hint" hidden></span>
           <button id="library-reload" class="ghost-btn" type="button"
                   title="棋譜を読み直します">再読み込み</button>
         </div>
@@ -562,7 +567,6 @@ export function mountMainScreen(root: HTMLElement): void {
           <button id="library-search" class="ghost-btn is-primary" type="button">検索</button>
           <button id="library-clear" class="ghost-btn" type="button">条件をクリア</button>
         </div>
-        <p id="library-hint" class="setting-note" hidden></p>
         <p id="library-status" class="status" role="status" aria-live="polite" hidden></p>
 
         <div class="library-table-wrap">
