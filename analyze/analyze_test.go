@@ -1,6 +1,7 @@
 package analyze
 
 import (
+	"bufio"
 	"context"
 	"io"
 	"log/slog"
@@ -738,5 +739,81 @@ func TestMateRejectsWithoutDefender(t *testing.T) {
 		MateOptions{Limit: time.Second}, nil)
 	if err == nil {
 		t.Fatal("玉方が居ないのに通りました")
+	}
+}
+
+// mateFake は `go mate` に決まった 1 行で答えるだけの偽エンジン。
+//
+// **同梱エンジンでは作れない答え**（`checkmate` / `checkmate nomate` など）を
+// 通すために要る。⚠️ **実機のエンジンをテストに要求しないこと**（手元に何が
+// あるかでテストが左右されると、壊れたときに切り分けられない）。
+func mateFake(t *testing.T, reply string) *Session {
+	t.Helper()
+	s := newSession(func(ctx context.Context) (*client.Session, error) {
+		cmdR, cmdW := io.Pipe()
+		outR, outW := io.Pipe()
+		go func() {
+			defer outW.Close()
+			sc := bufio.NewScanner(cmdR)
+			for sc.Scan() {
+				switch line := sc.Text(); {
+				case line == "usi":
+					_, _ = io.WriteString(outW, "id name Mate Fake\nusiok\n")
+				case line == "isready":
+					_, _ = io.WriteString(outW, "readyok\n")
+				case line == "quit":
+					return
+				case strings.HasPrefix(line, "go mate"):
+					_, _ = io.WriteString(outW, reply+"\n")
+				}
+			}
+		}()
+		return client.Open(ctx, client.Transport{
+			In: outR, Out: cmdW,
+			Close: func() error { _ = cmdW.Close(); return outR.Close() },
+		}, nil)
+	})
+	t.Cleanup(s.Close)
+	return s
+}
+
+// 詰み探索の答えの読み分け（2026-09-12）。
+//
+// ⚠️ **手順の無い `checkmate` を読み落とさないこと。** 既に詰んでいる局面で
+// KomoringHeights が返す形で、**捨てると返事を待ち続けて時間切れになる**
+// （実機で踏んだ。画面には「エンジンが checkmate を返しません」と出た）。
+func TestMateKinds(t *testing.T) {
+	// 攻方の玉なし・玉方の玉ありの局面（詰み探索にかけられる形）。
+	const target = "4k4/9/4P4/9/9/9/9/9/9 b G2r2b3g4s4n4l17p 1"
+
+	for _, tt := range []struct {
+		reply string
+		want  MateKind
+		moves int
+	}{
+		{"checkmate G*5b", MateFound, 1},
+		{"checkmate", MateAlready, 0}, // 既に詰んでいる
+		{"checkmate nomate", MateNone, 0},
+		{"checkmate timeout", MateTimeout, 0},
+		{"checkmate notimplemented", MateNotImplemented, 0},
+		{"bestmove G*5b", MateFound, 1},  // やねうら王系（実測）
+		{"bestmove resign", MateNone, 0}, //
+	} {
+		t.Run(tt.reply, func(t *testing.T) {
+			s := mateFake(t, tt.reply)
+			r, err := s.Mate(context.Background(), target, MateOptions{Limit: time.Second}, nil)
+			if err != nil {
+				t.Fatalf("Mate: %v", err)
+			}
+			if r.Kind != tt.want {
+				t.Errorf("Kind = %q, want %q", r.Kind, tt.want)
+			}
+			if len(r.Moves) != tt.moves {
+				t.Errorf("Moves = %v, want %d 手", r.Moves, tt.moves)
+			}
+			if tt.moves > 0 && len(r.Text) != tt.moves {
+				t.Errorf("Text = %v（日本語表記が付いていない）", r.Text)
+			}
+		})
 	}
 }

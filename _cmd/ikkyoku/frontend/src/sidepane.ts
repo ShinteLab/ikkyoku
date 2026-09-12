@@ -1504,6 +1504,9 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
           // ⚠️ **出したエンジンを渡す**（手順リストで誰が言った手かの色になる）。
           onState(await StudyService.AddLine(r.engineId ?? "", r.moves).then((l) => l.state));
         }
+      } else if (r.kind === "already") {
+        // ⚠️ **手順の無い詰み＝既に詰んでいる**（足すものが無い）。
+        analyzeStatus.textContent = `この局面は既に詰んでいます（${r.engine}）`;
       } else if (r.kind === "nomate") {
         analyzeStatus.textContent = `詰みはありません（${r.engine}）`;
       } else if (r.kind === "timeout") {

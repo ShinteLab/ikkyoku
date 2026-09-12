@@ -443,10 +443,16 @@ type MateKind string
 
 const (
 	MateFound          MateKind = "mate"           // 詰みあり（Moves に手順）
+	MateAlready        MateKind = "already"        // **既に詰んでいる**（手順なし。下記）
 	MateNone           MateKind = "nomate"         // 詰みなし
 	MateTimeout        MateKind = "timeout"        // 時間内に解けなかった
 	MateNotImplemented MateKind = "notimplemented" // 詰み探索に対応していない
 )
+
+// ⚠️ **`MateAlready` は「詰みあり・手順 0 手」**（2026-09-12 に実機で踏んだ）。
+// 既に詰んでいる局面に `go mate` を送ると、**手順の無い `checkmate`** が返る
+// （KomoringHeights）。**`MateFound` と同じ扱いにしないこと** ——
+// 手順が無いので木に足すものが無く、画面に出す言葉も違う（「詰みました」ではない）。
 
 // MateResult は詰み探索の結末。
 type MateResult struct {
@@ -544,6 +550,11 @@ func (s *Session) Mate(ctx context.Context, positionSFEN string, opt MateOptions
 	switch res.Kind {
 	case coreusi.CheckmateFound:
 		out.Kind = MateFound
+		if len(res.Moves) == 0 {
+			// **手順の無い詰み＝既に詰んでいる**（上の ⚠️）。
+			out.Kind = MateAlready
+			break
+		}
 		// **手順の日本語表記は core/kifu**（読み筋と同じ作り方。`accumulator.moveText`）。
 		// ⚠️ **エラーは握る** —— 読めない手があっても、USI の手順は返す（設計原則3）。
 		texts, _ := kifu.FormatMoves(root, res.Moves)
