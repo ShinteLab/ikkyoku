@@ -271,6 +271,12 @@ func TestSetMateProblemGivesRestToWhite(t *testing.T) {
 		t.Errorf("玉方の歩 = %d, want 18", got)
 	}
 	for _, v := range st.Inventory {
+		// ⚠️ **玉だけは未決が残って正しい** —— 詰将棋に攻方の玉は無く、
+		// 玉は駒台に載らないので、**「足りない駒」に玉が出るのが正しい姿**
+		// （置きたければそこから置ける）。**確定は止めない。**
+		if v.Name == "玉" {
+			continue
+		}
 		if v.Unassigned != 0 || v.Unused != 0 {
 			t.Errorf("%s: 未決=%d 使わない=%d, want 0, 0", v.Name, v.Unassigned, v.Unused)
 		}
@@ -339,5 +345,66 @@ func TestAdoptMateProblemKeepsBoardWithoutMoves(t *testing.T) {
 	// 手番は攻方。**寄せた持ち駒は玉方（後手）のもの**なので、攻方の打つ手は出ない。
 	if st.Turn != int(position.TurnBlack) {
 		t.Errorf("Turn = %d, want %d(攻方)", st.Turn, position.TurnBlack)
+	}
+}
+
+// ⚠️ **詰将棋でも駒台の駒を掴めること**（2026-09-12 に実機で踏んだ回帰）。
+//
+// 余りを「計算で見せる」だけにしていたときは、**駒台に並んで見えるのに Go 側の
+// 割り振りは 0 枚**だったので、`FromHand`（駒台 → 盤）が毎回「駒台にありません」で
+// 落ち、**駒台から 1 枚も動かせなかった。** 実体として載せること。
+//
+// ⚠️ **「攻方に持ち駒が無い」わけではない**ことも一緒に見ている。攻方の駒台に
+// 載せれば、そのぶん玉方の持駒が減るだけ（玉方 = 合計 − 攻方）。
+func TestMateProblemHandsAreReal(t *testing.T) {
+	const pawn = 0 // 歩（position/sfen の駒コード）
+
+	s := NewPositionService(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	st, err := s.LoadEmpty()
+	if err != nil {
+		t.Fatalf("LoadEmpty: %v", err)
+	}
+	handOf := func(st EditState, name string) (black, white int) {
+		for _, v := range st.Inventory {
+			if v.Name == name {
+				return v.HandBlack, v.HandWhite
+			}
+		}
+		return -1, -1
+	}
+	if _, w := handOf(st, "歩"); w != 18 {
+		t.Fatalf("玉方の歩 = %d, want 18", w)
+	}
+
+	// **駒台から盤へ打てること**（ここが落ちていた）。
+	st, err = s.FromHand(4, 4, pawn, false)
+	if err != nil {
+		t.Fatalf("FromHand: %v（駒台から掴めない）", err)
+	}
+	if _, w := handOf(st, "歩"); w != 17 {
+		t.Errorf("打ったあとの玉方の歩 = %d, want 17", w)
+	}
+
+	// **攻方の駒を盤に置くと、そのぶん玉方の持駒が減ること**
+	// （足すだけにすると「玉方に多すぎる」警告が出続ける）。
+	st, err = s.Place(8, 4, pawn, true, false)
+	if err != nil {
+		t.Fatalf("Place: %v", err)
+	}
+	if _, w := handOf(st, "歩"); w != 16 {
+		t.Errorf("攻方の駒を置いたあとの玉方の歩 = %d, want 16", w)
+	}
+
+	// **攻方にも持ち駒を持たせられること**（詰将棋の攻方の持駒はここで決まる）。
+	st, err = s.SetHand(pawn, true, 2)
+	if err != nil {
+		t.Fatalf("SetHand: %v", err)
+	}
+	if b, w := handOf(st, "歩"); b != 2 || w != 14 {
+		t.Errorf("攻方の歩 = %d（want 2）/ 玉方の歩 = %d（want 14）", b, w)
+	}
+	// **その状態でも確定できること。**
+	if st.SFEN == "" {
+		t.Error("確定できません")
 	}
 }

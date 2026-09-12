@@ -154,14 +154,6 @@ func (p *Position) Hands() (black, white map[int]int) {
 			white[base] = n
 		}
 	}
-	// ⚠️ **詰将棋は余りが全部 玉方（後手）の持駒**（2026-09-12）。
-	// **属性なので盤を直すたびに追随する** —— ここで足しているだけなので、
-	// 盤から 1 枚外せばその駒はそのまま玉方の持駒として出る。
-	if p.MateProblem {
-		for base, rest := range p.rest() {
-			white[base] += rest
-		}
-	}
 	return black, white
 }
 
@@ -191,13 +183,15 @@ func (p *Position) assigned(base int) (black, white int) {
 // **これが 0 になるまで局面は確定しない**（SFEN は持ち駒を先後に分けて書くため）。
 // 訂正 UI は「どちらの駒台か」をここから減らしていく操作として作る。
 func (p *Position) Unassigned() map[int]int {
-	if p.HandsFixed || p.MateProblem {
-		// 駒台が書いてある局面（手合割）では逆算しない。
-		// 詰将棋は**行き先が決まっている**（余りは全部 玉方）ので未決が無い。
-		// ⚠️ **どちらも「決めていないことを決めた」わけではない** —— 人が
-		// 「手合割だ」「詰将棋だ」と決めた結果、行き先が 1 つに定まっている。
+	if p.HandsFixed {
+		// 駒台が書いてある局面では逆算しない（決めるものが残っていない）。
 		return map[int]int{}
 	}
+	// ⚠️ **詰将棋はここに来ない。** あちらは余りを**駒台に実体として載せて**
+	// あるので（`NormalizeMateHands`）、そもそも未決が残らない。
+	// **ここで詰将棋を特別扱いしないこと** —— 見せかけだけ未決を消すと、
+	// **駒台から駒を掴めなくなる**（`FromHand` が割り振りの実体を見るため。
+	// 一度そうして実機で詰んだ）。
 	return p.rest()
 }
 
@@ -236,6 +230,31 @@ func (p *Position) hand(black bool) map[int]int {
 
 // BoardSFEN は盤面部分だけの SFEN を返す。手番が未決でも使える。
 func (p *Position) BoardSFEN() string { return p.Board.SFEN() }
+
+// NormalizeMateHands は**余りを玉方（後手）の持駒として駒台に載せ直す**
+// （詰将棋。2026-09-12）。`MateProblem` でなければ何もしない。
+//
+// **保つ約束はこれ 1 つ: 玉方の持駒 = 逆算した合計 − 攻方の持駒。**
+// ⚠️ **「余りを足す」ではなく「載せ直す」** —— 攻方の駒を盤に置けば、そのぶん
+// 玉方の持駒は減る。足すだけにすると**玉方に多すぎる警告が出続ける**。
+//
+// ⚠️ **実体として載せること**（見せかけで足さない）。駒台の枚数は
+// `FromHand`（駒台 → 盤）も駒台どうしの移動も**割り振りの実体を見る**ので、
+// 計算で見せているだけだと**駒台から 1 枚も掴めない**（実機で詰んだ）。
+//
+// ⚠️ **1 操作ごとに呼ぶこと**（`PositionService.edit`）。これが「属性」の実装で、
+// **盤から 1 枚外せばその駒がそのまま玉方の持駒になる。**
+//
+// ⚠️ **玉は載せない**（逆算に玉は含まれない。`core/sfen` の `HandOrder`）。
+func (p *Position) NormalizeMateHands() {
+	if !p.MateProblem {
+		return
+	}
+	for base, total := range p.HandTotal() {
+		b, _ := p.assigned(base)
+		p.hand(false)[base] = max(total-b, 0)
+	}
+}
 
 // SFEN は局面全体の SFEN（盤面・手番・持ち駒・手数）を返す。
 //
@@ -347,9 +366,7 @@ func (p *Position) Warnings() []string {
 // ⚠️ **玉は数えない。** 駒台に載らないので「足りない」は盤の枚数の話になり、
 // それは core/sfen の CheckKing が既に言っている（二重に言わない）。
 func (p *Position) missingWarnings() []string {
-	// ⚠️ **詰将棋でも言わない**（2026-09-12）。余りは玉方の持駒として出ているので、
-	// 「足りない」ものは無い（言うと駒を置くたびに警告が出る）。
-	if p.HandsFixed || p.MateProblem {
+	if p.HandsFixed {
 		return nil
 	}
 	info := p.Board.Inspect(sfen.CheckSyntax)

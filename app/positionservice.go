@@ -209,6 +209,10 @@ func (s *PositionService) LoadEmpty() (EditState, error) {
 	p.MateProblem = true
 	p.Turn = position.TurnBlack
 	p.MoveNumber = 1
+	// **空の盤なので、40 枚から玉 2 枚を除いた全部が玉方の持駒になる。**
+	// ⚠️ **攻方の駒は「足りない駒」の枠から置く**（あちらは在庫を見ないので、
+	// 玉方の駒台が全部持っていても置ける）。
+	p.NormalizeMateHands()
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -248,6 +252,8 @@ func (s *PositionService) SetMateProblem(mate bool) (EditState, error) {
 			p.Turn = position.TurnBlack
 		}
 		return nil
+		// ⚠️ **駒台を載せ直すのは `edit` のほう**（1 操作ごとに走る）。
+		// ここでだけ寄せると、**チェックした瞬間だけ正しくて、あとは追随しない**。
 	})
 	if err != nil || !mate {
 		return st, err
@@ -490,6 +496,12 @@ func (s *PositionService) edit(fn func(*position.Position) error) (EditState, er
 		return s.state(), fmt.Errorf("まだ局面がありません")
 	}
 	err := fn(s.pos)
+	// ⚠️ **詰将棋は 1 操作ごとに駒台を載せ直す**（2026-09-12）。これが「操作では
+	// なく属性」の実装そのもので、**盤から 1 枚外せばその駒がそのまま玉方の
+	// 持駒になる**（攻方の駒を盤に置けば、そのぶん玉方の持駒が減る）。
+	// ⚠️ **失敗したときも呼ぶこと** —— 約束（玉方 = 合計 − 攻方）は局面の
+	// 不変条件で、操作が通ったかとは関係が無い。
+	s.pos.NormalizeMateHands()
 	return s.state(), err
 }
 

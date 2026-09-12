@@ -88,12 +88,10 @@ func (p *Position) Inventory() []Stock {
 			// ⚠️ **数を消さずに移し替えること** —— 0 にしてしまうと、
 			// 落とした駒が画面から消えて、外し忘れとの区別が付かなくなる。
 			unassigned, unused = 0, unassigned
-		case p.MateProblem:
-			// **詰将棋**。余りは**全部 玉方（後手）の持駒**なので、
-			// 未決ではなく**駒台の枚数として出す**（画面の駒台にそのまま並ぶ）。
-			// ⚠️ **`Hands()` と同じ足し方にすること**（2 か所で数が割れる）。
-			hw, unassigned = hw+unassigned, 0
 		}
+		// ⚠️ **詰将棋はここで特別扱いしない**（2026-09-12）。あちらは余りを
+		// **駒台の実体として載せて**あるので（`NormalizeMateHands`）、
+		// `hw` に既に入っていて未決も残らない。
 		out = append(out, Stock{
 			Piece: base, Letter: sfen.Letter(base), Name: sfen.Name(base),
 			Limit: limit, Black: black, White: white, Rest: rest,

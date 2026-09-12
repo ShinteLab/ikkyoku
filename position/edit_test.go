@@ -405,6 +405,9 @@ func TestMateProblemRestGoesToWhite(t *testing.T) {
 	}
 
 	p.MateProblem = true
+	// ⚠️ **載せ直しは明示的に呼ぶ**（アプリ側は 1 操作ごとに呼ぶ。
+	// **見せかけで足さない** —— 駒台の実体でないと `FromHand` が掴めない）。
+	p.NormalizeMateHands()
 	if _, err := p.SFEN(); err != nil {
 		t.Fatalf("詰将棋にしたのに確定しません: %v", err)
 	}
@@ -422,6 +425,7 @@ func TestMateProblemRestGoesToWhite(t *testing.T) {
 	if err := p.Remove(2, 4); err != nil {
 		t.Fatal(err)
 	}
+	p.NormalizeMateHands()
 	if _, white := p.Hands(); white[sfen.Gold] != 4 {
 		t.Errorf("外した金が玉方に回っていません: %d, want 4", white[sfen.Gold])
 	}

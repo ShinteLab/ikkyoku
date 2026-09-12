@@ -491,11 +491,11 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     mate = !!next?.mateProblem;
     handicapCheck.checked = handicap;
     mateCheck.checked = mate;
-    // ⚠️ **枠の見出しは 3 通り。** 同じ数字でも意味が違うので、文字を替えないと
-    // 画面が嘘をつく（詰将棋では**そもそも枠に数が残らない** —— 余りは玉方の
-    // 駒台に並ぶ —— ので、見出しは「玉方が持ちます」と言い切る）。
+    // ⚠️ **見出しは手合割のときだけ替える。** 詰将棋では余りが玉方の駒台に
+    // 並ぶので、この枠に残るのは**攻方の玉 1 枚**（＝本当に足りない駒）だけ。
+    // **枠の役割は変わらない**（ここから盤に置く）ので、名前も変えない。
     const stock = handicap ? "使わない駒" : "足りない駒";
-    missingLabel.textContent = mate ? "余りは玉方へ" : stock;
+    missingLabel.textContent = stock;
     stockName.textContent = stock;
     for (const b of turnBtns) {
       const turn = Number(b.dataset.turn);
@@ -598,7 +598,7 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
       moveNum.value = String(next.moveNumber ?? 0);
     }
     const inv = next.inventory ?? [];
-    renderMissing(inv, !!next.handsFixed);
+    renderMissing(inv, !!next.handsFixed, !!next.mateProblem);
     renderHands(inv);
     // チップは作り直されているので、掴んでいる印を付け直す。
     //
@@ -675,7 +675,7 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   // 「使わない駒」から盤へ置けないと、駒落ちの局面を直せなくなる。
   // ⚠️ **数は Go 側が出したものをそのまま出すこと**（`unassigned` と `unused` は
   // 逆算するかしないかの裏表で、**同時には立たない**）。ここで足し引きしない。
-  function renderMissing(inv: Stock[], handsFixed: boolean) {
+  function renderMissing(inv: Stock[], handsFixed: boolean, mateProblem: boolean) {
     missingChips.replaceChildren();
     for (const s of inv) {
       // 出す数（平手 = 先後が未決の枚数 / 手合割 = この対局で使わない枚数）。
@@ -691,7 +691,10 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
       // 置けない」という詰みが起きる（設計原則3・4）。見た目だけ非活性にする。
       chip.dataset.piece = String(s.piece);
       chip.textContent = s.letter;
-      chip.classList.toggle("is-spare", n <= 0);
+      // ⚠️ **詰将棋では薄くしない**（2026-09-12）。あちらは余りが玉方の駒台に
+      // 載っているので**ここの数は常に 0** だが、**盤に置く駒はここから掴む**
+      // （置いたぶんは玉方の持駒から回る）。薄いと掴めないものに見える。
+      chip.classList.toggle("is-spare", !mateProblem && n <= 0);
 
       const count = document.createElement("span");
       count.className = "missing-count";
@@ -705,8 +708,11 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
             : `${s.name} ${n}枚（どちらの駒台か未決）。` +
               `クリックすると掴んだままになり、盤を押すたびに置けます（Esc で離す）。` +
               `駒台へドラッグすると持ち主が決まり、盤へドラッグすると先手の駒として置きます`
-          : `${s.name}は足りています。それでも盤にも駒台にも置けます` +
-            `（置くと多すぎる警告が出ます）`;
+          : mateProblem
+            ? `${s.name}をここから盤に置けます（置いたぶんは玉方の持駒から回ります）。` +
+              `クリックすると掴んだままになり、盤を押すたびに置けます（Esc で離す）`
+            : `${s.name}は足りています。それでも盤にも駒台にも置けます` +
+              `（置くと多すぎる警告が出ます）`;
       row.append(chip, count);
       missingChips.appendChild(row);
     }
