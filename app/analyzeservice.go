@@ -657,8 +657,14 @@ type MateSolution struct {
 	Engine string `json:"engine"`
 	// EngineID は登録 ID。**手順ツリーへ足すときの「誰が言った手か」**に使う
 	// （`StudyService.AddLine`）。
-	EngineID  string `json:"engineId"`
-	ElapsedMS int64  `json:"elapsedMs"`
+	EngineID string `json:"engineId"`
+	// MultiPV はこのエンジンに設定されている候補手の本数。
+	//
+	// ⚠️ **返ってきた候補の数ではない**（詰みが 1 つしか無ければ 1 本しか返らない）。
+	// 画面のエンジンの見出しに出す「候補 n」の選択肢がこの値で、
+	// **入口は解析タブのその欄だけ**（設定タブには出していない。編集口を 2 つにしない）。
+	MultiPV   int   `json:"multiPv"`
+	ElapsedMS int64 `json:"elapsedMs"`
 }
 
 // SolveMate は今見ている局面の詰みを解く（詰将棋。2026-09-12）。
@@ -706,6 +712,7 @@ func (s *AnalyzeService) SolveMate(seconds int) (MateSolution, error) {
 		SFEN:      target.Current,
 		Engine:    s.engineName(entry.ID),
 		EngineID:  entry.ID,
+		MultiPV:   entry.MultiPV(),
 		ElapsedMS: res.ElapsedMS,
 	}, nil
 }

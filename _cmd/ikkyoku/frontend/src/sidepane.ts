@@ -1518,7 +1518,10 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
             label: r.engine ?? "詰み探索",
             name: r.engine ?? "",
             custom: true,
-            multiPv: Math.max(lines.length, 1),
+            // ⚠️ **返ってきた候補の数ではなく、そのエンジンの設定値**
+            // （詰みが 1 つしか無ければ 1 本しか返らない）。見出しの「候補 n」の
+            // 欄はこの値で開き、**本数を変える入口はそこだけ**（設定タブには無い）。
+            multiPv: r.multiPv || 1,
           },
         ]);
         const card = engineCards.get(r.engineId ?? "");
