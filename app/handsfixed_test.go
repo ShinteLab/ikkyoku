@@ -219,56 +219,93 @@ func TestLoadEmptyStartsProblem(t *testing.T) {
 	if st.Turn != int(position.TurnBlack) {
 		t.Errorf("Turn = %d, want %d(攻方＝先手)", st.Turn, position.TurnBlack)
 	}
+	if !st.MateProblem {
+		t.Error("詰将棋として始まっていません")
+	}
 	if st.HandsFixed {
-		t.Error("駒台を逆算しない状態で始まっています（詰将棋は逆算する）")
+		t.Error("手合割になっています（詰将棋とは排他）")
 	}
 }
 
-// 「残り全部を片側の駒台へ」がまとめて効くこと（詰将棋の慣習）。
+// 「詰将棋」は操作ではなく**属性**であること（2026-09-12）。
 //
-// ⚠️ **玉は載せないこと**（駒台に乗らない）。⚠️ **寄せたら確定できること**
-// が目的そのもの —— 歩 17 枚を 1 枚ずつドラッグさせないために入れた操作なので、
-// 押したあとに未決が残っていては意味が無い。
-func TestFillHandsSweepsRest(t *testing.T) {
-	// 詰将棋のつもりの盤（玉方の玉が 1 枚と、攻方の金が 1 枚だけ）。
+// ⚠️ **立てた時点で、余った駒が全部 玉方（後手）の持駒になる**（駒台を 1 枚ずつ
+// 埋める作業が要らない）。⚠️ **盤を直すたびに追随すること**が属性である意味で、
+// **1 枚外したらその駒がそのまま玉方の持駒に増える。**
+// ⚠️ **手番は攻方＝先手**・⚠️ **目線は先手固定**も一緒に決まる。
+func TestSetMateProblemGivesRestToWhite(t *testing.T) {
+	// 撮った詰将棋のつもり（玉方の玉 1 枚と攻方の金 1 枚）。
 	s := edited(t, "4k4/9/4G4/9/9/9/9/9/9")
-	if _, err := s.SetTurn(int(position.TurnBlack)); err != nil { // 攻方から
-		t.Fatalf("SetTurn: %v", err)
+	if _, err := s.SetViewpoint(true); err != nil { // 後手目線で撮ったつもり
+		t.Fatalf("SetViewpoint: %v", err)
 	}
-	// **手番を決めても確定しない**（駒台の未決が残っているため）。ここが
-	// 「1 枚ずつドラッグさせない」操作の要る理由そのもの。
 	if before := s.State(); before.SFEN != "" {
-		t.Fatalf("駒台が未決なのに確定しています: %q", before.SFEN)
+		t.Fatalf("並べただけで確定しています: %q", before.SFEN)
 	}
 
-	st, err := s.FillHands(false) // 玉方（奥＝後手）へ寄せる
+	st, err := s.SetMateProblem(true)
 	if err != nil {
-		t.Fatalf("FillHands: %v", err)
+		t.Fatalf("SetMateProblem: %v", err)
+	}
+	if !st.MateProblem {
+		t.Fatal("詰将棋になっていません")
+	}
+	if st.Turn != int(position.TurnBlack) {
+		t.Errorf("Turn = %d, want %d(攻方＝先手)", st.Turn, position.TurnBlack)
+	}
+	if st.NearWhite {
+		t.Error("目線が先手固定になっていません")
 	}
 	if st.SFEN == "" {
-		t.Fatal("寄せたのに確定しません（未決が残っている）")
+		t.Fatal("詰将棋にしたのに確定しません（余りが玉方へ回っていない）")
 	}
-	for _, v := range st.Inventory {
-		if v.Name == "玉" {
-			if v.HandBlack != 0 || v.HandWhite != 0 {
-				t.Errorf("玉が駒台に載りました: 先手%d 後手%d", v.HandBlack, v.HandWhite)
+	handWhite := func(st EditState, name string) int {
+		for _, v := range st.Inventory {
+			if v.Name == name {
+				return v.HandWhite
 			}
-			continue
 		}
-		if v.Unassigned != 0 {
-			t.Errorf("%s の未決が残っています: %d", v.Name, v.Unassigned)
-		}
+		return -1
 	}
-	// 歩は 18 枚全部が玉方の持駒になる。
+	if got := handWhite(st, "歩"); got != 18 {
+		t.Errorf("玉方の歩 = %d, want 18", got)
+	}
 	for _, v := range st.Inventory {
-		if v.Name == "歩" && v.HandWhite != 18 {
-			t.Errorf("後手の駒台の歩 = %d, want 18", v.HandWhite)
+		if v.Unassigned != 0 || v.Unused != 0 {
+			t.Errorf("%s: 未決=%d 使わない=%d, want 0, 0", v.Name, v.Unassigned, v.Unused)
 		}
 	}
 
-	// 2 回目は寄せるものが無い（押しても何も起きないことを理由付きで返す）。
-	if _, err := s.FillHands(false); err == nil {
-		t.Error("寄せるものが無いのにエラーになりません")
+	// ⚠️ **盤を直すと追随すること**（属性である意味そのもの）。金を外せば
+	// その金が玉方の持駒になる。
+	after, err := s.Remove(2, 4)
+	if err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	if got := handWhite(after, "金"); got != 4 {
+		t.Errorf("外した金が玉方に回っていません: %d, want 4", got)
+	}
+}
+
+// ⚠️ **手合割と詰将棋は排他**（同じ問いへの別の答え）。
+func TestMateProblemAndHandicapAreExclusive(t *testing.T) {
+	s := edited(t, nimaiBoard)
+	if _, err := s.SetHandsFixed(true); err != nil {
+		t.Fatalf("SetHandsFixed: %v", err)
+	}
+	st, err := s.SetMateProblem(true)
+	if err != nil {
+		t.Fatalf("SetMateProblem: %v", err)
+	}
+	if st.HandsFixed {
+		t.Error("詰将棋にしたのに手合割が残っています")
+	}
+	st, err = s.SetHandsFixed(true)
+	if err != nil {
+		t.Fatalf("SetHandsFixed: %v", err)
+	}
+	if st.MateProblem {
+		t.Error("手合割にしたのに詰将棋が残っています")
 	}
 }
 
@@ -281,11 +318,8 @@ func TestFillHandsSweepsRest(t *testing.T) {
 // 「玉が 1 枚なら断る」を手前の層に足さないこと。
 func TestAdoptMateProblemKeepsBoardWithoutMoves(t *testing.T) {
 	s := edited(t, "4k4/9/4G4/9/9/9/9/9/9")
-	if _, err := s.SetTurn(int(position.TurnBlack)); err != nil {
-		t.Fatalf("SetTurn: %v", err)
-	}
-	if _, err := s.FillHands(false); err != nil {
-		t.Fatalf("FillHands: %v", err)
+	if _, err := s.SetMateProblem(true); err != nil {
+		t.Fatalf("SetMateProblem: %v", err)
 	}
 
 	study := NewStudyService(slog.New(slog.NewTextHandler(io.Discard, nil)), s)

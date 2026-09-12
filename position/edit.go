@@ -81,12 +81,18 @@ func (p *Position) Inventory() []Stock {
 		// 駒台が書いてある局面（KIF・SFEN から読んだもの）では未決が無い。
 		unassigned := max(max(rest, 0)-hb-hw, 0)
 		unused := 0
-		if p.HandsFixed {
-			// **逆算をやめた局面**（駒落ち・詰将棋）。行き場の無い枚数は
-			// 「未決」ではなく「**この対局で使わない**」になる。
+		switch {
+		case p.HandsFixed:
+			// **手合割**。行き場の無い枚数は「未決」ではなく
+			// 「**この対局で使わない**」になる。
 			// ⚠️ **数を消さずに移し替えること** —— 0 にしてしまうと、
 			// 落とした駒が画面から消えて、外し忘れとの区別が付かなくなる。
 			unassigned, unused = 0, unassigned
+		case p.MateProblem:
+			// **詰将棋**。余りは**全部 玉方（後手）の持駒**なので、
+			// 未決ではなく**駒台の枚数として出す**（画面の駒台にそのまま並ぶ）。
+			// ⚠️ **`Hands()` と同じ足し方にすること**（2 か所で数が割れる）。
+			hw, unassigned = hw+unassigned, 0
 		}
 		out = append(out, Stock{
 			Piece: base, Letter: sfen.Letter(base), Name: sfen.Name(base),
@@ -99,56 +105,6 @@ func (p *Position) Inventory() []Stock {
 		})
 	}
 	return out
-}
-
-// Spare は「盤にも駒台にも無い駒」の枚数を返す（ベース駒コード → 枚数）。
-//
-// **`Inventory()` の `Unassigned` と `Unused` を 1 つにまとめたもの**（あちらは
-// 逆算するかしないかで入る場所が変わるが、**どちらも「まだ置き場所が決まって
-// いない駒」**という点では同じ）。⚠️ **数え方を 2 つ持たないために `Inventory`
-// から作ること** —— ここで数え直すと、駒箱の表示と寄せた枚数が食い違いうる。
-//
-// ⚠️ **玉は数えない。** 駒台に載らないので（`core/sfen` の逆算も玉を含まない）、
-// 盤の枚数の話になる。詰将棋では玉が 1 枚しかないのが正しい。
-func (p *Position) Spare() map[int]int {
-	out := map[int]int{}
-	for _, s := range p.Inventory() {
-		if s.Piece == sfen.King {
-			continue
-		}
-		if n := s.Unassigned + s.Unused; n > 0 {
-			out[s.Piece] = n
-		}
-	}
-	return out
-}
-
-// FillHands は残っている駒を**まとめて片側の駒台に載せる**（戻り値は載せた枚数）。
-//
-// **詰将棋のための操作。** 詰将棋は「**残り全部が玉方の持駒**」という慣習なので、
-// 歩が 17 枚といった枚数になる。1 枚ずつドラッグするのは現実的でないが、
-// 駒台の枚数は指定で決められる（`SetHand`）ので、ここでまとめて決める。
-//
-// ⚠️ **これも「決めていないことを決めない」に反しない** —— 決めるのは人間で、
-// ここは人間が押した 1 操作をそのまま反映するだけ。**自動では呼ばないこと。**
-//
-// ⚠️ **玉は載せない**（`Spare` が数えない）。⚠️ **逆算をやめている局面
-// （手合割）でも動く** —— 「使わない駒」を持ち駒にし直す操作になる。
-func (p *Position) FillHands(black bool) int {
-	moved := 0
-	for base, n := range p.Spare() {
-		b, w := p.assigned(base)
-		cur := w
-		if black {
-			cur = b
-		}
-		if err := p.SetHand(base, black, cur+n); err != nil {
-			// 載せられない駒種は飛ばす（残りはそのまま。設計原則3）。
-			continue
-		}
-		moved += n
-	}
-	return moved
 }
 
 // Place はマスに駒を置く（元あった駒は消える）。**駒箱から盤へのドロップ。**

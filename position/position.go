@@ -70,6 +70,21 @@ type Position struct {
 	// 組み上がらない**（＝二枚落ちの棋譜が 1 手も進められない。実際に踏んだ）。
 	// 持ち駒が明記されている以上、そこに推測を混ぜる理由が無い。
 	HandsFixed bool
+	// MateProblem は**詰将棋か**（2026-09-12）。
+	//
+	// **盤にも駒台にも無い駒は、全部が玉方（後手）の持駒**になる
+	// （詰将棋の「残り全部は玉方の持駒」という慣習そのもの）。⚠️ **操作ではなく
+	// 属性**なので、**盤を直すたびに自動で追随する** —— 駒を 1 枚外せば、その駒は
+	// そのまま玉方の持駒になる。まとめて寄せる操作は要らない（一度入れて外した）。
+	//
+	// ⚠️ **`HandsFixed` とは排他。** どちらも「盤にも駒台にも無い駒」の解釈だが、
+	// 手合割は**存在しない**、詰将棋は**玉方が持っている**という別の答えになる。
+	// **両方立てないこと**（立てる側が決めるのは `PositionService` の仕事）。
+	//
+	// ⚠️ **手番は攻方＝先手。** 詰将棋は攻方から指すと決まっているので、
+	// これを立てる側が手番も決める（ここでは手番に触らない —— 型としては
+	// 「盤に無い駒の行き先」だけを表す）。
+	MateProblem bool
 	// MoveNumber は手数。0 は「不明」。
 	//
 	// 中継の画面から読めることもあるが、**撮った 1 枚からは分からないのが普通**。
@@ -139,7 +154,31 @@ func (p *Position) Hands() (black, white map[int]int) {
 			white[base] = n
 		}
 	}
+	// ⚠️ **詰将棋は余りが全部 玉方（後手）の持駒**（2026-09-12）。
+	// **属性なので盤を直すたびに追随する** —— ここで足しているだけなので、
+	// 盤から 1 枚外せばその駒はそのまま玉方の持駒として出る。
+	if p.MateProblem {
+		for base, rest := range p.rest() {
+			white[base] += rest
+		}
+	}
 	return black, white
+}
+
+// rest は**盤にも駒台にも無い枚数**（ベース駒コード → 枚数。玉は含まない）。
+//
+// 逆算（`HandTotal`）から、人が駒台へ割り振ったぶんを引いたもの。
+// **「未決」「使わない駒」「詰将棋で玉方が持つ駒」は、どれもこの数**で、
+// 違うのは**どう解釈するか**だけ。⚠️ **数え方を 1 つにしておくこと。**
+func (p *Position) rest() map[int]int {
+	out := map[int]int{}
+	for base, total := range p.HandTotal() {
+		b, w := p.assigned(base)
+		if n := total - b - w; n > 0 {
+			out[base] = n
+		}
+	}
+	return out
 }
 
 // assigned は駒種 1 つぶんの割り振り（人間が決めた枚数）を返す。
@@ -152,18 +191,14 @@ func (p *Position) assigned(base int) (black, white int) {
 // **これが 0 になるまで局面は確定しない**（SFEN は持ち駒を先後に分けて書くため）。
 // 訂正 UI は「どちらの駒台か」をここから減らしていく操作として作る。
 func (p *Position) Unassigned() map[int]int {
-	out := map[int]int{}
-	if p.HandsFixed {
-		// 駒台が書いてある局面では逆算しない（決めるものが残っていない）。
-		return out
+	if p.HandsFixed || p.MateProblem {
+		// 駒台が書いてある局面（手合割）では逆算しない。
+		// 詰将棋は**行き先が決まっている**（余りは全部 玉方）ので未決が無い。
+		// ⚠️ **どちらも「決めていないことを決めた」わけではない** —— 人が
+		// 「手合割だ」「詰将棋だ」と決めた結果、行き先が 1 つに定まっている。
+		return map[int]int{}
 	}
-	for base, total := range p.HandTotal() {
-		b, w := p.assigned(base)
-		if rest := total - b - w; rest > 0 {
-			out[base] = rest
-		}
-	}
-	return out
+	return p.rest()
 }
 
 // SetHand は駒台のうち片側の枚数を n 枚にする。
@@ -312,7 +347,9 @@ func (p *Position) Warnings() []string {
 // ⚠️ **玉は数えない。** 駒台に載らないので「足りない」は盤の枚数の話になり、
 // それは core/sfen の CheckKing が既に言っている（二重に言わない）。
 func (p *Position) missingWarnings() []string {
-	if p.HandsFixed {
+	// ⚠️ **詰将棋でも言わない**（2026-09-12）。余りは玉方の持駒として出ているので、
+	// 「足りない」ものは無い（言うと駒を置くたびに警告が出る）。
+	if p.HandsFixed || p.MateProblem {
 		return nil
 	}
 	info := p.Board.Inspect(sfen.CheckSyntax)
@@ -371,6 +408,9 @@ func (p *Position) Clone() *Position {
 		// ⚠️ **HandsFixed も写すこと。** 落とすと、手を 1 つ進めた（＝Clone した）
 		// 瞬間に駒台の逆算が復活し、駒落ちの棋譜がそこで進まなくなる。
 		HandsFixed: p.HandsFixed,
+		// ⚠️ **詰将棋も写すこと。** 落とすと、1 手進めた瞬間に余りが未決に戻り、
+		// SFEN が組み上がらなくなる（`HandsFixed` を落としたときと同じ壊れ方）。
+		MateProblem: p.MateProblem,
 		MoveNumber: p.MoveNumber,
 		handBlack:  make(map[int]int, len(p.handBlack)),
 		handWhite:  make(map[int]int, len(p.handWhite)),

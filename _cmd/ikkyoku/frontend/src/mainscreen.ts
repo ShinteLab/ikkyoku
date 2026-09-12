@@ -449,15 +449,15 @@ export function mountMainScreen(root: HTMLElement): void {
              ⚠️ **「新しく対局を始める」の option に「詰将棋」を足さないこと。**
              あちらは**確定した局面を解析タブへ渡す**経路で、行き先が違う。
 
-             ⚠️ **詰将棋は駒台を逆算する**（手合割のチェックは入れない）。
-             「残り全部は玉方の持駒」という慣習が逆算そのもので、並べ終わったら
-             「まとめる」で玉方へ寄せれば確定する。**手合割とは逆。** -->
+             ⚠️ **詰将棋は「属性」**（訂正タブのチェック 1 つ）。入れた時点で
+             余った駒は**全部 玉方（奥）の持駒**になり、盤を直すたびに追随する。
+             手番は攻方（先手）固定・目線も先手固定。**手合割とは排他。** -->
         <div class="setting-group">
           <span class="setting-title" data-hint="hint-mate">詰将棋を並べる</span>
           <span id="hint-mate" class="setting-note is-hint">
-            空の盤を<strong>訂正タブ</strong>に出します。駒を置いたら、残りは
-            <strong>「まとめる」</strong>で玉方（奥）の持駒にしてください。
-            手番は<strong>攻方（先手）</strong>で始まります。
+            空の盤を<strong>訂正タブ</strong>に出します。駒を置けば、
+            <strong>余った駒は玉方（奥）の持駒になります</strong>（並べるだけで確定します）。
+            手番は<strong>攻方（先手）</strong>固定です。
           </span>
           <div class="setting-fields">
             <button id="mate-start" class="ghost-btn is-primary" type="button">空の盤を並べる</button>
@@ -3827,7 +3827,7 @@ ${st.turnLabel}${n}`;
         clearShotContext();
         selectTab(editTab);
         mateStatus.textContent =
-          "空の盤を訂正タブに出しました。駒を置いたら「まとめる」で残りを玉方の持駒にしてください";
+          "空の盤を訂正タブに出しました。駒を置けば、余った駒は玉方の持駒になります";
       } catch (err) {
         mateStatus.textContent =
           `並べられませんでした: ${String(err instanceof Error ? err.message : err)}`;

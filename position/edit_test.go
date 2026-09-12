@@ -389,37 +389,40 @@ func TestInventoryUnusedWhenHandsFixed(t *testing.T) {
 	}
 }
 
-// ⚠️ **`FillHands` が残りを片側へまとめて載せること**（2026-09-12。詰将棋の
-// 「残り全部は玉方の持駒」）。
+// ⚠️ **詰将棋では余りが全部 玉方（後手）の持駒になること**（2026-09-12）。
 //
-// 見ているのは 3 つ: **玉を載せないこと**（駒台に乗らない）・**寄せたら確定
-// できること**（歩 17 枚を 1 枚ずつドラッグさせないのが目的なので、押したあとに
-// 未決が残っていては意味が無い）・**寄せるものが無ければ 0 を返すこと**。
-func TestFillHands(t *testing.T) {
-	// 詰将棋のつもりの盤（玉方の玉 1 枚と攻方の金 1 枚）。
+// **属性なので盤を直すたびに追随する**（外した駒がそのまま玉方の持駒に増える）。
+// ⚠️ **玉は載らないこと**（駒台に乗らない）。⚠️ **未決が残らないこと**
+// （残ると確定できず、詰将棋を並べる意味が無い）。
+func TestMateProblemRestGoesToWhite(t *testing.T) {
 	p, err := FromBoardSFEN("4k4/9/4G4/9/9/9/9/9/9")
 	if err != nil {
 		t.Fatalf("FromBoardSFEN: %v", err)
 	}
-	p.Turn = TurnBlack // 攻方から
-
+	p.Turn = TurnBlack
 	if _, err := p.SFEN(); err == nil {
 		t.Fatal("駒台が未決なのに確定しています")
 	}
 
-	moved := p.FillHands(false) // 玉方（後手）へ
-	if moved == 0 {
-		t.Fatal("1 枚も寄りませんでした")
-	}
+	p.MateProblem = true
 	if _, err := p.SFEN(); err != nil {
-		t.Fatalf("寄せたのに確定しません: %v", err)
+		t.Fatalf("詰将棋にしたのに確定しません: %v", err)
 	}
-	if _, white := p.Hands(); white[sfen.King] != 0 {
+	_, white := p.Hands()
+	if white[sfen.Pawn] != 18 {
+		t.Errorf("玉方の歩 = %d, want 18", white[sfen.Pawn])
+	}
+	if white[sfen.King] != 0 {
 		t.Errorf("玉が駒台に載りました: %d", white[sfen.King])
-	} else if white[sfen.Pawn] != 18 {
-		t.Errorf("後手の駒台の歩 = %d, want 18", white[sfen.Pawn])
 	}
-	if again := p.FillHands(false); again != 0 {
-		t.Errorf("寄せるものが無いのに %d 枚動きました", again)
+	if rest := p.Unassigned(); len(rest) > 0 {
+		t.Errorf("未決が残っています: %v", rest)
+	}
+	// 盤を直すと追随する（金を外せば玉方の持駒が 1 枚増える）。
+	if err := p.Remove(2, 4); err != nil {
+		t.Fatal(err)
+	}
+	if _, white := p.Hands(); white[sfen.Gold] != 4 {
+		t.Errorf("外した金が玉方に回っていません: %d, want 4", white[sfen.Gold])
 	}
 }

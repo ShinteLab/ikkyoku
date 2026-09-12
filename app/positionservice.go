@@ -119,6 +119,15 @@ type EditState struct {
 	// **未決が永久に消えず、SFEN が組み上がらない＝解析タブへ渡せない**。
 	// 立てると、行き場の無い枚数は `Stock.Unused`（この対局で使わない駒）に回る。
 	HandsFixed bool `json:"handsFixed"`
+	// MateProblem は**詰将棋か**（2026-09-12）。
+	//
+	// 立っていると、盤にも駒台にも無い駒は**全部が玉方（後手）の持駒**として
+	// 駒台に出る（`Inventory` の `HandWhite` に入っている）。**属性なので
+	// 盤を直すたびに追随する。** ⚠️ **`HandsFixed` とは排他。**
+	// ⚠️ **手番は攻方＝先手・目線は先手固定**（`SetMateProblem` が決める）ので、
+	// **画面はその 2 つを選ばせないこと**（選べると、決まっているものを
+	// 選ばせることになる）。
+	MateProblem bool `json:"mateProblem"`
 	// Warnings は局面として成立していない点。**エラーではない**（直している最中は
 	// 壊れていて当たり前）。
 	Warnings []string `json:"warnings"`
@@ -189,17 +198,15 @@ func (s *PositionService) LoadHandicap(handicap string) (EditState, error) {
 // ような表は引けない。⚠️ **「新しく対局を始める」に空の盤の option を足さないこと**
 // —— あちらは**確定した局面を解析タブへ渡す**経路で、行き先が違う。
 //
-// ⚠️ **手番は攻方＝先手。** 詰将棋は攻方から指すので、最初から決めておく
-// （盤が空でも手番は決まっている、という珍しい局面）。
-//
-// ⚠️ **駒台は逆算する**（`HandsFixed` は立てない）。詰将棋の慣習
-// 「**残り全部は玉方の持駒**」がまさに逆算そのもので、並べ終わったら
-// `FillHands` で玉方へ寄せれば確定する。**手合割とは逆**なので混同しないこと。
+// ⚠️ **最初から詰将棋として始まる**（`MateProblem`）。手番は攻方＝先手、
+// 余った駒は全部 玉方（後手）の持駒になるので、**駒を置いた時点で確定している**
+// （駒台を埋める作業が要らない）。**手合割とは逆**なので混同しないこと。
 //
 // ⚠️ **画像は無い**（`LoadHandicap` と同じ。撮った画像・認識の情報・学習への
 // 送信は呼び出し側が片付けること）。
 func (s *PositionService) LoadEmpty() (EditState, error) {
 	p := position.New(nil)
+	p.MateProblem = true
 	p.Turn = position.TurnBlack
 	p.MoveNumber = 1
 
@@ -212,26 +219,44 @@ func (s *PositionService) LoadEmpty() (EditState, error) {
 	return s.state(), nil
 }
 
-// FillHands は残っている駒を**まとめて片側の駒台に載せる**（訂正タブの「まとめる」。
-// 2026-09-12）。
+// SetMateProblem は**この盤を詰将棋として扱う**か（2026-09-12）。
 //
-// **詰将棋の「残り全部は玉方の持駒」を 1 操作にしたもの。** 歩 17 枚を 1 枚ずつ
-// ドラッグするのは現実的でないので、枚数指定（`position.SetHand`）をまとめて行う。
+// **操作ではなく属性。** 立てると、盤にも駒台にも無い駒は**全部が玉方（後手）の
+// 持駒**になり、**盤を直すたびに自動で追随する**（1 枚外せばその駒がそのまま
+// 玉方の持駒になる）。まとめて寄せる操作は要らない（一度入れて外した）。
 //
-// ⚠️ **受け取るのは「見た目の側」**（`SetHand` / `ToHand` と同じ。**`SetTurn` とは
-// 違う**）。駒台の出し入れは画面の駒台に対する操作なので、**手番だけが
-// 「対局としての先後」で受ける**。ここを揃えようとすると、**目線を切り替えた
-// ときに駒台の操作だけが裏返る。**
+// **撮った局面にも効く。** 詰将棋の画面を撮って、ここを立てれば余った駒は
+// そのまま玉方へ回る（駒台を 1 枚ずつ埋める作業が要らない）。
 //
-// ⚠️ **自動では呼ばない。** 押した人が「残りは玉方」と決めたから寄るのであって、
-// 未決を勝手に片側へ倒すと設計原則5（決めていないことを決めない）に反する。
-func (s *PositionService) FillHands(black bool) (EditState, error) {
-	return s.edit(func(p *position.Position) error {
-		if p.FillHands(black) == 0 {
-			return fmt.Errorf("まとめる駒がありません")
+// 立てるときに**一緒に決めるもの**（どちらも詰将棋では定数なので、人に選ばせない）:
+//
+//   - ⚠️ **手番は攻方＝先手**（詰将棋は攻方から指す）
+//   - ⚠️ **目線は先手固定**（`nearWhite` を落とす）。詰将棋の図は攻方が手前と
+//     決まっているので、撮った画像の向きを疑う必要が無い
+//
+// ⚠️ **手合割（`HandsFixed`）とは排他。** どちらも「盤にも駒台にも無い駒」の
+// 解釈で、手合割は**存在しない**、詰将棋は**玉方が持っている**という別の答え。
+// **片方を立てたらもう片方を外す**（両方立った状態を作らない）。
+//
+// ⚠️ **外しても手番と目線は戻さない**（人が決めた値として残す。戻すと、
+// 押し間違えて外しただけで手番が消える）。
+func (s *PositionService) SetMateProblem(mate bool) (EditState, error) {
+	st, err := s.edit(func(p *position.Position) error {
+		p.MateProblem = mate
+		if mate {
+			p.HandsFixed = false
+			p.Turn = position.TurnBlack
 		}
 		return nil
 	})
+	if err != nil || !mate {
+		return st, err
+	}
+	s.mu.Lock()
+	s.nearWhite = false
+	st = s.state()
+	s.mu.Unlock()
+	return st, nil
 }
 
 // State は今の状態を返す（何も変えない）。フロントの初期表示用。
@@ -412,6 +437,10 @@ func (s *PositionService) SetMoveNumber(n int) (EditState, error) {
 func (s *PositionService) SetHandsFixed(fixed bool) (EditState, error) {
 	return s.edit(func(p *position.Position) error {
 		p.HandsFixed = fixed
+		if fixed {
+			// ⚠️ **詰将棋とは排他**（同じ問いへの別の答え）。
+			p.MateProblem = false
+		}
 		return nil
 	})
 }
@@ -512,12 +541,13 @@ func (s *PositionService) state() EditState {
 		Turn:        int(turn),
 		TurnLabel:   turn.String(),
 		// 見た目の手番（Position が持っているのはこちら）。
-		SeenTurn:   int(s.pos.Turn),
-		MoveNumber: s.pos.MoveNumber,
-		Cells:      cells,
-		Inventory:  s.pos.Inventory(),
-		HandsFixed: s.pos.HandsFixed,
-		Warnings:   warnings,
-		Dirty:      board != s.origin,
+		SeenTurn:    int(s.pos.Turn),
+		MoveNumber:  s.pos.MoveNumber,
+		Cells:       cells,
+		Inventory:   s.pos.Inventory(),
+		HandsFixed:  s.pos.HandsFixed,
+		MateProblem: s.pos.MateProblem,
+		Warnings:    warnings,
+		Dirty:       board != s.origin,
 	}
 }

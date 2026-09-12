@@ -54,8 +54,6 @@
 import { PositionService } from "../bindings/github.com/ShinteLab/ikkyoku/app";
 import type { EditState, EditCell } from "../bindings/github.com/ShinteLab/ikkyoku/app/models";
 import type { Stock } from "../bindings/github.com/ShinteLab/ikkyoku/position/models";
-// ⚠️ **`window.confirm` / `window.prompt` は使わない**（popup.ts の先頭の理由）。
-import { openPopup } from "./popup";
 
 // 手番。Go 側（position.Turn）と同じ値。
 const TURN_UNKNOWN = 0;
@@ -381,23 +379,23 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   handicapLabel.innerHTML = `<input id="edit-handicap" type="checkbox" />手合割`;
   handSlots.missing.appendChild(handicapLabel);
 
-  // 「まとめる」（2026-09-12）。**残っている駒を片側の駒台へ一度に載せる。**
+  // 「詰将棋」のチェック（2026-09-12）。**手合割の隣、同じ枠の下。**
   //
-  // **詰将棋のための操作。** 詰将棋は「**残り全部は玉方の持駒**」という慣習なので、
-  // 歩が 17 枚といった枚数になる。**1 枚ずつドラッグさせない。**
+  // ⚠️ **これも操作ではなく属性。** 入れた瞬間に、盤にも駒台にも無い駒が
+  // **全部 玉方（奥）の持駒**になり、**盤を直すたびに追随する**（1 枚外せば
+  // その駒がそのまま玉方の持駒に増える）。**まとめて寄せるボタンは要らない**
+  // （一度入れて外した —— 押し忘れれば確定できず、押す意味も説明が要った）。
   //
-  // ⚠️ **どちらへ寄せるかは必ず聞く**（`openPopup`）。**片側に倒すのを既定に
-  // しないこと** —— 決めるのは人間（設計原則5）。
-  // ⚠️ **枠の外に置く**（手合割のチェックと同じ理由。駒のチップと隣り合わせない）。
-  const sweepBtn = document.createElement("button");
-  sweepBtn.type = "button";
-  sweepBtn.id = "edit-sweep";
-  sweepBtn.className = "ghost-btn is-compact";
-  sweepBtn.textContent = "まとめる";
-  sweepBtn.title =
-    "残っている駒を、まとめて片側の駒台に載せます" +
-    "（詰将棋の「残り全部は玉方の持駒」。押すとどちらの駒台かを聞きます）";
-  handSlots.missing.appendChild(sweepBtn);
+  // ⚠️ **手合割とは排他**（Go 側が外す）。同じ「盤に無い駒」への別の答えなので、
+  // **両方入った状態を作らない。**
+  const mateLabel = document.createElement("label");
+  mateLabel.className = "handicap-check";
+  mateLabel.innerHTML = `<input id="edit-mate" type="checkbox" />詰将棋`;
+  mateLabel.title =
+    "余った駒を全部 玉方（奥）の持駒として扱います。" +
+    "手番は攻方（先手）に固定され、目線も先手で固定されます";
+  handSlots.missing.appendChild(mateLabel);
+  const mateCheck = mateLabel.querySelector<HTMLInputElement>("#edit-mate")!;
   const missingChips = missing.querySelector<HTMLDivElement>(".missing-chips")!;
   // ⚠️ **見出しは手合割かで替わる**（2026-09-12）。手合割では、ここに出ている数の
   // 意味が「まだ持ち主が決まっていない」から**「この対局で使わない」**に変わるので、
@@ -450,13 +448,23 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   // 下手を持っているのに何を選べばよいのか分からなくなる（実際に分からなかった）。
   // **側の名前を出すところは必ずこの 1 つの値を見ること。**
   let handicap = false;
+  // mate は**詰将棋か**（＝ Go 側の `MateProblem`）。⚠️ **手合割とは排他。**
+  //
+  // ⚠️ **手番と目線は選ばせない** —— 詰将棋では攻方（先手）から指すと決まって
+  // いて、図も攻方が手前と決まっている。**決まっているものを選ばせない。**
+  let mate = false;
 
-  // sideName は側の呼び名（手合割なら下手／上手）。**先手・後手と書かないこと。**
-  const sideName = (black: boolean) =>
-    handicap ? (black ? "下手" : "上手") : black ? "先手" : "後手";
+  // sideName は側の呼び名（手合割なら下手／上手、詰将棋なら攻方／玉方）。
+  // **先手・後手と書かないこと。**
+  const sideName = (black: boolean) => {
+    if (mate) {
+      return black ? "攻方" : "玉方";
+    }
+    return handicap ? (black ? "下手" : "上手") : black ? "先手" : "後手";
+  };
   // turnName は手番の呼び名。**「不明」は手合割でも不明のまま。**
   const turnName = (turn: number, fallback: string) => {
-    if (!handicap) {
+    if (!handicap && !mate) {
       return fallback;
     }
     if (turn === TURN_BLACK || turn === TURN_WHITE) {
@@ -480,26 +488,32 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   // 「先手番／後手番」と出ていると、下手を持っている人が選べない。
   const paintHandicap = (next: EditState | null) => {
     handicap = !!next?.handsFixed;
+    mate = !!next?.mateProblem;
     handicapCheck.checked = handicap;
+    mateCheck.checked = mate;
+    // ⚠️ **枠の見出しは 3 通り。** 同じ数字でも意味が違うので、文字を替えないと
+    // 画面が嘘をつく（詰将棋では**そもそも枠に数が残らない** —— 余りは玉方の
+    // 駒台に並ぶ —— ので、見出しは「玉方が持ちます」と言い切る）。
     const stock = handicap ? "使わない駒" : "足りない駒";
-    missingLabel.textContent = stock;
+    missingLabel.textContent = mate ? "余りは玉方へ" : stock;
     stockName.textContent = stock;
-    // 寄せるものが無ければ押せない（押しても何も起きないボタンを出さない）。
-    // ⚠️ **玉は数に入れない**（駒台に載らない。Go 側の `Spare` と揃えること）。
-    const rest = (next?.inventory ?? []).reduce(
-      (n, v) => (v.name === "玉" ? n : n + v.unassigned + v.unused),
-      0,
-    );
-    sweepBtn.disabled = !next?.loaded || rest === 0;
-    sweepBtn.textContent = rest > 0 ? `まとめる(${rest})` : "まとめる";
     for (const b of turnBtns) {
       const turn = Number(b.dataset.turn);
       b.textContent =
         turn === TURN_BLACK || turn === TURN_WHITE
           ? `${sideName(turn === TURN_BLACK)}番`
           : "不明";
+      // ⚠️ **詰将棋では手番を選ばせない**（攻方から指すと決まっている）。
+      // **押せない理由を出すこと** —— 出さないと「押しても何も起きない」になる。
+      b.disabled = mate;
+      b.title = mate ? "詰将棋は攻方（先手）から指すと決まっています" : "";
     }
+    // ⚠️ **目線も選ばせない**（詰将棋の図は攻方が手前と決まっている）。
+    nearBtn.disabled = mate;
     paintNearButton(!!next?.nearWhite);
+    if (mate) {
+      nearBtn.title = "詰将棋は攻方が手前と決まっています";
+    }
   };
   // ⚠️ **一度は通すこと。** 駒台の見出し（「手前の駒台」）と目線のボタンの文字は
   // ここで入れているので、通さないと見出しの無い駒台と空のボタンが出る。
@@ -1259,31 +1273,14 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     void apply(() => PositionService.SetViewpoint(next));
   });
 
-  // 「まとめる」。⚠️ **どちらへ寄せるかを聞いてから**（片側に倒す既定を作らない）。
-  //
-  // ⚠️ **聞き方は「手前 / 奥」**（駒台の見出しと同じ）。撮った画像が後手目線なら
-  // 手前に写っているのは後手なので、**「先手 / 後手」で聞くと画面と食い違う。**
-  // ⚠️ **`PositionService.FillHands` が受けるのも見た目の側**（`ToHand` と同じ。
-  // 手番だけが「対局としての先後」で受ける）。
-  sweepBtn.addEventListener("click", (e) => {
-    const toSeenBlack = (near: boolean) => (flipped ? !near : near);
-    openPopup(e.clientX, e.clientY, {
-      label: "残りの駒をまとめる",
-      items: [
-        {
-          label: "奥の駒台へ（詰将棋なら玉方）",
-          onPick: () => void apply(() => PositionService.FillHands(toSeenBlack(false))),
-        },
-        {
-          label: "手前の駒台へ",
-          onPick: () => void apply(() => PositionService.FillHands(toSeenBlack(true))),
-        },
-        { label: "やめる", onPick: () => {} },
-      ],
-    });
+  // 詰将棋か。⚠️ **手合割と同じで、今の値は `state` から読む**（見た目は
+  // 返ってきた `EditState` で入れ直す。Go 側が排他にするので、こちらで
+  // もう片方のチェックを外さないこと —— 2 か所で決めると必ず食い違う）。
+  mateCheck.addEventListener("change", () => {
+    void apply(() => PositionService.SetMateProblem(mateCheck.checked));
   });
 
-  // 手合割の対局か（駒落ち・詰将棋）。⚠️ **今の値は `state` から読む**
+  // 手合割の対局か（駒落ち）。⚠️ **今の値は `state` から読む**
   // （チェックの見た目は返ってきた `EditState` で入れ直す）。
   handicapCheck.addEventListener("change", () => {
     const next = handicapCheck.checked;
