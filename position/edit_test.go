@@ -388,3 +388,38 @@ func TestInventoryUnusedWhenHandsFixed(t *testing.T) {
 		t.Errorf("逆算をやめたのに確定できません: %v", err)
 	}
 }
+
+// ⚠️ **`FillHands` が残りを片側へまとめて載せること**（2026-09-12。詰将棋の
+// 「残り全部は玉方の持駒」）。
+//
+// 見ているのは 3 つ: **玉を載せないこと**（駒台に乗らない）・**寄せたら確定
+// できること**（歩 17 枚を 1 枚ずつドラッグさせないのが目的なので、押したあとに
+// 未決が残っていては意味が無い）・**寄せるものが無ければ 0 を返すこと**。
+func TestFillHands(t *testing.T) {
+	// 詰将棋のつもりの盤（玉方の玉 1 枚と攻方の金 1 枚）。
+	p, err := FromBoardSFEN("4k4/9/4G4/9/9/9/9/9/9")
+	if err != nil {
+		t.Fatalf("FromBoardSFEN: %v", err)
+	}
+	p.Turn = TurnBlack // 攻方から
+
+	if _, err := p.SFEN(); err == nil {
+		t.Fatal("駒台が未決なのに確定しています")
+	}
+
+	moved := p.FillHands(false) // 玉方（後手）へ
+	if moved == 0 {
+		t.Fatal("1 枚も寄りませんでした")
+	}
+	if _, err := p.SFEN(); err != nil {
+		t.Fatalf("寄せたのに確定しません: %v", err)
+	}
+	if _, white := p.Hands(); white[sfen.King] != 0 {
+		t.Errorf("玉が駒台に載りました: %d", white[sfen.King])
+	} else if white[sfen.Pawn] != 18 {
+		t.Errorf("後手の駒台の歩 = %d, want 18", white[sfen.Pawn])
+	}
+	if again := p.FillHands(false); again != 0 {
+		t.Errorf("寄せるものが無いのに %d 枚動きました", again)
+	}
+}

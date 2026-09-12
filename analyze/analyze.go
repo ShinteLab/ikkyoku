@@ -781,5 +781,9 @@ func ensurePlayable(boardSFEN string) error {
 	for _, v := range vs {
 		msgs = append(msgs, v.Detail)
 	}
-	return fmt.Errorf("エンジンは玉の揃った局面しか扱えません: %s", strings.Join(msgs, " / "))
+	// ⚠️ **詰将棋がここに来る**（攻方の玉が無い）。**盤を見ることも手を進めることも
+	// できている**ので、断られるのがここだけであることが分かる言い方にする。
+	return fmt.Errorf("エンジンは玉の揃った局面しか扱えません: %s"+
+		"（詰将棋のように玉が片方だけの局面は解析できません。盤を動かすことはできます）",
+		strings.Join(msgs, " / "))
 }

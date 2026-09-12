@@ -201,3 +201,109 @@ func TestResetKeepsHandicap(t *testing.T) {
 		}
 	}
 }
+
+// 詰将棋を並べ始められること（入力タブの「詰将棋を並べる」）。
+//
+// ⚠️ **手番は攻方＝先手**（盤が空でも手番は決まっている）。⚠️ **駒台は逆算する**
+// （詰将棋の「残り全部は玉方の持駒」がまさに逆算。手合割とは逆なので混同しないこと）。
+func TestLoadEmptyStartsProblem(t *testing.T) {
+	s := NewPositionService(slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	st, err := s.LoadEmpty()
+	if err != nil {
+		t.Fatalf("LoadEmpty: %v", err)
+	}
+	if st.BoardSFEN != "9/9/9/9/9/9/9/9/9" {
+		t.Errorf("BoardSFEN = %q, want 空の盤", st.BoardSFEN)
+	}
+	if st.Turn != int(position.TurnBlack) {
+		t.Errorf("Turn = %d, want %d(攻方＝先手)", st.Turn, position.TurnBlack)
+	}
+	if st.HandsFixed {
+		t.Error("駒台を逆算しない状態で始まっています（詰将棋は逆算する）")
+	}
+}
+
+// 「残り全部を片側の駒台へ」がまとめて効くこと（詰将棋の慣習）。
+//
+// ⚠️ **玉は載せないこと**（駒台に乗らない）。⚠️ **寄せたら確定できること**
+// が目的そのもの —— 歩 17 枚を 1 枚ずつドラッグさせないために入れた操作なので、
+// 押したあとに未決が残っていては意味が無い。
+func TestFillHandsSweepsRest(t *testing.T) {
+	// 詰将棋のつもりの盤（玉方の玉が 1 枚と、攻方の金が 1 枚だけ）。
+	s := edited(t, "4k4/9/4G4/9/9/9/9/9/9")
+	if _, err := s.SetTurn(int(position.TurnBlack)); err != nil { // 攻方から
+		t.Fatalf("SetTurn: %v", err)
+	}
+	// **手番を決めても確定しない**（駒台の未決が残っているため）。ここが
+	// 「1 枚ずつドラッグさせない」操作の要る理由そのもの。
+	if before := s.State(); before.SFEN != "" {
+		t.Fatalf("駒台が未決なのに確定しています: %q", before.SFEN)
+	}
+
+	st, err := s.FillHands(false) // 玉方（奥＝後手）へ寄せる
+	if err != nil {
+		t.Fatalf("FillHands: %v", err)
+	}
+	if st.SFEN == "" {
+		t.Fatal("寄せたのに確定しません（未決が残っている）")
+	}
+	for _, v := range st.Inventory {
+		if v.Name == "玉" {
+			if v.HandBlack != 0 || v.HandWhite != 0 {
+				t.Errorf("玉が駒台に載りました: 先手%d 後手%d", v.HandBlack, v.HandWhite)
+			}
+			continue
+		}
+		if v.Unassigned != 0 {
+			t.Errorf("%s の未決が残っています: %d", v.Name, v.Unassigned)
+		}
+	}
+	// 歩は 18 枚全部が玉方の持駒になる。
+	for _, v := range st.Inventory {
+		if v.Name == "歩" && v.HandWhite != 18 {
+			t.Errorf("後手の駒台の歩 = %d, want 18", v.HandWhite)
+		}
+	}
+
+	// 2 回目は寄せるものが無い（押しても何も起きないことを理由付きで返す）。
+	if _, err := s.FillHands(false); err == nil {
+		t.Error("寄せるものが無いのにエラーになりません")
+	}
+}
+
+// ⚠️ **詰将棋も解析タブへ渡せて、手も進められること**（設計原則3）。
+//
+// **玉が 1 枚でも合法手は出る**（実測。攻方の玉が無くても、攻方の駒の動きは
+// 決まる）。断られるのは**エンジンにかけるところだけ**で（`analyze.ensurePlayable`。
+// 玉の揃った局面しか読めない）、**盤を見ることも手を進めることも止めない。**
+// ⚠️ **ここが通らなくなったら、詰将棋を並べる意味がほぼ無くなる**ので、
+// 「玉が 1 枚なら断る」を手前の層に足さないこと。
+func TestAdoptMateProblemKeepsBoardWithoutMoves(t *testing.T) {
+	s := edited(t, "4k4/9/4G4/9/9/9/9/9/9")
+	if _, err := s.SetTurn(int(position.TurnBlack)); err != nil {
+		t.Fatalf("SetTurn: %v", err)
+	}
+	if _, err := s.FillHands(false); err != nil {
+		t.Fatalf("FillHands: %v", err)
+	}
+
+	study := NewStudyService(slog.New(slog.NewTextHandler(io.Discard, nil)), s)
+	st, err := study.Adopt()
+	if err != nil {
+		t.Fatalf("Adopt: %v（詰将棋を断ってはいけない）", err)
+	}
+	if !st.Loaded || st.BoardSFEN == "" {
+		t.Fatal("盤が出ていません")
+	}
+	if st.LegalError != "" {
+		t.Errorf("合法手が出せませんでした: %s", st.LegalError)
+	}
+	if len(st.Legal) == 0 {
+		t.Error("手が 1 つも出ていません（詰将棋を並べても動かせない）")
+	}
+	// 手番は攻方。**寄せた持ち駒は玉方（後手）のもの**なので、攻方の打つ手は出ない。
+	if st.Turn != int(position.TurnBlack) {
+		t.Errorf("Turn = %d, want %d(攻方)", st.Turn, position.TurnBlack)
+	}
+}

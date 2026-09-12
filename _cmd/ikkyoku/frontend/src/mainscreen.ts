@@ -443,6 +443,28 @@ export function mountMainScreen(root: HTMLElement): void {
           <p id="newgame-status" class="status" role="status" aria-live="polite" hidden></p>
         </div>
 
+        <!-- 詰将棋。**手合割とは別の口**（2026-09-12）。初期局面が無い（人が並べる）
+             ので手合割の表は引けず、行き先も訂正タブ（自由に置ける盤が要る）。
+
+             ⚠️ **「新しく対局を始める」の option に「詰将棋」を足さないこと。**
+             あちらは**確定した局面を解析タブへ渡す**経路で、行き先が違う。
+
+             ⚠️ **詰将棋は駒台を逆算する**（手合割のチェックは入れない）。
+             「残り全部は玉方の持駒」という慣習が逆算そのもので、並べ終わったら
+             「まとめる」で玉方へ寄せれば確定する。**手合割とは逆。** -->
+        <div class="setting-group">
+          <span class="setting-title" data-hint="hint-mate">詰将棋を並べる</span>
+          <span id="hint-mate" class="setting-note is-hint">
+            空の盤を<strong>訂正タブ</strong>に出します。駒を置いたら、残りは
+            <strong>「まとめる」</strong>で玉方（奥）の持駒にしてください。
+            手番は<strong>攻方（先手）</strong>で始まります。
+          </span>
+          <div class="setting-fields">
+            <button id="mate-start" class="ghost-btn is-primary" type="button">空の盤を並べる</button>
+          </div>
+          <p id="mate-status" class="status" role="status" aria-live="polite" hidden></p>
+        </div>
+
         <!-- 棋譜を貼り付ける。**画像を通らない 2 つめの入口**なので、行き先も違う
              （撮影は認識を通るので訂正タブ、棋譜は既に確定しているので解析タブ）。 -->
         <div class="setting-group">
@@ -3707,6 +3729,32 @@ ${st.turnLabel}${n}`;
   };
   newgameHandicap.addEventListener("change", applyNewgameLabels);
   applyNewgameLabels();
+  // clearShotContext は**撮った画像に紐づくものを全部片付ける**（2026-09-12）。
+  //
+  // ⚠️ **画像の無い局面を訂正タブに入れる口では必ず呼ぶこと**（手合割の調整・
+  // 詰将棋）。訂正タブは元々「撮った 1 枚を直す面」で、**画像・認識の情報・
+  // 学習への送信**がぶら下がっている。残したまま別の局面を入れると、
+  // **別の画像のラベルとして訂正結果を送れてしまう**（学習データが壊れる）。
+  const clearShotContext = () => {
+    showPath("");
+    shot.hidden = true;
+    lastRegion = null;
+    hasShot = false;
+    showConfidence(0, "");
+    showRegion(null);
+    showPredictor(null);
+    showHand({});
+    showWarnings([]);
+    drawOverlay(null);
+    markDebug("");
+    trainSendStatus.textContent = "";
+    trainSendStatus.classList.remove("is-error");
+    syncCaptureRef();
+    // ⚠️ **最後に呼ぶこと** —— `shotFullPath` と盤面領域を見て
+    // 「訂正データを送信」の行を畳むので、先に呼ぶと出たままになる。
+    syncTrain();
+  };
+
   // 「訂正タブで調整」（2026-09-12）。**独自ハンデの入口。**
   //
   // ⚠️ **4 つめの入力の口だが、行き先だけが違う**（手合割 → **訂正タブ**）。
@@ -3730,23 +3778,7 @@ ${st.turnLabel}${n}`;
       newgameStatus.textContent = "並べています…";
       try {
         await editor.loadHandicap(newgameHandicap.value);
-        // 撮った画像に紐づくものを片付ける（上の ⚠️）。**画像が無い局面なので、
-        // 学習には送れない**（`syncTrain` が `shotFullPath` と領域を見ている）。
-        showPath("");
-        shot.hidden = true;
-        lastRegion = null;
-        hasShot = false;
-        showConfidence(0, "");
-        showRegion(null);
-        showPredictor(null);
-        showHand({});
-        showWarnings([]);
-        drawOverlay(null);
-        markDebug("");
-        trainSendStatus.textContent = "";
-        trainSendStatus.classList.remove("is-error");
-        syncCaptureRef();
-        syncTrain();
+        clearShotContext();
         selectTab(editTab);
         newgameStatus.textContent =
           `${newgameHandicap.value}の初期局面を訂正タブに出しました。駒を足し引きしてから「この局面を解析する」を押してください`;
@@ -3774,6 +3806,49 @@ ${st.turnLabel}${n}`;
           kind: "danger",
           onPick: startHandicapEdit,
         },
+        { label: "やめる", onPick: () => {} },
+      ],
+    });
+  });
+
+  // 詰将棋（2026-09-12）。**空の盤を訂正タブへ。** 手合割とは別の口で、
+  // ⚠️ **こちらは駒台を逆算したまま始める**（「残り全部は玉方の持駒」を
+  // 「まとめる」で寄せて確定させる）。**手合割のチェックは入れない。**
+  const mateStart = root.querySelector<HTMLButtonElement>("#mate-start")!;
+  const mateStatus = root.querySelector<HTMLParagraphElement>("#mate-status")!;
+  const startMateEdit = () => {
+    void (async () => {
+      mateStart.disabled = true;
+      mateStatus.hidden = false;
+      mateStatus.classList.remove("is-error");
+      mateStatus.textContent = "空の盤を出しています…";
+      try {
+        await editor.loadEmpty();
+        clearShotContext();
+        selectTab(editTab);
+        mateStatus.textContent =
+          "空の盤を訂正タブに出しました。駒を置いたら「まとめる」で残りを玉方の持駒にしてください";
+      } catch (err) {
+        mateStatus.textContent =
+          `並べられませんでした: ${String(err instanceof Error ? err.message : err)}`;
+        mateStatus.classList.add("is-error");
+      } finally {
+        mateStart.disabled = false;
+      }
+    })();
+  };
+
+  // ⚠️ **置き換える前に聞く**（「訂正タブで調整」と同じ。初期フォーカスは「やめる」）。
+  mateStart.addEventListener("click", (e) => {
+    if (!editLoaded) {
+      startMateEdit();
+      return;
+    }
+    openPopup(e.clientX, e.clientY, {
+      label: "訂正タブの局面を置き換え",
+      focus: 1,
+      items: [
+        { label: "訂正タブを空の盤で置き換える", kind: "danger", onPick: startMateEdit },
         { label: "やめる", onPick: () => {} },
       ],
     });

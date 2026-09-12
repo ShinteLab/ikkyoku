@@ -183,6 +183,57 @@ func (s *PositionService) LoadHandicap(handicap string) (EditState, error) {
 	return s.state(), nil
 }
 
+// LoadEmpty は**空の盤から並べ始める**（入力タブの「詰将棋を並べる」。2026-09-12）。
+//
+// **詰将棋のための入口。** 詰将棋には初期局面が無い（人が並べる）ので、手合割の
+// ような表は引けない。⚠️ **「新しく対局を始める」に空の盤の option を足さないこと**
+// —— あちらは**確定した局面を解析タブへ渡す**経路で、行き先が違う。
+//
+// ⚠️ **手番は攻方＝先手。** 詰将棋は攻方から指すので、最初から決めておく
+// （盤が空でも手番は決まっている、という珍しい局面）。
+//
+// ⚠️ **駒台は逆算する**（`HandsFixed` は立てない）。詰将棋の慣習
+// 「**残り全部は玉方の持駒**」がまさに逆算そのもので、並べ終わったら
+// `FillHands` で玉方へ寄せれば確定する。**手合割とは逆**なので混同しないこと。
+//
+// ⚠️ **画像は無い**（`LoadHandicap` と同じ。撮った画像・認識の情報・学習への
+// 送信は呼び出し側が片付けること）。
+func (s *PositionService) LoadEmpty() (EditState, error) {
+	p := position.New(nil)
+	p.Turn = position.TurnBlack
+	p.MoveNumber = 1
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pos = p
+	s.origin = p.BoardSFEN()
+	s.originHandsFixed = false
+	s.nearWhite = false
+	return s.state(), nil
+}
+
+// FillHands は残っている駒を**まとめて片側の駒台に載せる**（訂正タブの「まとめる」。
+// 2026-09-12）。
+//
+// **詰将棋の「残り全部は玉方の持駒」を 1 操作にしたもの。** 歩 17 枚を 1 枚ずつ
+// ドラッグするのは現実的でないので、枚数指定（`position.SetHand`）をまとめて行う。
+//
+// ⚠️ **受け取るのは「見た目の側」**（`SetHand` / `ToHand` と同じ。**`SetTurn` とは
+// 違う**）。駒台の出し入れは画面の駒台に対する操作なので、**手番だけが
+// 「対局としての先後」で受ける**。ここを揃えようとすると、**目線を切り替えた
+// ときに駒台の操作だけが裏返る。**
+//
+// ⚠️ **自動では呼ばない。** 押した人が「残りは玉方」と決めたから寄るのであって、
+// 未決を勝手に片側へ倒すと設計原則5（決めていないことを決めない）に反する。
+func (s *PositionService) FillHands(black bool) (EditState, error) {
+	return s.edit(func(p *position.Position) error {
+		if p.FillHands(black) == 0 {
+			return fmt.Errorf("まとめる駒がありません")
+		}
+		return nil
+	})
+}
+
 // State は今の状態を返す（何も変えない）。フロントの初期表示用。
 func (s *PositionService) State() EditState {
 	s.mu.Lock()

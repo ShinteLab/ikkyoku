@@ -4350,6 +4350,15 @@ html.is-graph #app {
   user-select: none;
 }
 
+/* 「まとめる」（2026-09-12）。**「足りない駒」の枠の下**（手合割のチェックの隣）。
+   ⚠️ **枠の中に入れない**（駒のチップと隣り合わせない）。
+   ⚠️ **幅は 104px しかない**ので、文字は「まとめる(17)」まで。説明は title。 */
+.ghost-btn.is-compact {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  font-size: 11px;
+}
+
 .handicap-check input {
   width: 12px;
   height: 12px;

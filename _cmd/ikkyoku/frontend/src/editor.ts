@@ -54,6 +54,8 @@
 import { PositionService } from "../bindings/github.com/ShinteLab/ikkyoku/app";
 import type { EditState, EditCell } from "../bindings/github.com/ShinteLab/ikkyoku/app/models";
 import type { Stock } from "../bindings/github.com/ShinteLab/ikkyoku/position/models";
+// ⚠️ **`window.confirm` / `window.prompt` は使わない**（popup.ts の先頭の理由）。
+import { openPopup } from "./popup";
 
 // 手番。Go 側（position.Turn）と同じ値。
 const TURN_UNKNOWN = 0;
@@ -80,6 +82,11 @@ export interface EditorHandle {
   // ⚠️ **画像の無い局面が訂正タブに入る唯一の口。** 撮った画像・認識の情報・
   // 学習への送信は**呼び出し側が片付けること**（こちらは画像を知らない）。
   loadHandicap(handicap: string): Promise<void>;
+  // loadEmpty は**空の盤**から並べ始める（詰将棋。2026-09-12）。
+  //
+  // ⚠️ **手番は攻方＝先手で始まる**（Go 側が決めている）。画像の後片付けは
+  // `loadHandicap` と同じで呼び出し側。
+  loadEmpty(): Promise<void>;
   // clear は局面が無い状態に戻す（撮る前の表示）。
   clear(): void;
   // relayout は盤に重ねるグリッドを置き直す。
@@ -373,6 +380,24 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   handicapLabel.className = "handicap-check";
   handicapLabel.innerHTML = `<input id="edit-handicap" type="checkbox" />手合割`;
   handSlots.missing.appendChild(handicapLabel);
+
+  // 「まとめる」（2026-09-12）。**残っている駒を片側の駒台へ一度に載せる。**
+  //
+  // **詰将棋のための操作。** 詰将棋は「**残り全部は玉方の持駒**」という慣習なので、
+  // 歩が 17 枚といった枚数になる。**1 枚ずつドラッグさせない。**
+  //
+  // ⚠️ **どちらへ寄せるかは必ず聞く**（`openPopup`）。**片側に倒すのを既定に
+  // しないこと** —— 決めるのは人間（設計原則5）。
+  // ⚠️ **枠の外に置く**（手合割のチェックと同じ理由。駒のチップと隣り合わせない）。
+  const sweepBtn = document.createElement("button");
+  sweepBtn.type = "button";
+  sweepBtn.id = "edit-sweep";
+  sweepBtn.className = "ghost-btn is-compact";
+  sweepBtn.textContent = "まとめる";
+  sweepBtn.title =
+    "残っている駒を、まとめて片側の駒台に載せます" +
+    "（詰将棋の「残り全部は玉方の持駒」。押すとどちらの駒台かを聞きます）";
+  handSlots.missing.appendChild(sweepBtn);
   const missingChips = missing.querySelector<HTMLDivElement>(".missing-chips")!;
   // ⚠️ **見出しは手合割かで替わる**（2026-09-12）。手合割では、ここに出ている数の
   // 意味が「まだ持ち主が決まっていない」から**「この対局で使わない」**に変わるので、
@@ -459,6 +484,14 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     const stock = handicap ? "使わない駒" : "足りない駒";
     missingLabel.textContent = stock;
     stockName.textContent = stock;
+    // 寄せるものが無ければ押せない（押しても何も起きないボタンを出さない）。
+    // ⚠️ **玉は数に入れない**（駒台に載らない。Go 側の `Spare` と揃えること）。
+    const rest = (next?.inventory ?? []).reduce(
+      (n, v) => (v.name === "玉" ? n : n + v.unassigned + v.unused),
+      0,
+    );
+    sweepBtn.disabled = !next?.loaded || rest === 0;
+    sweepBtn.textContent = rest > 0 ? `まとめる(${rest})` : "まとめる";
     for (const b of turnBtns) {
       const turn = Number(b.dataset.turn);
       b.textContent =
@@ -1226,6 +1259,30 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     void apply(() => PositionService.SetViewpoint(next));
   });
 
+  // 「まとめる」。⚠️ **どちらへ寄せるかを聞いてから**（片側に倒す既定を作らない）。
+  //
+  // ⚠️ **聞き方は「手前 / 奥」**（駒台の見出しと同じ）。撮った画像が後手目線なら
+  // 手前に写っているのは後手なので、**「先手 / 後手」で聞くと画面と食い違う。**
+  // ⚠️ **`PositionService.FillHands` が受けるのも見た目の側**（`ToHand` と同じ。
+  // 手番だけが「対局としての先後」で受ける）。
+  sweepBtn.addEventListener("click", (e) => {
+    const toSeenBlack = (near: boolean) => (flipped ? !near : near);
+    openPopup(e.clientX, e.clientY, {
+      label: "残りの駒をまとめる",
+      items: [
+        {
+          label: "奥の駒台へ（詰将棋なら玉方）",
+          onPick: () => void apply(() => PositionService.FillHands(toSeenBlack(false))),
+        },
+        {
+          label: "手前の駒台へ",
+          onPick: () => void apply(() => PositionService.FillHands(toSeenBlack(true))),
+        },
+        { label: "やめる", onPick: () => {} },
+      ],
+    });
+  });
+
   // 手合割の対局か（駒落ち・詰将棋）。⚠️ **今の値は `state` から読む**
   // （チェックの見た目は返ってきた `EditState` で入れ直す）。
   handicapCheck.addEventListener("change", () => {
@@ -1254,6 +1311,10 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     // あちらが持っている）、**残っていると別の画像のラベルとして送れてしまう。**
     async loadHandicap(handicap: string) {
       await apply(() => PositionService.LoadHandicap(handicap));
+      syncLoaded();
+    },
+    async loadEmpty() {
+      await apply(() => PositionService.LoadEmpty());
       syncLoaded();
     },
     clear() {
