@@ -457,6 +457,13 @@ const (
 // MateResult は詰み探索の結末。
 type MateResult struct {
 	Kind MateKind `json:"kind"`
+	// Progress は**詰み手順の候補**（`MultiPV`。解析の候補手と同じ形）。
+	//
+	// **詰将棋では「他の詰み」＝余詰**なので、1 本目だけ見せて終わりにしない
+	// （**別解があれば詰将棋としては不完全**で、それは作者にとっての答えの一部）。
+	// ⚠️ **画面は解析の候補手と同じ道具で出す**（右クリックで手順に足せる）ので、
+	// **形を揃えてあることに意味がある。**
+	Progress Progress `json:"progress"`
 	// Moves は詰み手順（USI 表記）。⚠️ **1 手しか返さないエンジンもある**ので、
 	// **長さを「何手詰」として出さないこと。**
 	Moves []string `json:"moves"`
@@ -473,6 +480,8 @@ type MateResult struct {
 type MateOptions struct {
 	// Limit は考えさせる上限。0 なら既定（`DefaultMateLimit`）。
 	Limit time.Duration
+	// MultiPV は詰み手順をいくつ出させるか（0/1 なら送らない）。
+	MultiPV int
 }
 
 // DefaultMateLimit は詰み探索の既定の上限。
@@ -530,7 +539,7 @@ func (s *Session) Mate(ctx context.Context, positionSFEN string, opt MateOptions
 	started := time.Now()
 	// 途中経過は `Analyze` と同じ形で流す（画面の出し先が同じなので）。
 	acc := &accumulator{black: fields[1] == "b", started: started, sfen: root}
-	res, err := eng.Mate(ctx, root, client.MateOptions{Limit: limit}, func(in coreusi.Info) {
+	res, err := eng.Mate(ctx, root, client.MateOptions{Limit: limit, MultiPV: opt.MultiPV}, func(in coreusi.Info) {
 		if p, ok := acc.add(in); ok && info != nil {
 			info(p)
 		}
@@ -541,10 +550,13 @@ func (s *Session) Mate(ctx context.Context, positionSFEN string, opt MateOptions
 		return MateResult{}, err
 	}
 
+	final := acc.snapshot()
+	final.ElapsedMS = time.Since(started).Milliseconds()
 	out := MateResult{
+		Progress:  final,
 		Moves:     res.Moves,
 		Engine:    eng.ID,
-		ElapsedMS: time.Since(started).Milliseconds(),
+		ElapsedMS: final.ElapsedMS,
 		Stopped:   res.Stopped,
 	}
 	switch res.Kind {

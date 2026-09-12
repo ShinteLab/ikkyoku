@@ -187,10 +187,20 @@ func newSession(e ikkyoku.EngineEntry) *analyze.Session {
 // （`client.Session.Analyze` が `go` の前に送る）、`isready` を跨ぐ必要が無い。
 // 指紋に入れると、**候補手の本数を変えるたびにエンジンを起こし直す**ことになり、
 // 評価関数の読み込みを毎回払う（解析タブで気軽に変える値なので特に効く）。
+//
+// ⚠️ **ただし詰将棋エンジンは別**（2026-09-12）。**KomoringHeights は `isready` の
+// 前に送らないと MultiPV が効かない**（実測。後から送っても候補は 1 本のまま）ので、
+// あちらでは指紋に入れて**繋ぎ直させる**。詰将棋エンジンは評価関数を読まないので
+// 起こし直しが安い。
 func engineKey(e ikkyoku.EngineEntry) string {
 	names := make([]string, 0, len(e.Options))
 	for k := range e.Options {
-		if k == ikkyoku.MultiPVOption {
+		// ⚠️ **詰将棋エンジンでは MultiPV も指紋に入れる**（2026-09-12 に実測）。
+		// **KomoringHeights は `isready` の前に送らないと MultiPV が効かない**
+		// （後から `setoption` を送っても無視され、候補は 1 本のまま）。
+		// 繋ぎ直しは安い（評価関数を読まないので 1 秒ほど）ので、
+		// **効かないより繋ぎ直すほうがよい。**
+		if k == ikkyoku.MultiPVOption && !e.Mate {
 			continue
 		}
 		names = append(names, k)
@@ -634,6 +644,13 @@ type MateSolution struct {
 	Moves []string `json:"moves"`
 	// Text は日本語表記（画面に出すのはこちら）。
 	Text []string `json:"text"`
+	// Progress は**詰み手順の候補**（`MultiPV`。解析の候補手と同じ形）。
+	//
+	// ⚠️ **いきなり手順に足さない**（2026-09-12）。**候補として出して、足すのは人が
+	// 選んでから** —— 解析の候補手と同じ道具（右クリック）で足せるように、
+	// **形を揃えて返す**。詰将棋では「他の詰み」＝余詰そのものなので、
+	// **1 本目だけ見せて終わりにしない。**
+	Progress analyze.Progress `json:"progress"`
 	// SFEN は解いた局面。**「どの局面の答えか」が分かるように返す。**
 	SFEN string `json:"sfen"`
 	// Engine は答えたエンジンの表示名。
@@ -667,8 +684,10 @@ func (s *AnalyzeService) SolveMate(seconds int) (MateSolution, error) {
 	}
 
 	limit := time.Duration(seconds) * time.Second
+	// ⚠️ **候補の本数はエンジンの登録から**（通常の解析と同じ入口。設定タブの
+	// エンジンの行で変える）。**詰み探索用に別の欄を作らないこと。**
 	res, err := s.sessionFor(entry).Mate(context.Background(), target.Current,
-		analyze.MateOptions{Limit: limit}, nil)
+		analyze.MateOptions{Limit: limit, MultiPV: entry.MultiPV()}, nil)
 	if err != nil {
 		s.logger.Warn("詰み探索に失敗しました",
 			"engine", entry.DisplayName(), "sfen", target.Current, "error", err)
@@ -681,6 +700,7 @@ func (s *AnalyzeService) SolveMate(seconds int) (MateSolution, error) {
 
 	return MateSolution{
 		Kind:      string(res.Kind),
+		Progress:  res.Progress,
 		Moves:     res.Moves,
 		Text:      res.Text,
 		SFEN:      target.Current,

@@ -89,3 +89,84 @@ func TestSolveMateWithoutMateEngine(t *testing.T) {
 		t.Fatal("詰将棋エンジンが無いのに通りました")
 	}
 }
+
+// ⚠️ **詰将棋では足した手順が本線になること**（2026-09-12）。
+//
+// 詰将棋に「本譜」は無く、**足した手順そのものが答え**なので、1 段下げて
+// 畳んだ形で置くと読みづらい。⚠️ **2 本目（余詰）は枝のまま** ——
+// 先に足したほうを黙って押しのけないこと。
+func TestAddLineOnMateProblemBecomesMainLine(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	pos := NewPositionService(logger)
+	// 1 手詰（後手玉 5一・先手歩 5三・攻方の持駒は金）。
+	if _, err := pos.Load("4k4/9/4P4/9/9/9/9/9/9"); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if _, err := pos.SetMateProblem(true); err != nil {
+		t.Fatalf("SetMateProblem: %v", err)
+	}
+	if _, err := pos.SetHand(4, true, 1); err != nil { // 4=金 を攻方の駒台へ
+		t.Fatalf("SetHand: %v", err)
+	}
+	study := NewStudyService(logger, pos)
+	if _, err := study.Adopt(); err != nil {
+		t.Fatalf("Adopt: %v", err)
+	}
+
+	got, err := study.AddLine("", []string{"G*5b"})
+	if err != nil {
+		t.Fatalf("AddLine: %v", err)
+	}
+	if got.Added != 1 {
+		t.Fatalf("足した手数 = %d, want 1", got.Added)
+	}
+	node := func(st StudyState, id int) (int, bool) {
+		for _, n := range st.Nodes {
+			if n.ID == id {
+				return n.Depth, n.Main
+			}
+		}
+		return -1, false
+	}
+	depth, main := node(got.State, got.FirstID)
+	if depth != 0 || !main {
+		t.Errorf("詰み手順が本線になっていません: depth=%d main=%v", depth, main)
+	}
+
+	// 2 本目（別の詰み＝余詰）は枝のまま。
+	other, err := study.AddLine("", []string{"G*4b"})
+	if err != nil {
+		t.Fatalf("AddLine(2 本目): %v", err)
+	}
+	if d, m := node(other.State, other.FirstID); m || d == 0 {
+		t.Errorf("2 本目が本線を押しのけました: depth=%d main=%v", d, m)
+	}
+	// ⚠️ **1 本目は本線のまま。**
+	if d, m := node(other.State, got.FirstID); d != 0 || !m {
+		t.Errorf("1 本目が本線から外れました: depth=%d main=%v", d, m)
+	}
+}
+
+// ⚠️ **詰将棋エンジンでは MultiPV も接続の指紋に入ること**（2026-09-12 に実測）。
+//
+// **KomoringHeights は `isready` の前に送らないと MultiPV が効かない**
+// （後から `setoption` を送っても無視され、候補は 1 本のまま）。指紋に入っていないと
+// **本数を変えても繋ぎ直さない**ので、画面で変えても何も起きない。
+// ⚠️ **通常のエンジンでは今までどおり外す**（本数を変えるたびに評価関数を読み直す
+// ことになる）。
+func TestEngineKeyMultiPV(t *testing.T) {
+	one := map[string]string{"MultiPV": "1", "Threads": "4"}
+	three := map[string]string{"MultiPV": "3", "Threads": "4"}
+
+	normal := ikkyoku.EngineEntry{ID: "a", Path: "a.exe", Options: one}
+	normal3 := ikkyoku.EngineEntry{ID: "a", Path: "a.exe", Options: three}
+	if engineKey(normal) != engineKey(normal3) {
+		t.Error("通常のエンジンで MultiPV が指紋に入っています（繋ぎ直しが起きる）")
+	}
+
+	mate := ikkyoku.EngineEntry{ID: "m", Path: "k.exe", Options: one, Mate: true}
+	mate3 := ikkyoku.EngineEntry{ID: "m", Path: "k.exe", Options: three, Mate: true}
+	if engineKey(mate) == engineKey(mate3) {
+		t.Error("詰将棋エンジンで MultiPV が指紋に入っていません（変えても効かない）")
+	}
+}

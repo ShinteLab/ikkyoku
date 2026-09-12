@@ -1498,12 +1498,44 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
     try {
       const r = await AnalyzeService.SolveMate(Number(analyzeSeconds.value) || 0);
       if (r.kind === "mate") {
-        const text = (r.text ?? []).join(" ") || (r.moves ?? []).join(" ");
-        analyzeStatus.textContent = `詰みました（${r.moves?.length ?? 0}手）: ${text}（${r.engine}）`;
-        if (r.moves?.length) {
-          // ⚠️ **出したエンジンを渡す**（手順リストで誰が言った手かの色になる）。
-          onState(await StudyService.AddLine(r.engineId ?? "", r.moves).then((l) => l.state));
+        // ⚠️ **いきなり手順に足さない**（2026-09-12 にそう直した）。
+        // **解析の候補手と同じ枠に出して、足すのは人が選んでから**（右クリック）。
+        // 詰将棋では「他の詰み」＝**余詰**で、1 つでもあれば作品としては不完全 ——
+        // **並べて見せることに意味がある**（`MultiPV`。エンジンの登録で本数を変える）。
+        // ⚠️ **イベントのペイロードの型は手書き**（bindings に出ないもの）なので、
+        // **戻り値の型からここで詰め替える**（bindings 側は配列が null になりうる）。
+        // 揃えているのは意味があってのことで、**候補手の描画を 2 つ持たない**ため。
+        const lines: AnalyzeLine[] = (r.progress?.lines ?? []).map((l) => ({
+          rank: l.rank,
+          depth: l.depth,
+          score: l.score,
+          moves: l.moves ?? [],
+          text: l.text ?? [],
+        }));
+        buildEngineCards([
+          {
+            id: r.engineId ?? "",
+            label: r.engine ?? "詰み探索",
+            name: r.engine ?? "",
+            custom: true,
+            multiPv: Math.max(lines.length, 1),
+          },
+        ]);
+        const card = engineCards.get(r.engineId ?? "");
+        if (card) {
+          card.pending = false;
+          showAnalyzeProgress(card, {
+            depth: r.progress?.depth ?? 0,
+            nodes: r.progress?.nodes ?? 0,
+            elapsedMs: r.progress?.elapsedMs ?? 0,
+            lines,
+          });
         }
+        const text = (r.text ?? []).join(" ") || (r.moves ?? []).join(" ");
+        const others = lines.length > 1 ? `／ほかに${lines.length - 1}通り` : "";
+        analyzeStatus.textContent =
+          `詰みました（${r.moves?.length ?? 0}手${others}）: ${text}` +
+          `（${r.engine}）。右クリックで手順に足せます`;
       } else if (r.kind === "already") {
         // ⚠️ **手順の無い詰み＝既に詰んでいる**（足すものが無い）。
         analyzeStatus.textContent = `この局面は既に詰んでいます（${r.engine}）`;

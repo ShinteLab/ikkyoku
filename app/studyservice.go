@@ -623,6 +623,15 @@ func (s *StudyService) AddLine(engineID string, moves []string) (line AddLine, e
 		return AddLine{State: s.state()}, fmt.Errorf("読み筋がありません")
 	}
 	first, added, note := s.study.AddLine(moves, engineID)
+	// ⚠️ **詰将棋では読み筋が本線**（2026-09-12）。詰将棋に「本譜」は無く、
+	// **足した手順そのものが答え**なので、1 段下げて畳んだ形で置くと読みづらい。
+	//
+	// ⚠️ **エラーは握る。** `Promote` は**もう本線があるなら断る**ので、
+	// 2 本目以降（＝余詰）は枝のまま残る —— **それが正しい姿**
+	// （先に足したほうを黙って押しのけない）。
+	if first != 0 && s.study.Root().MateProblem {
+		_ = s.study.Promote(first)
+	}
 	return AddLine{State: s.changed(), FirstID: first, Added: added, Note: note}, nil
 }
 
