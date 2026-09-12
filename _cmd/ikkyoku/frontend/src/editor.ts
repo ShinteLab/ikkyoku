@@ -349,32 +349,34 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   // （置きたい駒は「足りない駒」として必ずここに出るので、見本は要らない）。
   const missing = document.createElement("div");
   missing.className = "missing-zone";
+  missing.innerHTML =
+    `<span class="hand-zone-label">足りない駒</span><div class="missing-chips"></div>`;
+  handSlots.missing.appendChild(missing);
+
+  // 「手合割の対局か」のチェック（2026-09-12）。**変えるのはこの枠の意味そのもの**
+  // （「まだ持ち主が決まっていない駒」⇄「この対局で使わない駒」）なので、
+  // **変わるものの隣**に置く。盤の下の目線の行に置いてみたが、**何が変わるのか
+  // 分からない**うえ、目線（撮った画像の話）と同じ種類の設定に見えた。
   //
-  // ⚠️ **「手合割の対局か」のチェックはこの枠の中**（2026-09-12）。**変えるのは
-  // この枠の意味そのもの**（「まだ持ち主が決まっていない駒」⇄「この対局で
-  // 使わない駒」）なので、**変わるものの隣に置く**。盤の下の目線の行に置いて
-  // みたが、**何が変わるのか分からない**うえ、目線（撮った画像の話）と
-  // 同じ種類の設定に見えた。
+  // ⚠️ **枠の外（下）に置くこと**（2026-09-12）。中に入れると**歩のチップと
+  // 隣り合う**ので、駒を掴むつもりで押し間違える。外に出せば枠と駒台の
+  // 隙間に入り、**どちらの操作対象とも重ならない**。
   //
   // ⚠️ **言葉は「手合割」**（「駒台を逆算しない」ではない）。逆算はこちらの都合で、
   // ユーザが知っているのは**駒を落として指す対局かどうか**のほう。
-  missing.innerHTML =
-    `<span class="hand-zone-label">足りない駒</span>` +
-    `<label class="handicap-check">` +
-    `<input id="edit-handicap" type="checkbox" />手合割` +
-    `</label>` +
-    `<div class="missing-chips"></div>`;
-  handSlots.missing.appendChild(missing);
+  const handicapLabel = document.createElement("label");
+  handicapLabel.className = "handicap-check";
+  handicapLabel.innerHTML = `<input id="edit-handicap" type="checkbox" />手合割`;
+  handSlots.missing.appendChild(handicapLabel);
   const missingChips = missing.querySelector<HTMLDivElement>(".missing-chips")!;
   // ⚠️ **見出しは手合割かで替わる**（2026-09-12）。手合割では、ここに出ている数の
   // 意味が「まだ持ち主が決まっていない」から**「この対局で使わない」**に変わるので、
   // **文字を替えないと嘘になる。**
   const missingLabel = missing.querySelector<HTMLSpanElement>(".hand-zone-label")!;
-  const handicapCheck = missing.querySelector<HTMLInputElement>("#edit-handicap")!;
+  const handicapCheck = handicapLabel.querySelector<HTMLInputElement>("#edit-handicap")!;
   // ⚠️ **説明文の中の枠の名前も一緒に替えること**（下の操作の説明）。
   // 片方だけ替えると、画面に無い名前で操作を説明することになる。
   const stockName = confirmHost.querySelector<HTMLElement>("#edit-stock-name")!;
-  const handicapLabel = missing.querySelector<HTMLLabelElement>(".handicap-check")!;
   handicapLabel.title =
     "駒落ちのように、はじめから盤に無い駒がある対局。" +
     "チェックすると「足りない駒」を「使わない駒」として扱い、局面を確定できます" +

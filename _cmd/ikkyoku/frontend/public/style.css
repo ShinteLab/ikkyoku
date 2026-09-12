@@ -4320,21 +4320,30 @@ html.is-graph #app {
   align-items: center;
   gap: 4px;
   width: 104px;
-  height: 100%;
+  /* ⚠️ **`height: 100%` にしないこと**（2026-09-12）。下に「手合割」のチェックが
+     並んだので、枠が親の高さいっぱいを取ると**チェックのぶんだけはみ出す**。
+     余りを取る指定にして、駒の列（`.missing-chips`）のほうを縮める。 */
+  flex: 1 1 auto;
+  min-height: 0;
   padding: 4px;
   border: 1px dashed #6a5a33;
   border-radius: 6px;
 }
 
-/* 「手合割」のチェック（2026-09-12）。**「足りない駒」の枠の中**に置く。
+/* 「手合割」のチェック（2026-09-12）。**「足りない駒」の枠と手前の駒台の間**
+   （`#missing-slot` の中、枠の下）。
    ⚠️ **この枠の意味そのものを変える**（足りない駒 ⇄ 使わない駒）ので、
    変わるものの隣に置くこと。盤の下の目線の行に出すと、何が変わるのか分からない。
-   ⚠️ **枠は 104px しかない**ので、文字は「手合割」の 4 文字まで。説明は title。 */
+   ⚠️ **枠の中には入れない** —— 歩のチップと隣り合うので、駒を掴むつもりで
+   押し間違える。枠と駒台の隙間なら、どちらの操作対象とも重ならない。
+   ⚠️ **幅は 104px しかない**ので、文字は「手合割」の 4 文字まで。説明は title。 */
 .handicap-check {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 4px;
   flex: 0 0 auto;
+  padding: 2px 0;
   font-size: 11px;
   color: #9aa0ac;
   cursor: pointer;
