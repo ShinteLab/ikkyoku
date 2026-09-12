@@ -75,6 +75,11 @@ const cellLabel = (rank: number, file: number) => `${9 - file}${RANK_KANJI[rank]
 export interface EditorHandle {
   // load は認識結果（盤面部分の SFEN）を読み込んで訂正を始める。撮るたびに呼ぶ。
   load(boardSFEN: string): Promise<void>;
+  // loadHandicap は**手合割の初期局面**から並べ始める（独自ハンデ。2026-09-12）。
+  //
+  // ⚠️ **画像の無い局面が訂正タブに入る唯一の口。** 撮った画像・認識の情報・
+  // 学習への送信は**呼び出し側が片付けること**（こちらは画像を知らない）。
+  loadHandicap(handicap: string): Promise<void>;
   // clear は局面が無い状態に戻す（撮る前の表示）。
   clear(): void;
   // relayout は盤に重ねるグリッドを置き直す。
@@ -1240,6 +1245,15 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   return {
     async load(boardSFEN: string) {
       await apply(() => PositionService.Load(boardSFEN));
+      syncLoaded();
+    },
+    // 手合割の初期局面から並べ始める（入力タブの「訂正タブで調整」。2026-09-12）。
+    //
+    // ⚠️ **撮った画像の後片付けは呼び出し側**（`mainscreen.ts`）。こちらには
+    // 画像に関する状態が無く（盤の左の画像も認識の情報も学習への送信も
+    // あちらが持っている）、**残っていると別の画像のラベルとして送れてしまう。**
+    async loadHandicap(handicap: string) {
+      await apply(() => PositionService.LoadHandicap(handicap));
       syncLoaded();
     },
     clear() {

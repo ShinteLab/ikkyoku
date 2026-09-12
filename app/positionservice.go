@@ -29,6 +29,12 @@ type PositionService struct {
 	// origin は読み込んだときの盤面 SFEN。**Reset で戻す先**であり、
 	// 「認識結果から変えたか」の判定にも使う。
 	origin string
+	// originHandsFixed は**戻す先が手合割の局面か**（2026-09-12）。
+	//
+	// ⚠️ **盤面 SFEN だけでは戻せない。** `origin` から作り直すと
+	// `FromBoardSFEN`（＝駒台を逆算する）に戻ってしまい、**手合割から並べ始めた
+	// 局面が、訂正を捨てた拍子に確定できなくなる**（落とした駒が未決に戻る）。
+	originHandsFixed bool
 	// nearWhite は**撮った画像が後手目線だった**か（＝手前に写っているのが後手）。
 	//
 	// ⚠️ **表示視点（盤の絵を裏から眺める `flip` 属性）とは別物。** あちらは
@@ -130,6 +136,8 @@ func (s *PositionService) Load(boardSFEN string) (EditState, error) {
 	s.mu.Lock()
 	s.pos = p
 	s.origin = p.BoardSFEN()
+	// **撮った局面は駒台を逆算する**（訂正の拠り所）。戻す先もそちら。
+	s.originHandsFixed = false
 	st := s.state()
 	s.mu.Unlock()
 
@@ -141,6 +149,40 @@ func (s *PositionService) Load(boardSFEN string) (EditState, error) {
 	return st, nil
 }
 
+// LoadHandicap は**手合割の初期局面から訂正を始める**（入力タブの「駒を落として
+// 並べる」。2026-09-12）。
+//
+// **独自ハンデのための入口。** 手合割のテンプレートは `core/kifu` が持っているが、
+// 「飛車と左香を落として歩を 2 枚抜く」のような取り決めは表に無い。**近い手合割から
+// 始めて訂正タブで足し引きする**のが、表を増やさずに任意のハンデを作る道になる。
+//
+// ⚠️ **画像は無い。** 撮った 1 枚から始める `Load` と違い、こちらには元画像が無いので、
+// **呼び出し側（フロント）は撮った画像・認識の情報・学習への送信を片付けること**
+// （前のキャプチャのものが残っていると、**別の画像のラベルとして訂正結果を送れて
+// しまう**）。⚠️ **学習に送れるのは撮った局面だけ**という線引きは崩さない。
+//
+// ⚠️ **目線は先手目線に戻す。** 画像が無いのだから「撮った画像がどちら目線か」は
+// 意味を持たない（残っていると、解析へ渡すときに勝手に 180 度回る）。
+//
+// ⚠️ **`HandsFixed` が立った状態で始まる**（`position.NewPosition`）。駒落ちは
+// 盤にも駒台にも無い駒がある局面なので、逆算を始めると未決が消えず確定できない。
+// 画面の「手合割」のチェックが**最初から入っている**状態になる。
+func (s *PositionService) LoadHandicap(handicap string) (EditState, error) {
+	p, err := position.NewPosition(handicap)
+	if err != nil {
+		return s.State(), err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pos = p
+	// **戻る先はこの初期局面**（「訂正を捨てて戻す」で並べ直せる）。
+	s.origin = p.BoardSFEN()
+	s.originHandsFixed = true
+	s.nearWhite = false
+	return s.state(), nil
+}
+
 // State は今の状態を返す（何も変えない）。フロントの初期表示用。
 func (s *PositionService) State() EditState {
 	s.mu.Lock()
@@ -148,15 +190,28 @@ func (s *PositionService) State() EditState {
 	return s.state()
 }
 
-// Reset は訂正を捨てて認識結果に戻す。
+// Reset は訂正を捨てて読み込んだときの局面に戻す。
+//
+// ⚠️ **手合割から並べ始めた局面は手合割のまま戻す**（2026-09-12）。`Load` は
+// 盤面 SFEN から駒台を逆算する（＝撮った局面の読み方）ので、そのままだと
+// **落とした駒が未決に戻り、捨てた拍子に確定できなくなる**。
 func (s *PositionService) Reset() (EditState, error) {
 	s.mu.Lock()
-	origin := s.origin
+	origin, fixed := s.origin, s.originHandsFixed
 	s.mu.Unlock()
 	if origin == "" {
 		return s.State(), nil
 	}
-	return s.Load(origin)
+	st, err := s.Load(origin)
+	if err != nil || !fixed {
+		return st, err
+	}
+	// ⚠️ **戻す先の印も立て直すこと。** `Load` が「撮った局面」として false に
+	// するので、ここで戻さないと**2 回目の Reset で手合割が外れる。**
+	s.mu.Lock()
+	s.originHandsFixed = true
+	s.mu.Unlock()
+	return s.SetHandsFixed(true)
 }
 
 // Move は盤の中で駒を動かす（盤 → 盤のドラッグ＆ドロップ）。

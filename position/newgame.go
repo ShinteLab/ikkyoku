@@ -35,6 +35,26 @@ const Hirate = kifu.HirateHandicap
 // ⚠️ **駒落ちは上手（後手）が初手を指す**ので、返る局面の手番は後手番になる
 // （`w` + 手数 1 は正当な局面）。手番を先手に直さないこと。
 func NewGame(handicap string) (*Study, error) {
+	root, err := NewPosition(handicap)
+	if err != nil {
+		return nil, err
+	}
+	return NewStudy(root), nil
+}
+
+// NewPosition は手合割の初期局面そのものを返す（**手順を持たない**）。
+//
+// **訂正タブへ渡す入口**（独自ハンデ。テンプレートの駒落ちから駒を足し引きして
+// 作る）。`NewGame` との違いは `Study` に包むかどうかだけで、局面は同じもの。
+//
+// ⚠️ **`HandsFixed` が立った局面が返る**（`FromFullSFEN` が立てる）。
+// 駒落ちは**盤にも駒台にも無い駒がある局面**なので、訂正タブがここから逆算を
+// 始めると未決が消えず確定できない。**訂正タブ側で外さないこと**
+// （画面の「手合割」のチェックがそのまま入った状態で始まる）。
+//
+// ⚠️ **手番は上手（後手）**（駒落ちの初手は上手）。平手なら先手番。
+// **どちらも初期局面が持っているとおり**で、ここで決め直さない。
+func NewPosition(handicap string) (*Position, error) {
 	name := strings.TrimSpace(handicap)
 	if name == "" {
 		name = Hirate
@@ -46,9 +66,9 @@ func NewGame(handicap string) (*Study, error) {
 	// ⚠️ **FromFullSFEN で読む**（FromBoardSFEN ではない）。持ち駒まで書いてある
 	// 局面なので、駒台は書いてあるとおりに読む（`HandsFixed`）。駒落ちは盤にも
 	// 駒台にも無い駒がある局面なので、逆算すると未決が消えず SFEN が組み上がらない。
-	root, err := FromFullSFEN(start)
+	p, err := FromFullSFEN(start)
 	if err != nil {
 		return nil, fmt.Errorf("ikkyoku/position: 初期局面が読めません(%s): %w", name, err)
 	}
-	return NewStudy(root), nil
+	return p, nil
 }

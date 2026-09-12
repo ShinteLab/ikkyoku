@@ -414,6 +414,8 @@ export function mountMainScreen(root: HTMLElement): void {
             盤の駒を押せばそのまま手を進められます。
             <strong>あなたの手番に選んだ側が手前に来ます</strong>
             （盤の向きが変わるだけで、局面は変わりません）。
+            表に無いハンデは<strong>「訂正タブで調整」</strong>から
+            （初期局面を訂正タブに出すので、駒を足し引きできます）。
           </span>
           <div class="setting-fields">
             <span class="field-label">手合割</span>
@@ -435,6 +437,8 @@ export function mountMainScreen(root: HTMLElement): void {
                       data-side="white">後手</button>
             </div>
             <button id="newgame-start" class="ghost-btn is-primary" type="button">対局を始める</button>
+            <button id="newgame-edit" class="ghost-btn" type="button"
+                    title="選んだ手合割の初期局面を訂正タブに出します。駒を足し引きすれば、表に無い独自のハンデも作れます（そのあと「この局面を解析する」で解析タブへ）">訂正タブで調整</button>
           </div>
           <p id="newgame-status" class="status" role="status" aria-live="polite" hidden></p>
         </div>
@@ -3672,6 +3676,7 @@ ${st.turnLabel}${n}`;
   // 対局モードを入れる段になったら、この選択がそのまま「自分の側」になる。
   const newgameHandicap = root.querySelector<HTMLSelectElement>("#newgame-handicap")!;
   const newgameStart = root.querySelector<HTMLButtonElement>("#newgame-start")!;
+  const newgameEdit = root.querySelector<HTMLButtonElement>("#newgame-edit")!;
   const newgameStatus = root.querySelector<HTMLParagraphElement>("#newgame-status")!;
   const newgameSides = Array.from(
     root.querySelectorAll<HTMLButtonElement>("#panel-input .turn-group .turn-btn"),
@@ -3702,6 +3707,78 @@ ${st.turnLabel}${n}`;
   };
   newgameHandicap.addEventListener("change", applyNewgameLabels);
   applyNewgameLabels();
+  // 「訂正タブで調整」（2026-09-12）。**独自ハンデの入口。**
+  //
+  // ⚠️ **4 つめの入力の口だが、行き先だけが違う**（手合割 → **訂正タブ**）。
+  // 表に無いハンデ（「飛車と左香を落として歩を 2 枚抜く」など）は
+  // `core/kifu` の表には無いので、**近い手合割から始めて駒を足し引きする**。
+  //
+  // ⚠️ **撮った画像に紐づくものを全部片付けること。** 訂正タブは元々
+  // 「撮った 1 枚を直す面」で、**画像・認識の情報・学習への送信**がぶら下がって
+  // いる。残したまま別の局面を入れると、**別の画像のラベルとして訂正結果を
+  // 送れてしまう**（学習データが壊れる）。
+  //
+  // ⚠️ **確認を挟むこと** —— 訂正中の局面を捨てる操作なので、
+  // 撮ったものが載っているときは黙って上書きしない。
+  // ⚠️ **`window.confirm` は使わない**（`popup.ts` の先頭の理由。押した場所で聞く）。
+  // ⚠️ **初期フォーカスは「やめる」**（捨てる操作なので、Enter の連打で消えない）。
+  const startHandicapEdit = () => {
+    void (async () => {
+      newgameEdit.disabled = true;
+      newgameStatus.hidden = false;
+      newgameStatus.classList.remove("is-error");
+      newgameStatus.textContent = "並べています…";
+      try {
+        await editor.loadHandicap(newgameHandicap.value);
+        // 撮った画像に紐づくものを片付ける（上の ⚠️）。**画像が無い局面なので、
+        // 学習には送れない**（`syncTrain` が `shotFullPath` と領域を見ている）。
+        showPath("");
+        shot.hidden = true;
+        lastRegion = null;
+        hasShot = false;
+        showConfidence(0, "");
+        showRegion(null);
+        showPredictor(null);
+        showHand({});
+        showWarnings([]);
+        drawOverlay(null);
+        markDebug("");
+        trainSendStatus.textContent = "";
+        trainSendStatus.classList.remove("is-error");
+        syncCaptureRef();
+        syncTrain();
+        selectTab(editTab);
+        newgameStatus.textContent =
+          `${newgameHandicap.value}の初期局面を訂正タブに出しました。駒を足し引きしてから「この局面を解析する」を押してください`;
+      } catch (err) {
+        newgameStatus.textContent =
+          `並べられませんでした: ${String(err instanceof Error ? err.message : err)}`;
+        newgameStatus.classList.add("is-error");
+      } finally {
+        newgameEdit.disabled = false;
+      }
+    })();
+  };
+
+  newgameEdit.addEventListener("click", (e) => {
+    if (!editLoaded) {
+      startHandicapEdit();
+      return;
+    }
+    openPopup(e.clientX, e.clientY, {
+      label: "訂正タブの局面を置き換え",
+      focus: 1,
+      items: [
+        {
+          label: `訂正タブを「${newgameHandicap.value}」で置き換える`,
+          kind: "danger",
+          onPick: startHandicapEdit,
+        },
+        { label: "やめる", onPick: () => {} },
+      ],
+    });
+  });
+
   newgameStart.addEventListener("click", () => {
     void (async () => {
       newgameStart.disabled = true;

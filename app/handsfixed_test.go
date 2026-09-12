@@ -130,3 +130,74 @@ func TestSetHandsFixedWithoutPosition(t *testing.T) {
 		t.Fatal("局面が無いのに通りました")
 	}
 }
+
+// 手合割の初期局面から訂正を始められること（入力タブ →「駒を落として並べる」）。
+//
+// ⚠️ **最初から手合割として始まること**が要点。逆算から始めると、落とした駒が
+// 未決として出てきて**そのままでは確定できない**（＝独自ハンデを作る入口として
+// 使えない）。手番が上手（後手）であることも一緒に見ている。
+func TestLoadHandicapStartsAsHandicap(t *testing.T) {
+	s := NewPositionService(slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	st, err := s.LoadHandicap("二枚落ち")
+	if err != nil {
+		t.Fatalf("LoadHandicap: %v", err)
+	}
+	if !st.HandsFixed {
+		t.Fatal("手合割として始まっていません（逆算したままでは確定できない）")
+	}
+	if st.BoardSFEN != nimaiBoard {
+		t.Errorf("BoardSFEN = %q, want %q", st.BoardSFEN, nimaiBoard)
+	}
+	if st.Turn != int(position.TurnWhite) {
+		t.Errorf("Turn = %d, want %d(上手＝後手から)", st.Turn, position.TurnWhite)
+	}
+	// **画像が無いので目線は先手目線**（残っていると解析へ渡すときに勝手に回る）。
+	if st.NearWhite {
+		t.Error("目線が後手のままです")
+	}
+	// **そのまま確定できること**（訂正するものが無ければ、すぐ解析へ渡せる）。
+	if st.SFEN == "" {
+		t.Error("手合割の初期局面が確定できません")
+	}
+}
+
+// ⚠️ **撮った局面の目線を、手合割から並べ直しても引きずらないこと。**
+func TestLoadHandicapClearsViewpoint(t *testing.T) {
+	s := edited(t, nimaiBoard)
+	if _, err := s.SetViewpoint(true); err != nil {
+		t.Fatalf("SetViewpoint: %v", err)
+	}
+	st, err := s.LoadHandicap("平手")
+	if err != nil {
+		t.Fatalf("LoadHandicap: %v", err)
+	}
+	if st.NearWhite {
+		t.Error("前の目線が残っています")
+	}
+}
+
+// ⚠️ **「訂正を捨てて戻す」も手合割のまま戻すこと**（何度でも）。
+// 盤面 SFEN から作り直すと駒台の逆算が復活し、**捨てた拍子に確定できなくなる。**
+func TestResetKeepsHandicap(t *testing.T) {
+	s := NewPositionService(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if _, err := s.LoadHandicap("二枚落ち"); err != nil {
+		t.Fatalf("LoadHandicap: %v", err)
+	}
+	// 独自ハンデのつもりで 1 枚外す（9 筋の香）。
+	if _, err := s.Remove(0, 0); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	for i := 1; i <= 2; i++ { // 2 回目でも外れないこと
+		st, err := s.Reset()
+		if err != nil {
+			t.Fatalf("Reset(%d 回目): %v", i, err)
+		}
+		if !st.HandsFixed {
+			t.Fatalf("%d 回目の Reset で手合割が外れました", i)
+		}
+		if st.BoardSFEN != nimaiBoard {
+			t.Errorf("%d 回目の Reset: BoardSFEN = %q, want %q", i, st.BoardSFEN, nimaiBoard)
+		}
+	}
+}
