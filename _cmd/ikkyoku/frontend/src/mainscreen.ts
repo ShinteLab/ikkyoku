@@ -5065,12 +5065,14 @@ ${st.turnLabel}${n}`;
           <input class="engine-enabled" type="checkbox" />
           <span>解析に使う</span>
         </label>
-        <!-- 詰将棋エンジン（2026-09-12）。⚠️ **入れると通常の解析からは外れる。**
-             詰将棋エンジンは通常の go に答えないことがあり（KomoringHeights は
-             bestmove resign を返す。実測）、混ぜると評価値の代わりに投了が並ぶ。 -->
-        <label class="engine-use" title="詰将棋を go mate で解かせる相手にします（通常の解析には使わなくなります）">
+        <!-- 詰み探索に使うか（2026-09-12）。⚠️ **「解析に使う」とは独立した軸**で、
+             両方入れれば両方に使う。**片方がもう片方を外さないこと** ——
+             チェックを入れたのに使われないのは、画面から理由が読めない。
+             （詰将棋エンジンは通常の go に答えないことがあるが、それを承知で
+             使うかどうかを決めるのは人。こちらは title で説明するだけ。） -->
+        <label class="engine-use" title="詰みを go mate で解かせる相手にします。「解析に使う」とは別なので、両方入れれば両方に使います（詰将棋エンジンは通常の解析に答えないことがあります）">
           <input class="engine-mate" type="checkbox" />
-          <span>詰将棋</span>
+          <span>詰み</span>
         </label>
         <input class="engine-name" type="text" spellcheck="false" />
         <input class="engine-path" type="text" spellcheck="false"
@@ -5097,7 +5099,10 @@ ${st.turnLabel}${n}`;
       path.value = e.path;
       // **同梱かどうかの判定は Go 側の値を使う**（フロントで path === "" を書かない）。
       const opts = e.optionCount > 0 ? ` / setoption ${e.optionCount} 件` : "";
-      const kind = e.mate ? "詰将棋エンジン（通常の解析には使いません）" : e.builtin ? "同梱のエンジン" : "";
+      // ⚠️ **「詰み」は「解析に使う」を打ち消さない**ので、並べて出すだけ。
+      const kind = [e.builtin ? "同梱のエンジン" : "", e.mate ? "詰み探索に使う" : ""]
+        .filter(Boolean)
+        .join(" / ");
       engineRowNote(row).textContent = kind + opts;
       row.classList.toggle("is-off", !e.enabled);
 

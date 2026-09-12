@@ -8,34 +8,39 @@ import (
 	ikkyoku "github.com/ShinteLab/ikkyoku"
 )
 
-// 詰将棋エンジンは**通常の解析からは外れる**こと（2026-09-12）。
+// ⚠️ **「解析に使う」と「詰将棋」は独立した軸**（2026-09-12）。
 //
-// ⚠️ **混ぜると評価値の代わりに「投了」が並ぶ** —— 詰将棋エンジンは通常の `go` に
-// 答えないことがある（KomoringHeights は `bestmove resign` を返す。実測）。
-func TestMateEngineIsSeparateFromAnalysis(t *testing.T) {
+// **片方がもう片方を外さないこと。** 一度「詰将棋の印が付いた登録は解析から外す」と
+// していたが、**チェックを入れたのに使われない**のは画面から理由が読めない。
+// どう使うかを決めるのは人で、こちらは説明するだけにする。
+func TestEngineAxesAreIndependent(t *testing.T) {
 	cfg := ikkyoku.Config{Engines: []ikkyoku.EngineEntry{
 		{ID: "a", Path: "a.exe", Enabled: true},
-		{ID: "m", Path: "komoring.exe", Enabled: true, Mate: true},
-		{ID: "b", Path: "b.exe", Enabled: false},
+		{ID: "both", Path: "komoring.exe", Enabled: true, Mate: true},
+		{ID: "off", Path: "b.exe", Enabled: false},
 	}}
 
 	got := cfg.EnabledEngines()
-	if len(got) != 1 || got[0].ID != "a" {
-		t.Errorf("解析に使うエンジン = %+v, want a だけ", got)
+	if len(got) != 2 || got[0].ID != "a" || got[1].ID != "both" {
+		t.Errorf("解析に使うエンジン = %+v, want a と both", got)
+	}
+	mate, ok := cfg.MateEngine()
+	if !ok || mate.ID != "both" {
+		t.Errorf("詰将棋エンジン = %+v (ok=%v), want both", mate, ok)
+	}
+}
+
+// ⚠️ **「詰将棋にだけ使う」が成り立つこと**（解析には使わない設定が一番ありふれた形）。
+func TestMateEngineWithoutAnalysis(t *testing.T) {
+	cfg := ikkyoku.Config{Engines: []ikkyoku.EngineEntry{
+		{ID: "m", Path: "komoring.exe", Enabled: false, Mate: true},
+	}}
+	if got := cfg.EnabledEngines(); len(got) != 0 {
+		t.Errorf("解析に使うエンジン = %+v, want 無し", got)
 	}
 	mate, ok := cfg.MateEngine()
 	if !ok || mate.ID != "m" {
 		t.Errorf("詰将棋エンジン = %+v (ok=%v), want m", mate, ok)
-	}
-}
-
-// ⚠️ **「解析に使う」を外した詰将棋エンジンは拾わないこと**（一覧で外した以上使わない）。
-func TestMateEngineSkipsDisabled(t *testing.T) {
-	cfg := ikkyoku.Config{Engines: []ikkyoku.EngineEntry{
-		{ID: "m", Path: "komoring.exe", Enabled: false, Mate: true},
-	}}
-	if _, ok := cfg.MateEngine(); ok {
-		t.Error("外してある詰将棋エンジンを拾いました")
 	}
 }
 
