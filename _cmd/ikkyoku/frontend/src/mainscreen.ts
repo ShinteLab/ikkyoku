@@ -388,15 +388,25 @@ export function mountMainScreen(root: HTMLElement): void {
              がそれを引く）。フロントに SFEN を書き写すと、棋譜から読んだ平手と
              新規で作った平手が食い違いうる。
 
-             ⚠️ **手合割は select にしてある。** 今出しているのは平手だけだが、
-             駒落ちは Go 側（core/kifu）が既に全部持っているので、**option を
-             足すだけで通る**。詰将棋は初期局面が無い（人が並べる）ので別の口になる
-             —— そちらは訂正タブ側の話で、ここには並ばない。
+             ⚠️ **手合割の値は core/kifu が読める表記そのまま。** ここは表を
+             持っているのではなく、向こうの表の名前を **value に書き写している
+             だけ**（StartSFEN が知らない名前はエラーになるので、打ち間違えれば
+             押した瞬間に分かる）。**盤面は 1 文字もここに書かない。**
+             ⚠️ **出しているのは代表的な 6 つだけ**（2026-09-12）。core/kifu は
+             右香・飛香・三/五/八/十枚落ちも持っているが、**まず使うものだけ並べる**。
+             詰将棋は初期局面が無い（人が並べる）ので別の口になる —— そちらは
+             訂正タブ側の話で、ここには並ばない。
 
              ⚠️ **「あなたの手番」が今決めているのは視点（画面の向き）だけ。**
-             平手の初期局面はどちらを持っても同じなので、局面には効かない。
+             初期局面は手合割で決まっていて、どちらを持っても同じものが出る。
              対局モード（片側を人、もう片側をエンジンが指す）を入れる段になったら、
-             この選択がそのまま「自分の側」になる。 -->
+             この選択がそのまま「自分の側」になる。
+
+             ⚠️ **駒落ちではラベルを「下手／上手」に替える**（2026-09-12）。
+             側そのものは平手と同じ（下手＝先手＝b、上手＝後手＝w）で、
+             **呼び名だけが替わる**。⚠️ **上手が「先手」になるのではない** ——
+             駒落ちで上手が指すのは**初手**であって、SFEN 上は後手のまま
+             （初期局面が w から始まる）。ここを入れ替えると盤ごとひっくり返る。 -->
         <div class="setting-group">
           <span class="setting-title" data-hint="hint-newgame">新しく対局を始める</span>
           <span id="hint-newgame" class="setting-note is-hint">
@@ -407,8 +417,15 @@ export function mountMainScreen(root: HTMLElement): void {
           </span>
           <div class="setting-fields">
             <span class="field-label">手合割</span>
-            <select id="newgame-handicap" title="今は平手だけです（駒落ち・詰将棋はこれから）">
+            <select id="newgame-handicap"
+                    title="駒を落とすのは上手（後手）側です。詰将棋はこれから">
               <option value="平手" selected>平手</option>
+              <option value="香落ち">香落ち</option>
+              <option value="角落ち">角落ち</option>
+              <option value="飛車落ち">飛車落ち</option>
+              <option value="二枚落ち">二枚落ち</option>
+              <option value="四枚落ち">四枚落ち</option>
+              <option value="六枚落ち">六枚落ち</option>
             </select>
             <span class="field-label">あなたの手番</span>
             <div class="turn-group" role="group" aria-label="あなたの手番">
@@ -1817,11 +1834,18 @@ export function mountMainScreen(root: HTMLElement): void {
   // ⚠️ **Go 側は空を「先手」「後手」で埋めない**（名前が分かっているのか、
   // 既定を出しているだけなのかが区別できなくなる）。**既定の文言はここが持つ。**
   // ⚠️ **▲△ は名前があっても付ける**（名前だけではどちらか分からない）。
-  const showPlayers = (black: string, white: string) => {
-    playerNames.black.textContent = `▲${black || "先手"}`;
-    playerNames.white.textContent = `△${white || "後手"}`;
-    playerNames.black.title = black || "先手";
-    playerNames.white.title = white || "後手";
+  //
+  // ⚠️ **駒落ちでは既定を「下手／上手」にする**（2026-09-12。`StudyState.handicap`
+  // が空でなければ駒落ち）。**替わるのは名前が無いときの既定だけ**で、
+  // ▲△ も左右も側も動かさない（下手＝先手＝▲のまま）。
+  const showPlayers = (black: string, white: string, handicap: string) => {
+    const dropped = handicap !== "";
+    const blackName = black || (dropped ? "下手" : "先手");
+    const whiteName = white || (dropped ? "上手" : "後手");
+    playerNames.black.textContent = `▲${blackName}`;
+    playerNames.white.textContent = `△${whiteName}`;
+    playerNames.black.title = blackName;
+    playerNames.white.title = whiteName;
   };
 
   const winrateBar = root.querySelector<HTMLButtonElement>("#winrate-bar")!;
@@ -2065,7 +2089,7 @@ ${st.turnLabel}${n}`;
     // 落とすと**前の手番のまま光り続ける**（連続モードでは毎手ずれる）。
     showStudyTurn(loaded ? st.turn : 0);
     // ⚠️ **局面と一緒に更新する。** 根を入れ替えると対局者も変わる。
-    showPlayers(st.black ?? "", st.white ?? "");
+    showPlayers(st.black ?? "", st.white ?? "", st.handicap ?? "");
     if (!o?.fromBoard) {
       studyBoardUI.render(loaded ? st : null);
     }
@@ -3647,7 +3671,8 @@ ${st.turnLabel}${n}`;
   const newgameSides = Array.from(
     root.querySelectorAll<HTMLButtonElement>("#panel-input .turn-group .turn-btn"),
   );
-  // 既定は先手（中継の原則と同じ「手前が先手」）。
+  // 既定は先手（中継の原則と同じ「手前が先手」）。**駒落ちでは下手**で、
+  // これも既定のままでよい（下手＝先手＝`b` で、側は平手と同じ）。
   let newgameBlack = true;
   for (const b of newgameSides) {
     b.addEventListener("click", () => {
@@ -3657,6 +3682,21 @@ ${st.turnLabel}${n}`;
       }
     });
   }
+  // 駒落ちのときだけ「先手／後手」を「下手／上手」に言い替える（2026-09-12）。
+  //
+  // ⚠️ **替えるのは呼び名だけ。** `data-side` も `newgameBlack` も触らない
+  // （下手＝先手＝`b`、上手＝後手＝`w` は駒落ちでも同じ）。
+  // ⚠️ **「上手が先手」にしないこと** —— 上手が指すのは**初手**で、
+  // SFEN 上は後手のまま（駒落ちの初期局面が `w` から始まる。Go 側が持っている）。
+  const applyNewgameLabels = () => {
+    const dropped = newgameHandicap.value !== "平手";
+    for (const b of newgameSides) {
+      const black = b.dataset.side === "black";
+      b.textContent = dropped ? (black ? "下手" : "上手") : black ? "先手" : "後手";
+    }
+  };
+  newgameHandicap.addEventListener("change", applyNewgameLabels);
+  applyNewgameLabels();
   newgameStart.addEventListener("click", () => {
     void (async () => {
       newgameStart.disabled = true;

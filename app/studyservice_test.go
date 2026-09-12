@@ -360,6 +360,42 @@ func TestStudyServiceNewGame(t *testing.T) {
 	}
 }
 
+// 駒落ちで始められること（2026-09-12）。
+//
+// ⚠️ **見ているのは 3 つ。** どれが欠けても「駒落ちで始めた」ことが後から失われる:
+//
+//   - **上手（後手）が初手を指す**こと（`w` + 手数 1 は正当な局面。先手に直さない）
+//   - **落とした駒が盤に無い**こと（二枚落ちなら飛角の 2 枚）
+//   - ⚠️ **`Handicap` が残る**こと —— ここが空だと、棚に保存する段でも
+//     KIF に書き出す段でも**平手の棋譜**になり、そこから先が全部ずれる
+func TestStudyServiceNewGameHandicap(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	s := NewStudyService(logger, NewPositionService(logger))
+
+	got, err := s.NewGame("二枚落ち")
+	if err != nil {
+		t.Fatalf("NewGame(二枚落ち): %v", err)
+	}
+	st := got.State
+	if st.Turn != 2 {
+		t.Errorf("Turn = %d, want 2(後手番。駒落ちは上手が初手)", st.Turn)
+	}
+	// 上手の 1〜2 段目だけが平手と違う（2 段目が空＝飛角が落ちている）。
+	if want := "lnsgkgsnl/9/ppppppppp/"; !strings.HasPrefix(st.BoardSFEN, want) {
+		t.Errorf("BoardSFEN = %q, want %q で始まる（上手の飛角が落ちていない）",
+			st.BoardSFEN, want)
+	}
+	if st.Handicap != "二枚落ち" {
+		t.Errorf("Handicap = %q, want %q", st.Handicap, "二枚落ち")
+	}
+	// **平手は空**（画面は「空でなければ駒落ち」で分岐する）。
+	if hirate, err := s.NewGame("平手"); err != nil {
+		t.Fatalf("NewGame(平手): %v", err)
+	} else if hirate.State.Handicap != "" {
+		t.Errorf("平手の Handicap = %q, want \"\"", hirate.State.Handicap)
+	}
+}
+
 // ⚠️ **始め損ねても、それまでの局面を壊さないこと**（知らない手合割を打ったとき）。
 // 壊すと、押し間違えただけで検討が消える（棋譜の貼り間違いと同じ話）。
 func TestStudyServiceNewGameKeepsPositionOnError(t *testing.T) {

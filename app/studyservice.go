@@ -128,6 +128,15 @@ type StudyState struct {
 	// **既定の文言は表示側が持つ。**
 	Black string `json:"black"`
 	White string `json:"white"`
+	// Handicap は手合割（**平手なら空**。2026-09-12）。
+	//
+	// **駒落ちかどうかを画面が知るための 1 つの口。** 対局者名の既定を
+	// 「先手／後手」から「下手／上手」に替えるのに使う。
+	// ⚠️ **これで局面の解釈を変えないこと** —— 落ちている駒も手番も
+	// 根の SFEN が既に持っている（駒落ちの初手は上手＝後手）。
+	// ⚠️ **平手を "平手" と書いて埋めない** —— 「駒落ちか」の判定が
+	// 文字列比較 1 つで済まなくなる。
+	Handicap string `json:"handicap"`
 	// SourceURL は棋譜の取得元（**URL から読んだときだけ埋まる**。2026-08-13）。
 	//
 	// **空でなければ「再読み込み」を出す**（`ReloadKifu`）。⚠️ **フロントで
@@ -497,24 +506,48 @@ func (s *StudyService) NewGame(handicap string) (load KifuLoad, err error) {
 		return KifuLoad{State: s.State()}, err
 	}
 
+	name := strings.TrimSpace(handicap)
+	if name == "" {
+		name = position.Hirate
+	}
+
 	s.mu.Lock()
 	// **根ごと入れ替える**（Adopt / LoadKifu と同じ）。前の手順と解析結果は
 	// 別の局面の話になる。
 	s.study = study
-	// **新規対局に対局者は居ない**（名前を入れる口はまだ無い）。
-	s.game = position.Game{}
+	// **新規対局に対局者は居ないが、手合割は残す**（2026-09-12）。
+	// ⚠️ **駒落ちを捨てないこと** —— 手合割が根の SFEN にしか無いと、
+	// 棚へ保存する段でも KIF に書き出す段でも**平手の棋譜として扱われる**
+	// （落ちている駒が「初手までに消えた」ことになり、そこから先が全部ずれる）。
+	// 名前は `core/kifu` が読める表記そのまま（別名は向こうが吸収する）。
+	s.game = position.Game{Handicap: name}
 	// **取り直す先も無い。**
 	s.sourceURL = ""
 	s.evals.reset()
 	st := s.changed()
 	s.mu.Unlock()
 
-	name := strings.TrimSpace(handicap)
-	if name == "" {
-		name = position.Hirate
-	}
 	s.logger.Info("新しい対局を作りました", "handicap", name, "sfen", st.SFEN)
-	return KifuLoad{State: st, Summary: fmt.Sprintf("%sで対局を始めました", name)}, nil
+	summary := fmt.Sprintf("%sで対局を始めました", name)
+	if name != position.Hirate {
+		// ⚠️ **駒落ちは上手（後手）から指す。** 盤を見ただけでは手番が分からず、
+		// 「始めた直後なのに後手番になっている」はバグに見える。**先に言っておく。**
+		summary += "（上手＝後手から指します）"
+	}
+	return KifuLoad{State: st, Summary: summary}, nil
+}
+
+// handicapLabel は画面に出す手合割名（**平手と未設定は空**）。
+//
+// ⚠️ **平手を空にするのは意図的。** 画面側は「空でなければ駒落ち」で分岐する
+// （`StudyState.Handicap`）。ここで "平手" を返すと、表示のたびに
+// 「平手かどうか」の比較をフロントにも書くことになる。
+func handicapLabel(name string) string {
+	v := strings.TrimSpace(name)
+	if v == kifu.HirateHandicap {
+		return ""
+	}
+	return v
 }
 
 // kifuSummary は「何手読み込んだか」の 1 行を組み立てる。
@@ -981,6 +1014,7 @@ func (s *StudyService) state() StudyState {
 		LegalError: legalErr,
 		Black:      s.game.Black,
 		White:      s.game.White,
+		Handicap:   handicapLabel(s.game.Handicap),
 		SourceURL:  s.sourceURL,
 		Rev:        s.rev,
 	}
