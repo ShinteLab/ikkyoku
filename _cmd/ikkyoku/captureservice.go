@@ -7,6 +7,8 @@ import (
 	"image"
 	"image/color"
 	"image/draw"
+	_ "image/gif"  // 画像ファイルの読み込み（loadImage）
+	_ "image/jpeg" // 同上
 	"image/png"
 	"log/slog"
 	"os"
@@ -633,7 +635,21 @@ type CaptureShot struct {
 	Width     int    `json:"width"`
 	Height    int    `json:"height"`
 	Thumbnail string `json:"thumbnail"` // data:image/png;base64,... のサムネイル(等倍)
+
+	// Source はこの 1 枚がどこから来たか（`ImageSourceScreen` / `ImageSourceFile`）。
+	//
+	// ⚠️ **振る舞いを分けるためのものではない**（2026-09-12）。認識も訂正も
+	// 「画像から起こした 1 局面」に対する操作で、出どころで変わるものは無い。
+	// **変わるのは言い回しだけ** ——「撮りました」と言えないのと、
+	// **枠のシャッターの合図を出さないこと**（押していない操作に合図が出る）。
+	Source string `json:"source"`
 }
+
+// ImageSourceScreen / ImageSourceFile は 1 枚の出どころ（`CaptureShot.Source`）。
+const (
+	ImageSourceScreen = "screen"
+	ImageSourceFile   = "file"
+)
 
 // CaptureResult はフロントに返すキャプチャ結果。
 //
@@ -646,6 +662,8 @@ type CaptureResult struct {
 	Width     int    `json:"width"`
 	Height    int    `json:"height"`
 	Thumbnail string `json:"thumbnail"` // data:image/png;base64,... のサムネイル(等倍)
+	// Source は出どころ（`CaptureShot.Source` と同じ値）。
+	Source string `json:"source"`
 
 	SFEN       string         `json:"sfen"`       // 盤面部分のみ。認識できなければ空
 	Confidence float64        `json:"confidence"` // 盤面検出の信頼度(0.0〜1.0)
@@ -698,6 +716,87 @@ func (s *CaptureService) Capture() (CaptureResult, error) {
 		return CaptureResult{}, err
 	}
 
+	return s.deliver(img, path, ImageSourceScreen), nil
+}
+
+// OpenImage は画像ファイルを選んで、撮った 1 枚と同じ経路に載せる（入力タブの
+// 「画像ファイルを読み込む」）。
+//
+// ⚠️ **撮る経路と分けないこと。** 認識も訂正も「画像から起こした 1 局面」に対する
+// 操作で、どこから来た画像かで変わるものが無い（変わるのは画面に出す言い回しだけ）。
+// 分けると `capture:shot` / `capture:done` を受ける側が 2 系統になり、
+// **訂正タブへ渡すまでの約束を 2 か所で守ることになる。**
+//
+// ⚠️ **枠が出ているかは見ない**（`requireFrame` を掛けない）。あれは「どこを撮るのかが
+// 画面に見えていること」を撮る条件にする門番で、**ファイルにはその話が無い。**
+//
+// **取り消しはエラーではない。** パスが空で返るので、そのまま何もせずに返す
+// （イベントも出ないので、画面は 1 つも変わらない）。
+func (s *CaptureService) OpenImage() (CaptureResult, error) {
+	if s.app == nil {
+		return CaptureResult{}, fmt.Errorf("ダイアログを開けません")
+	}
+	dlg := s.app.Dialog.OpenFile()
+	dlg.SetTitle("盤面の画像を選ぶ")
+	dlg.CanChooseFiles(true)
+	dlg.CanChooseDirectories(false)
+	dlg.AddFilter("画像 (*.png, *.jpg, *.gif)", "*.png;*.jpg;*.jpeg;*.gif")
+	// 撮った PNG の置き場所から開く。**撮ったものを撮り直しに使う**のが一番多い
+	// （認識を試し直す・学習に回す）ので、そこが既定の入口として素直。
+	if dir, err := ikkyoku.DefaultOutDir(); err == nil {
+		dlg.SetDirectory(dir)
+	}
+	path, err := dlg.PromptForSingleSelection()
+	if err != nil {
+		return CaptureResult{}, err
+	}
+	if path == "" {
+		return CaptureResult{}, nil // 取り消し
+	}
+	return s.loadImage(path)
+}
+
+// loadImage は画像ファイルを読んで認識に掛ける（`OpenImage` の中身）。
+// **ドラッグ＆ドロップを足すときもここに合流させる**（パスを渡す口を増やすだけ）。
+//
+// ⚠️ **PNG 以外は PNG にして控えること。** この先は `Path` を「撮った PNG」として
+// 扱う口が 2 つある（学習への還元 `TrainingService.Send` と画像のコピー
+// `CopyImage`）。JPEG のパスをそのまま流すと、**suteme には .png という名前で
+// JPEG が届く。** 変換したものは撮った 1 枚と同じ置き場所に置く。
+func (s *CaptureService) loadImage(path string) (CaptureResult, error) {
+	if path == "" {
+		return CaptureResult{}, fmt.Errorf("画像のパスがありません")
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return CaptureResult{}, fmt.Errorf("画像を開けません: %w", err)
+	}
+	defer f.Close()
+	img, format, err := image.Decode(f)
+	if err != nil {
+		return CaptureResult{}, fmt.Errorf("画像を読めません（png / jpeg / gif のみ）: %w", err)
+	}
+	if format != "png" {
+		dir, err := ikkyoku.DefaultOutDir()
+		if err != nil {
+			return CaptureResult{}, err
+		}
+		saved, err := ikkyoku.SavePNG(img, dir)
+		if err != nil {
+			return CaptureResult{}, err
+		}
+		s.logger.Info("読み込んだ画像を PNG にして控えました", "from", path, "path", saved, "format", format)
+		path = saved
+	}
+	s.logger.Info("画像を読み込みました", "path", path, "format", format,
+		"width", img.Bounds().Dx(), "height", img.Bounds().Dy())
+	return s.deliver(img, path, ImageSourceFile), nil
+}
+
+// deliver は 1 枚の画像を「撮った 1 枚」として画面へ届ける。
+// **撮る（`Capture`）とファイルを読む（`loadImage`）の合流点**で、ここから先は
+// どちらから来たかで振る舞いを変えない（`source` は画面の言い回しのためだけ）。
+func (s *CaptureService) deliver(img image.Image, path, source string) CaptureResult {
 	var buf bytes.Buffer
 	thumb := ""
 	if err := png.Encode(&buf, img); err != nil {
@@ -712,10 +811,11 @@ func (s *CaptureService) Capture() (CaptureResult, error) {
 		Width:     b.Dx(),
 		Height:    b.Dy(),
 		Thumbnail: thumb,
+		Source:    source,
 		Warnings:  []string{},
 		HandTotal: map[string]int{},
 	}
-	s.logger.Info("キャプチャしました", "path", path, "width", b.Dx(), "height", b.Dy())
+	s.logger.Info("キャプチャしました", "path", path, "width", b.Dx(), "height", b.Dy(), "source", source)
 
 	// **撮れたことを先に知らせる。** 認識(下)は数秒かかるので、ここで一度切らないと
 	// 枠は「撮影中…」のまま止まって見え、メイン画面は前の 1 枚を出したままになる。
@@ -730,6 +830,7 @@ func (s *CaptureService) Capture() (CaptureResult, error) {
 			Width:     b.Dx(),
 			Height:    b.Dy(),
 			Thumbnail: thumb,
+			Source:    source,
 		})
 	}
 	s.revealMain()
@@ -762,7 +863,7 @@ func (s *CaptureService) Capture() (CaptureResult, error) {
 	if s.app != nil {
 		s.app.Event.Emit("capture:done", result)
 	}
-	return result, nil
+	return result
 }
 
 // FitResult はガイド枠の自動フィットの結果。

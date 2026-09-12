@@ -22,6 +22,11 @@ import { iconMarkup } from "./icon";
 // 認識には数秒かかるので、done を待つと「撮影中…」のまま止まって見える。
 interface CaptureShot {
   thumbnail: string; // data:image/png;base64,... の等倍サムネイル
+  // 出どころ("screen" = 撮った / "file" = 画像ファイルを読み込んだ)。
+  // ⚠️ **枠が合図を出すのは撮ったときだけ**(2026-09-12)。ファイルの読み込みは
+  // **メイン画面の中の操作**で、枠は 1 度も関わっていない ——
+  // そこでシャッターが光ると「撮れてしまった」と読める。
+  source?: string;
 }
 
 export function mountFrame(root: HTMLElement): void {
@@ -309,6 +314,10 @@ export function mountFrame(root: HTMLElement): void {
   // ——「今この 1 枚が撮れた」を伝えるのが合図の役目なので、遅れると意味が無い。
   // 認識の進み具合はメイン画面の担当(枠は撮る道具であって、結果を出す面ではない)。
   Events.On("capture:shot", (event: { data: CaptureShot }) => {
+    // 画像ファイルの読み込みは枠と無関係なので、合図もメニューも触らない。
+    if (event.data.source === "file") {
+      return;
+    }
     // 開いたまま撮られていたら畳む。その 1 枚には写り込んでいるが、続けて撮る
     // 2 枚目には写らない(ホットキーは止められないので、これが唯一できる手当て)。
     setMenuOpen(false);

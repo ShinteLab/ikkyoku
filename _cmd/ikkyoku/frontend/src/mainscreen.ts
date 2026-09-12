@@ -117,6 +117,10 @@ interface CaptureShot {
   width: number;
   height: number;
   thumbnail: string;
+  // 出どころ（"screen" = 撮った / "file" = 画像ファイルを読み込んだ）。
+  // ⚠️ **これで振る舞いを変えないこと**（2026-09-12）——変わるのは言い回しだけで、
+  // 認識も訂正も行き先（訂正タブ）も同じ。
+  source?: string;
 }
 
 interface CaptureResult {
@@ -124,6 +128,7 @@ interface CaptureResult {
   width: number;
   height: number;
   thumbnail: string;
+  source?: string;
   sfen: string;
   confidence: number;
   warnings: string[];
@@ -375,8 +380,30 @@ export function mountMainScreen(root: HTMLElement): void {
             （押すとフルパスをコピーできます）。
           </span>
         </div>
+        <!-- 画像ファイルを読み込む（2026-09-12）。**撮るのと同じ経路**で、
+             行き先も同じ**訂正タブ**（どちらも認識を通るため）。
+
+             ⚠️ **枠は要らない。** 「どこを撮るか」の話が無いので、
+             **枠が出ていなくても押せる**（撮るほうの門番と混ぜないこと）。
+
+             ⚠️ **結果の行は下の #status を共用する。** 撮ったのか読み込んだのかで
+             **別の面を作らない** —— 出てくるものは同じ「画像から起こした 1 局面」で、
+             この先の訂正も学習への還元も 1 つの経路しかない。 -->
+        <div class="setting-group">
+          <span class="setting-title" data-hint="hint-image">画像ファイルを読み込む</span>
+          <span id="hint-image" class="setting-note is-hint">
+            手元の画像（PNG / JPEG / GIF）から盤面を認識します。
+            撮るのと同じで、読み込むと<strong>訂正タブ</strong>が開きます。
+            <strong>枠は要りません</strong>（どこを撮るかの指定が無いので）。
+            撮り溜めた PNG を<strong>認識し直す</strong>のにも使えます。
+          </span>
+          <div class="setting-fields">
+            <button id="image-open" class="ghost-btn is-primary" type="button">画像を選ぶ…</button>
+          </div>
+        </div>
+
         <p id="status" class="status" role="status" aria-live="polite">
-          ガイド枠を盤面に合わせて撮影してください。
+          ガイド枠を盤面に合わせて撮影するか、画像ファイルを読み込んでください。
         </p>
 
         <!-- 何もないところから始める（2026-08-13）。**3 つめの入力の口。**
@@ -3480,6 +3507,12 @@ ${st.turnLabel}${n}`;
     })();
   });
 
+  // 出どころの言い回し。**ここでしか分けない**（2026-09-12。画像ファイルの読み込み）。
+  // ⚠️ **「撮りました」と出さないこと** —— 押していない操作を報告されると、
+  // **どの 1 枚の話なのかが分からなくなる**（撮ったものと読み込んだものが混ざる）。
+  const tookVerb = (source?: string) =>
+    source === "file" ? "読み込みました" : "撮りました";
+
   // 撮れた時点で呼ぶ（`capture:shot`）。**認識はまだ走っている。**
   //
   // ⚠️ **撮ることと認識することを 1 つの表示に混ぜないこと**（2026-08-18 に分けた）。
@@ -3495,7 +3528,7 @@ ${st.turnLabel}${n}`;
     // 埋めるうえ、**この行はもう見えていない**（撮ると訂正タブへ移る）。
     // 撮った画像の置き場所は**訂正タブの「認識詳細情報」**が持っている
     // （ファイル名 + 押すとフルパスをコピー）。**2 か所に出さないこと。**
-    status.textContent = `撮りました（${taken.width}x${taken.height}）。盤面を認識しています…`;
+    status.textContent = `${tookVerb(taken.source)}（${taken.width}x${taken.height}）。盤面を認識しています…`;
     status.classList.remove("is-error", "is-warn");
     showPath(taken.path);
 
@@ -3556,11 +3589,11 @@ ${st.turnLabel}${n}`;
     // 保存できたことと、認識できたかどうかを分けて出す。
     // ⚠️ **フルパスは出さない**（showShot の ⚠️ と同じ。置き場所は「認識詳細情報」）。
     if (result.recognizeError) {
-      status.textContent = `撮りました（${result.width}x${result.height}）。盤面は認識できませんでした: ${result.recognizeError}`;
+      status.textContent = `${tookVerb(result.source)}（${result.width}x${result.height}）。盤面は認識できませんでした: ${result.recognizeError}`;
       status.classList.add("is-warn");
       status.classList.remove("is-error");
     } else {
-      status.textContent = `撮りました（${result.width}x${result.height}）。盤面を認識しました。`;
+      status.textContent = `${tookVerb(result.source)}（${result.width}x${result.height}）。盤面を認識しました。`;
       status.classList.remove("is-error", "is-warn");
     }
 
@@ -3633,6 +3666,32 @@ ${st.turnLabel}${n}`;
     status.classList.remove("is-warn");
     markDebug("error");
   };
+
+  // 画像ファイルを読み込む（2026-09-12）。**撮るのと同じ経路に載る**ので、
+  // ここでやるのは Go 側を呼ぶことだけ —— 盤も訂正タブも
+  // `capture:shot` / `capture:done` が運ぶ（**受け側を 2 系統にしない**）。
+  //
+  // ⚠️ **取り消しは失敗ではない**（ダイアログを閉じただけ）。Go 側はパスが空の
+  // 結果を返し、イベントも出さないので、**画面を 1 つも変えずに黙って戻る**。
+  const imageOpen = root.querySelector<HTMLButtonElement>("#image-open")!;
+  imageOpen.addEventListener("click", () => {
+    void (async () => {
+      imageOpen.disabled = true;
+      try {
+        const picked = await CaptureService.OpenImage();
+        if (!picked?.path) {
+          return; // 取り消し
+        }
+      } catch (err) {
+        status.textContent =
+          `画像を読み込めませんでした: ${String(err instanceof Error ? err.message : err)}`;
+        status.classList.add("is-error");
+        status.classList.remove("is-warn");
+      } finally {
+        imageOpen.disabled = false;
+      }
+    })();
+  });
 
   // 枠を出す唯一の入口（**起動時は出ていない**。閉じても隠れるだけなので出し直せる）。
   //
