@@ -105,6 +105,14 @@ type EditState struct {
 	Cells []EditCell `json:"cells"`
 	// Inventory は「存在するはずの駒」の在庫。**訂正 UI の駒箱はこれを並べる。**
 	Inventory []position.Stock `json:"inventory"`
+	// HandsFixed は**駒台を逆算しない**か（駒落ち・詰将棋。2026-09-12）。
+	//
+	// 既定は false で、盤に無い駒は「どちらかの駒台にあるはず」と逆算される
+	// （認識の訂正はこれが拠り所）。⚠️ **落ちている駒がある局面ではその逆算が
+	// 成り立たない** —— 飛車落ちの飛車はどちらの駒台にも無いので、逆算したままだと
+	// **未決が永久に消えず、SFEN が組み上がらない＝解析タブへ渡せない**。
+	// 立てると、行き場の無い枚数は `Stock.Unused`（この対局で使わない駒）に回る。
+	HandsFixed bool `json:"handsFixed"`
 	// Warnings は局面として成立していない点。**エラーではない**（直している最中は
 	// 壊れていて当たり前）。
 	Warnings []string `json:"warnings"`
@@ -279,6 +287,29 @@ func (s *PositionService) SetMoveNumber(n int) (EditState, error) {
 	})
 }
 
+// SetHandsFixed は**駒台の逆算をやめる / 再開する**（駒落ち・詰将棋。2026-09-12）。
+//
+// **「盤にも駒台にも無い駒」をどう解釈するかの 1 つの選択。**
+//
+//	false（既定）… どちらかの駒台にあるはず（＝先後が未決。決まるまで確定しない）
+//	true          … この対局には**存在しない**（＝落とした駒・詰将棋で使わない駒）
+//
+// ⚠️ **これは訂正の操作ではない**（盤も駒台も 1 枚も動かない）。動くのは
+// 「足りない駒」の解釈だけで、**既に駒台へ割り振ったぶんはそのまま残る**
+// （人が決めたものを、解釈を変えた拍子に捨てない）。
+//
+// ⚠️ **戻せること。** false に戻せば逆算が復活し、使わない駒だったぶんが
+// また未決として出てくる（押し間違えても失うものが無い）。
+//
+// ⚠️ **エラーにする側ではない。** 立てなくても訂正は続けられる（確定できない
+// だけ）し、立てたまま平手を直しても警告が減るだけで止まらない（設計原則3）。
+func (s *PositionService) SetHandsFixed(fixed bool) (EditState, error) {
+	return s.edit(func(p *position.Position) error {
+		p.HandsFixed = fixed
+		return nil
+	})
+}
+
 // SetHand は駒台のうち片側の枚数を n 枚にする。
 // **駒台の先後も盤面からは決まらない**ので、これも人間の入口。
 // ドラッグ以外の入口（未割り当てを一括で寄せる操作）として残してある。
@@ -379,6 +410,7 @@ func (s *PositionService) state() EditState {
 		MoveNumber: s.pos.MoveNumber,
 		Cells:      cells,
 		Inventory:  s.pos.Inventory(),
+		HandsFixed: s.pos.HandsFixed,
 		Warnings:   warnings,
 		Dirty:      board != s.origin,
 	}

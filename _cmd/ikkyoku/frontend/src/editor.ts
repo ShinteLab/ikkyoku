@@ -30,6 +30,12 @@
 // どちらかの駒台にあるはずだが、**どちらかは盤面からは決まらない**（設計原則5）ので、
 // 決まるまで「足りない駒」に居る。決まるまで SFEN は組み上がらない。
 //
+// ⚠️ **その逆算が成り立たない局面がある**（駒落ち・詰将棋。2026-09-12）。落とした駒は
+// どちらの駒台にも無いので、逆算したままだと**未決が永久に消えず確定できない**。
+// そのため**盤の下のトグル**（`#edit-hands-fixed` → `PositionService.SetHandsFixed`）で
+// 逆算をやめられるようにしてあり、そのとき 3 つめの置き場は
+// **「使わない駒」**（この対局に存在しない駒）になる。**置き場の数は 3 つのまま。**
+//
 // **駒種ごとの見本（駒箱）は置かない。** 置きたい駒は必ず「足りない駒」として現れる
 // （認識が駒種を間違えていれば、正しいほうの駒が足りなくなる）ので、見本は重複になる。
 //
@@ -304,7 +310,14 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   // ⚠️ **ボタンの横に注記を出さないこと**（2026-08-18 に外した）。後手目線のときだけ
   // 文字が増えると、**出たり消えたりするたびにボタンの位置がずれて押しづらい**。
   // 「解析へは反転して送信」は**SFEN の後ろ**に添えてある（mainscreen の #sfen-note）。
-  viewHost.innerHTML = `<button id="edit-near" class="ghost-btn" type="button"></button>`;
+  //
+  // ⚠️ **隣に置く「盤に無い駒」のトグルは別の事実**（2026-09-12）。目線は
+  // **撮った画像**の話、こちらは**この対局**の話（駒落ち・詰将棋では、盤にも
+  // 駒台にも無い駒が「存在しない」）。**同じものの選択肢に見せないこと** ——
+  // どちらも**今の解釈を書いたボタン**で、押すと入れ替わる形に揃えてある。
+  viewHost.innerHTML =
+    `<button id="edit-near" class="ghost-btn" type="button"></button>` +
+    `<button id="edit-hands-fixed" class="ghost-btn" type="button"></button>`;
 
   // 駒台は盤の脇（後手=左上 / 先手=右下）に置く。**訂正ツールバーの中ではない。**
   // 盤との位置関係そのものが「どちらの駒台か」の説明になるので、離さないこと。
@@ -338,6 +351,10 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     `<span class="hand-zone-label">足りない駒</span><div class="missing-chips"></div>`;
   handSlots.missing.appendChild(missing);
   const missingChips = missing.querySelector<HTMLDivElement>(".missing-chips")!;
+  // ⚠️ **見出しは逆算するかで替わる**（2026-09-12）。逆算をやめると、ここに
+  // 出ている数の意味が「まだ持ち主が決まっていない」から
+  // **「この対局で使わない」**に変わるので、**文字を替えないと嘘になる。**
+  const missingLabel = missing.querySelector<HTMLSpanElement>(".hand-zone-label")!;
 
   // nearSide は「その駒台が画面の手前にあるか」。**表示視点で入れ替わる**
   // （盤を裏から眺めると、上向きの駒の駒台が奥へ回る）。
@@ -366,6 +383,22 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   // **盤が反転すると思われる** —— この盤は 1 マスも動かない。言っているのは
   // **「手前に写っているのはどちらの駒か」という、撮った画像についての事実**なので、
   // 位置で書く。
+  const handsFixedBtn = viewHost.querySelector<HTMLButtonElement>("#edit-hands-fixed")!;
+  // 「盤にも駒台にも無い駒」をどう読むか（2026-09-12）。**今の解釈を書いておく。**
+  //
+  // ⚠️ **これは訂正の操作ではない**（盤も駒台も 1 枚も動かない）。効くのは
+  // 足りない駒の読み方だけで、**駒落ち・詰将棋はこれを押さないと確定できない**
+  // （落とした駒はどちらの駒台にも無いので、逆算したままだと未決が消えない）。
+  const paintHandsFixedButton = (fixed: boolean) => {
+    handsFixedBtn.textContent = fixed ? "盤に無い駒: 使わない" : "盤に無い駒: 駒台にある";
+    handsFixedBtn.title = fixed
+      ? "駒落ち・詰将棋。盤にも駒台にも無い駒は、この対局に存在しないものとして扱います（持ち駒は自分で決めてください）。押すと駒台の逆算に戻ります"
+      : "盤にも駒台にも無い駒は、どちらかの駒台にあるものとして数えます（既定）。押すと「この対局で使わない」（駒落ち・詰将棋）に切り替わります";
+    handsFixedBtn.setAttribute("aria-pressed", String(fixed));
+    handsFixedBtn.classList.toggle("is-active", fixed);
+    missingLabel.textContent = fixed ? "使わない駒" : "足りない駒";
+  };
+
   const paintNearButton = (nearWhite: boolean) => {
     nearBtn.textContent = nearWhite ? "手前: 後手" : "手前: 先手";
     nearBtn.title = nearWhite
@@ -376,6 +409,7 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   // ⚠️ **一度は通すこと。** 駒台の見出し（「手前の駒台」）と目線のボタンの文字は
   // ここで入れているので、通さないと見出しの無い駒台と空のボタンが出る。
   paintNearButton(false);
+  paintHandsFixedButton(false);
   showHandLabels();
 
   let state: EditState | null = null;
@@ -441,6 +475,7 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
       b.classList.toggle("is-active", Number(b.dataset.turn) === next.turn);
     }
     paintNearButton(!!next.nearWhite);
+    paintHandsFixedButton(!!next.handsFixed);
     // ⚠️ **手番の値は 1 つ（`EditState.turn`）。** ボタンとマークは同じ値を
     // 2 か所に描くだけで、**更新経路もここ 1 本**にする（片方だけ更新する道を
     // 作ると、どちらが本当の手番か分からなくなる）。
@@ -454,7 +489,7 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
       moveNum.value = String(next.moveNumber ?? 0);
     }
     const inv = next.inventory ?? [];
-    renderMissing(inv);
+    renderMissing(inv, !!next.handsFixed);
     renderHands(inv);
     // チップは作り直されているので、掴んでいる印を付け直す。
     //
@@ -525,9 +560,17 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   // **駒種は常に全部（表のみ）並べる。** 足りている駒は非活性の見た目にするだけで、
   // **掴めなくはしない**（在庫が尽きていても置ける。設計原則3・4）。並びが毎回同じに
   // なるので、どこを掴めばよいかが変わらないのも利点。枚数はバッジで出す。
-  function renderMissing(inv: Stock[]) {
+  //
+  // ⚠️ **逆算をやめているときは `unused`（この対局で使わない駒）を出す**
+  // （2026-09-12）。**数の出どころが替わるだけで、掴めることは変わらない** ——
+  // 「使わない駒」から盤へ置けないと、駒落ちの局面を直せなくなる。
+  // ⚠️ **数は Go 側が出したものをそのまま出すこと**（`unassigned` と `unused` は
+  // 逆算するかしないかの裏表で、**同時には立たない**）。ここで足し引きしない。
+  function renderMissing(inv: Stock[], handsFixed: boolean) {
     missingChips.replaceChildren();
     for (const s of inv) {
+      // 出す数（逆算あり = 先後が未決の枚数 / 逆算なし = 使わない枚数）。
+      const n = handsFixed ? s.unused : s.unassigned;
       // 縦 1 列。**並びは Inventory の順（歩香桂銀金角飛王）のまま**で、
       // 足りていても消さない（位置が動くと、どこを掴むかが毎回変わる）。
       const row = document.createElement("div");
@@ -539,17 +582,20 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
       // 置けない」という詰みが起きる（設計原則3・4）。見た目だけ非活性にする。
       chip.dataset.piece = String(s.piece);
       chip.textContent = s.letter;
-      chip.classList.toggle("is-spare", s.unassigned <= 0);
+      chip.classList.toggle("is-spare", n <= 0);
 
       const count = document.createElement("span");
       count.className = "missing-count";
-      count.textContent = s.unassigned > 0 ? String(s.unassigned) : "";
+      count.textContent = n > 0 ? String(n) : "";
 
       row.title =
-        s.unassigned > 0
-          ? `${s.name} ${s.unassigned}枚（どちらの駒台か未決）。` +
-            `クリックすると掴んだままになり、盤を押すたびに置けます（Esc で離す）。` +
-            `駒台へドラッグすると持ち主が決まり、盤へドラッグすると先手の駒として置きます`
+        n > 0
+          ? handsFixed
+            ? `${s.name} ${n}枚はこの対局で使いません（駒落ちで落とした駒・詰将棋で使わない駒）。` +
+              `持ち駒にするなら駒台へドラッグしてください。盤へも置けます`
+            : `${s.name} ${n}枚（どちらの駒台か未決）。` +
+              `クリックすると掴んだままになり、盤を押すたびに置けます（Esc で離す）。` +
+              `駒台へドラッグすると持ち主が決まり、盤へドラッグすると先手の駒として置きます`
           : `${s.name}は足りています。それでも盤にも駒台にも置けます` +
             `（置くと多すぎる警告が出ます）`;
       row.append(chip, count);
@@ -1116,6 +1162,12 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   nearBtn.addEventListener("click", () => {
     const next = !state?.nearWhite;
     void apply(() => PositionService.SetViewpoint(next));
+  });
+
+  // 盤に無い駒の読み方（駒落ち・詰将棋）。⚠️ **今の値は `state` から読む。**
+  handsFixedBtn.addEventListener("click", () => {
+    const next = !state?.handsFixed;
+    void apply(() => PositionService.SetHandsFixed(next));
   });
 
   moveNum.addEventListener("change", () => {

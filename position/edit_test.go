@@ -352,3 +352,39 @@ func TestTogglePromotedAndFlipSide(t *testing.T) {
 		t.Error("空マスで成りがエラーになりません")
 	}
 }
+
+// ⚠️ **逆算をやめたら、未決は「使わない駒」へ移ること**（駒落ち・詰将棋。2026-09-12）。
+//
+// 見ているのは 2 つ: **数が消えないこと**（0 にすると落とした駒が画面から消え、
+// 外し忘れと区別が付かない）と、**未決と同時に立たないこと**（逆算するかしないかの
+// 裏表なので、両方に数が入っていたらどちらかが嘘）。
+func TestInventoryUnusedWhenHandsFixed(t *testing.T) {
+	// 二枚落ち（上手の飛角が無い）。
+	p, err := FromBoardSFEN("lnsgkgsnl/9/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL")
+	if err != nil {
+		t.Fatalf("FromBoardSFEN: %v", err)
+	}
+
+	// 逆算したまま＝飛角は「どちらかの駒台にあるはず」の未決。
+	if s := stockOf(p.Inventory(), sfen.Rook); s.Unassigned != 1 || s.Unused != 0 {
+		t.Errorf("逆算あり 飛: 未決=%d 使わない=%d, want 1, 0", s.Unassigned, s.Unused)
+	}
+
+	p.HandsFixed = true
+	for _, base := range []int{sfen.Rook, sfen.Bishop} {
+		s := stockOf(p.Inventory(), base)
+		if s.Unassigned != 0 || s.Unused != 1 {
+			t.Errorf("逆算なし %s: 未決=%d 使わない=%d, want 0, 1",
+				sfen.Name(base), s.Unassigned, s.Unused)
+		}
+	}
+	// 足りている駒は、どちらでもない。
+	if s := stockOf(p.Inventory(), sfen.Pawn); s.Unassigned != 0 || s.Unused != 0 {
+		t.Errorf("歩: 未決=%d 使わない=%d, want 0, 0", s.Unassigned, s.Unused)
+	}
+	// ⚠️ **確定できること**（`Unused` が残っていても SFEN は組み上がる）。
+	p.Turn = TurnWhite
+	if _, err := p.SFEN(); err != nil {
+		t.Errorf("逆算をやめたのに確定できません: %v", err)
+	}
+}

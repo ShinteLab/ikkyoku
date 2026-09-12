@@ -40,6 +40,16 @@ type Stock struct {
 	// Unassigned は Rest のうち**まだ先後を決めていない**枚数。
 	// **これが残っているあいだ局面は確定しない**（SFEN が書けない）。
 	Unassigned int `json:"unassigned"`
+	// Unused は **この対局で使わない枚数**（駒落ち・詰将棋。2026-09-12）。
+	//
+	// 盤にも駒台にも無い駒は、既定では「どちらかの駒台にあるはず」と逆算されて
+	// `Unassigned` に入るが、**`HandsFixed` を立てるとその逆算をやめる**ので、
+	// 行き場の無くなった枚数がこちらへ回る（**落とした駒・詰将棋で使わない駒**）。
+	//
+	// ⚠️ **`Unassigned` と同時に立つことは無い**（逆算するかしないかの裏表）。
+	// ⚠️ **これは確定を止めない** —— 使わない駒があること自体が正常なので、
+	// `SFEN()` は残っていても組み上がる（`Unassigned` との一番の違い）。
+	Unused int `json:"unused"`
 }
 
 // Over は過剰かを返す（盤上が上限を超えている）。
@@ -70,13 +80,18 @@ func (p *Position) Inventory() []Stock {
 		hb, hw := p.assigned(base)
 		// 駒台が書いてある局面（KIF・SFEN から読んだもの）では未決が無い。
 		unassigned := max(max(rest, 0)-hb-hw, 0)
+		unused := 0
 		if p.HandsFixed {
-			unassigned = 0
+			// **逆算をやめた局面**（駒落ち・詰将棋）。行き場の無い枚数は
+			// 「未決」ではなく「**この対局で使わない**」になる。
+			// ⚠️ **数を消さずに移し替えること** —— 0 にしてしまうと、
+			// 落とした駒が画面から消えて、外し忘れとの区別が付かなくなる。
+			unassigned, unused = 0, unassigned
 		}
 		out = append(out, Stock{
 			Piece: base, Letter: sfen.Letter(base), Name: sfen.Name(base),
 			Limit: limit, Black: black, White: white, Rest: rest,
-			HandBlack: hb, HandWhite: hw,
+			HandBlack: hb, HandWhite: hw, Unused: unused,
 			// 割り振りが逆算した残りを超えていたら未割り当ては 0（負にはしない）。
 			// **駒台の枚数のほうを丸めない**（人が決めた枚数なので消さない。
 			// 多すぎることは Warnings に出る）。
