@@ -237,17 +237,72 @@ func TestScoreMate(t *testing.T) {
 	})
 }
 
-// ⚠️ **玉の欠けた局面はエンジンに渡さない**（合法手生成が落ちる）。
-// 訂正 UI 側では確定できてよい局面なので、止めるのはこの境界だけ。
-func TestAnalyzeRejectsMissingKing(t *testing.T) {
-	const noBlackKing = "4k4/9/9/9/9/9/9/9/9 b R2b4g4s4n4l18p 1"
-	s := newTestSession(t)
-	_, err := s.Analyze(context.Background(), noBlackKing, Options{Movetime: testMovetime}, nil)
-	if err == nil {
-		t.Fatal("玉が欠けているのにエラーになりませんでした")
+// 玉が揃っていない局面をエンジンに渡してよいかの線引き（2026-09-12）。
+//
+// ⚠️ **「攻方の玉が無い」＝詰将棋は、同梱エンジンなら渡す。** 実測で落ちず、
+// 1 手詰を詰みスコアで見つける（攻方の玉を隅に置いた版と手もスコアも一致した）。
+// ⚠️ **外部エンジンには渡さない** —— 両玉を前提にしているエンジンがあり、
+// 落ちるか出鱈目を返す。**測っていないものは安全側に倒す。**
+// ⚠️ **両方無い・2 枚ある局面はどちらにも渡さない**（詰将棋ではない）。
+func TestEnsurePlayable(t *testing.T) {
+	const (
+		bothKings = "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL"
+		noBlack   = "4k4/9/9/9/9/9/9/9/9" // 詰将棋（攻方の玉が無い）
+		noKings   = "9/9/9/9/9/9/9/9/9"
+		twoBlack  = "4k4/9/9/9/9/9/9/9/3KK4"
+	)
+	for _, tt := range []struct {
+		name     string
+		board    string
+		kingless bool
+		ok       bool
+	}{
+		{"両玉・同梱", bothKings, true, true},
+		{"両玉・外部", bothKings, false, true},
+		{"攻方の玉なし・同梱", noBlack, true, true},
+		{"攻方の玉なし・外部", noBlack, false, false},
+		{"両方なし・同梱", noKings, true, false},
+		{"玉が 2 枚・同梱", twoBlack, true, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ensurePlayable(tt.board, tt.kingless)
+			if tt.ok && err != nil {
+				t.Fatalf("通るはずが断られました: %v", err)
+			}
+			if !tt.ok && err == nil {
+				t.Fatal("断るはずが通りました")
+			}
+			if err != nil && !strings.Contains(err.Error(), "玉") {
+				t.Errorf("理由が伝わりません: %v", err)
+			}
+		})
 	}
-	if !strings.Contains(err.Error(), "玉") {
-		t.Errorf("理由が伝わりません: %v", err)
+}
+
+// ⚠️ **攻方の玉が無い詰将棋を、同梱エンジンが解けること**（2026-09-12）。
+//
+// ここが通らなくなったら「詰将棋を並べる」は**並べるだけ**になる。
+// 見ているのは 2 つ: **断られないこと**と、**詰みを詰みとして返すこと**
+// （評価値そのものは詰将棋では意味を持たない —— 慣習で玉方が余り駒を全部
+// 持つので、材料では常に玉方が大優勢に出る。**意味があるのは詰みかどうかだけ**）。
+func TestAnalyzeMateProblemWithoutAttackerKing(t *testing.T) {
+	// 1 手詰（▲5二金打まで）。後手玉 5一・先手歩 5三・先手の持駒は金 1 枚で、
+	// 残りは全部 後手（玉方）の持駒という詰将棋の形。
+	const mateInOne = "4k4/9/4P4/9/9/9/9/9/9 b G2r2b3g4s4n4l17p 1"
+
+	s := newTestSession(t)
+	r, err := s.Analyze(context.Background(), mateInOne, Options{Movetime: testMovetime}, nil)
+	if err != nil {
+		t.Fatalf("詰将棋が断られました: %v", err)
+	}
+	if len(r.Lines) == 0 {
+		t.Fatal("読み筋が 1 つも返りません")
+	}
+	if got := r.Lines[0].Score.Mate; got == 0 {
+		t.Errorf("詰みとして返りません: score=%+v bestmove=%s", r.Lines[0].Score, r.Bestmove)
+	}
+	if r.Bestmove != "G*5b" {
+		t.Errorf("bestmove = %q, want %q", r.Bestmove, "G*5b")
 	}
 }
 

@@ -218,6 +218,18 @@ type Session struct {
 	// lastEngine は最後に繋がったエンジンの名前。**表示用**
 	// （閉じたあとも名前だけは出せるようにしておく）。
 	lastEngine string
+
+	// kingless は**玉が片方だけの局面を渡してよいか**（詰将棋。2026-09-12）。
+	//
+	// **同梱エンジンだけ true。** 実測で、攻方の玉が無くても
+	// **落ちないし 1 手詰を詰みスコアで見つける**ことを確かめてある
+	// （攻方の玉を隅に置いた版と手もスコアも一致した）。
+	//
+	// ⚠️ **外部エンジンでは false のまま。** 両玉の存在を前提にしているエンジンが
+	// あり、渡すと落ちるか出鱈目を返す（実物で測っていないので**安全側に倒す**）。
+	// 手前で断るほうが「相手のプロセスが黙って死ぬ」より扱いやすい、という
+	// `ensurePlayable` の元の判断はここでも生きている。
+	kingless bool
 }
 
 func newSession(open func(context.Context) (*client.Session, error)) *Session {
@@ -226,7 +238,13 @@ func newSession(open func(context.Context) (*client.Session, error)) *Session {
 
 // NewLocalSession は同梱の `engine` を USI で話す相手として使うセッションを作る
 // （Step 1 の足場）。
-func NewLocalSession() *Session { return newSession(localusi.Local) }
+func NewLocalSession() *Session {
+	s := newSession(localusi.Local)
+	// ⚠️ **詰将棋（攻方の玉が無い局面）を読ませるのは同梱エンジンだけ**
+	// （2026-09-12。上の `kingless` の注記）。
+	s.kingless = true
+	return s
+}
 
 // NewExecSession は外部の USI エンジン（.exe）を起こして使うセッションを作る（Step 2）。
 //
@@ -332,7 +350,7 @@ func (s *Session) Connect(ctx context.Context) (EngineInfo, error) {
 // ctx をキャンセルすると `stop` を送り、**それまでに届いた結果**を返す（設計原則3）。
 // ⚠️ **そのあともエンジンは生きたまま**（次の解析で使い回す）。終わらせるのは `Close`。
 func (s *Session) Analyze(ctx context.Context, positionSFEN string, opt Options, info func(Progress)) (Result, error) {
-	fields, err := checkSFEN(positionSFEN)
+	fields, err := checkSFEN(positionSFEN, s.kingless)
 	if err != nil {
 		return Result{}, err
 	}
@@ -746,7 +764,7 @@ func abs(v int) int {
 }
 
 // checkSFEN は局面が解析にかけられる形かを確かめ、正規化した各フィールドを返す。
-func checkSFEN(positionSFEN string) ([]string, error) {
+func checkSFEN(positionSFEN string, kingless bool) ([]string, error) {
 	if strings.TrimSpace(positionSFEN) == "" {
 		return nil, fmt.Errorf("局面がありません")
 	}
@@ -757,7 +775,7 @@ func checkSFEN(positionSFEN string) ([]string, error) {
 	if fields[1] != "b" && fields[1] != "w" {
 		return nil, fmt.Errorf("手番が読めません: %s", fields[1])
 	}
-	if err := ensurePlayable(fields[0]); err != nil {
+	if err := ensurePlayable(fields[0], kingless); err != nil {
 		return nil, err
 	}
 	return fields, nil
@@ -765,25 +783,39 @@ func checkSFEN(positionSFEN string) ([]string, error) {
 
 // ensurePlayable はエンジンに渡せる局面かを確かめる。
 //
-// ⚠️ **玉が欠けた局面は渡せない。** 合法手生成が玉の位置を前提にしているエンジンが
-// あり（自作 `engine` がそう）、渡すと落ちる。**外部エンジンでも同じ**で、
-// 手前で弾いておくほうが「相手のプロセスが黙って死ぬ」より扱いやすい。
-//
 // **訂正 UI 側でこれを禁止しないこと。** 詰将棋のように玉が 1 枚しかない局面も
 // 「正しい局面」として確定できるのが訂正 UI の要件（CLAUDE.md）。ここで止めるのは
-// **エンジンに渡す瞬間だけ**で、盤を見ることも訂正することも学習に送ることもできる。
-func ensurePlayable(boardSFEN string) error {
+// **エンジンに渡す瞬間だけ**で、盤を見ることも手を進めることも学習に送ることもできる。
+//
+// ⚠️ **「玉が片方だけ」は渡せることがある**（2026-09-12。詰将棋）。kingless が
+// true（＝同梱エンジン）なら通す。**実測で、攻方の玉が無くても落ちず、1 手詰を
+// 詰みスコアで見つける**（攻方の玉を隅に置いた版と手もスコアも一致した）。
+// ⚠️ **外部エンジンでは通さない** —— 両玉を前提にしているエンジンがあり、
+// 落ちるか出鱈目を返す。**測っていないものは安全側に倒す。**
+//
+// ⚠️ **通すのは「片側だけが 0 枚」のときだけ。** 両方無い局面は攻める相手が
+// 居らず、玉が 2 枚ある局面は**駒数がそもそもおかしい**（どちらも詰将棋ではない）。
+func ensurePlayable(boardSFEN string, kingless bool) error {
 	vs := sfen.Inspect(boardSFEN, sfen.CheckKing).Filter(sfen.CheckKing)
 	if len(vs) == 0 {
+		return nil
+	}
+	if kingless && len(vs) == 1 && vs[0].Count == 0 {
+		// 片側の玉だけが無い＝詰将棋の形。同梱エンジンは読める。
 		return nil
 	}
 	msgs := make([]string, 0, len(vs))
 	for _, v := range vs {
 		msgs = append(msgs, v.Detail)
 	}
-	// ⚠️ **詰将棋がここに来る**（攻方の玉が無い）。**盤を見ることも手を進めることも
-	// できている**ので、断られるのがここだけであることが分かる言い方にする。
-	return fmt.Errorf("エンジンは玉の揃った局面しか扱えません: %s"+
-		"（詰将棋のように玉が片方だけの局面は解析できません。盤を動かすことはできます）",
-		strings.Join(msgs, " / "))
+	// ⚠️ **盤を見ることも手を進めることもできている**ので、断られるのが
+	// ここだけであることが分かる言い方にする。
+	hint := "（盤を動かすことはできます）"
+	if !kingless && len(vs) == 1 && vs[0].Count == 0 {
+		// 詰将棋なのに外部エンジンを選んでいる、が一番ありうる。**次の一手を書く。**
+		hint = "（詰将棋のように玉が片方だけの局面は、同梱エンジンなら読めます。" +
+			"設定でエンジンを同梱のものに切り替えてください）"
+	}
+	return fmt.Errorf("エンジンは玉の揃った局面しか扱えません: %s%s",
+		strings.Join(msgs, " / "), hint)
 }
