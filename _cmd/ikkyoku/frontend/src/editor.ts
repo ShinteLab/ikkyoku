@@ -32,9 +32,13 @@
 //
 // ⚠️ **その逆算が成り立たない局面がある**（駒落ち・詰将棋。2026-09-12）。落とした駒は
 // どちらの駒台にも無いので、逆算したままだと**未決が永久に消えず確定できない**。
-// そのため**盤の下のトグル**（`#edit-hands-fixed` → `PositionService.SetHandsFixed`）で
-// 逆算をやめられるようにしてあり、そのとき 3 つめの置き場は
+// そのため枠の中に**「手合割」のチェック**（`#edit-handicap` →
+// `PositionService.SetHandsFixed`）を置いてあり、入れると 3 つめの置き場は
 // **「使わない駒」**（この対局に存在しない駒）になる。**置き場の数は 3 つのまま。**
+//
+// ⚠️ **手合割では側の呼び名が「下手 / 上手」に替わる**（`sideName`）。手番のボタンも
+// 目線のボタンも手番マークのツールチップも**この 1 つの値を見る**こと ——
+// 「手前: 先手」のままだと、下手を持っているのにどちらを選べばよいか分からない。
 //
 // **駒種ごとの見本（駒箱）は置かない。** 置きたい駒は必ず「足りない駒」として現れる
 // （認識が駒種を間違えていれば、正しいほうの駒が足りなくなる）ので、見本は重複になる。
@@ -290,7 +294,7 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     <button id="edit-confirm" class="ghost-btn is-primary" type="button">この局面を解析する</button>
     <span class="edit-hint">
       盤 ⇄ 駒台をドラッグ（外すと同時に持ち主が決まる） /
-      <strong>「足りない駒」をクリックすると掴んだまま連続で置ける</strong>（残り 0 でも置ける。Esc で離す） /
+      <strong>「<span id="edit-stock-name">足りない駒</span>」をクリックすると掴んだまま連続で置ける</strong>（残り 0 でも置ける。Esc で離す） /
       盤の外へ放ると外れる /
       右クリックで先後と成・不成を切り替え
     </span>
@@ -311,13 +315,11 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   // 文字が増えると、**出たり消えたりするたびにボタンの位置がずれて押しづらい**。
   // 「解析へは反転して送信」は**SFEN の後ろ**に添えてある（mainscreen の #sfen-note）。
   //
-  // ⚠️ **隣に置く「盤に無い駒」のトグルは別の事実**（2026-09-12）。目線は
-  // **撮った画像**の話、こちらは**この対局**の話（駒落ち・詰将棋では、盤にも
-  // 駒台にも無い駒が「存在しない」）。**同じものの選択肢に見せないこと** ——
-  // どちらも**今の解釈を書いたボタン**で、押すと入れ替わる形に揃えてある。
-  viewHost.innerHTML =
-    `<button id="edit-near" class="ghost-btn" type="button"></button>` +
-    `<button id="edit-hands-fixed" class="ghost-btn" type="button"></button>`;
+  // ⚠️ **「手合割か」はここに置かない**（2026-09-12 に一度ここへ置いて外した）。
+  // あれは**「足りない駒」の枠の意味そのもの**を変えるので、枠の中に置く
+  // （`missing-zone`）。ここに並べると、**目線と同じ「画像の話」に見える**うえ、
+  // 何が変わるのかが離れていて分からなかった。
+  viewHost.innerHTML = `<button id="edit-near" class="ghost-btn" type="button"></button>`;
 
   // 駒台は盤の脇（後手=左上 / 先手=右下）に置く。**訂正ツールバーの中ではない。**
   // 盤との位置関係そのものが「どちらの駒台か」の説明になるので、離さないこと。
@@ -347,14 +349,36 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   // （置きたい駒は「足りない駒」として必ずここに出るので、見本は要らない）。
   const missing = document.createElement("div");
   missing.className = "missing-zone";
+  //
+  // ⚠️ **「手合割の対局か」のチェックはこの枠の中**（2026-09-12）。**変えるのは
+  // この枠の意味そのもの**（「まだ持ち主が決まっていない駒」⇄「この対局で
+  // 使わない駒」）なので、**変わるものの隣に置く**。盤の下の目線の行に置いて
+  // みたが、**何が変わるのか分からない**うえ、目線（撮った画像の話）と
+  // 同じ種類の設定に見えた。
+  //
+  // ⚠️ **言葉は「手合割」**（「駒台を逆算しない」ではない）。逆算はこちらの都合で、
+  // ユーザが知っているのは**駒を落として指す対局かどうか**のほう。
   missing.innerHTML =
-    `<span class="hand-zone-label">足りない駒</span><div class="missing-chips"></div>`;
+    `<span class="hand-zone-label">足りない駒</span>` +
+    `<label class="handicap-check">` +
+    `<input id="edit-handicap" type="checkbox" />手合割` +
+    `</label>` +
+    `<div class="missing-chips"></div>`;
   handSlots.missing.appendChild(missing);
   const missingChips = missing.querySelector<HTMLDivElement>(".missing-chips")!;
-  // ⚠️ **見出しは逆算するかで替わる**（2026-09-12）。逆算をやめると、ここに
-  // 出ている数の意味が「まだ持ち主が決まっていない」から
-  // **「この対局で使わない」**に変わるので、**文字を替えないと嘘になる。**
+  // ⚠️ **見出しは手合割かで替わる**（2026-09-12）。手合割では、ここに出ている数の
+  // 意味が「まだ持ち主が決まっていない」から**「この対局で使わない」**に変わるので、
+  // **文字を替えないと嘘になる。**
   const missingLabel = missing.querySelector<HTMLSpanElement>(".hand-zone-label")!;
+  const handicapCheck = missing.querySelector<HTMLInputElement>("#edit-handicap")!;
+  // ⚠️ **説明文の中の枠の名前も一緒に替えること**（下の操作の説明）。
+  // 片方だけ替えると、画面に無い名前で操作を説明することになる。
+  const stockName = confirmHost.querySelector<HTMLElement>("#edit-stock-name")!;
+  const handicapLabel = missing.querySelector<HTMLLabelElement>(".handicap-check")!;
+  handicapLabel.title =
+    "駒落ちのように、はじめから盤に無い駒がある対局。" +
+    "チェックすると「足りない駒」を「使わない駒」として扱い、局面を確定できます" +
+    "（詰将棋もこちら）。盤や駒台は動きません";
 
   // nearSide は「その駒台が画面の手前にあるか」。**表示視点で入れ替わる**
   // （盤を裏から眺めると、上向きの駒の駒台が奥へ回る）。
@@ -383,33 +407,63 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   // **盤が反転すると思われる** —— この盤は 1 マスも動かない。言っているのは
   // **「手前に写っているのはどちらの駒か」という、撮った画像についての事実**なので、
   // 位置で書く。
-  const handsFixedBtn = viewHost.querySelector<HTMLButtonElement>("#edit-hands-fixed")!;
-  // 「盤にも駒台にも無い駒」をどう読むか（2026-09-12）。**今の解釈を書いておく。**
+  // handicap は**手合割の対局か**（＝ Go 側の `HandsFixed`）。
   //
-  // ⚠️ **これは訂正の操作ではない**（盤も駒台も 1 枚も動かない）。効くのは
-  // 足りない駒の読み方だけで、**駒落ち・詰将棋はこれを押さないと確定できない**
-  // （落とした駒はどちらの駒台にも無いので、逆算したままだと未決が消えない）。
-  const paintHandsFixedButton = (fixed: boolean) => {
-    handsFixedBtn.textContent = fixed ? "盤に無い駒: 使わない" : "盤に無い駒: 駒台にある";
-    handsFixedBtn.title = fixed
-      ? "駒落ち・詰将棋。盤にも駒台にも無い駒は、この対局に存在しないものとして扱います（持ち駒は自分で決めてください）。押すと駒台の逆算に戻ります"
-      : "盤にも駒台にも無い駒は、どちらかの駒台にあるものとして数えます（既定）。押すと「この対局で使わない」（駒落ち・詰将棋）に切り替わります";
-    handsFixedBtn.setAttribute("aria-pressed", String(fixed));
-    handsFixedBtn.classList.toggle("is-active", fixed);
-    missingLabel.textContent = fixed ? "使わない駒" : "足りない駒";
+  // ⚠️ **側の呼び名がまるごと替わる。** 手合割では先手を**下手**、後手を**上手**と
+  // 呼ぶので、画面から「先手／後手」が消える（手番のボタン・目線のボタン・
+  // 手番マークのツールチップ）。**呼び名だけ**で、側も手番も局面も変わらない
+  // （下手＝先手＝`b`、上手＝後手＝`w`）。
+  //
+  // ⚠️ **替え忘れると画面が嘘をつく。** 二枚落ちで「手前: 先手」と出ていると、
+  // 下手を持っているのに何を選べばよいのか分からなくなる（実際に分からなかった）。
+  // **側の名前を出すところは必ずこの 1 つの値を見ること。**
+  let handicap = false;
+
+  // sideName は側の呼び名（手合割なら下手／上手）。**先手・後手と書かないこと。**
+  const sideName = (black: boolean) =>
+    handicap ? (black ? "下手" : "上手") : black ? "先手" : "後手";
+  // turnName は手番の呼び名。**「不明」は手合割でも不明のまま。**
+  const turnName = (turn: number, fallback: string) => {
+    if (!handicap) {
+      return fallback;
+    }
+    if (turn === TURN_BLACK || turn === TURN_WHITE) {
+      return `${sideName(turn === TURN_BLACK)}番`;
+    }
+    return fallback;
   };
 
   const paintNearButton = (nearWhite: boolean) => {
-    nearBtn.textContent = nearWhite ? "手前: 後手" : "手前: 先手";
+    nearBtn.textContent = `手前: ${sideName(!nearWhite)}`;
     nearBtn.title = nearWhite
-      ? "撮った画像は手前が後手。押すと「手前が先手」に戻ります。盤は変わらず、解析へ渡すときに上下を反転します"
-      : "撮った画像は手前が先手。押すと「手前が後手」になります。盤は変わりません（解析へ渡すときだけ反転します）";
+      ? `撮った画像は手前が${sideName(false)}。押すと「手前が${sideName(true)}」に戻ります。盤は変わらず、解析へ渡すときに上下を反転します`
+      : `撮った画像は手前が${sideName(true)}。押すと「手前が${sideName(false)}」になります。盤は変わりません（解析へ渡すときだけ反転します）`;
     nearBtn.setAttribute("aria-pressed", String(nearWhite));
+  };
+
+  // 手合割かどうかで替わるものを**まとめて**塗り直す（2026-09-12）。
+  //
+  // ⚠️ **チェック自体もここで入れる**（`state` が唯一の値で、押した瞬間の
+  // 見た目を自前で持たない）。⚠️ **手番のボタンの文字もここ** —— 手合割で
+  // 「先手番／後手番」と出ていると、下手を持っている人が選べない。
+  const paintHandicap = (next: EditState | null) => {
+    handicap = !!next?.handsFixed;
+    handicapCheck.checked = handicap;
+    const stock = handicap ? "使わない駒" : "足りない駒";
+    missingLabel.textContent = stock;
+    stockName.textContent = stock;
+    for (const b of turnBtns) {
+      const turn = Number(b.dataset.turn);
+      b.textContent =
+        turn === TURN_BLACK || turn === TURN_WHITE
+          ? `${sideName(turn === TURN_BLACK)}番`
+          : "不明";
+    }
+    paintNearButton(!!next?.nearWhite);
   };
   // ⚠️ **一度は通すこと。** 駒台の見出し（「手前の駒台」）と目線のボタンの文字は
   // ここで入れているので、通さないと見出しの無い駒台と空のボタンが出る。
-  paintNearButton(false);
-  paintHandsFixedButton(false);
+  paintHandicap(null);
   showHandLabels();
 
   let state: EditState | null = null;
@@ -474,8 +528,9 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     for (const b of turnBtns) {
       b.classList.toggle("is-active", Number(b.dataset.turn) === next.turn);
     }
-    paintNearButton(!!next.nearWhite);
-    paintHandsFixedButton(!!next.handsFixed);
+    // ⚠️ **側の呼び名が先。** 手番マークも目線のボタンもこの値で文字を作るので、
+    // 後ろに回すと**1 回ぶん古い呼び名**が残る。
+    paintHandicap(next);
     // ⚠️ **手番の値は 1 つ（`EditState.turn`）。** ボタンとマークは同じ値を
     // 2 か所に描くだけで、**更新経路もここ 1 本**にする（片方だけ更新する道を
     // 作ると、どちらが本当の手番か分からなくなる）。
@@ -484,7 +539,7 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     // **上向きに写っている側**に付いているので、後手目線では `turn` と逆になる
     // （後手番なら、上向きに見えている手前の側が指す）。
     // **`turn` を渡さないこと** —— 後手目線のときだけ光る側が入れ替わる。
-    showTurnMarks(next.seenTurn ?? next.turn, next.turnLabel ?? "");
+    showTurnMarks(next.seenTurn ?? next.turn, turnName(next.turn, next.turnLabel ?? ""));
     if (document.activeElement !== moveNum) {
       moveNum.value = String(next.moveNumber ?? 0);
     }
@@ -569,7 +624,7 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   function renderMissing(inv: Stock[], handsFixed: boolean) {
     missingChips.replaceChildren();
     for (const s of inv) {
-      // 出す数（逆算あり = 先後が未決の枚数 / 逆算なし = 使わない枚数）。
+      // 出す数（平手 = 先後が未決の枚数 / 手合割 = この対局で使わない枚数）。
       const n = handsFixed ? s.unused : s.unassigned;
       // 縦 1 列。**並びは Inventory の順（歩香桂銀金角飛王）のまま**で、
       // 足りていても消さない（位置が動くと、どこを掴むかが毎回変わる）。
@@ -1164,9 +1219,10 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     void apply(() => PositionService.SetViewpoint(next));
   });
 
-  // 盤に無い駒の読み方（駒落ち・詰将棋）。⚠️ **今の値は `state` から読む。**
-  handsFixedBtn.addEventListener("click", () => {
-    const next = !state?.handsFixed;
+  // 手合割の対局か（駒落ち・詰将棋）。⚠️ **今の値は `state` から読む**
+  // （チェックの見た目は返ってきた `EditState` で入れ直す）。
+  handicapCheck.addEventListener("change", () => {
+    const next = handicapCheck.checked;
     void apply(() => PositionService.SetHandsFixed(next));
   });
 

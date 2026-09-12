@@ -2899,11 +2899,11 @@ html.is-graph #app {
   color: #ff7a7a;
 }
 
-/* 目線と「盤に無い駒」の行（2026-08-18 / 2026-09-12）。**盤のすぐ下。**
+/* 目線の行（2026-08-18）。**盤のすぐ下に 1 つだけ。**
    ⚠️ **手番の行（.edit-meta）に戻さないこと** —— 別の事実なのに、同じ見た目の
    ボタンが隣り合うと同じものの選択肢に見える。中身は editor.ts が入れる。
-   ⚠️ **この 2 つも別の事実**（目線は撮った画像の話、盤に無い駒はこの対局の話）。
-   どちらも**今の解釈を書いたボタン**で、押すと入れ替わる形に揃えてある。 */
+   ⚠️ **「手合割か」のチェックもここに並べない**（2026-09-12 に一度置いて外した。
+   あれは「足りない駒」の枠の意味を変えるので `.missing-zone` の中）。 */
 .edit-view-row {
   flex: 0 0 auto;
   display: flex;
@@ -4324,6 +4324,29 @@ html.is-graph #app {
   padding: 4px;
   border: 1px dashed #6a5a33;
   border-radius: 6px;
+}
+
+/* 「手合割」のチェック（2026-09-12）。**「足りない駒」の枠の中**に置く。
+   ⚠️ **この枠の意味そのものを変える**（足りない駒 ⇄ 使わない駒）ので、
+   変わるものの隣に置くこと。盤の下の目線の行に出すと、何が変わるのか分からない。
+   ⚠️ **枠は 104px しかない**ので、文字は「手合割」の 4 文字まで。説明は title。 */
+.handicap-check {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: #9aa0ac;
+  cursor: pointer;
+  user-select: none;
+}
+
+.handicap-check input {
+  width: 12px;
+  height: 12px;
+  margin: 0;
+  accent-color: #5ea0ff;
+  cursor: pointer;
 }
 
 .missing-zone.is-over {
