@@ -695,18 +695,31 @@ export function mountMainScreen(root: HTMLElement): void {
                **盤は 560px より大きくならない**ので、
                左の余白はもともと遊んでおり、ここに置くのは盤を狭めない。
 
-               ⚠️ **認識が使った盤面領域(Debug.Region)で切り取って出す**(2026-08-11)。
-               画面いっぱいに広げたときに盤が小さすぎて 1 マスずつ見比べられないのと、
-               **盤面領域を誤認識していても気づけない**ため。切り取ると、ずれていれば
-               「盤が欠けた画像」として一目で分かる。**領域が無いときは全体を出す**
-               (撮った 1 枚を見せないより良い。設計原則3)。
+               ⚠️ **盤だと判定した矩形とマス割りをここに重ねる**(2026-09-13)。
+               以前は矩形で黙って切り取るだけで、**矩形そのものは「認識詳細情報」の
+               折りたたみの中にしか無かった**。そのため認識がおかしいときに
+               「矩形がずれているのか、駒種を外しているのか」が訂正の手を止めずには
+               分からず、**撮った画像のほうを疑うことになった**(2026-09-12 の
+               20260912-144914。実際には矩形はピクセル単位で合っていた)。
+               **判断に要るものを、判断する場所に出す。**
 
-               ⚠️ **出すのは画像そのものだけ。** 重ね表示・信頼度・保存先は
-               「認識がどれくらい外したか」の情報なので「認識詳細情報」に残す
-               (盤面タブの基準は「局面を読む・直す・動かすのに要るか」)。
+               ⚠️ **切り取っても余白を残すこと。** 矩形が画像の縁と重なると線が
+               見えず、「判定した範囲」を確かめられない(切り取ったことすら分からない)。
+
+               ⚠️ **信頼度・保存先・推論器は「認識詳細情報」のまま。** あちらは
+               「認識がどれくらい外したか」の記録で、ここは「今直している 1 枚」。
                もとの画像は「認識詳細情報」と**同じ CaptureResult.thumbnail**。 -->
           <div id="capture-ref" class="capture-ref" hidden>
-            <img id="capture-ref-img" class="capture-ref-img" alt="訂正のもとになった画像" />
+            <div class="capture-ref-head">
+              <span class="field-label">撮った画像</span>
+              <button id="capture-ref-scope" class="ghost-btn is-tiny" type="button"
+                      title="盤だと判定した範囲を拡大するか、撮った画像の全体を出すかを切り替えます">画像全体</button>
+            </div>
+            <svg id="capture-ref-svg" class="capture-ref-svg" preserveAspectRatio="xMidYMid meet"
+                 role="img" aria-label="訂正のもとになった画像">
+              <image id="capture-ref-image" />
+              <g id="capture-ref-marks" class="capture-ref-marks"></g>
+            </svg>
           </div>
           <!-- 盤と駒台の配置。**後手の駒台は盤の左上、先手の駒台は右下**
                (実際の将棋盤と同じ並び)。訂正モードのときだけ出る。 -->
@@ -1647,69 +1660,161 @@ export function mountMainScreen(root: HTMLElement): void {
   // 訂正中に盤の左へ出す「撮った画像」。**「認識詳細情報」のサムネイルと同じ値**を描くだけで、
   // 別の経路で取り直さない(片方だけ更新されると、どちらが今の 1 枚か分からなくなる)。
   //
-  // 出す条件は「訂正中」かつ「画像がある」の両方。撮る前と、確定したあとは畳む。
+  // 出す条件は「画像がある」だけ(訂正タブそのものが訂正モードなので、以前あった
+  // 「訂正中かどうか」の条件は消えた)。入れ替えは setCaptureRef のみ。
   const captureRef = root.querySelector<HTMLDivElement>("#capture-ref")!;
-  const captureRefImg = root.querySelector<HTMLImageElement>("#capture-ref-img")!;
-  // 画像の有無は自前で覚える。**`img.src` は空文字を入れてもページの URL に解決される**
-  // ので、要素から「画像が入っているか」は読めない。
+  const captureRefSvg = root.querySelector<SVGSVGElement>("#capture-ref-svg")!;
+  const captureRefImage = root.querySelector<SVGImageElement>("#capture-ref-image")!;
+  const captureRefMarks = root.querySelector<SVGGElement>("#capture-ref-marks")!;
+  const captureRefScope = root.querySelector<HTMLButtonElement>("#capture-ref-scope")!;
+  // 認識の重ね表示（盤だと判定した矩形とマス割り）を SVG へ描く。
   //
-  // **訂正タブに居るあいだは常に出す**（タブそのものが訂正モードなので、
-  // 以前の「訂正中だけ」という条件は画像の有無だけになった）。
-  let hasShot = false;
-  const syncCaptureRef = () => {
-    captureRef.hidden = !hasShot;
+  // **描き先は 2 つある** ——「認識詳細情報」の記録（`#overlay`）と、訂正中に盤の左へ
+  // 出す参照画像（`#capture-ref`）。⚠️ **2 つに分けて書かないこと。** 同じ debug から
+  // 違う絵が出ると、どちらが本当なのか分からなくなる。見た目の違いは CSS 側
+  // （`.overlay` / `.capture-ref-marks`）が持つ。
+  //
+  // ⚠️ **viewBox は呼び出し側が決める。** ここは画像の座標系にそのまま置くだけで、
+  // 全体を出すのか矩形を拡大するのかを知らない（知ると 2 か所で同じ判断をすることになる）。
+  const paintRecognition = (target: SVGElement, debug: Debug) => {
+    const rect = (
+      r: { Min: { X: number; Y: number }; Max: { X: number; Y: number } },
+      cls: string,
+      tip?: string,
+    ) => {
+      const el = document.createElementNS(SVG_NS, "rect");
+      el.setAttribute("x", String(r.Min.X));
+      el.setAttribute("y", String(r.Min.Y));
+      el.setAttribute("width", String(r.Max.X - r.Min.X));
+      el.setAttribute("height", String(r.Max.Y - r.Min.Y));
+      el.setAttribute("class", cls);
+      // 線の太さは画像の拡縮に引きずられると見えなくなるので、画面上の px で固定する。
+      el.setAttribute("vector-effect", "non-scaling-stroke");
+      if (tip) {
+        const title = document.createElementNS(SVG_NS, "title");
+        title.textContent = tip;
+        el.appendChild(title);
+      }
+      target.appendChild(el);
+    };
+
+    for (const c of debug.cells ?? []) {
+      // category 0 = 空。空マスは枠だけにして、駒のあるマスの確信度を目立たせる。
+      const empty = c.piece === "";
+      const cls =
+        empty ? "cell is-empty"
+        : c.confidence < LOW_CELL_CONFIDENCE ? "cell is-low"
+        : "cell";
+      rect(
+        c.rect,
+        cls,
+        `${cellName(c.row, c.col)} ${c.piece || "空"} ${Math.round(c.confidence * 100)}%`,
+      );
+    }
+    // 外枠は最後に描いて、マスの線の上に来るようにする。
+    rect(debug.region, "region");
   };
 
-  // 参照画像は**認識が使った盤面領域で切り取って**出す（2026-08-11）。
+  // 参照画像は **SVG 1 枚**に「撮った画像・盤だと判定した矩形・マス割り」をまとめて描く
+  // （2026-09-13 に `<img>` + canvas の切り取りから作り直した）。
   //
-  // 全体のままだと、ウィンドウを広げたときに盤が小さいままで 1 マスずつ見比べられず、
-  // **盤面領域そのものを誤認識していても気づけない**（重ね表示は「認識詳細情報」の
-  // 中で、畳んでいると見えない）。切り取れば、ずれていれば盤の欠けた画像として出る。
+  // ⚠️ **画像と格子を別々に更新しないこと。** 描く材料は `refShot` ただ 1 つで、
+  // `renderCaptureRef` がそこから**画像も矩形もマス割りも一度に**描き直す。
+  // **「新しい画像に前の認識の格子が乗る」という状態が作れない**のがこの形の要点。
+  // 以前は canvas で切り取っており `img.onload` を挟む非同期だったため、
+  // 撮り直しの前後で一瞬ぶれる余地があった（**実際に「前の格子が出ている」と
+  // 疑う元になった**。2026-09-12 の 20260912-144914）。
   //
-  // ⚠️ **切り取りはここでやる（Go 側に 2 枚目を作らせない）。** サムネイルは既に
-  // 等倍 PNG の base64 なので、切り取った画像も返すとイベントのペイロードが倍になる。
-  // 重ね表示の SVG と同じ考え方で、**Go が返すのは座標だけ**。
+  // ⚠️ **切り取りは viewBox でやる（画素を作り直さない）。** `<image>` は常に
+  // 撮った画像の座標系そのままに置き、viewBox だけを狭める。だから**矩形も
+  // マス割りも画像と同じ座標系**にあり、拡大・縮小でずれようがない。
+  // 学習へ送る矩形（`lastRegion`）と同じ値をそのまま描いている。
   //
-  // ⚠️ **領域が無い（認識に失敗した）ときは全体を出す。** 撮った 1 枚を見せないより
-  // 良い（設計原則3）。**画像が壊れていて読めないときも同じ。**
-  let captureRefSeq = 0;
-  const showCaptureRefImage = (
-    thumbnail: string,
-    region: ShotRegion | null,
-    path: string,
-  ) => {
-    // 撮り直しの競合よけ。切り取りは画像の読み込みを挟む非同期なので、
-    // 遅れて終わった前の 1 枚が新しい画像を上書きしないようにする。
-    const seq = ++captureRefSeq;
-    captureRefImg.title = path;
-    captureRefImg.src = thumbnail;
-    if (!region) {
+  // ⚠️ **認識できていないときは全体に倒す**（設計原則3）。矩形が無いだけで、
+  // 撮った 1 枚は必ず見える。
+  const REF_MARGIN_CELLS = 0.6; // 切り取るときに矩形の外へ残す余白（1 マスの何倍か）
+  type RefShot = {
+    thumbnail: string;
+    path: string;
+    width: number;
+    height: number;
+    debug?: Debug | null;
+  };
+  let refShot: RefShot | null = null;
+  // 画像の全体を出すか。**押されたら覚える**（撮り直しても保つ。矩形を疑って
+  // 全体にした人は、次の 1 枚も全体で見たいはず）。
+  let refWhole = false;
+
+  const renderCaptureRef = () => {
+    captureRefMarks.replaceChildren();
+    const cur = refShot;
+    if (!cur || !cur.thumbnail) {
+      captureRefImage.removeAttribute("href");
+      captureRefSvg.removeAttribute("viewBox");
+      captureRefScope.hidden = true;
       return;
     }
-    const img = new Image();
-    img.onload = () => {
-      if (seq !== captureRefSeq) {
-        return;
-      }
-      // 画像からはみ出す座標は詰める（はみ出したまま drawImage すると空白が入る）。
-      const x = Math.max(0, Math.min(region.x1, img.naturalWidth));
-      const y = Math.max(0, Math.min(region.y1, img.naturalHeight));
-      const w = Math.max(0, Math.min(region.x2, img.naturalWidth) - x);
-      const h = Math.max(0, Math.min(region.y2, img.naturalHeight) - y);
-      if (w <= 0 || h <= 0) {
-        return; // 切り取れないので全体のまま
-      }
-      const canvas = document.createElement("canvas");
-      canvas.width = w;
-      canvas.height = h;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) {
-        return;
-      }
-      ctx.drawImage(img, x, y, w, h, 0, 0, w, h);
-      captureRefImg.src = canvas.toDataURL("image/png");
-    };
-    img.src = thumbnail;
+    const dbg = cur.debug;
+    // 撮った画像の座標系。**debug があればそちらが正**（原点が 0,0 とは限らない）。
+    const b = dbg?.image_bounds;
+    const ix = b ? b.Min.X : 0;
+    const iy = b ? b.Min.Y : 0;
+    const iw = b ? b.Max.X - b.Min.X : cur.width;
+    const ih = b ? b.Max.Y - b.Min.Y : cur.height;
+
+    captureRefImage.setAttribute("href", cur.thumbnail);
+    captureRefImage.setAttribute("x", String(ix));
+    captureRefImage.setAttribute("y", String(iy));
+    captureRefImage.setAttribute("width", String(iw));
+    captureRefImage.setAttribute("height", String(ih));
+    captureRefSvg.setAttribute("aria-label", `訂正のもとになった画像: ${cur.path}`);
+
+    // 矩形が無ければ切り取れない。**ボタンごと畳む**（押しても何も変わらない
+    // ボタンを出さない）。
+    const region = dbg?.region;
+    captureRefScope.hidden = !region;
+    const whole = refWhole || !region;
+    captureRefScope.textContent = whole ? "盤だけ" : "画像全体";
+    captureRefScope.title = whole
+      ? "盤だと判定した範囲だけを拡大します"
+      : "撮った画像の全体を出します（判定した範囲がどこかを確かめられます）";
+
+    if (whole || !region) {
+      captureRefSvg.setAttribute("viewBox", `${ix} ${iy} ${iw} ${ih}`);
+    } else {
+      // 余白は 1 マスぶんから決める。矩形の線が画像の縁と重なると見えないため。
+      const cell = Math.min(
+        (region.Max.X - region.Min.X) / 9,
+        (region.Max.Y - region.Min.Y) / 9,
+      );
+      const m = Math.max(1, cell * REF_MARGIN_CELLS);
+      const x = Math.max(ix, region.Min.X - m);
+      const y = Math.max(iy, region.Min.Y - m);
+      const w = Math.min(ix + iw, region.Max.X + m) - x;
+      const h = Math.min(iy + ih, region.Max.Y + m) - y;
+      captureRefSvg.setAttribute("viewBox", `${x} ${y} ${w} ${h}`);
+    }
+    if (dbg) {
+      paintRecognition(captureRefMarks, dbg);
+    }
+  };
+
+  captureRefScope.addEventListener("click", () => {
+    refWhole = !refWhole;
+    renderCaptureRef();
+  });
+
+  // showShot / showResult / clearShotContext から呼ぶ**唯一の口**。
+  //
+  // ⚠️ **`refShot` を直に書き換えないこと。** 描き直しを忘れると画像だけ入れ替わり、
+  // **格子が前の 1 枚のまま残る** —— この形にしたのはまさにそれを起こせなくするため。
+  //
+  // **訂正タブに居るあいだは画像があれば常に出す**（タブそのものが訂正モードなので、
+  // 以前の「訂正中だけ」という条件は画像の有無だけになった）。
+  const setCaptureRef = (next: RefShot | null) => {
+    refShot = next && next.thumbnail ? next : null;
+    captureRef.hidden = !refShot;
+    renderCaptureRef();
   };
 
   // ---- 訂正データの送信（suteme への還元） --------------------------------
@@ -3394,43 +3499,7 @@ ${st.turnLabel}${n}`;
       "viewBox",
       `${b.Min.X} ${b.Min.Y} ${b.Max.X - b.Min.X} ${b.Max.Y - b.Min.Y}`,
     );
-
-    const rect = (
-      r: { Min: { X: number; Y: number }; Max: { X: number; Y: number } },
-      cls: string,
-      tip?: string,
-    ) => {
-      const el = document.createElementNS(SVG_NS, "rect");
-      el.setAttribute("x", String(r.Min.X));
-      el.setAttribute("y", String(r.Min.Y));
-      el.setAttribute("width", String(r.Max.X - r.Min.X));
-      el.setAttribute("height", String(r.Max.Y - r.Min.Y));
-      el.setAttribute("class", cls);
-      // 線の太さは画像の拡縮に引きずられると見えなくなるので、画面上の px で固定する。
-      el.setAttribute("vector-effect", "non-scaling-stroke");
-      if (tip) {
-        const title = document.createElementNS(SVG_NS, "title");
-        title.textContent = tip;
-        el.appendChild(title);
-      }
-      overlay.appendChild(el);
-    };
-
-    for (const c of debug.cells ?? []) {
-      // category 0 = 空。空マスは枠だけにして、駒のあるマスの確信度を目立たせる。
-      const empty = c.piece === "";
-      const cls =
-        empty ? "cell is-empty"
-        : c.confidence < LOW_CELL_CONFIDENCE ? "cell is-low"
-        : "cell";
-      rect(
-        c.rect,
-        cls,
-        `${cellName(c.row, c.col)} ${c.piece || "空"} ${Math.round(c.confidence * 100)}%`,
-      );
-    }
-    // 外枠は最後に描いて、マスの線の上に来るようにする。
-    rect(debug.region, "region");
+    paintRecognition(overlay, debug);
   };
 
   // 撮った画像のファイル名。押すと**フルパス**をクリップボードへ入れる。
@@ -3570,11 +3639,15 @@ ${st.turnLabel}${n}`;
       shot.hidden = false;
     }
     lastRegion = null;
-    hasShot = !!taken.thumbnail;
-    if (hasShot) {
-      showCaptureRefImage(taken.thumbnail, null, taken.path);
-    }
-    syncCaptureRef();
+    // **まだ盤面領域が分からないので矩形は付かない**（認識はこれから）。
+    // 届いたら showResult が同じ 1 枚を矩形つきで出し直す。
+    setCaptureRef({
+      thumbnail: taken.thumbnail,
+      path: taken.path,
+      width: taken.width,
+      height: taken.height,
+      debug: null,
+    });
     syncTrain();
 
     // **撮ったら訂正タブへ移る。** 行き先は認識の成否に依らないので、
@@ -3639,12 +3712,16 @@ ${st.turnLabel}${n}`;
         }
       : null;
     // 訂正中に盤の左へ出す参照画像。**もとの 1 枚は「認識詳細情報」と同じ**で、
-    // ここではそれを盤面領域で切り取って出すだけ（別の経路で取り直さない）。
-    hasShot = !!result.thumbnail;
-    if (hasShot) {
-      showCaptureRefImage(result.thumbnail, lastRegion, result.path);
-    }
-    syncCaptureRef();
+    // ここではそれに矩形とマス割りを重ねて出すだけ（別の経路で取り直さない）。
+    // ⚠️ **画像と矩形を 1 回で渡すこと** —— 別々に入れると、片方だけ入れ替わった
+    // 「新しい画像に前の格子」という状態を作れてしまう。
+    setCaptureRef({
+      thumbnail: result.thumbnail,
+      path: result.path,
+      width: result.width,
+      height: result.height,
+      debug: result.debug,
+    });
     syncTrain();
     drawOverlay(result.debug);
 
@@ -3798,7 +3875,7 @@ ${st.turnLabel}${n}`;
     showPath("");
     shot.hidden = true;
     lastRegion = null;
-    hasShot = false;
+    setCaptureRef(null);
     showConfidence(0, "");
     showRegion(null);
     showPredictor(null);
@@ -3808,7 +3885,6 @@ ${st.turnLabel}${n}`;
     markDebug("");
     trainSendStatus.textContent = "";
     trainSendStatus.classList.remove("is-error");
-    syncCaptureRef();
     // ⚠️ **最後に呼ぶこと** —— `shotFullPath` と盤面領域を見て
     // 「訂正データを送信」の行を畳むので、先に呼ぶと出たままになる。
     syncTrain();

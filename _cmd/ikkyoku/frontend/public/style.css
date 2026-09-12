@@ -3005,6 +3005,13 @@ html.is-graph #app {
   cursor: default;
 }
 
+/* 行の中に混ぜる小さいボタン（見出しの隣に置く切り替えなど）。
+   **主役ではない**ので、普通の ghost-btn より一回り小さくする。 */
+.ghost-btn.is-tiny {
+  padding: 2px 8px;
+  font-size: 11.5px;
+}
+
 /* 認識器(suteme の学習データ)の読み込み状況。データを育てながら使うので、
    「今どれを読んでいるか」が常に見えているほうがよい。 */
 .recognizer {
@@ -3074,20 +3081,72 @@ html.is-graph #app {
   align-self: stretch;
   min-height: 0;
   display: flex;
-  align-items: center;
+  flex-direction: column;
   justify-content: center;
+  gap: 4px;
 }
 
 .capture-ref[hidden] {
   display: none;
 }
 
-.capture-ref-img {
-  max-width: 100%;
+/* 見出しと「画像全体 / 盤だけ」の切り替え。**高さを食わないこと**（盤の左の列は
+   もともと遊んでいる幅であって、高さは盤と同じしか無い）。 */
+.capture-ref-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  min-height: 0;
+}
+
+/* 撮った画像・盤だと判定した矩形・マス割りを 1 枚にまとめた SVG（mainscreen.ts の
+   renderCaptureRef）。
+
+   ⚠️ **画像の大きさで箱を決めさせないこと**（幅は .capture-ref が持つ）。
+   中身で幅が決まると、**読み込み完了の瞬間に盤が横へ動き**、訂正グリッドだけが
+   元の位置に取り残される（layoutGrid はそのとき呼ばれない）。
+
+   preserveAspectRatio="xMidYMid meet" なので、箱より縦横比が違っても歪まず
+   中央に収まる。余った余地は透明のままで、枠線も背景も付けない
+   （付けると画像の無い余白に枠が付いて、どこまでが画像か分からなくなる）。 */
+.capture-ref-svg {
+  display: block;
+  /* ⚠️ **伸ばさないこと**（`flex: 0 1 auto`）。viewBox から縦横比が決まるので、
+     height: auto に任せれば画像の形のまま。溢れるぶんだけ max-height が縮める
+     （preserveAspectRatio="xMidYMid meet" なので歪まず中央に収まる）。 */
+  flex: 0 1 auto;
+  width: 100%;
+  height: auto;
   max-height: 100%;
-  object-fit: contain;
-  border: 1px solid #3a3d47;
-  border-radius: 6px;
+  min-height: 0;
+}
+
+/* 参照画像に重ねる矩形とマス割り。**「認識詳細情報」の .overlay と同じものを
+   描いている**（mainscreen.ts の paintRecognition）が、こちらは**訂正しながら
+   ずっと見るもの**なので薄くする。⚠️ 外枠だけは薄くしないこと —— これが
+   「盤をどこだと思ったか」そのもので、確かめるために出している。 */
+.capture-ref-marks .region {
+  fill: none;
+  stroke: #6ad3ff;
+  stroke-width: 2;
+}
+
+.capture-ref-marks .cell {
+  fill: none;
+  stroke: rgba(106, 211, 255, 0.22);
+  stroke-width: 1;
+}
+
+.capture-ref-marks .cell.is-empty {
+  stroke: rgba(154, 166, 192, 0.12);
+}
+
+/* 確信度が低いマス。**駒を直す手がかりなので、ここでは残す**（訂正中に
+   「どこを疑えばいいか」が分かる）。塗りは原本が読める濃さまで落とす。 */
+.capture-ref-marks .cell.is-low {
+  fill: rgba(255, 196, 107, 0.18);
+  stroke: #ffc46b;
 }
 
 /* 訂正タブ・解析タブとも盤の脇に駒台を置くので .board-with-hands が
