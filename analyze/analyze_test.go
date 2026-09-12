@@ -679,3 +679,64 @@ func TestAccumulatorIgnoresBoundReports(t *testing.T) {
 		t.Errorf("確定値が採れていません: %+v", p.Lines[0])
 	}
 }
+
+// 詰み探索にかけられる局面かの線引き（2026-09-12）。
+//
+// ⚠️ **`ensurePlayable` とは条件が違う。** 詰将棋は**攻方の玉が無いのが普通**なので、
+// 要るのは**詰ませる相手（玉方の玉）**だけ。
+func TestEnsureMateTarget(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		board string
+		black bool // 攻方が先手か
+		ok    bool
+	}{
+		{"攻方の玉なし・玉方あり", "4k4/9/4P4/9/9/9/9/9/9", true, true},
+		{"両玉あり", "4k4/9/4P4/9/9/9/9/9/8K", true, true},
+		{"玉方が居ない", "9/9/9/9/9/9/9/9/4K4", true, false},
+		{"どちらも居ない", "9/9/9/9/9/9/9/9/9", true, false},
+		{"攻方の玉が 2 枚", "4k4/9/9/9/9/9/9/9/3KK4", true, false},
+		{"後手が攻方（玉方は先手）", "4K4/9/4p4/9/9/9/9/9/9", false, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ensureMateTarget(tt.board, tt.black)
+			if tt.ok && err != nil {
+				t.Fatalf("通るはずが断られました: %v", err)
+			}
+			if !tt.ok && err == nil {
+				t.Fatal("断るはずが通りました")
+			}
+		})
+	}
+}
+
+// ⚠️ **同梱エンジンは詰み探索に対応していない**（`checkmate notimplemented`）。
+//
+// **それでも経路は通ること**を見ている —— `go mate` を送り、答えを読み、
+// **「非対応」として返る**。ここが黙って固まると、詰将棋エンジンを繋ぐまで
+// 画面が止まったままになる。
+func TestMateNotImplementedOnBundledEngine(t *testing.T) {
+	const mateInOne = "4k4/9/4P4/9/9/9/9/9/9 b G2r2b3g4s4n4l17p 1"
+
+	s := newTestSession(t)
+	r, err := s.Mate(context.Background(), mateInOne, MateOptions{Limit: 2 * time.Second}, nil)
+	if err != nil {
+		t.Fatalf("Mate: %v", err)
+	}
+	if r.Kind != MateNotImplemented {
+		t.Errorf("Kind = %q, want %q（同梱エンジンは詰み探索を持たない）", r.Kind, MateNotImplemented)
+	}
+	if len(r.Moves) != 0 {
+		t.Errorf("Moves = %v（非対応なのに手順が入っている）", r.Moves)
+	}
+}
+
+// 詰ませる相手が居ない局面は、エンジンに渡す前に断ること。
+func TestMateRejectsWithoutDefender(t *testing.T) {
+	s := newTestSession(t)
+	_, err := s.Mate(context.Background(), "9/9/9/9/9/9/9/9/4K4 b 2r2b4g4s4n4l18p 1",
+		MateOptions{Limit: time.Second}, nil)
+	if err == nil {
+		t.Fatal("玉方が居ないのに通りました")
+	}
+}

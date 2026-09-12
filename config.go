@@ -594,6 +594,17 @@ type EngineEntry struct {
 	// omitempty を付けないのは、**外してあること自体を設定ファイルに残す**ため。
 	Enabled bool `json:"enabled"`
 
+	// Mate は**詰将棋エンジン**か（`go mate` で詰みを解かせる相手。2026-09-12）。
+	//
+	// ⚠️ **通常の解析には使わない。** 詰将棋エンジンは通常の `go` に答えないことが
+	// あり（KomoringHeights は `bestmove resign` を返す。実測）、**混ぜると毎回
+	// 「投了」が出る**。`EnabledEngines` から外し、`MateEngine` が拾う。
+	//
+	// ⚠️ **逆に、通常のエンジンを詰将棋用にしても解けない** —— やねうら王系は
+	// **攻方の玉が無いと `go mate` にも答えない**（実測）。詰将棋エンジンは
+	// 攻方の玉が無い局面を前提にしているものを選ぶこと（KomoringHeights など）。
+	Mate bool `json:"mate,omitempty"`
+
 	// Color は評価値グラフの折れ線の色（`#rrggbb`）。
 	//
 	// **エンジンが色を持つ**（2026-08-14。以前は「一覧の何番目か」で決まっていた）。
@@ -830,14 +841,33 @@ func (c Config) EngineList() []EngineEntry {
 }
 
 // EnabledEngines は解析に使うエンジンだけを返す（順番は登録順）。
+//
+// ⚠️ **詰将棋エンジンは含まない**（2026-09-12）。あちらは通常の `go` に答えない
+// ことがあるので、混ぜると**評価値の代わりに「投了」が並ぶ**。拾うのは `MateEngine`。
 func (c Config) EnabledEngines() []EngineEntry {
 	var out []EngineEntry
 	for _, e := range c.EngineList() {
-		if e.Enabled {
+		if e.Enabled && !e.Mate {
 			out = append(out, e)
 		}
 	}
 	return out
+}
+
+// MateEngine は詰み探索に使うエンジンを返す（**登録順で最初の 1 つ**）。
+//
+// ⚠️ **無ければ ok=false。** 詰将棋エンジンは同梱していないので、
+// **入れていない環境が普通**。呼び出し側は「入れてください」と言うだけにして、
+// **通常の解析を巻き込まないこと**（設計原則3）。
+//
+// ⚠️ **`Enabled` も見る**（一覧で外してあるものは使わない）。
+func (c Config) MateEngine() (EngineEntry, bool) {
+	for _, e := range c.EngineList() {
+		if e.Enabled && e.Mate {
+			return e, true
+		}
+	}
+	return EngineEntry{}, false
 }
 
 // DefaultEngineID は同梱エンジンを既定で登録したときの ID。

@@ -154,6 +154,11 @@ type EngineSettings struct {
 	MultiPV int `json:"multiPv"`
 	// Enabled は解析に使うか。**外した登録も残る。**
 	Enabled bool `json:"enabled"`
+	// Mate は**詰将棋エンジン**か（`go mate` で詰みを解かせる相手。2026-09-12）。
+	//
+	// ⚠️ **入れると通常の解析からは外れる**（詰将棋エンジンは通常の `go` に
+	// 答えないことがある）。画面でもそう説明すること。
+	Mate bool `json:"mate"`
 	// Color は評価値グラフの折れ線の色（`#rrggbb`）。
 	//
 	// **常に解決済みで返る**（未設定なら登録順の既定色）。⚠️ **フロントで
@@ -259,6 +264,7 @@ func engineSettings(e ikkyoku.EngineEntry, i int) EngineSettings {
 		OptionsKnown: len(e.OptionSpecs) > 0,
 		MultiPV:      e.MultiPV(),
 		Enabled:      e.Enabled,
+		Mate:         e.Mate,
 		Color:        e.DisplayColor(i),
 	}
 }
@@ -412,6 +418,16 @@ func (s *SettingsService) enabledEngines() []ikkyoku.EngineEntry {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.cfg.EnabledEngines()
+}
+
+// mateEngine は詰み探索に使うエンジンを 1 つ返す（**無ければ ok=false**）。
+//
+// ⚠️ **同梱していないので、入れていない環境が普通**（呼び出し側は「入れてください」
+// と言うだけにして、通常の解析を巻き込まないこと）。
+func (s *SettingsService) mateEngine() (ikkyoku.EngineEntry, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cfg.MateEngine()
 }
 
 // engineEntry は ID で 1 つ引く（「接続を確認」がこれ 1 つを繋ぐ）。
@@ -881,6 +897,26 @@ func (s *SettingsService) SetEngineEnabled(id string, enabled bool) (AppSettings
 		for i := range list {
 			if list[i].ID == id {
 				list[i].Enabled = enabled
+			}
+		}
+		return list
+	})
+}
+
+// SetEngineMate は**詰将棋エンジンかどうか**を切り替える（2026-09-12）。
+//
+// ⚠️ **通常の解析からは外れる**（`Config.EnabledEngines` が弾く）。詰将棋エンジンは
+// 通常の `go` に答えないことがあり、混ぜると**評価値の代わりに「投了」が並ぶ**。
+//
+// ⚠️ **複数入れても使うのは最初の 1 つ**（`Config.MateEngine`）。**排他にはしない** ——
+// 入れ替えて比べる作業では、外したものをまた戻すことが多い（`Enabled` と同じ考え方）。
+func (s *SettingsService) SetEngineMate(id string, mate bool) (AppSettings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.editEngines(func(list []ikkyoku.EngineEntry) []ikkyoku.EngineEntry {
+		for i := range list {
+			if list[i].ID == id {
+				list[i].Mate = mate
 			}
 		}
 		return list

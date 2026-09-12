@@ -5065,6 +5065,13 @@ ${st.turnLabel}${n}`;
           <input class="engine-enabled" type="checkbox" />
           <span>解析に使う</span>
         </label>
+        <!-- 詰将棋エンジン（2026-09-12）。⚠️ **入れると通常の解析からは外れる。**
+             詰将棋エンジンは通常の go に答えないことがあり（KomoringHeights は
+             bestmove resign を返す。実測）、混ぜると評価値の代わりに投了が並ぶ。 -->
+        <label class="engine-use" title="詰将棋を go mate で解かせる相手にします（通常の解析には使わなくなります）">
+          <input class="engine-mate" type="checkbox" />
+          <span>詰将棋</span>
+        </label>
         <input class="engine-name" type="text" spellcheck="false" />
         <input class="engine-path" type="text" spellcheck="false"
                placeholder="空なら同梱のエンジン" />
@@ -5077,9 +5084,11 @@ ${st.turnLabel}${n}`;
         <span class="engine-note note"></span>
       `;
       const enabled = row.querySelector<HTMLInputElement>(".engine-enabled")!;
+      const mate = row.querySelector<HTMLInputElement>(".engine-mate")!;
       const name = row.querySelector<HTMLInputElement>(".engine-name")!;
       const path = row.querySelector<HTMLInputElement>(".engine-path")!;
       enabled.checked = e.enabled;
+      mate.checked = e.mate;
       // ⚠️ **既定の名前は placeholder に出し、value には入れない。**
       // 入れてしまうと、パスを変えても名前が追従しなくなる（Go 側が
       // 「人が付けた名前か」を custom で返しているのはこのため）。
@@ -5088,7 +5097,8 @@ ${st.turnLabel}${n}`;
       path.value = e.path;
       // **同梱かどうかの判定は Go 側の値を使う**（フロントで path === "" を書かない）。
       const opts = e.optionCount > 0 ? ` / setoption ${e.optionCount} 件` : "";
-      engineRowNote(row).textContent = (e.builtin ? "同梱のエンジン" : "") + opts;
+      const kind = e.mate ? "詰将棋エンジン（通常の解析には使いません）" : e.builtin ? "同梱のエンジン" : "";
+      engineRowNote(row).textContent = kind + opts;
       row.classList.toggle("is-off", !e.enabled);
 
       // 並べ替え。⚠️ **端では押せなくする**（押しても何も起きないボタンは、
@@ -5106,6 +5116,9 @@ ${st.turnLabel}${n}`;
 
       enabled.addEventListener("change", () => {
         void applyEngineChange(() => SettingsService.SetEngineEnabled(e.id, enabled.checked));
+      });
+      mate.addEventListener("change", () => {
+        void applyEngineChange(() => SettingsService.SetEngineMate(e.id, mate.checked));
       });
       name.addEventListener("change", () => {
         void applyEngineChange(() => SettingsService.SetEngineName(e.id, name.value));

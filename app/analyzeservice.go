@@ -623,6 +623,73 @@ func (s *AnalyzeService) runOne(
 	})
 }
 
+// MateSolution は詰み探索の結末（画面に出す形）。
+type MateSolution struct {
+	// Kind は "mate" / "nomate" / "timeout" / "notimplemented"。
+	//
+	// ⚠️ **「詰みなし」と「時間切れ」を混ぜないこと。** 後者は分からなかっただけで、
+	// 時間を伸ばせば答えが変わる（画面の文言もそう出し分ける）。
+	Kind string `json:"kind"`
+	// Moves は詰み手順（USI）。**手順ツリーへ足すのに使う。**
+	Moves []string `json:"moves"`
+	// Text は日本語表記（画面に出すのはこちら）。
+	Text []string `json:"text"`
+	// SFEN は解いた局面。**「どの局面の答えか」が分かるように返す。**
+	SFEN string `json:"sfen"`
+	// Engine は答えたエンジンの表示名。
+	Engine string `json:"engine"`
+	// EngineID は登録 ID。**手順ツリーへ足すときの「誰が言った手か」**に使う
+	// （`StudyService.AddLine`）。
+	EngineID  string `json:"engineId"`
+	ElapsedMS int64  `json:"elapsedMs"`
+}
+
+// SolveMate は今見ている局面の詰みを解く（詰将棋。2026-09-12）。
+//
+// ⚠️ **通常の解析とは別の口**（`Start` は使わない）。答えの形が違ううえ、
+// **エンジンも別**（`Config.MateEngine`）。詰将棋エンジンは通常の `go` に
+// 答えないことがあるので、**同じ一覧に混ぜて使い回さない。**
+//
+// ⚠️ **手順は渡さない**（`position sfen <今の局面>` だけ）。詰将棋は
+// **その局面だけで完結する**問題で、そこへ至る手順は答えに関係しない。
+//
+// seconds は考えさせる上限（0 なら既定）。⚠️ **詰み探索では時間切れも答えの 1 つ**
+// なので、**エンジン自身に時間を伝える**（`analyze.MateOptions`）。
+func (s *AnalyzeService) SolveMate(seconds int) (MateSolution, error) {
+	target, err := s.study.analyzeTarget()
+	if err != nil {
+		return MateSolution{}, err
+	}
+	entry, ok := s.settings.mateEngine()
+	if !ok {
+		return MateSolution{}, fmt.Errorf(
+			"詰将棋エンジンが登録されていません（設定タブでエンジンを足し、「詰将棋エンジン」を入れてください）")
+	}
+
+	limit := time.Duration(seconds) * time.Second
+	res, err := s.sessionFor(entry).Mate(context.Background(), target.Current,
+		analyze.MateOptions{Limit: limit}, nil)
+	if err != nil {
+		s.logger.Warn("詰み探索に失敗しました",
+			"engine", entry.DisplayName(), "sfen", target.Current, "error", err)
+		return MateSolution{}, err
+	}
+	s.rememberEngine(entry.ID, res.Engine)
+	s.logger.Info("詰み探索が終わりました",
+		"engine", res.Engine, "kind", string(res.Kind), "moves", len(res.Moves),
+		"elapsedMs", res.ElapsedMS, "sfen", target.Current)
+
+	return MateSolution{
+		Kind:      string(res.Kind),
+		Moves:     res.Moves,
+		Text:      res.Text,
+		SFEN:      target.Current,
+		Engine:    s.engineName(entry.ID),
+		EngineID:  entry.ID,
+		ElapsedMS: res.ElapsedMS,
+	}, nil
+}
+
 // interruptedRun は**考える時間を使い切る前に外から止められたか**を返す。
 //
 // ⚠️ **`stopped` だけでは区別できない。** 時間切れもこちらから `stop` を送って

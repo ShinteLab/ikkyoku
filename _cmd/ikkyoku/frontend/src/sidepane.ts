@@ -120,6 +120,15 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
                  盤が変わったあとも残っていると、別の局面の値を今の盤の評価だと読ませる。 -->
             <div id="analyze-row" class="analyze-row side-part-analyze" hidden>
               <button id="analyze-run" class="ghost-btn" type="button">解析</button>
+              <!-- 詰み探索（2026-09-12）。**通常の解析とは別のエンジンに投げる**
+                   （設定タブで「詰将棋」を付けた登録。go mate → checkmate）。
+
+                   ⚠️ **詰将棋のときだけ出す、にはしていない。** 「ここで詰むか」は
+                   普通の対局でも読みたいもので、詰将棋かどうかは押す理由の一部でしかない。
+                   ⚠️ **詰将棋エンジンが無ければ押したときに理由が出る**（出し分けない
+                   ——「押せないボタン」より「押したら理由が出る」ほうが次の一手が分かる）。 -->
+              <button id="mate-run" class="ghost-btn" type="button"
+                      title="今の局面が詰むかを詰将棋エンジンに解かせます（設定タブで「詰将棋」を付けた登録を使います）">詰み</button>
               <!-- 連続モード（2026-08-11）。**既定で入**。
                    手を進めるたびに勝手に解析し直すので、押す操作が要らなくなる。
                    手順を辿りながら評価値の変化を追うのがこのタブの目的なので、
@@ -333,6 +342,7 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
 
   const analyzeRow = q<HTMLDivElement>("#analyze-row")!;
   const analyzeRun = q<HTMLButtonElement>("#analyze-run")!;
+  const mateRun = q<HTMLButtonElement>("#mate-run")!;
   const analyzeSeconds = q<HTMLSelectElement>("#analyze-seconds")!;
   const analyzeContinuous = q<HTMLInputElement>("#analyze-continuous")!;
   const analyzeEnginesBox = q<HTMLDivElement>("#analyze-engines")!;
@@ -1473,6 +1483,46 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
       syncAnalyzeButton();
     }
   };
+
+  // 詰み探索（2026-09-12）。**答えの形が評価値ではない**ので、解析の結果欄ではなく
+  // 1 行の文で返し、**詰みが見つかったら手順ツリーへ枝として足す**
+  // （`StudyService.AddLine`。候補手の右クリックと同じ入口を使う）。
+  //
+  // ⚠️ **指さない。** 今見ている局面は動かさない（動くと、解いた局面と盤が食い違う）。
+  // ⚠️ **「詰みなし」と「時間切れ」を同じ文言にしないこと** —— 後者は**分からなかった
+  // だけ**なので、**時間を伸ばせば答えが変わる**ことが読み取れる言い方にする。
+  const solveMate = async () => {
+    mateRun.disabled = true;
+    analyzeStatus.hidden = false;
+    analyzeStatus.textContent = "詰みを探しています…";
+    try {
+      const r = await AnalyzeService.SolveMate(Number(analyzeSeconds.value) || 0);
+      if (r.kind === "mate") {
+        const text = (r.text ?? []).join(" ") || (r.moves ?? []).join(" ");
+        analyzeStatus.textContent = `詰みました（${r.moves?.length ?? 0}手）: ${text}（${r.engine}）`;
+        if (r.moves?.length) {
+          // ⚠️ **出したエンジンを渡す**（手順リストで誰が言った手かの色になる）。
+          onState(await StudyService.AddLine(r.engineId ?? "", r.moves).then((l) => l.state));
+        }
+      } else if (r.kind === "nomate") {
+        analyzeStatus.textContent = `詰みはありません（${r.engine}）`;
+      } else if (r.kind === "timeout") {
+        analyzeStatus.textContent =
+          `時間内に解けませんでした（${r.engine}）。詰みが無いとは限らないので、秒数を伸ばすと変わることがあります`;
+      } else {
+        analyzeStatus.textContent =
+          `このエンジンは詰み探索に対応していません（${r.engine}）。設定タブで詰将棋エンジンを登録してください`;
+      }
+    } catch (err) {
+      analyzeStatus.textContent = `詰みを探せません: ${String(err instanceof Error ? err.message : err)}`;
+    } finally {
+      mateRun.disabled = false;
+    }
+  };
+
+  mateRun.addEventListener("click", () => {
+    void solveMate();
+  });
 
   analyzeRun.addEventListener("click", () => {
     // ⚠️ **「停止」は連続解析も止めること。** 止めたのに次の手が始まったら、

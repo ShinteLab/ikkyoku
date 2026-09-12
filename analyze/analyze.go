@@ -435,6 +435,158 @@ func (s *Session) Analyze(ctx context.Context, positionSFEN string, opt Options,
 	}, nil
 }
 
+// MateKind は詰み探索の答えの種類（**画面にそのまま出す文字列**）。
+//
+// ⚠️ **「詰みなし」と「時間切れ」を同じ扱いにしないこと。** 後者は**分からなかった
+// だけ**で、時間を伸ばして投げ直せば答えが変わる。
+type MateKind string
+
+const (
+	MateFound          MateKind = "mate"           // 詰みあり（Moves に手順）
+	MateNone           MateKind = "nomate"         // 詰みなし
+	MateTimeout        MateKind = "timeout"        // 時間内に解けなかった
+	MateNotImplemented MateKind = "notimplemented" // 詰み探索に対応していない
+)
+
+// MateResult は詰み探索の結末。
+type MateResult struct {
+	Kind MateKind `json:"kind"`
+	// Moves は詰み手順（USI 表記）。⚠️ **1 手しか返さないエンジンもある**ので、
+	// **長さを「何手詰」として出さないこと。**
+	Moves []string `json:"moves"`
+	// Text は手順の日本語表記（`core/kifu`）。**画面に出すのはこちら。**
+	Text []string `json:"text"`
+	// Engine は答えたエンジンの名前。**何が出した答えかは残す。**
+	Engine    string `json:"engine"`
+	ElapsedMS int64  `json:"elapsedMs"`
+	// Stopped はこちらから打ち切ったか。
+	Stopped bool `json:"stopped"`
+}
+
+// MateOptions は詰み探索の条件。
+type MateOptions struct {
+	// Limit は考えさせる上限。0 なら既定（`DefaultMateLimit`）。
+	Limit time.Duration
+}
+
+// DefaultMateLimit は詰み探索の既定の上限。
+//
+// **詰将棋は「解けるか解けないか」なので、通常の解析より長く待つ意味がある。**
+// 短すぎると「時間切れ」ばかりになり、長すぎると画面が止まって見える。
+const DefaultMateLimit = 10 * time.Second
+
+// Mate は詰み探索（詰将棋を解かせる）。
+//
+// ⚠️ **通常の解析（`Analyze`）とは別の口。** 答えの形が違う（最善手と評価値 /
+// 詰むか否かとその手順）し、**渡してよい局面の条件も違う**（下記）。
+//
+// ⚠️ **攻方の玉が無くてよい。** そこが詰将棋の普通の形で、**詰将棋エンジンは
+// それを前提にしている**（KomoringHeights で実測）。⚠️ **玉方の玉は要る** ——
+// 詰ませる相手が居ない局面は詰み探索にならない。
+//
+// ⚠️ **詰将棋エンジンを繋ぐこと。** 通常のエンジン（やねうら王系）は**攻方の玉が
+// 無いと `go mate` にも答えない**（実測）。その場合は上限まで待って
+// 「エンジンが checkmate を返しません」で返る（**黙って固まりはしない**）。
+func (s *Session) Mate(ctx context.Context, positionSFEN string, opt MateOptions, info func(Progress)) (MateResult, error) {
+	fields := strings.Fields(positionSFEN)
+	if len(fields) < 4 {
+		return MateResult{}, fmt.Errorf("局面が確定していません（手番・持ち駒・手数まで揃った SFEN が要ります）: %s", positionSFEN)
+	}
+	if fields[1] != "b" && fields[1] != "w" {
+		return MateResult{}, fmt.Errorf("手番が読めません: %s", fields[1])
+	}
+	if err := ensureMateTarget(fields[0], fields[1] == "b"); err != nil {
+		return MateResult{}, err
+	}
+	root := strings.Join(fields, " ")
+
+	limit := opt.Limit
+	if limit <= 0 {
+		limit = DefaultMateLimit
+	}
+
+	// ⚠️ **1 接続 1 探索**（`Analyze` と同じ理由）。
+	s.runMu.Lock()
+	defer s.runMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return MateResult{}, err
+	}
+
+	eng, _, _, err := s.acquire(ctx)
+	if err != nil {
+		return MateResult{}, err
+	}
+	if err := eng.NewGame(); err != nil {
+		s.drop()
+		return MateResult{}, fmt.Errorf("エンジンに usinewgame を送れませんでした: %w", err)
+	}
+
+	started := time.Now()
+	// 途中経過は `Analyze` と同じ形で流す（画面の出し先が同じなので）。
+	acc := &accumulator{black: fields[1] == "b", started: started, sfen: root}
+	res, err := eng.Mate(ctx, root, client.MateOptions{Limit: limit}, func(in coreusi.Info) {
+		if p, ok := acc.add(in); ok && info != nil {
+			info(p)
+		}
+	})
+	if err != nil {
+		// ⚠️ **エラーが出たら接続は捨てる**（`Analyze` と同じ）。
+		s.drop()
+		return MateResult{}, err
+	}
+
+	out := MateResult{
+		Moves:     res.Moves,
+		Engine:    eng.ID,
+		ElapsedMS: time.Since(started).Milliseconds(),
+		Stopped:   res.Stopped,
+	}
+	switch res.Kind {
+	case coreusi.CheckmateFound:
+		out.Kind = MateFound
+		// **手順の日本語表記は core/kifu**（読み筋と同じ作り方。`accumulator.moveText`）。
+		// ⚠️ **エラーは握る** —— 読めない手があっても、USI の手順は返す（設計原則3）。
+		texts, _ := kifu.FormatMoves(root, res.Moves)
+		out.Text = make([]string, 0, len(texts))
+		for _, t := range texts {
+			out.Text = append(out.Text, t.Text)
+		}
+	case coreusi.CheckmateNone:
+		out.Kind = MateNone
+	case coreusi.CheckmateTimeout:
+		out.Kind = MateTimeout
+	default:
+		out.Kind = MateNotImplemented
+	}
+	if out.Moves == nil {
+		out.Moves = []string{}
+	}
+	if out.Text == nil {
+		out.Text = []string{}
+	}
+	return out, nil
+}
+
+// ensureMateTarget は詰み探索にかけられる局面かを確かめる。
+//
+// ⚠️ **`ensurePlayable` とは条件が違う。** あちらは両玉を要求するが、詰将棋は
+// **攻方の玉が無いのが普通**。ここで要るのは**詰ませる相手（玉方の玉）**だけ。
+//
+// black は攻方（手番）が先手か。**玉方は手番でない側。**
+func ensureMateTarget(boardSFEN string, black bool) error {
+	for _, v := range sfen.Inspect(boardSFEN, sfen.CheckKing).Filter(sfen.CheckKing) {
+		// 攻方の玉は 0 枚でよい（詰将棋の普通の形）。
+		if v.Black == black && v.Count == 0 {
+			continue
+		}
+		if v.Black == black {
+			return fmt.Errorf("攻方の玉が多すぎます: %s", v.Detail)
+		}
+		return fmt.Errorf("詰ませる相手が居ません: %s", v.Detail)
+	}
+	return nil
+}
+
 // liveEngine は起動中のエンジン 1 つ。**close で必ず片付ける。**
 type liveEngine struct {
 	*client.Session
