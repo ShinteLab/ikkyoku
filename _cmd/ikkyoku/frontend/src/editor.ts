@@ -691,10 +691,12 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
       // 置けない」という詰みが起きる（設計原則3・4）。見た目だけ非活性にする。
       chip.dataset.piece = String(s.piece);
       chip.textContent = s.letter;
-      // ⚠️ **詰将棋では薄くしない**（2026-09-12）。あちらは余りが玉方の駒台に
-      // 載っているので**ここの数は常に 0** だが、**盤に置く駒はここから掴む**
-      // （置いたぶんは玉方の持駒から回る）。薄いと掴めないものに見える。
-      chip.classList.toggle("is-spare", !mateProblem && n <= 0);
+      // ⚠️ **0 枚は必ず薄くする**（2026-09-12 に詰将棋だけ濃くして戻した）。
+      // **薄い＝この枠には載っていない**、という読み方が枠全体の約束で、
+      // 詰将棋だけ濃くすると**余りが玉方の駒台へ移ったのに、まだここに
+      // 残っているように見える**（実機で「玉以外も載っている」と読めた）。
+      // **掴めることは薄さと関係が無い**（説明は行の title に出す）。
+      chip.classList.toggle("is-spare", n <= 0);
 
       const count = document.createElement("span");
       count.className = "missing-count";
