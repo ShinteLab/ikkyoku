@@ -34,7 +34,7 @@
 | `Position` | 盤面 + `Turn` + `MoveNumber` + 駒台の割り振り。`SFEN()` / `Warnings()` / `Violations()` |
 | `Stock` / `Inventory()` | **「存在するはずの駒」の在庫**（`edit.go`）。残り = 上限 − 盤上で、**負なら過剰**。訂正 UI の駒箱はこれを並べる |
 | `Place` / `Remove` / `Move` / `TogglePromoted` / `FlipSide` | 訂正の操作（`edit.go`）。**合法性は問わない** |
-| `MateProblem` / `NormalizeMateHands` | **詰将棋か**（2026-09-12）。余りは**全部が玉方（後手）の持駒**で、保つ約束は **玉方 = 逆算した合計 − 攻方**。⚠️ **駒台に実体として載せる**（計算で見せるだけだと `FromHand` が掴めない）・⚠️ **1 操作ごとに `NormalizeMateHands` を呼ぶ**（それが「属性」の実装）・⚠️ **`HandsFixed` とは排他**・⚠️ **`Clone()` で写すこと** |
+| `MateProblem` / `NormalizeMateHands` | **詰将棋か**（2026-09-12）。⚠️ **`Warnings()` が「攻方の玉がありません」を言わなくなる**（詰将棋では正しい姿。**玉方の玉が無いときは言う**）。余りは**全部が玉方（後手）の持駒**で、保つ約束は **玉方 = 逆算した合計 − 攻方**。⚠️ **駒台に実体として載せる**（計算で見せるだけだと `FromHand` が掴めない）・⚠️ **1 操作ごとに `NormalizeMateHands` を呼ぶ**（それが「属性」の実装）・⚠️ **`HandsFixed` とは排他**・⚠️ **`Clone()` で写すこと** |
 | `Game` | 対局の素性。**`core/kifu.Document` のエイリアス**（対局者を定義し直さない） |
 | `FromKIF` / `FromFullSFEN` | **棋譜・完全形 SFEN の取り込み**（`kifu.go`）。⚠️ `FromBoardSFEN`（認識の入口。未決だらけ）とは別物で、こちらは**手番も持ち駒も決まった局面**を返す |
 

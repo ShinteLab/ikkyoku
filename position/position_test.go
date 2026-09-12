@@ -328,3 +328,43 @@ func TestTurnString(t *testing.T) {
 		}
 	}
 }
+
+// ⚠️ **詰将棋では「攻方の玉がありません」を言わないこと**（2026-09-12）。
+//
+// 詰将棋に攻方の玉は無いのが正しいので、言い続けると**詰将棋のあいだ中ずっと
+// 警告が出たまま**になり、本当に直すべき違反がその中に埋もれる。
+// ⚠️ **玉方（後手）の玉が無いときは言う** —— 詰ませる相手が居ないのは本当に変。
+func TestWarningsMateProblemKings(t *testing.T) {
+	hasKingWarning := func(list []string, side string) bool {
+		for _, w := range list {
+			if strings.Contains(w, side+"の玉がありません") {
+				return true
+			}
+		}
+		return false
+	}
+
+	// 玉方（後手）の玉だけがある詰将棋。
+	p, err := FromBoardSFEN("4k4/9/4G4/9/9/9/9/9/9")
+	if err != nil {
+		t.Fatalf("FromBoardSFEN: %v", err)
+	}
+	if !hasKingWarning(p.Warnings(), "先手") {
+		t.Fatal("詰将棋にする前は言うこと（普通の局面では玉が欠けている）")
+	}
+
+	p.MateProblem = true
+	if hasKingWarning(p.Warnings(), "先手") {
+		t.Error("詰将棋なのに「先手の玉がありません」と言っています")
+	}
+
+	// 玉方が居ない盤（攻方の玉だけ）は、詰将棋でも言う。
+	q, err := FromBoardSFEN("9/9/9/9/9/9/9/9/4K4")
+	if err != nil {
+		t.Fatalf("FromBoardSFEN: %v", err)
+	}
+	q.MateProblem = true
+	if !hasKingWarning(q.Warnings(), "後手") {
+		t.Error("詰ませる相手が居ないのに黙っています")
+	}
+}

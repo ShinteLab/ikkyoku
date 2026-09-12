@@ -348,7 +348,18 @@ func (p *Position) LabelSFEN() (string, []string) {
 //   - 超過 … 「盤上 + 駒台」で初めて上限を超えたぶん（`handWarnings`）
 //   - 不足 … 盤にも駒台にも無い駒（`missingWarnings`。＝訂正 UI の「足りない駒」）
 func (p *Position) Warnings() []string {
-	out := p.Board.Inspect(sfen.CheckAll).Messages()
+	info := p.Board.Inspect(sfen.CheckAll)
+	out := make([]string, 0, len(info.Violations))
+	for _, v := range info.Violations {
+		// ⚠️ **詰将棋に攻方の玉は無いのが正しい**（2026-09-12）。
+		// 言い続けると、**詰将棋のあいだ中ずっと警告が出たまま**になり、
+		// 本当に直すべき違反（二歩・駒の数）がその中に埋もれる。
+		// ⚠️ **玉方（後手）の玉は言うこと** —— 詰ませる相手が居ないのは本当に変。
+		if p.MateProblem && v.Check == sfen.CheckKing && v.Black && v.Count == 0 {
+			continue
+		}
+		out = append(out, v.Detail)
+	}
 	out = append(out, p.handWarnings()...)
 	return append(out, p.missingWarnings()...)
 }
