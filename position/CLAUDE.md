@@ -38,6 +38,9 @@
 | `Game` | 対局の素性。**`core/kifu.Document` のエイリアス**（対局者を定義し直さない） |
 | `FromKIF` / `FromFullSFEN` | **棋譜・完全形 SFEN の取り込み**（`kifu.go`）。⚠️ `FromBoardSFEN`（認識の入口。未決だらけ）とは別物で、こちらは**手番も持ち駒も決まった局面**を返す |
 
+⚠️ **手合割（駒落ち）と詰将棋の全体像はスキル `ikkyoku-handicap-mate`。**
+ここにあるのは**この層の制約**（`HandsFixed` / `MateProblem` / `Clone` で写す）。
+
 **壊さないこと（テストで固定してある）**:
 
 - ⚠️ **`MateProblem`（詰将棋）も落とさない**（2026-09-12）。⚠️ **`Clone()` で

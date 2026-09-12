@@ -662,6 +662,8 @@ kicho 側の実装で、ikkyoku は `Library.Watches / Watch / Unwatch / Unwatch
 
 ### 詰将棋（`LoadEmpty` / `SetMateProblem`）— **2026-09-12**
 
+**全体像と手順はスキル `ikkyoku-handicap-mate`。** ここは ⚠️ **制約だけ。**
+
 **入力タブの「詰将棋を並べる」→ 空の盤を訂正タブへ。** 初期局面が無い（人が並べる）
 ので手合割の表は引けず、**手合割とは別の口**になる。
 
