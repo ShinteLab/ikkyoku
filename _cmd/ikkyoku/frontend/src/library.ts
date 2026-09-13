@@ -9,7 +9,7 @@
 //
 // ⚠️ **「棋譜 URL をコピー」は置かない**（kicho の UI にはある）。あれは
 // ShogiHome 等の外部ツールへ渡すためのもので、ikkyoku では渡す先が自分自身。
-// **代わりに置くのが「解析」（行の左端）。**
+// **代わりに置くのが「解析」で、その口は棋戦名のリンク**（2026-09-14）。
 import { Clipboard } from "@wailsio/runtime";
 import { KifuService } from "../bindings/github.com/ShinteLab/ikkyoku/app";
 import { openPopup } from "./popup";
@@ -193,6 +193,9 @@ export function mountLibrary(
     });
   };
 
+  // analyze は棚の 1 局を解析タブへ送る（**棋戦名のリンク**から呼ばれる）。
+  //
+  // btn は押した相手（リンクもボタン）。⚠️ **送っているあいだ押せなくすること。**
   const analyze = async (id: string, btn: HTMLButtonElement) => {
     setStatus("");
     btn.disabled = true;
@@ -222,37 +225,41 @@ export function mountLibrary(
       const tr = document.createElement("tr");
       tr.dataset.id = g.id;
 
-      // ⚠️ **「解析」は行の左端**（2026-09-12）。一覧から拾って解析へ送るのが
-      // この面の主目的なので、日付や棋戦名の長さで押す位置が動かないようにしてある。
-      // ⚠️ **「削除」だけは右端に残すこと**（間違って押される場所に置かない）。
-      const lead = document.createElement("td");
-      lead.className = "is-actions is-lead";
-
-      // ⚠️ **「解析」が主役。** kicho の「棋譜 URL をコピー」の置き換えで、
-      // ikkyoku で棚を持つ理由そのもの。
-      const analyzeBtn = document.createElement("button");
-      analyzeBtn.type = "button";
-      analyzeBtn.className = "ghost-btn is-primary";
-      analyzeBtn.textContent = "解析";
-      analyzeBtn.title = "この棋譜を解析タブで開きます";
-      analyzeBtn.addEventListener("click", () => void analyze(g.id, analyzeBtn));
-
-      lead.append(analyzeBtn);
-      tr.append(lead);
-
       cell(tr, formatDate(g.startedAt));
 
-      // 棋戦名は**詳細を開くリンク**（2026-09-12。「表示」ボタンの置き換え）。
-      // ⚠️ **行の押せる場所を増やさないこと** —— 行そのものを押して開く作りに
-      // すると、選ぶつもりの操作で毎回モーダルが出る。**開く口は棋戦名だけ。**
+      // 棋戦名のリンクが**解析の口**（2026-09-14。それまでは詳細を開いていた）。
+      //
+      // ⚠️ **一覧から拾って解析へ送るのがこの面の主目的**なので、**その棋譜
+      // そのものである棋戦名**を押すのが解析に当たる。詳細は補助なので、
+      // **押し間違えても何も起きない「表示」ボタン**の側へ回してある。
+      // ⚠️ **行そのものを押して解析する作りにしないこと** —— 選ぶつもりの操作で
+      // 毎回解析タブへ飛ぶ。**押せる場所は棋戦名と「表示」の 2 つだけ。**
       const event = cell(tr, "");
       const link = document.createElement("button");
       link.type = "button";
       link.className = "library-link";
       link.textContent = g.event || "(棋戦名なし)";
-      link.title = `${SOURCE_LABELS[g.source] ?? g.source} ／ クリックで詳細`;
-      link.addEventListener("click", () => void show(g.id));
+      link.title = `${SOURCE_LABELS[g.source] ?? g.source} ／ クリックで解析タブへ`;
+      // ⚠️ **押しているあいだは押せなくすること**（`analyze` が自分で外す）。
+      // 続けて押すと**同じ棋譜を 2 回送って根が入れ替わる。**
+      link.addEventListener("click", () => void analyze(g.id, link));
       event.append(link);
+
+      // 「表示」は**先手より前**（2026-09-14）。⚠️ **行の左端に戻さないこと** ——
+      // 左端は一覧を目で追う起点（開始日）で、**そこに押すものがあると、
+      // 拾い読みのたびにボタンを避けることになる**。棋戦名のすぐ後ろなら、
+      // **「この棋譜の詳細」だと位置で読める。**
+      // ⚠️ **「削除」は右端のまま**（間違って押される場所に置かない）。
+      const view = document.createElement("td");
+      view.className = "is-actions is-view";
+      const viewBtn = document.createElement("button");
+      viewBtn.type = "button";
+      viewBtn.className = "ghost-btn";
+      viewBtn.textContent = "表示";
+      viewBtn.title = "この棋譜の詳細を出します（解析タブは触りません）";
+      viewBtn.addEventListener("click", () => void show(g.id));
+      view.append(viewBtn);
+      tr.append(view);
 
       cell(tr, g.black || "-");
       cell(tr, g.white || "-");
