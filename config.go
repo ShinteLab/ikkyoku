@@ -120,23 +120,27 @@ type Config struct {
 	// 連続解析は向こうの窓が回す（手順の窓のボタンは持ち主へ頼むだけ）。
 	MovePaneDetached bool `json:"movePaneDetached"`
 
-	// EvalGraphWinRate は評価値グラフを**勝率で見ているか**（2026-09-13）。
+	// EvalGraphAxis は評価値グラフの**縦軸**（2026-09-13）。
 	//
-	// **縦軸を「評価値（センチポーン）」から「先手の勝率（0〜100%）」へ
-	// 切り替えるだけ**で、記録している点も折れ線の本数も変わらない
-	// （点は評価値も勝率も両方持っている。`app.EvalPoint`）。
+	//	"eval"    … 評価値そのまま（センチポーン。**±3000 で頭打ち**）
+	//	"scaled"  … 折れた目盛り（**±500 までで上下半分、±30000 まで畳む**）
+	//	"winrate" … 先手の勝率（0〜100%）
 	//
-	// ⚠️ **勝率バーを隠す設定（`HideWinRateBar`）とは無関係。** あちらは
-	// 盤の上の帯を消す話で、こちらはグラフの縦軸の話。**片方でもう片方を
-	// 動かさないこと。**
+	// **どれも同じ点の別の読み方**で、記録している点は 1 つも変わらない
+	// （点は評価値も勝率も持っている。`app.EvalPoint`）。
 	//
-	// ⚠️ **「評価値か勝率か」の 1 つで持つこと**（軸ごとに別の設定にしない）。
-	// 同時に 2 つの縦軸では描けないので、**2 つ持つと食い違う状態が作れてしまう。**
+	// ⚠️ **"scaled" は "eval" の代わりではない。** 素の評価値グラフは
+	// **そのまま残すこと** —— 目盛りが等間隔であることに意味がある読み方
+	// （傾きがそのまま点差の動き）で、畳んだ軸はそれを捨てている。
 	//
-	// ⚠️ **画面の組み方の好みなので、次の起動でも同じ形で始める**
-	// （`EvalGraphDetached` と同じ扱い）。ゼロ値＝評価値なので、
+	// ⚠️ **"winrate" は "scaled" の代わりでもない。** 勝率は
+	// **「勝率で見たい人のための軸」**であって、0 の近くを広げるための
+	// 手段として足したものではない（既定のポナンザ定数 1500 では、
+	// ±500 の帯の傾きは線形とほとんど変わらない）。
+	//
+	// ⚠️ **知らない値は "eval" に倒す**（`NormalizeEvalAxis`）。空も同じなので、
 	// **この項目を知らない設定ファイルは今までどおり評価値で開く。**
-	EvalGraphWinRate bool `json:"evalGraphWinRate"`
+	EvalGraphAxis string `json:"evalGraphAxis,omitempty"`
 
 	// HideWinRateBar は解析タブの**勝率バー（評価値バー）を隠しているか**
 	// （2026-09-10）。切り替えるのは**解析タブの黒地の右クリック**（盤と駒台の上では
@@ -430,6 +434,34 @@ func parseHexColor(s string) (r, g, b int, ok bool) {
 		return 0, 0, 0, false
 	}
 	return int(v>>16) & 0xff, int(v>>8) & 0xff, int(v) & 0xff, true
+}
+
+// 評価値グラフの縦軸（`Config.EvalGraphAxis`）。
+//
+// ⚠️ **この値はフロントの `EvalMode` と同じ綴りにすること**
+// （`evalgraph.ts`）。設定に入る文字列なので、片方だけ変えると
+// **保存された軸が読めなくなって既定に戻る。**
+const (
+	// EvalAxisEval は評価値そのまま（既定）。
+	EvalAxisEval = "eval"
+	// EvalAxisScaled は折れた目盛り（0 の近くを広げ、詰みまで畳む）。
+	EvalAxisScaled = "scaled"
+	// EvalAxisWinRate は勝率。
+	EvalAxisWinRate = "winrate"
+)
+
+// NormalizeEvalAxis は縦軸の指定を**知っている値に倒す**（既定は評価値）。
+//
+// ⚠️ **倒す先を勝率や折れた目盛りにしないこと。** 打ち間違いや将来の版で
+// 書かれた値を読んだときに**縦軸が勝手に変わって見える**（折れ線の形そのものが
+// 変わるので、壊れたように読める）。**素の評価値が一番「何も足していない」軸。**
+func NormalizeEvalAxis(v string) string {
+	switch v {
+	case EvalAxisScaled, EvalAxisWinRate:
+		return v
+	default:
+		return EvalAxisEval
+	}
 }
 
 // GyokuOption は「王/玉」の選択肢 1 つ（画面に出す）。

@@ -59,7 +59,9 @@ const ticks = (cap: number, step: number): number[] => {
 // ⚠️ **勝率をここで計算しないこと。** 式もポナンザ定数も Go 側（`analyze.WinRate`）に
 // あり、点の `winRate` はその結果。**フロントに 2 つ目の式を作らない**（勝率バーと
 // 食い違う）。
-export type EvalMode = "eval" | "winrate";
+// ⚠️ **綴りは Go 側の `ikkyoku.EvalAxis*` と揃えること**（設定に入る文字列）。
+// 片方だけ変えると、保存された軸が読めずに既定へ戻る。
+export type EvalMode = "eval" | "scaled" | "winrate";
 
 // 縦軸 1 本ぶんの決まりごと。
 //
@@ -78,6 +80,62 @@ interface Axis {
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
 // 評価値の軸（センチポーン。**±CAP で頭打ち**）。
+// ---- 折れた目盛り（`scaled`。2026-09-13）----------------------------------
+//
+// **プロの対局は 100 手くらい ±500 の中で動く。** そこが一番読みたいのに、
+// 等間隔（±3000）では**上下 20px 弱に潰れて**いた。かといって上限を詰めると
+// 大差の局面が端に貼り付くだけで、**評価値は詰みに向かって 30000 まで伸びる。**
+//
+// そこで**折れ点を 2 つ置いて、帯ごとに縮尺を変える**:
+//
+//	0〜±500      … 上下半分（**競っている帯。ここを一番広く**）
+//	±500〜±3000  … そこから 80% まで（**「まぁ勝ちだな」の帯**）
+//	±3000〜±30000 … 残り 20%（**詰み・必至の帯。畳んでよい**）
+//
+// ⚠️ **これは素の評価値グラフの代わりではない。** 等間隔の目盛りには
+// 「傾きがそのまま点差の動き」という読み方があり、畳んだ軸はそれを捨てている。
+// **両方残すこと**（トグルで選ぶ）。
+//
+// ⚠️ **目盛りの数字は評価値のまま**（±500 / ±3000 / ±30000）。読み替えが
+// 要らないのがこの軸の取り柄なので、**％や無名の刻みにしないこと。**
+//
+// ⚠️ **折れ点を動かすなら目盛りも動かすこと。** 折れ点に線が引かれていないと、
+// **同じ 1cm が場所によって違う点差を指している**ことが画面から読めない。
+const KNEE = 500;
+const KNEE_AT = 0.5;
+// 「まぁ勝ちだな」の帯の上端。
+const WIN = 3000;
+const WIN_AT = 0.8;
+// 端（**詰み・必至**）。⚠️ **ここで頭打ち** —— 自作 `engine` の詰みスコアは
+// 1<<20 まで伸びるが、そこは `Mate` として端に乗るので気にしなくてよい。
+const MATE = 30000;
+
+// scaledAt は評価値 → 0〜1（絶対値のぶん）。**折れ点で縮尺が変わる。**
+const scaledAt = (cp: number): number => {
+  const a = Math.abs(cp);
+  if (a <= KNEE) {
+    return (a / KNEE) * KNEE_AT;
+  }
+  if (a <= WIN) {
+    return KNEE_AT + ((a - KNEE) / (WIN - KNEE)) * (WIN_AT - KNEE_AT);
+  }
+  return WIN_AT + (Math.min(a, MATE) - WIN) / (MATE - WIN) * (1 - WIN_AT);
+};
+
+const scaledAxis: Axis = {
+  at: (p) =>
+    p.mate !== 0 ? (p.mate > 0 ? 1 : -1) : Math.sign(p.cp) * scaledAt(p.cp),
+  // ⚠️ **折れ点には必ず線を引く**（±500 / ±3000）。そこで縮尺が変わることが
+  // 見えていないと、**傾きを点差の動きとして読み違える。**
+  ticks: [MATE, WIN, KNEE, KNEE / 2, 0, -KNEE / 2, -KNEE, -WIN, -MATE].map((v) => ({
+    at: Math.sign(v) * scaledAt(v),
+    text: v > 0 ? `+${v}` : String(v),
+    zero: v === 0,
+  })),
+  // ⚠️ **読み上げは評価値のまま**（軸を畳んでも数字は畳まない）。
+  label: (p) => p.label,
+};
+
 const evalAxis: Axis = {
   at: (p) => (p.mate !== 0 ? (p.mate > 0 ? 1 : -1) : clamp(p.cp, -CAP, CAP) / CAP),
   ticks: ticks(CAP, TICK_STEP).map((v) => ({
@@ -185,7 +243,8 @@ export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
 
   // 今の縦軸（**画面だけの状態ではない** —— 設定に保存する。既定は評価値）。
   let axisMode: EvalMode = "eval";
-  const axis = (): Axis => (axisMode === "winrate" ? rateAxis : evalAxis);
+  const axis = (): Axis =>
+    axisMode === "winrate" ? rateAxis : axisMode === "scaled" ? scaledAxis : evalAxis;
 
   // 見出しのボタンに今の軸を映す。⚠️ **色だけで示さないこと**（`aria-pressed`）。
   const syncMode = () => {
@@ -620,7 +679,7 @@ export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
   mode.addEventListener("click", (ev) => {
     const btn = (ev.target as HTMLElement | null)?.closest<HTMLButtonElement>("button[data-mode]");
     const next = btn?.dataset.mode;
-    if (next !== "eval" && next !== "winrate") {
+    if (next !== "eval" && next !== "scaled" && next !== "winrate") {
       return;
     }
     if (next === axisMode) {

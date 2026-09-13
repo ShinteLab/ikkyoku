@@ -414,6 +414,47 @@ func TestNextPieceFontID(t *testing.T) {
 	}
 }
 
+// TestNormalizeEvalAxis は評価値グラフの縦軸の語彙を固定する（2026-09-13）。
+//
+// ⚠️ **知らない値も空も「素の評価値」に倒すこと。** 打ち間違いや将来の版で
+// 書かれた値を読んだときに勝率や圧縮へ倒れると、**設定を触っていないのに
+// 縦軸が変わって見える**（折れ線の形そのものが変わる）。
+//
+// ⚠️ **綴りはフロントの `EvalMode` と同じ**（`evalgraph.ts`）。設定に入る
+// 文字列なので、片方だけ変えると保存された軸が読めずに既定へ戻る。
+func TestNormalizeEvalAxis(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"", EvalAxisEval},
+		{EvalAxisEval, EvalAxisEval},
+		{EvalAxisScaled, EvalAxisScaled},
+		{EvalAxisWinRate, EvalAxisWinRate},
+		{"winRate", EvalAxisEval},
+		{"あるはずのない軸", EvalAxisEval},
+	} {
+		if got := NormalizeEvalAxis(tc.in); got != tc.want {
+			t.Errorf("NormalizeEvalAxis(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestConfigEvalAxisRoundTrip は選んだ縦軸が保存されて戻ること（2026-09-13）。
+//
+// ⚠️ **残ること自体が要点**（切り離しや帯の設定と同じ。画面の組み方の好みなので、
+// 次の起動でも同じ軸で始まってほしい）。
+func TestConfigEvalAxisRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := SaveConfig(path, Config{EvalGraphAxis: EvalAxisScaled}); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.EvalGraphAxis != EvalAxisScaled {
+		t.Errorf("EvalGraphAxis = %q, want %q", cfg.EvalGraphAxis, EvalAxisScaled)
+	}
+}
+
 // 王/玉の解決。⚠️ **先後を分けられるのは玉だけ**（左馬は盤全体）。
 func TestGyokuFor(t *testing.T) {
 	for _, tc := range []struct {

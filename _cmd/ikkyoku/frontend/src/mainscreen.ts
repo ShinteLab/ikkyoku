@@ -83,6 +83,7 @@ import { mountEditor } from "./editor";
 import { mountLibrary } from "./library";
 import { mountFetchCards } from "./fetchcards";
 import { mountEvalPane } from "./evalgraphpane";
+import type { EvalMode } from "./evalgraph";
 import { mountSidePane, type EngineScore } from "./sidepane";
 import { openPopup } from "./popup";
 import { attachHints, hideHint } from "./hint";
@@ -1040,14 +1041,21 @@ export function mountMainScreen(root: HTMLElement): void {
                  評価値は「どれくらい差が付いたか」、勝率は「その差がどれくらい
                  勝ちに効くか」で、**同じ +500 でも序盤と終盤では意味が違う。**
 
-                 ⚠️ **見出しの札の代わりに置いてある** —— どちらで見ているかが
-                 グラフの題そのもの。⚠️ **今どちらかが読めること**（aria-pressed）:
+                 ⚠️ **見出しの札の代わりに置いてある** —— どれで見ているかが
+                 グラフの題そのもの。⚠️ **今どれかが読めること**（aria-pressed）:
                  軸が変わると折れ線の形も変わるので、分からないと数字を読み違える。
-                 ⚠️ **記録は 1 つも変わらない**（点が評価値も勝率も持っている）。 -->
+                 ⚠️ **記録は 1 つも変わらない**（点が評価値も勝率も持っている）。
+
+                 ⚠️ **「圧縮」は「評価値」の代わりではない。** 等間隔の目盛りには
+                 「傾きがそのまま点差の動き」という読み方があるので、**素の
+                 評価値グラフは残すこと。** ⚠️ **「勝率」もその代わりではない**
+                 （0 の近くを広げるために足したものではなく、勝率で見たい人の軸）。 -->
             <span id="eval-graph-mode" class="eval-graph-mode" role="group"
                   aria-label="縦軸">
               <button type="button" data-mode="eval" class="is-on" aria-pressed="true"
-                      title="評価値（センチポーン）で見ます">評価値</button>
+                      title="評価値（センチポーン）そのまま。目盛りは等間隔で、±3000 で頭打ちです">評価値</button>
+              <button type="button" data-mode="scaled" aria-pressed="false"
+                      title="圧縮: ±500 までで上下半分、±3000（まぁ勝ち）までで 8 割、±30000（詰み・必至）までを端に畳みます。目盛りの数字は評価値のままです">圧縮</button>
               <button type="button" data-mode="winrate" aria-pressed="false"
                       title="先手の勝率（0〜100%）で見ます。評価値からの変換で、定数は設定タブ">勝率</button>
             </span>
@@ -2568,7 +2576,7 @@ ${st.turnLabel}${n}`;
     // ⚠️ **保存できなくても画面はそのまま**（設計原則3）。次の起動で戻るだけで、
     // 今見えている折れ線は正しい。
     onMode: (m) => {
-      void SettingsService.SetEvalGraphWinRate(m === "winrate").catch(() => {});
+      void SettingsService.SetEvalGraphAxis(m).catch(() => {});
     },
   });
 
@@ -4766,9 +4774,10 @@ ${st.turnLabel}${n}`;
     // **手順の面**を別ウィンドウに切り離しているか（2026-09-12）。
     // ⚠️ **候補手とは別の設定**（両方外に出すと右の列そのものが消える）。
     movePaneDetached: boolean;
-    // 評価値グラフを**勝率で見ているか**（2026-09-13。グラフの見出しで切り替え）。
+    // 評価値グラフの**縦軸**（2026-09-13。"eval" / "scaled" / "winrate"）。
+    // ⚠️ **知らない値の解決は Go 側**（`NormalizeEvalAxis`）。そのまま入れる。
     // ⚠️ **勝率バーを隠す設定とは別物**（あちらは盤の上の帯）。
-    evalGraphWinRate: boolean;
+    evalGraphAxis: string;
     // 勝率バー（評価値バー）を隠しているか（2026-09-10。黒地の右クリック）。
     hideWinRateBar: boolean;
     // 対局者名を隠しているか（2026-09-10。⚠️ **帯とは別の設定**）。
@@ -4812,7 +4821,7 @@ ${st.turnLabel}${n}`;
     // ⚠️ **評価値グラフの縦軸も設定から受け取る**（2026-09-13）。切り替えるのは
     // グラフの見出しだが、**起動直後にどちらで始まるかはここで決まる**
     // （切り離した窓で切り替えたときも `settings:changed` でここを通る）。
-    evalGraphUI.setMode(s.evalGraphWinRate ? "winrate" : "eval");
+    evalGraphUI.setMode(s.evalGraphAxis as EvalMode);
     // ⚠️ **盤の上の 1 行の出し入れも設定から受け取る**（2026-09-10）。切り替えは
     // 黒地の右クリックだが、**起動直後にどちらで始まるかはここで決まる。**
     winrateHidden = !!s.hideWinRateBar;

@@ -43,15 +43,19 @@ type AppSettings struct {
 	// MovePaneDetached は**手順の面**を別ウィンドウに切り離しているか（2026-09-12）。
 	// ⚠️ **候補手とは別の設定。** 両方切り離すとメイン画面の右の列ごと消える。
 	MovePaneDetached bool `json:"movePaneDetached"`
-	// EvalGraphWinRate は評価値グラフを**勝率で見ているか**（2026-09-13）。
+	// EvalGraphAxis は評価値グラフの**縦軸**（2026-09-13。
+	// "eval" / "scaled" / "winrate"。**既定は "eval"**）。
 	//
 	// ⚠️ **設定タブには出していない。** 切り替えるのは**グラフの見出しの
-	// 「評価値 / 勝率」**（見えているものを切り替える操作は、その場に置く）。
-	// ここに載せてあるのは、**起動時にどちらで始めるかをフロントが知る必要が
+	// トグル**（見えているものを切り替える操作は、その場に置く）。
+	// ここに載せてあるのは、**起動時にどれで始めるかをフロントが知る必要が
 	// ある**から（切り離した窓も同じ設定を読む）。
 	//
+	// ⚠️ **解決済みの値が返る**（`ikkyoku.NormalizeEvalAxis`）。フロントに
+	// 「知らない値をどうするか」を書かせないこと。
+	//
 	// ⚠️ **勝率バーを隠す設定とは別物**（あちらは盤の上の帯）。
-	EvalGraphWinRate bool `json:"evalGraphWinRate"`
+	EvalGraphAxis string `json:"evalGraphAxis"`
 	// HideWinRateBar は解析タブの**勝率バー（評価値バー）を隠しているか**
 	// （2026-09-10）。
 	//
@@ -386,7 +390,7 @@ func (s *SettingsService) settings() AppSettings {
 		EvalGraphDetached: s.cfg.EvalGraphDetached,
 		StudyPaneDetached: s.cfg.StudyPaneDetached,
 		MovePaneDetached:  s.cfg.MovePaneDetached,
-		EvalGraphWinRate:  s.cfg.EvalGraphWinRate,
+		EvalGraphAxis:     ikkyoku.NormalizeEvalAxis(s.cfg.EvalGraphAxis),
 		HideWinRateBar:    s.cfg.HideWinRateBar,
 		HidePlayerNames:   s.cfg.HidePlayerNames,
 		Training:          trainingSettings(s.cfg.Training),
@@ -1176,19 +1180,26 @@ func (s *SettingsService) SetMovePaneDetached(v bool) (AppSettings, error) {
 	return st, nil
 }
 
-// SetEvalGraphWinRate は評価値グラフの縦軸を切り替えて保存する（2026-09-13）。
+// SetEvalGraphAxis は評価値グラフの縦軸を切り替えて保存する（2026-09-13）。
 //
-// **true なら勝率（0〜100%）、false なら評価値（センチポーン）。**
+//	"eval"    … 評価値そのまま（**既定**。等間隔の目盛り）
+//	"scaled"  … 折れた目盛り（±500 までで上下半分、±30000 まで畳む）
+//	"winrate" … 先手の勝率
+//
 // ⚠️ **効かせるのは画面だけ**（窓の出し入れが無いので `On...` の呼び戻しは
-// 持たない）。**記録している点は 1 つも変わらない** —— 点は評価値も勝率も
-// 両方持っていて、変わるのは**どちらを縦軸にするか**だけ。
+// 持たない）。**記録している点は 1 つも変わらない** —— 変わるのは
+// **どれを縦軸にするか**だけ。
+//
+// ⚠️ **知らない値は評価値に倒す**（`ikkyoku.NormalizeEvalAxis`）。エラーにしない
+// のは、**軸が読めないことで解析まで止める理由が無い**から（設計原則3）。
 //
 // ⚠️ **勝率バーを隠す設定（`SetHideWinRateBar`）を巻き添えにしないこと。**
-// 帯を消したまま、グラフだけ勝率で見るのも普通の使い方。
-func (s *SettingsService) SetEvalGraphWinRate(v bool) (AppSettings, error) {
+// 帯を消したまま、グラフだけ別の軸で見るのも普通の使い方。
+func (s *SettingsService) SetEvalGraphAxis(v string) (AppSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.save(func(cfg *ikkyoku.Config) { cfg.EvalGraphWinRate = v })
+	axis := ikkyoku.NormalizeEvalAxis(v)
+	return s.save(func(cfg *ikkyoku.Config) { cfg.EvalGraphAxis = axis })
 }
 
 // SetHideWinRateBar は解析タブの勝率バー（評価値バー）の表示を切り替えて保存する。

@@ -17,6 +17,7 @@ import {
 } from "../bindings/github.com/ShinteLab/ikkyoku/app";
 import { iconMarkup } from "./icon";
 import { mountEvalPane } from "./evalgraphpane";
+import type { EvalMode } from "./evalgraph";
 
 // 設定に無いエンジンの色（`mainscreen.ts` と同じ値にすること）。
 const UNKNOWN_ENGINE_COLOR = "#b8c0d0";
@@ -30,7 +31,9 @@ export function mountGraphScreen(root: HTMLElement) {
              切り替えると設定に保存され、メイン画面のグラフも同じ軸になる。 -->
         <span id="eval-graph-mode" class="eval-graph-mode" role="group" aria-label="縦軸">
           <button type="button" data-mode="eval" class="is-on" aria-pressed="true"
-                  title="評価値（センチポーン）で見ます">評価値</button>
+                  title="評価値（センチポーン）そのまま。目盛りは等間隔で、±3000 で頭打ちです">評価値</button>
+          <button type="button" data-mode="scaled" aria-pressed="false"
+                  title="圧縮: ±500 までで上下半分、±3000（まぁ勝ち）までで 8 割、±30000（詰み・必至）までを端に畳みます。目盛りの数字は評価値のままです">圧縮</button>
           <button type="button" data-mode="winrate" aria-pressed="false"
                   title="先手の勝率（0〜100%）で見ます。評価値からの変換で、定数は設定タブ">勝率</button>
         </span>
@@ -92,7 +95,7 @@ export function mountGraphScreen(root: HTMLElement) {
       }
       // ⚠️ **縦軸も設定から受け取ること**（2026-09-13）。この窓とメイン画面で
       // 別の軸になると、**どちらが本当の軸か**が分からなくなる。
-      pane.setMode(s.evalGraphWinRate ? "winrate" : "eval");
+      pane.setMode(s.evalGraphAxis as EvalMode);
     } catch {
       // 読めなくても既定の色・既定の軸で描ける（設計原則3）。
     }
@@ -117,7 +120,7 @@ export function mountGraphScreen(root: HTMLElement) {
     onMode: (m) => {
       void (async () => {
         try {
-          await SettingsService.SetEvalGraphWinRate(m === "winrate");
+          await SettingsService.SetEvalGraphAxis(m);
           await Events.Emit("settings:changed", null);
         } catch {
           // 保存できなくてもこの窓はその軸のまま（次の起動で戻るだけ）。

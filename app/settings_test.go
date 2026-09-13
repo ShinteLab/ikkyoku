@@ -712,53 +712,51 @@ func TestSetMovePaneDetached(t *testing.T) {
 	}
 }
 
-// TestSetEvalGraphWinRate は評価値グラフの縦軸を固定する（2026-09-13）。
+// TestSetEvalGraphAxis は評価値グラフの縦軸を固定する（2026-09-13）。
 //
-// ⚠️ **一番の要点は「既定が評価値であること」。** ゼロ値が勝率になると、
-// **この項目を知らない設定ファイルで開いたときに縦軸が変わって見える**
+// ⚠️ **一番の要点は「既定が素の評価値であること」。** 空や知らない値が
+// 勝率や圧縮に倒れると、**設定を触っていないのに縦軸が変わって見える**
 // （折れ線の形そのものが変わるので、壊れたように読める）。
 //
 // ⚠️ **勝率バーを隠す設定を巻き添えにしないこと**も見ている —— どちらも
 // 「勝率」という語が入っているだけで、別の話（帯とグラフの縦軸）。
-func TestSetEvalGraphWinRate(t *testing.T) {
+func TestSetEvalGraphAxis(t *testing.T) {
 	s := newTestSettings(t, nil)
 
-	if s.Settings().EvalGraphWinRate {
-		t.Error("既定が勝率になっています（設定を触っていないのに縦軸が変わります）")
+	if got := s.Settings().EvalGraphAxis; got != ikkyoku.EvalAxisEval {
+		t.Errorf("既定の縦軸 = %q, want %q（触っていないのに軸が変わります）",
+			got, ikkyoku.EvalAxisEval)
 	}
 
-	st, err := s.SetEvalGraphWinRate(true)
-	if err != nil {
-		t.Fatalf("SetEvalGraphWinRate: %v", err)
-	}
-	if !st.EvalGraphWinRate {
-		t.Errorf("EvalGraphWinRate = false, want true")
-	}
-	// ⚠️ **帯の設定は動かないこと**（別の設定）。
-	if st.HideWinRateBar {
-		t.Error("勝率バーまで隠れました（縦軸と帯は別の設定）")
-	}
-	cfg, err := ikkyoku.LoadConfig(s.path)
-	if err != nil {
-		t.Fatalf("LoadConfig: %v", err)
-	}
-	if !cfg.EvalGraphWinRate {
-		t.Error("保存されていません（次の起動で評価値に戻ってしまう）")
+	for _, axis := range []string{ikkyoku.EvalAxisScaled, ikkyoku.EvalAxisWinRate} {
+		st, err := s.SetEvalGraphAxis(axis)
+		if err != nil {
+			t.Fatalf("SetEvalGraphAxis(%q): %v", axis, err)
+		}
+		if st.EvalGraphAxis != axis {
+			t.Errorf("EvalGraphAxis = %q, want %q", st.EvalGraphAxis, axis)
+		}
+		// ⚠️ **帯の設定は動かないこと**（別の設定）。
+		if st.HideWinRateBar {
+			t.Error("勝率バーまで隠れました（縦軸と帯は別の設定）")
+		}
+		cfg, err := ikkyoku.LoadConfig(s.path)
+		if err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		if cfg.EvalGraphAxis != axis {
+			t.Errorf("保存された EvalGraphAxis = %q, want %q（次の起動で戻ってしまう）",
+				cfg.EvalGraphAxis, axis)
+		}
 	}
 
-	st, err = s.SetEvalGraphWinRate(false)
+	// ⚠️ **知らない値は評価値に倒すこと**（エラーにしない。設計原則3）。
+	st, err := s.SetEvalGraphAxis("あるはずのない軸")
 	if err != nil {
-		t.Fatalf("SetEvalGraphWinRate(false): %v", err)
+		t.Fatalf("SetEvalGraphAxis(知らない値): %v", err)
 	}
-	if st.EvalGraphWinRate {
-		t.Error("戻っていません")
-	}
-	cfg, err = ikkyoku.LoadConfig(s.path)
-	if err != nil {
-		t.Fatalf("LoadConfig: %v", err)
-	}
-	if cfg.EvalGraphWinRate {
-		t.Errorf("保存された EvalGraphWinRate = true, want false")
+	if st.EvalGraphAxis != ikkyoku.EvalAxisEval {
+		t.Errorf("知らない値の縦軸 = %q, want %q", st.EvalGraphAxis, ikkyoku.EvalAxisEval)
 	}
 }
 
