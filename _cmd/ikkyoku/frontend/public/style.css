@@ -5240,14 +5240,21 @@ html.is-graph #app {
    スクロールすればどの行も見出しの真下に来る —— **先頭だけ空けると、
    スクロールした瞬間にその余白が消えて詰まって見える。**
 
-   ⚠️ **`vertical-align: bottom` を足さないこと**（2026-09-14 に実測して外した）。
-   ここは見出しと違って**行に余り（9px）がある**ので効いてしまうが、
-   **動くのは文字だけ** —— 「表示」「削除」のセルは `display: flex` で
-   **表のセルではなくなっている**ので `vertical-align` が当たらない。
-   **行の高さを決めているのはそのボタン**なので、文字だけ下がると
-   **今ちょうど揃っている文字とボタンの中心（差 0.3px）がずれる。** */
+   ⚠️ **中身は下揃え**（2026-09-14）。**見出しから離すのはこれ** —— ここは見出しと
+   違って**行に余りがある**（行の高さを決めているのは「表示」「削除」のボタンで、
+   文字 1 行より背が高い）ので、寄せ先がそのまま効く。既定の `middle` だと
+   **余りが上下に分かれて、文字が見出し側へ寄る。**
+
+   ⚠️ **`.is-actions` にも `align-items: flex-end` を付けること**（下）。
+   あちらは `display: flex` で**表のセルではなくなっている**ので、
+   `vertical-align` が当たらない —— 付けないと**ボタンだけ揃わない**。
+
+   ⚠️ **文字とボタンは「下端」で揃う**（実測で 1.5px 差）。**中心は 4.5px ずれる**
+   —— ボタンは文字より背の高い箱なので、下で揃えれば中心はずれる。
+   **これは承知のうえ**（`middle` に戻すと、離したかった側に文字が寄る）。 */
 .library-table tbody td {
   padding: 8px 10px;
+  vertical-align: bottom;
   color: #dfe3ea;
   border-bottom: 1px solid #23262e;
   white-space: nowrap;
@@ -5300,9 +5307,13 @@ html.is-graph #app {
   font-variant-numeric: tabular-nums;
 }
 
+/* ⚠️ **`align-items: flex-end` は中身の下揃えの一部**（2026-09-14。上の ⚠️）。
+   ここは `display: flex` なので**表のセルではなくなっており**、
+   `vertical-align` が当たらない —— 外すとボタンだけ揃わない。 */
 .library-table .is-actions {
   display: flex;
   gap: 6px;
+  align-items: flex-end;
   justify-content: flex-end;
 }
 
