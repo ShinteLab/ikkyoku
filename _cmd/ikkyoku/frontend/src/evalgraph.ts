@@ -72,7 +72,14 @@ interface Axis {
   // at は点の縦位置（-1〜+1。**+ が先手**）。
   at(p: EvalPoint): number;
   // ticks は横線（`at` と同じ正規化値）。`zero` は**形勢が入れ替わる線**。
-  ticks: { at: number; text: string; zero: boolean }[];
+  //
+  // `minor` は**細かい刻み**（圧縮の軸の 100 単位）。⚠️ **線は全部引くが、
+  // 文字は入るぶんだけ**（下の `placeLabels`）—— 116px の箱では 100 刻みが
+  // 5px 間隔になるので、全部に文字を付けると読めなくなる。
+  // `pri` は**文字を出す優先順**（小さいほど先。既定 1）。⚠️ **箱が低いときに
+  // 何を残すかを決めるのは軸**（`placeLabels` は順に詰めるだけ）—— 圧縮の軸なら
+  // **折れ点（±500 / ±3000）が最優先**で、端（±30000）はその次。
+  ticks: { at: number; text: string; zero: boolean; minor?: boolean; pri?: number }[];
   // label は読み上げ・ツールチップに出す値（**その軸の読み方で**）。
   label(p: EvalPoint): string;
 }
@@ -88,9 +95,9 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v
 //
 // そこで**折れ点を 2 つ置いて、帯ごとに縮尺を変える**:
 //
-//	0〜±500      … 上下半分（**競っている帯。ここを一番広く**）
-//	±500〜±3000  … そこから 80% まで（**「まぁ勝ちだな」の帯**）
-//	±3000〜±30000 … 残り 20%（**詰み・必至の帯。畳んでよい**）
+//	0〜±500      … 上下半分（**競っている帯。ここを一番広く。100 単位で目盛り**）
+//	±500〜±3000  … そこから 90% まで（**「まぁ勝ちだな」の帯。1000 単位**）
+//	±3000〜±30000 … 残り 10%（**詰み・必至の帯。畳んでよい**）
 //
 // ⚠️ **これは素の評価値グラフの代わりではない。** 等間隔の目盛りには
 // 「傾きがそのまま点差の動き」という読み方があり、畳んだ軸はそれを捨てている。
@@ -103,9 +110,10 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v
 // **同じ 1cm が場所によって違う点差を指している**ことが画面から読めない。
 const KNEE = 500;
 const KNEE_AT = 0.5;
-// 「まぁ勝ちだな」の帯の上端。
+// 「まぁ勝ちだな」の帯の上端。⚠️ **9 割のあたりに置くこと** —— ここから上は
+// 「勝ったかどうか」しか読まない帯なので、1 割あれば足りる。
 const WIN = 3000;
-const WIN_AT = 0.8;
+const WIN_AT = 0.9;
 // 端（**詰み・必至**）。⚠️ **ここで頭打ち** —— 自作 `engine` の詰みスコアは
 // 1<<20 まで伸びるが、そこは `Mate` として端に乗るので気にしなくてよい。
 const MATE = 30000;
@@ -122,16 +130,49 @@ const scaledAt = (cp: number): number => {
   return WIN_AT + (Math.min(a, MATE) - WIN) / (MATE - WIN) * (1 - WIN_AT);
 };
 
+// scaledTicks は圧縮の軸の横線（上から下へ）。
+//
+// ⚠️ **`minor`（100 単位）にも線は引く。** 文字が入らないぶんは `placeLabels` が
+// 間引くが、**線そのものは残す** —— 競っている帯がどれくらいの幅なのかが、
+// 線の間隔として見えていること自体が目盛りの役目。
+const scaledTicks = (): Axis["ticks"] => {
+  // 大きいほう（上）から: ±30000 → ±3000 → ±2000 → ±1000 → ±500 → 100 単位 → 0。
+  //
+  // ⚠️ **`pri` は「箱が低いとき何を残すか」。** 折れ点（±500 / ±3000）が
+  // 最優先で、端（±30000）はその次 —— ドックした 116px の箱では ±3000 と
+  // ±30000 が 5px しか離れておらず、**どちらか 1 つしか文字を置けない。**
+  const half: { v: number; minor?: boolean; pri: number }[] = [
+    { v: MATE, pri: 2 },
+    { v: WIN, pri: 0 },
+    { v: 2000, pri: 1 },
+    { v: 1000, pri: 1 },
+    { v: KNEE, pri: 0 },
+    { v: 400, minor: true, pri: 1 },
+    { v: 300, minor: true, pri: 1 },
+    { v: 200, minor: true, pri: 1 },
+    { v: 100, minor: true, pri: 1 },
+  ];
+  const out: Axis["ticks"] = [];
+  for (const t of half) {
+    out.push({ at: scaledAt(t.v), text: `+${t.v}`, zero: false, minor: t.minor, pri: t.pri });
+  }
+  out.push({ at: 0, text: "0", zero: true });
+  for (const t of [...half].reverse()) {
+    out.push({ at: -scaledAt(t.v), text: `-${t.v}`, zero: false, minor: t.minor, pri: t.pri });
+  }
+  return out;
+};
+
 const scaledAxis: Axis = {
   at: (p) =>
     p.mate !== 0 ? (p.mate > 0 ? 1 : -1) : Math.sign(p.cp) * scaledAt(p.cp),
   // ⚠️ **折れ点には必ず線を引く**（±500 / ±3000）。そこで縮尺が変わることが
   // 見えていないと、**傾きを点差の動きとして読み違える。**
-  ticks: [MATE, WIN, KNEE, KNEE / 2, 0, -KNEE / 2, -KNEE, -WIN, -MATE].map((v) => ({
-    at: Math.sign(v) * scaledAt(v),
-    text: v > 0 ? `+${v}` : String(v),
-    zero: v === 0,
-  })),
+  //
+  // ⚠️ **競っている帯は 100 単位**（±100〜±400 が `minor`）。ここを読むための
+  // 軸なので、**目盛りが 500 刻みでは折れ線がどれだけ動いたのか読めない。**
+  // その上は 1000 単位（±1000 / ±2000）で、端が ±30000。
+  ticks: scaledTicks(),
   // ⚠️ **読み上げは評価値のまま**（軸を畳んでも数字は畳まない）。
   label: (p) => p.label,
 };
@@ -161,6 +202,45 @@ const rateAxis: Axis = {
   // ⚠️ **評価値も添えること。** 勝率だけだと「何手目で何が起きたか」を
   // 読み筋や候補手（評価値で出ている）と突き合わせられない。
   label: (p) => `${Math.round(clamp(p.winRate, 0, 1) * 100)}%（${p.label}）`,
+};
+
+// 目盛りの文字を置ける最小の間隔（px）。**9px の字 + 息継ぎ。**
+const LABEL_GAP = 11;
+
+// placeLabels は**文字を出す目盛りを選ぶ**（2026-09-13）。
+//
+// **線は全部引くが、文字は入るぶんだけ。** 圧縮の軸の 100 単位は、ドックした
+// 116px の箱では 5px 間隔になるので、全部に文字を付けると重なって読めない
+// （切り離して窓を高くすれば、そのぶん多く出る）。
+//
+// ⚠️ **太い目盛り（`minor` でないもの）を先に置くこと。** ±500 / ±3000 /
+// ±30000 は**折れ点そのもの**なので、細かい刻みに押し出されてはいけない。
+// ⚠️ **0 には文字を出さない**（手数の目盛りが乗っている）。
+const placeLabels = (
+  ticks: Axis["ticks"],
+  y: (at: number) => number,
+): Set<Axis["ticks"][number]> => {
+  const out = new Set<Axis["ticks"][number]>();
+  const used: number[] = [];
+  // 0 の行は文字を出さないが、**場所は取る**（手数の目盛りが乗っているので、
+  // そこに評価値の文字が寄ると重なる）。
+  for (const t of ticks) {
+    if (t.zero) {
+      used.push(y(t.at));
+    }
+  }
+  // ⚠️ **大事な目盛りから順に置くこと。** 上から順に詰めると、**箱が低いときに
+  // 端（±30000）が ±3000 を押し出す**（5px しか離れていない）。
+  const order = ticks
+    .filter((t) => !t.zero)
+    .sort((a, b) => Number(!!a.minor) - Number(!!b.minor) || (a.pri ?? 1) - (b.pri ?? 1));
+  for (const t of order) {
+    if (used.every((u) => Math.abs(u - y(t.at)) >= LABEL_GAP)) {
+      out.add(t);
+      used.push(y(t.at));
+    }
+  }
+  return out;
 };
 
 // 描画の余白。⚠️ **下は狭い**（2026-08-14）—— 手数の目盛りを**真ん中の 0 の線の上**へ
@@ -373,15 +453,18 @@ export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
     // 評価値は 1000 単位で語られるので、**線の数を増やすより読める数字にする**
     // ほうが目盛りとして役に立つ。⚠️ **CAP を変えたら刻みも見直すこと**
     // （細かすぎると線だらけになって折れ線が読めない）。
+    // ⚠️ **文字は入るぶんだけ**（`placeLabels`）。線は全部引く —— 細かい刻みの
+    // 間隔そのものが「この帯はここまで広い」という目盛りになっている。
+    const labelled = placeLabels(ax.ticks, py);
     for (const t of ax.ticks) {
       svg.appendChild(
         el("line", {
           x1: left, x2: right, y1: py(t.at), y2: py(t.at),
-          class: t.zero ? "eval-axis is-zero" : "eval-axis",
+          class: t.zero ? "eval-axis is-zero" : t.minor ? "eval-axis is-minor" : "eval-axis",
         }),
       );
       // ⚠️ **真ん中の線には値を書かない** —— そこには手数の目盛りが乗っている。
-      if (!t.zero) {
+      if (labelled.has(t)) {
         svg.appendChild(
           el("text", { x: left - 4, y: py(t.at) + 3, class: "eval-tick", "text-anchor": "end" }),
         ).textContent = t.text;
