@@ -5209,20 +5209,35 @@ html.is-graph #app {
 }
 
 /* 見出しは貼り付けておく（棋譜が溜まると 100 行を超えるので、
-   スクロールしたときに何の列か分からなくなる）。 */
+   スクロールしたときに何の列か分からなくなる）。
+
+   ⚠️ **見出しは「行」ではなく「帯」に見えること**（2026-09-14）。上下が同じ
+   余白だと**ただの 1 行目**に見えて、**最初の棋譜がくっついて見える**。
+   そこで **上に空気を作り、ラベルは下揃えで線の上に置く**（`vertical-align`）——
+   ラベルと区切り線が組になるので、**下から始まるのが中身**だと読める。
+
+   ⚠️ **区切り線を `border-bottom` で引かないこと。** `border-collapse: collapse`
+   では枠線が**表の側**に描かれるので、**貼り付けた見出しと一緒に動かず、
+   スクロールすると線だけ流れていく**（行が見出しに食い込んで見える）。
+   `box-shadow: inset` なら見出しに貼り付いたまま残る。 */
 .library-table thead th {
   position: sticky;
   top: 0;
   z-index: 1;
-  padding: 7px 10px;
+  padding: 13px 10px 7px;
+  vertical-align: bottom;
   font-size: 12px;
   font-weight: 600;
   color: #8b93a3;
   text-align: left;
   background: #23262e;
-  border-bottom: 1px solid #2c303a;
+  box-shadow: inset 0 -1px 0 #343945;
 }
 
+/* ⚠️ **行の高さは揃えること**（先頭の行だけ広げない）。見出しは貼り付けてあるので、
+   スクロールすればどの行も見出しの真下に来る —— **先頭だけ空けると、
+   スクロールした瞬間にその余白が消えて詰まって見える。**
+   空気は見出しの側（上の `padding-top`）で作る。 */
 .library-table tbody td {
   padding: 6px 10px;
   color: #dfe3ea;
