@@ -1036,7 +1036,21 @@ export function mountMainScreen(root: HTMLElement): void {
                     aria-expanded="true"></button>
           </div>
           <div class="eval-graph-head">
-            <span class="field-label">評価値</span>
+            <!-- 縦軸（2026-09-13）。**評価値と勝率は同じ点の別の読み方。**
+                 評価値は「どれくらい差が付いたか」、勝率は「その差がどれくらい
+                 勝ちに効くか」で、**同じ +500 でも序盤と終盤では意味が違う。**
+
+                 ⚠️ **見出しの札の代わりに置いてある** —— どちらで見ているかが
+                 グラフの題そのもの。⚠️ **今どちらかが読めること**（aria-pressed）:
+                 軸が変わると折れ線の形も変わるので、分からないと数字を読み違える。
+                 ⚠️ **記録は 1 つも変わらない**（点が評価値も勝率も持っている）。 -->
+            <span id="eval-graph-mode" class="eval-graph-mode" role="group"
+                  aria-label="縦軸">
+              <button type="button" data-mode="eval" class="is-on" aria-pressed="true"
+                      title="評価値（センチポーン）で見ます">評価値</button>
+              <button type="button" data-mode="winrate" aria-pressed="false"
+                      title="先手の勝率（0〜100%）で見ます。評価値からの変換で、定数は設定タブ">勝率</button>
+            </span>
             <!-- 横軸の範囲。**既定は「全て」＝ 指した手が全部見えている状態。**
                  ⚠️ **1 から始まるとは限らない** —— 根は初期局面とは限らないので、
                  撮った 40 手目の局面から始めたなら 40 手目から始まる。
@@ -2533,6 +2547,7 @@ ${st.turnLabel}${n}`;
     all: root.querySelector<HTMLInputElement>("#eval-graph-all")!,
     from: root.querySelector<HTMLInputElement>("#eval-graph-from")!,
     to: root.querySelector<HTMLInputElement>("#eval-graph-to")!,
+    mode: root.querySelector<HTMLElement>("#eval-graph-mode")!,
     legend: root.querySelector<HTMLElement>("#eval-graph-legend")!,
     readout: root.querySelector<HTMLElement>("#eval-graph-readout")!,
     // 折れ線の色は**エンジンごと**（登場順ではない）。⚠️ **設定を直に読ませない** ——
@@ -2548,6 +2563,12 @@ ${st.turnLabel}${n}`;
           sidePane.setStatus(String(err instanceof Error ? err.message : err));
         }
       })();
+    },
+    // 縦軸を切り替えたら**保存する**（次の起動も、切り離した窓も同じ軸で始まる）。
+    // ⚠️ **保存できなくても画面はそのまま**（設計原則3）。次の起動で戻るだけで、
+    // 今見えている折れ線は正しい。
+    onMode: (m) => {
+      void SettingsService.SetEvalGraphWinRate(m === "winrate").catch(() => {});
     },
   });
 
@@ -4745,6 +4766,9 @@ ${st.turnLabel}${n}`;
     // **手順の面**を別ウィンドウに切り離しているか（2026-09-12）。
     // ⚠️ **候補手とは別の設定**（両方外に出すと右の列そのものが消える）。
     movePaneDetached: boolean;
+    // 評価値グラフを**勝率で見ているか**（2026-09-13。グラフの見出しで切り替え）。
+    // ⚠️ **勝率バーを隠す設定とは別物**（あちらは盤の上の帯）。
+    evalGraphWinRate: boolean;
     // 勝率バー（評価値バー）を隠しているか（2026-09-10。黒地の右クリック）。
     hideWinRateBar: boolean;
     // 対局者名を隠しているか（2026-09-10。⚠️ **帯とは別の設定**）。
@@ -4785,6 +4809,10 @@ ${st.turnLabel}${n}`;
     applyGraphDetached(!!s.evalGraphDetached);
     applySideDetached(!!s.studyPaneDetached);
     applyMovesDetached(!!s.movePaneDetached);
+    // ⚠️ **評価値グラフの縦軸も設定から受け取る**（2026-09-13）。切り替えるのは
+    // グラフの見出しだが、**起動直後にどちらで始まるかはここで決まる**
+    // （切り離した窓で切り替えたときも `settings:changed` でここを通る）。
+    evalGraphUI.setMode(s.evalGraphWinRate ? "winrate" : "eval");
     // ⚠️ **盤の上の 1 行の出し入れも設定から受け取る**（2026-09-10）。切り替えは
     // 黒地の右クリックだが、**起動直後にどちらで始まるかはここで決まる。**
     winrateHidden = !!s.hideWinRateBar;

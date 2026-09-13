@@ -22,7 +22,32 @@ func record(t *testing.T, s *StudyService, engineID string, sc analyze.Score) {
 	s.recordEval(target.Epoch, target.NodeID, engineID, engineID, sc, 12)
 }
 
-// 手を進めながら記録すると、手数の順に並んだ折れ線になること。
+// 点が**勝率も持って**いること（2026-09-13。グラフの縦軸の切り替え用）。
+//
+// ⚠️ **フロントで評価値から計算し直させないための歯止め。** 式もポナンザ定数も
+// `analyze.WinRate` の 1 か所にあり、点に入るのは**その結果の写し**
+// （勝率バーと同じ値）。ここが落ちると、グラフだけ別の式で描かれる。
+func TestEvalGraphKeepsWinRate(t *testing.T) {
+	s := adopted(t)
+	sc := score(600)
+	sc.WinRate = analyze.WinRate(sc, 0)
+	record(t, s, "a", sc)
+
+	pts := s.Evals().Series[0].Points
+	if len(pts) != 1 {
+		t.Fatalf("点が %d 個（1 個のはず）", len(pts))
+	}
+	if pts[0].WinRate != sc.WinRate {
+		t.Errorf("WinRate = %v, want %v（`analyze` が出した値をそのまま持つこと）",
+			pts[0].WinRate, sc.WinRate)
+	}
+	// **評価値も残っていること**（軸を切り替えても同じ点を読むため）。
+	if pts[0].CP != 600 {
+		t.Errorf("CP = %d, want 600（勝率を足しても評価値は消さない）", pts[0].CP)
+	}
+}
+
+// 手を進めながら記録すると、手数の順に並んだ折れ線になること。// 手を進めながら記録すると、手数の順に並んだ折れ線になること。
 //
 // ⚠️ **エンジンごとに別の折れ線であること。** 合成しない（平均も多数決も取らない）。
 func TestEvalGraphRecordsPerEngine(t *testing.T) {

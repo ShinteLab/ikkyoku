@@ -25,7 +25,15 @@ export function mountGraphScreen(root: HTMLElement) {
   root.innerHTML = `
     <div class="graph-screen">
       <div class="eval-graph-head">
-        <span class="field-label">評価値</span>
+        <!-- 縦軸（2026-09-13）。⚠️ **ドック側と同じ作りにすること**
+             （置き場所を変えただけで操作が変わらないこと）。
+             切り替えると設定に保存され、メイン画面のグラフも同じ軸になる。 -->
+        <span id="eval-graph-mode" class="eval-graph-mode" role="group" aria-label="縦軸">
+          <button type="button" data-mode="eval" class="is-on" aria-pressed="true"
+                  title="評価値（センチポーン）で見ます">評価値</button>
+          <button type="button" data-mode="winrate" aria-pressed="false"
+                  title="先手の勝率（0〜100%）で見ます。評価値からの変換で、定数は設定タブ">勝率</button>
+        </span>
         <label class="eval-graph-all"
                title="全て: 指した手が全部見える範囲にします。外すと右の欄の手数がそのまま横軸になります">
           <input id="eval-graph-all" type="checkbox" checked />
@@ -82,8 +90,11 @@ export function mountGraphScreen(root: HTMLElement) {
       for (const e of s.engines ?? []) {
         colors.set(e.id, e.color);
       }
+      // ⚠️ **縦軸も設定から受け取ること**（2026-09-13）。この窓とメイン画面で
+      // 別の軸になると、**どちらが本当の軸か**が分からなくなる。
+      pane.setMode(s.evalGraphWinRate ? "winrate" : "eval");
     } catch {
-      // 読めなくても既定の色で描ける（設計原則3）。
+      // 読めなくても既定の色・既定の軸で描ける（設計原則3）。
     }
   };
 
@@ -92,6 +103,7 @@ export function mountGraphScreen(root: HTMLElement) {
     all: q<HTMLInputElement>("#eval-graph-all"),
     from: q<HTMLInputElement>("#eval-graph-from"),
     to: q<HTMLInputElement>("#eval-graph-to"),
+    mode: q<HTMLElement>("#eval-graph-mode"),
     legend: q<HTMLElement>("#eval-graph-legend"),
     readout: q<HTMLElement>("#eval-graph-readout"),
     colorOf: (id) => colors.get(id) ?? UNKNOWN_ENGINE_COLOR,
@@ -99,6 +111,19 @@ export function mountGraphScreen(root: HTMLElement) {
     // ⚠️ **メイン画面を直に触らない。** `GoTo` が `study:changed` を出すので、
     // 盤も手順もあちらが自分で追随する（**それが連動の土台**）。
     onSeek: (id) => void StudyService.GoTo(id).catch(() => {}),
+    // 縦軸を切り替えたら保存し、**メイン画面にも知らせる**（設定タブの表示と
+    // ドック側のグラフが追随する）。⚠️ **あちらの画面を直に触らないこと** ——
+    // 真実は Go 側の設定 1 つで、**どちらの窓も同じイベントで追随する。**
+    onMode: (m) => {
+      void (async () => {
+        try {
+          await SettingsService.SetEvalGraphWinRate(m === "winrate");
+          await Events.Emit("settings:changed", null);
+        } catch {
+          // 保存できなくてもこの窓はその軸のまま（次の起動で戻るだけ）。
+        }
+      })();
+    },
   });
 
   // ⚠️ **取り直す口は 1 本にまとめること**（色と点がばらばらに更新されると、
@@ -113,6 +138,9 @@ export function mountGraphScreen(root: HTMLElement) {
   // ⚠️ **この窓は局面を持たない。** メイン画面で手を辿ってもここで押しても、
   // 変わるのは Go 側の 1 つの手順で、**どちらの窓も同じイベントで追随する**。
   Events.On("study:changed", refresh);
+  // ⚠️ **設定の変更にも追随すること**（色・縦軸）。メイン画面の設定タブで
+  // 色を変えても、この窓は `study:changed` を受け取らない。
+  Events.On("settings:changed", refresh);
   // 解析の途中経過。**間引く**（深さが 1 つ進むたびに、しかもエンジンの数だけ届く）。
   Events.On("analyze:info", () => pane.refreshSoon());
   Events.On("analyze:done", refresh);

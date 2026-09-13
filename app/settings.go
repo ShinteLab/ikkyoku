@@ -43,6 +43,15 @@ type AppSettings struct {
 	// MovePaneDetached は**手順の面**を別ウィンドウに切り離しているか（2026-09-12）。
 	// ⚠️ **候補手とは別の設定。** 両方切り離すとメイン画面の右の列ごと消える。
 	MovePaneDetached bool `json:"movePaneDetached"`
+	// EvalGraphWinRate は評価値グラフを**勝率で見ているか**（2026-09-13）。
+	//
+	// ⚠️ **設定タブには出していない。** 切り替えるのは**グラフの見出しの
+	// 「評価値 / 勝率」**（見えているものを切り替える操作は、その場に置く）。
+	// ここに載せてあるのは、**起動時にどちらで始めるかをフロントが知る必要が
+	// ある**から（切り離した窓も同じ設定を読む）。
+	//
+	// ⚠️ **勝率バーを隠す設定とは別物**（あちらは盤の上の帯）。
+	EvalGraphWinRate bool `json:"evalGraphWinRate"`
 	// HideWinRateBar は解析タブの**勝率バー（評価値バー）を隠しているか**
 	// （2026-09-10）。
 	//
@@ -377,6 +386,7 @@ func (s *SettingsService) settings() AppSettings {
 		EvalGraphDetached: s.cfg.EvalGraphDetached,
 		StudyPaneDetached: s.cfg.StudyPaneDetached,
 		MovePaneDetached:  s.cfg.MovePaneDetached,
+		EvalGraphWinRate:  s.cfg.EvalGraphWinRate,
 		HideWinRateBar:    s.cfg.HideWinRateBar,
 		HidePlayerNames:   s.cfg.HidePlayerNames,
 		Training:          trainingSettings(s.cfg.Training),
@@ -1164,6 +1174,21 @@ func (s *SettingsService) SetMovePaneDetached(v bool) (AppSettings, error) {
 		s.OnMovePaneDetached(v)
 	}
 	return st, nil
+}
+
+// SetEvalGraphWinRate は評価値グラフの縦軸を切り替えて保存する（2026-09-13）。
+//
+// **true なら勝率（0〜100%）、false なら評価値（センチポーン）。**
+// ⚠️ **効かせるのは画面だけ**（窓の出し入れが無いので `On...` の呼び戻しは
+// 持たない）。**記録している点は 1 つも変わらない** —— 点は評価値も勝率も
+// 両方持っていて、変わるのは**どちらを縦軸にするか**だけ。
+//
+// ⚠️ **勝率バーを隠す設定（`SetHideWinRateBar`）を巻き添えにしないこと。**
+// 帯を消したまま、グラフだけ勝率で見るのも普通の使い方。
+func (s *SettingsService) SetEvalGraphWinRate(v bool) (AppSettings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.save(func(cfg *ikkyoku.Config) { cfg.EvalGraphWinRate = v })
 }
 
 // SetHideWinRateBar は解析タブの勝率バー（評価値バー）の表示を切り替えて保存する。

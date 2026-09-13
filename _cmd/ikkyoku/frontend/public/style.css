@@ -2674,6 +2674,46 @@ html.is-graph #app {
 /* 「全て」のチェック（2026-09-10 に select からこちらへ変えた）。
    ⚠️ **札は「全て」だけ** —— もう一方（自由入力）は札を持たない。
    チェックを外せば触れるようになる欄そのものが、そう言っている。 */
+/* 縦軸の切り替え（2026-09-13）。**評価値 / 勝率。**
+
+   ⚠️ **見出しの札（.field-label）の代わりに置いてある** —— どちらで見ているかが
+   グラフの題そのものなので、**題の位置で切り替える**。
+
+   ⚠️ **今どちらかが一目で読めること。** 縦軸が変わると折れ線の形も変わるので、
+   分からないと数字を読み違える（押されている側だけ明るくする + aria-pressed）。 */
+.eval-graph-mode {
+  display: flex;
+  flex: 0 0 auto;
+  border: 1px solid #3a3f4b;
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.eval-graph-mode button {
+  padding: 1px 8px;
+  border: 0;
+  background: #23262e;
+  color: #8a92a4;
+  font-size: 11.5px;
+  line-height: 18px;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.eval-graph-mode button + button {
+  border-left: 1px solid #3a3f4b;
+}
+
+.eval-graph-mode button:hover {
+  color: #cfd6e6;
+}
+
+/* 今見ている軸。⚠️ **色だけに頼らないこと**（aria-pressed も付けてある）。 */
+.eval-graph-mode button.is-on {
+  background: #333a49;
+  color: #eaf0ff;
+}
+
 .eval-graph-all {
   display: flex;
   align-items: center;

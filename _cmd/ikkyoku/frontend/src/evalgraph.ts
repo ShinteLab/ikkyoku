@@ -46,6 +46,65 @@ const ticks = (cap: number, step: number): number[] => {
   return out;
 };
 
+// ---- 縦軸（評価値 / 勝率。2026-09-13）------------------------------------
+//
+// **同じ点を 2 通りの縦軸で読む。** 評価値は「どれくらい差が付いたか」、勝率は
+// 「その差がどれくらい勝ちに効くか」で、**同じ +500 でも局面によって受け取り方が
+// 違う**（序盤の +500 と終盤の +500）。切り替えの口があれば、**辿った枝が
+// どう転んだか**を両方の読み方で見られる。
+//
+// ⚠️ **点は 1 種類**（`EvalPoint` が評価値も勝率も持っている）。**軸を変えても
+// 記録は 1 つも変わらない** —— 変わるのは**どちらを縦に取るか**だけ。
+//
+// ⚠️ **勝率をここで計算しないこと。** 式もポナンザ定数も Go 側（`analyze.WinRate`）に
+// あり、点の `winRate` はその結果。**フロントに 2 つ目の式を作らない**（勝率バーと
+// 食い違う）。
+export type EvalMode = "eval" | "winrate";
+
+// 縦軸 1 本ぶんの決まりごと。
+//
+// **位置は -1（下端）〜 +1（上端）に正規化して返す。** こうしておくと、
+// 目盛りも折れ線もカーソルも**軸の中身を知らずに描ける**（軸を足しても
+// 描画側を触らない）。
+interface Axis {
+  // at は点の縦位置（-1〜+1。**+ が先手**）。
+  at(p: EvalPoint): number;
+  // ticks は横線（`at` と同じ正規化値）。`zero` は**形勢が入れ替わる線**。
+  ticks: { at: number; text: string; zero: boolean }[];
+  // label は読み上げ・ツールチップに出す値（**その軸の読み方で**）。
+  label(p: EvalPoint): string;
+}
+
+const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+
+// 評価値の軸（センチポーン。**±CAP で頭打ち**）。
+const evalAxis: Axis = {
+  at: (p) => (p.mate !== 0 ? (p.mate > 0 ? 1 : -1) : clamp(p.cp, -CAP, CAP) / CAP),
+  ticks: ticks(CAP, TICK_STEP).map((v) => ({
+    at: v / CAP,
+    text: v > 0 ? `+${v}` : String(v),
+    zero: v === 0,
+  })),
+  label: (p) => p.label,
+};
+
+// 勝率の軸（**先手の勝率** 0〜100%）。
+//
+// ⚠️ **真ん中は 50%**（＝評価値の 0 と同じ「形勢が入れ替わる線」）。
+// ⚠️ **頭打ちは要らない** —— 0〜1 に収まっている値なので、**詰みも端に
+// 自然に乗る**（`analyze.WinRate` が 1.0 / 0.0 に振り切る）。
+const rateAxis: Axis = {
+  at: (p) => (clamp(p.winRate, 0, 1) - 0.5) * 2,
+  ticks: [100, 75, 50, 25, 0].map((v) => ({
+    at: (v - 50) / 50,
+    text: `${v}%`,
+    zero: v === 50,
+  })),
+  // ⚠️ **評価値も添えること。** 勝率だけだと「何手目で何が起きたか」を
+  // 読み筋や候補手（評価値で出ている）と突き合わせられない。
+  label: (p) => `${Math.round(clamp(p.winRate, 0, 1) * 100)}%（${p.label}）`,
+};
+
 // 描画の余白。⚠️ **下は狭い**（2026-08-14）—— 手数の目盛りを**真ん中の 0 の線の上**へ
 // 移したので、下に文字を置く場所を取らなくてよくなった（そのぶん折れ線が縦に広がる）。
 // 目盛りを下に戻すなら、ここも 15px 前後に戻すこと（戻さないと文字が切れる）。
@@ -54,6 +113,11 @@ const PAD = { top: 8, right: 10, bottom: 6, left: 36 };
 export interface EvalGraphHandle {
   // render は Go から返ってきたグラフを描く（null なら空にする）。
   render(graph: EvalGraph | null): void;
+  // setMode は縦軸を入れ替える（**設定から入れ直す口**。2026-09-13）。
+  //
+  // ⚠️ **`onMode` は呼ばない**（これは「設定がこうなっている」を反映するだけで、
+  // 人が押したわけではない）。呼ぶと、書き戻しがもう一周する。
+  setMode(mode: EvalMode): void;
   // relayout は測り直して描き直す。
   //
   // ⚠️ **解析タブを開いた瞬間に呼ぶこと。** 大きさは `clientWidth` で測るが、
@@ -87,6 +151,13 @@ export interface EvalGraphOptions {
   //
   // ⚠️ **グラフの中に描かないこと。** 高さ 116px の絵に文字を重ねると
   // 目盛りの線と重なるうえ、**そのぶん折れ線の描ける範囲が狭くなる**。
+  // mode は縦軸の切り替え（**評価値 / 勝率**。2026-09-13）。
+  //
+  // 中の `button[data-mode]` を押すと切り替わる（`data-mode` は "eval" / "winrate"）。
+  // ⚠️ **今どちらを見ているかが読めること**（`aria-pressed` と `.is-on`）——
+  // 縦軸が変わると**折れ線の形そのものが変わる**ので、どちらの軸で見ているのかが
+  // 分からないと数字を読み違える。
+  mode: HTMLElement;
   legend: HTMLElement;
   // readout は指した位置の読み上げ（手数・手・各エンジンの評価値）。
   readout: HTMLElement;
@@ -102,10 +173,28 @@ export interface EvalGraphOptions {
   // **手順のリストと同じ「戻って見る」操作**（手順は消さない）。
   // onSeek はその局面へ戻す。**引数は手順ツリーの節点 id**（手数ではない）。
   onSeek(id: number): void;
+  // onMode は人が縦軸を切り替えたときに呼ぶ（**保存する側**）。
+  //
+  // ⚠️ **保存を待たずに描き替えること**（押した手応えが要る）。保存に失敗しても
+  // 画面はその軸のままでよい —— 次の起動で戻るだけで、今見えているものは正しい。
+  onMode?(mode: EvalMode): void;
 }
 
 export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
-  const { host, all, from, to, legend, readout, colorOf, onSeek } = opts;
+  const { host, all, from, to, mode, legend, readout, colorOf, onSeek } = opts;
+
+  // 今の縦軸（**画面だけの状態ではない** —— 設定に保存する。既定は評価値）。
+  let axisMode: EvalMode = "eval";
+  const axis = (): Axis => (axisMode === "winrate" ? rateAxis : evalAxis);
+
+  // 見出しのボタンに今の軸を映す。⚠️ **色だけで示さないこと**（`aria-pressed`）。
+  const syncMode = () => {
+    for (const b of mode.querySelectorAll<HTMLButtonElement>("button[data-mode]")) {
+      const on = b.dataset.mode === axisMode;
+      b.classList.toggle("is-on", on);
+      b.setAttribute("aria-pressed", String(on));
+    }
+  };
 
   const svg = document.createElementNS(NS, "svg");
   svg.setAttribute("class", "eval-graph-svg");
@@ -187,13 +276,6 @@ export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
     syncFields();
   };
 
-  // 評価値 → 縦位置。**詰みは端に置く**（数として大きすぎるので潰れる）。
-  const value = (p: EvalPoint): number => {
-    if (p.mate !== 0) {
-      return p.mate > 0 ? CAP : -CAP;
-    }
-    return Math.max(-CAP, Math.min(CAP, p.cp));
-  };
 
   const draw = () => {
     const w = host.clientWidth;
@@ -217,7 +299,12 @@ export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
     const mid = (top + bottom) / 2;
     const half = (bottom - top) / 2;
     const px = (n: number) => left + ((n - x0) / span) * (right - left);
-    const py = (v: number) => mid - (v / CAP) * half;
+    // ⚠️ **縦は正規化値（-1〜+1）で受ける。** 評価値か勝率かを知っているのは
+    // 軸（`Axis`）だけで、**描く側は軸の中身を知らない。**
+    const py = (v: number) => mid - v * half;
+    const ax = axis();
+    // 点 → 縦位置。**詰みは端**（評価値なら頭打ち、勝率なら 100% / 0%）。
+    const at = (p: EvalPoint) => py(ax.at(p));
 
     // ---- 目盛り ------------------------------------------------------------
     //
@@ -227,17 +314,18 @@ export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
     // 評価値は 1000 単位で語られるので、**線の数を増やすより読める数字にする**
     // ほうが目盛りとして役に立つ。⚠️ **CAP を変えたら刻みも見直すこと**
     // （細かすぎると線だらけになって折れ線が読めない）。
-    for (const v of ticks(CAP, TICK_STEP)) {
+    for (const t of ax.ticks) {
       svg.appendChild(
         el("line", {
-          x1: left, x2: right, y1: py(v), y2: py(v),
-          class: v === 0 ? "eval-axis is-zero" : "eval-axis",
+          x1: left, x2: right, y1: py(t.at), y2: py(t.at),
+          class: t.zero ? "eval-axis is-zero" : "eval-axis",
         }),
       );
-      if (v !== 0) {
+      // ⚠️ **真ん中の線には値を書かない** —— そこには手数の目盛りが乗っている。
+      if (!t.zero) {
         svg.appendChild(
-          el("text", { x: left - 4, y: py(v) + 3, class: "eval-tick", "text-anchor": "end" }),
-        ).textContent = v > 0 ? `+${v}` : String(v);
+          el("text", { x: left - 4, y: py(t.at) + 3, class: "eval-tick", "text-anchor": "end" }),
+        ).textContent = t.text;
       }
     }
     // 縦の目盛り。**間隔は範囲に合わせる**（150 手で 5 手刻みにすると読めない）。
@@ -267,7 +355,7 @@ export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
         continue;
       }
       svg.appendChild(el("polyline", {
-        points: pts.map((p) => `${px(p.number)},${py(value(p))}`).join(" "),
+        points: pts.map((p) => `${px(p.number)},${at(p)}`).join(" "),
         class: "eval-line is-ref",
         stroke: color,
       }));
@@ -291,7 +379,9 @@ export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
     if (series.length === 0) {
       svg.appendChild(
         el("text", { x: (left + right) / 2, y: mid - 6, class: "eval-empty", "text-anchor": "middle" }),
-      ).textContent = "解析すると、ここに評価値が並びます";
+      ).textContent = axisMode === "winrate"
+        ? "解析すると、ここに勝率が並びます"
+        : "解析すると、ここに評価値が並びます";
     }
 
     // ---- 折れ線 ------------------------------------------------------------
@@ -304,7 +394,7 @@ export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
       if (pts.length > 1) {
         svg.appendChild(
           el("polyline", {
-            points: pts.map((p) => `${px(p.number)},${py(value(p))}`).join(" "),
+            points: pts.map((p) => `${px(p.number)},${at(p)}`).join(" "),
             class: "eval-line",
             stroke: color,
           }),
@@ -313,9 +403,10 @@ export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
       // 点は詰まりすぎない範囲でだけ描く（150 手ぶん打つと線が潰れる）。
       if (span <= 80 || pts.length <= 40) {
         for (const p of pts) {
-          const dot = el("circle", { cx: px(p.number), cy: py(value(p)), r: 2.2, fill: color });
+          const dot = el("circle", { cx: px(p.number), cy: at(p), r: 2.2, fill: color });
           const title = document.createElementNS(NS, "title");
-          title.textContent = `${p.number}手目 ${p.move}　${s.label}: ${p.label}（深さ ${p.depth}）`;
+          title.textContent =
+            `${p.number}手目 ${p.move}　${s.label}: ${ax.label(p)}（深さ ${p.depth}）`;
           dot.appendChild(title);
           svg.appendChild(dot);
         }
@@ -409,13 +500,16 @@ export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
     }
     const parts: string[] = [`${n}手目`];
     let move = "";
+    const ax = axis();
     for (const s of graph.series ?? []) {
       const p = (s.points ?? []).find((q) => q.number === n);
       if (!p) {
         continue;
       }
       move = move || p.move;
-      parts.push(`${s.label || s.engineId} ${p.label}`);
+      // ⚠️ **今の軸の読み方で出すこと**（勝率で見ているのに評価値が出ると、
+      // 折れ線の高さと読み上げが噛み合わない）。
+      parts.push(`${s.label || s.engineId} ${ax.label(p)}`);
     }
     readout.textContent = move ? `${parts[0]} ${move}　${parts.slice(1).join(" / ")}`
       : parts.join(" / ");
@@ -518,11 +612,31 @@ export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
     syncFields();
     draw();
   });
+
+  // 縦軸の切り替え（見出しの「評価値 / 勝率」）。
+  //
+  // ⚠️ **保存を待たずに描き替えること**（押した手応えが要る）。保存は
+  // `onMode` に任せ、**失敗しても今の画面はそのまま**（次の起動で戻るだけ）。
+  mode.addEventListener("click", (ev) => {
+    const btn = (ev.target as HTMLElement | null)?.closest<HTMLButtonElement>("button[data-mode]");
+    const next = btn?.dataset.mode;
+    if (next !== "eval" && next !== "winrate") {
+      return;
+    }
+    if (next === axisMode) {
+      return;
+    }
+    axisMode = next;
+    syncMode();
+    draw();
+    opts.onMode?.(axisMode);
+  });
   // 打っている途中でも追随させる（確定を待たない。壊れた値は domain が丸める）。
   for (const input of [from, to]) {
     input.addEventListener("input", draw);
   }
   syncFields();
+  syncMode();
   // 箱の大きさが変わったら測り直す（ウィンドウのリサイズもここで拾える）。
   new ResizeObserver(() => draw()).observe(host);
 
@@ -536,6 +650,14 @@ export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
       dragA = null;
       dragB = null;
       showReadout(null);
+      draw();
+    },
+    setMode(next: EvalMode) {
+      if (next === axisMode) {
+        return;
+      }
+      axisMode = next;
+      syncMode();
       draw();
     },
     relayout: draw,

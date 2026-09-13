@@ -9,7 +9,7 @@
 // **手順を切ったときにどこまで捨てるかを知っているのはあちらだけ**。
 import { StudyService } from "../bindings/github.com/ShinteLab/ikkyoku/app";
 import type { EvalGraph } from "../bindings/github.com/ShinteLab/ikkyoku/app/models";
-import { mountEvalGraph, type EvalGraphOptions } from "./evalgraph";
+import { mountEvalGraph, type EvalGraphOptions, type EvalMode } from "./evalgraph";
 
 export interface EvalPaneHandle {
   // render は手元の値をそのまま描く（普段は refresh を使う）。
@@ -27,6 +27,11 @@ export interface EvalPaneHandle {
   refreshSoon(): void;
   // relayout は測り直して描き直す（隠れているあいだは測れないため）。
   relayout(): void;
+  // setMode は縦軸（評価値 / 勝率）を設定から入れ直す。
+  //
+  // ⚠️ **ドック側と切り離した窓で同じ設定を読むこと** —— 置き場所を変えただけで
+  // 縦軸が変わると、**どちらが本当の軸か**が分からなくなる。
+  setMode(mode: EvalMode): void;
   // setActive は「今このペインが出ているか」。
   //
   // ⚠️ **切り離しているあいだ、ドック側は描かないこと**（その逆も同じ）。
@@ -77,6 +82,7 @@ export function mountEvalPane(opts: EvalGraphOptions): EvalPaneHandle {
       }, SOON_MS);
     },
     relayout: () => ui.relayout(),
+    setMode: (m) => ui.setMode(m),
     setActive: (on) => {
       if (active === on) {
         return;

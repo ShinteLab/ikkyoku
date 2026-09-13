@@ -869,14 +869,15 @@ func (s *StudyService) recordEval(epoch, id int, engineID, label string, sc anal
 		text = node.USI
 	}
 	s.evals.record(epoch, engineID, label, EvalPoint{
-		ID:     id,
-		Ply:    node.Number,
-		Number: s.moveBaseLocked() + node.Number,
-		CP:     sc.CP,
-		Mate:   sc.Mate,
-		Label:  sc.Label,
-		Depth:  depth,
-		Move:   text,
+		ID:      id,
+		Ply:     node.Number,
+		Number:  s.moveBaseLocked() + node.Number,
+		CP:      sc.CP,
+		Mate:    sc.Mate,
+		WinRate: sc.WinRate,
+		Label:   sc.Label,
+		Depth:   depth,
+		Move:    text,
 	})
 }
 

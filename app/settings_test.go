@@ -712,6 +712,56 @@ func TestSetMovePaneDetached(t *testing.T) {
 	}
 }
 
+// TestSetEvalGraphWinRate は評価値グラフの縦軸を固定する（2026-09-13）。
+//
+// ⚠️ **一番の要点は「既定が評価値であること」。** ゼロ値が勝率になると、
+// **この項目を知らない設定ファイルで開いたときに縦軸が変わって見える**
+// （折れ線の形そのものが変わるので、壊れたように読める）。
+//
+// ⚠️ **勝率バーを隠す設定を巻き添えにしないこと**も見ている —— どちらも
+// 「勝率」という語が入っているだけで、別の話（帯とグラフの縦軸）。
+func TestSetEvalGraphWinRate(t *testing.T) {
+	s := newTestSettings(t, nil)
+
+	if s.Settings().EvalGraphWinRate {
+		t.Error("既定が勝率になっています（設定を触っていないのに縦軸が変わります）")
+	}
+
+	st, err := s.SetEvalGraphWinRate(true)
+	if err != nil {
+		t.Fatalf("SetEvalGraphWinRate: %v", err)
+	}
+	if !st.EvalGraphWinRate {
+		t.Errorf("EvalGraphWinRate = false, want true")
+	}
+	// ⚠️ **帯の設定は動かないこと**（別の設定）。
+	if st.HideWinRateBar {
+		t.Error("勝率バーまで隠れました（縦軸と帯は別の設定）")
+	}
+	cfg, err := ikkyoku.LoadConfig(s.path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if !cfg.EvalGraphWinRate {
+		t.Error("保存されていません（次の起動で評価値に戻ってしまう）")
+	}
+
+	st, err = s.SetEvalGraphWinRate(false)
+	if err != nil {
+		t.Fatalf("SetEvalGraphWinRate(false): %v", err)
+	}
+	if st.EvalGraphWinRate {
+		t.Error("戻っていません")
+	}
+	cfg, err = ikkyoku.LoadConfig(s.path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.EvalGraphWinRate {
+		t.Errorf("保存された EvalGraphWinRate = true, want false")
+	}
+}
+
 // TestSetHideWinRateBar は勝率バー（評価値バー）の表示を固定する（2026-09-10）。
 //
 // ⚠️ **一番の要点は「既定が表示であること」。** `Show...` で持つと、bool の
