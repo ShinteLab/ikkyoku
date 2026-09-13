@@ -88,10 +88,17 @@ interface Axis {
   // 踏んだ）—— **一番読む帯の地の色を上げると、100 単位の細い線が沈んで消える。**
   // 印を付けたいのは**畳んである側**なので、意味の上でも外側が正しい。
   //
-  // ⚠️ **境目には破断記号（二重斜線）を置く**（`.eval-break`）。塗りだけだと
-  // 「濃さが違う」以上のことは言えないが、**あの記号は「軸がここで切れている」を
-  // 一語で言える**（印刷物の作法）。
   band?: number;
+  // breaks は**畳んである区間**（正規化値の `from`〜`to`）。破断記号を置く場所。
+  //
+  // ⚠️ **記号は区間の「中」に置くこと**（2026-09-13。境目の線の上ではない）——
+  // 印刷物の破断記号は**間引いた区間そのもの**に入れる作法で、線に重ねると
+  // 「この目盛りが特別」という別の意味に読める。
+  //
+  // ⚠️ **畳んだ区間の数だけ要る。** 圧縮の軸なら **±500〜±1000**（等比に
+  // 切り替わるところ）と **±3000〜±30000**（一気に畳むところ）の 2 つ。
+  // 片方だけだと、もう片方が**素直な目盛りに見えてしまう**。
+  breaks?: { from: number; to: number }[];
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
@@ -195,6 +202,11 @@ const scaledAxis: Axis = {
   label: (p) => p.label,
   // 素直な目盛りはここまで（±500）。**外側が畳んである側。**
   band: KNEE_AT,
+  // ⚠️ **畳んである区間の中に置く**（目盛りと目盛りの間）。
+  breaks: [
+    { from: scaledAt(KNEE), to: scaledAt(1000) },
+    { from: scaledAt(WIN), to: scaledAt(MATE) },
+  ],
 };
 
 const evalAxis: Axis = {
@@ -490,12 +502,26 @@ export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
       svg.appendChild(el("rect", {
         x: left, y: lo, width: w, height: Math.max(bottom - lo, 0), class: "eval-band",
       }));
-      // 破断記号（二重斜線）。**「軸がここで切れている」の一語。**
-      // ⚠️ **左端に小さく置くこと** —— 折れ線の上を横切らせない（読むのは折れ線）。
-      for (const y of [hi, lo]) {
+    }
+
+    // ---- 破断記号（二重斜線）------------------------------------------------
+    //
+    // **「軸がここで切れている」の一語。** ⚠️ **畳んである区間の中に置くこと**
+    // （目盛りと目盛りの間。境目の線に重ねると「この目盛りが特別」という
+    // 別の意味に読める）。⚠️ **左端に小さく置くこと** —— 折れ線の上を
+    // 横切らせない（読むのは折れ線）。
+    for (const b of ax.breaks ?? []) {
+      for (const sign of [1, -1]) {
+        const y0 = py(sign * b.from);
+        const y1 = py(sign * b.to);
+        // ⚠️ **区間より大きく描かないこと** —— ±3000〜±30000 は箱が低いと
+        // 5px しかないので、はみ出すと隣の目盛りに重なる。
+        const h = Math.max(2.5, Math.min(4, Math.abs(y1 - y0) / 2.5));
+        const yc = (y0 + y1) / 2;
         for (const dx of [-2, 2]) {
           svg.appendChild(el("line", {
-            x1: left + dx - 3, y1: y + 4, x2: left + dx + 3, y2: y - 4, class: "eval-break",
+            x1: left + dx - h * 0.8, y1: yc + h, x2: left + dx + h * 0.8, y2: yc - h,
+            class: "eval-break",
           }));
         }
       }
