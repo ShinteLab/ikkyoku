@@ -598,6 +598,36 @@ func (s *StudyService) Play(move string) (st StudyState, err error) {
 	return s.changed(), nil
 }
 
+// PlayLine は**エンジンが挙げた手を 1 手指す**（候補手の右クリック →「手順を指す」。
+// 2026-09-14）。**自動で指し継ぐ**ときに 1 手ごとに呼ばれる。
+//
+// ⚠️ **`AddLine` と `Play` のどちらでも代わりにならない。** あちらは
+// 「足すが進まない」「進むが誰の手か残らない」で、ここが要るのは
+// **足して、進んで、誰が挙げた手かも残す**から（`position.Study.PlayLine`）。
+//
+// engineID は**その手を挙げたエンジン**の登録 ID（手順リストの色の丸）。
+// ⚠️ **空でも指せること** —— 出所が分からなくても手そのものは正しい。
+//
+// head は**この手を変化の頭にするか**。⚠️ **指し継ぐ列の 1 手目だけ真にすること**
+// —— 毎手立てると手順リストが 1 手ごとに 1 段ずつ下がる。
+// **1 手目を頭にしてあるのは、棋譜の本譜を 1 手も動かさないため**
+// （エンジンが指した手は**実際に現れた指し手ではない**。`AddLine` と同じ扱い）。
+func (s *StudyService) PlayLine(engineID, move string, head bool) (st StudyState, err error) {
+	// ⚠️ **`publish` はロックの外で走らせること**（`defer` は LIFO なので、
+	// ここで登録しておけば `s.mu.Unlock()` の**後**に走る）。
+	defer func() { s.publish(st, err) }()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.study == nil {
+		return s.state(), fmt.Errorf("まだ局面がありません")
+	}
+	if err := s.study.PlayLine(move, engineID, head); err != nil {
+		return s.state(), err
+	}
+	return s.changed(), nil
+}
+
 // AddLine は解析の候補手（読み筋）を**枝として木に足す**（候補手の右クリック）。
 //
 // ⚠️ **押しても指さない**（＝今見ている局面は動かない）。動くと走っている解析が

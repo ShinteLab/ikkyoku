@@ -862,3 +862,49 @@ func TestStudyServiceWithoutEmitter(t *testing.T) {
 		t.Error("Emit が無いと手が進みません")
 	}
 }
+
+// エンジンに指し継がせる口（2026-09-14。候補手の右クリック →「手順を指す」）。
+//
+// ⚠️ **見ているのは「1 手ごとに呼べる形になっているか」。** 自動で指し継ぐ側は
+// **done のたびにこれを 1 回ずつ呼ぶ**ので、ここが「進んだ局面」と「次の合法手」を
+// まとめて返さないと、次の 1 手を考えさせる局面が作れない。
+func TestStudyServicePlayLine(t *testing.T) {
+	s := adopted(t)
+	st, err := s.PlayLine("e1", "7g7f", true)
+	if err != nil {
+		t.Fatalf("PlayLine: %v", err)
+	}
+	if st.Ply != 1 || st.CurrentID == 0 {
+		t.Fatalf("指した手へ進んでいません: ply=%d id=%d", st.Ply, st.CurrentID)
+	}
+	// **誰が挙げた手かが残ること**（手順リストの色の丸）。
+	if len(st.Nodes) != 1 || len(st.Nodes[0].Sources) != 1 || st.Nodes[0].Sources[0] != "e1" {
+		t.Errorf("Sources = %+v, want [e1]", st.Nodes)
+	}
+	// **次の 1 手を考えさせられること**（合法手が後手のものになっている）。
+	if st.Turn != 2 || len(st.Legal) == 0 {
+		t.Errorf("次の局面になっていません: turn=%d legal=%d", st.Turn, len(st.Legal))
+	}
+
+	// ⚠️ **2 手目は頭にしない**（毎手立てると手順が階段になる）。
+	if _, err := s.PlayLine("e1", "3c3d", false); err != nil {
+		t.Fatalf("PlayLine 2: %v", err)
+	}
+
+	// 指せない手は断ること（**そのとき局面を壊さない**）。
+	if _, err := s.PlayLine("e1", "5i5a", false); err == nil {
+		t.Error("指せない手が通りました")
+	}
+	if got := s.State(); got.Ply != 2 {
+		t.Errorf("断ったのに局面が動きました: ply=%d", got.Ply)
+	}
+}
+
+// 何も採っていなければ指し継げない（**エラーで、落ちないこと**）。
+func TestStudyServicePlayLineWithoutPosition(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	s := NewStudyService(logger, NewPositionService(logger))
+	if _, err := s.PlayLine("e1", "7g7f", true); err == nil {
+		t.Error("局面が無いのに指せました")
+	}
+}

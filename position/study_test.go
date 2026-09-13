@@ -1063,3 +1063,107 @@ func TestStudyPromote(t *testing.T) {
 		}
 	})
 }
+
+// TestStudyPlayLine は**エンジンに指し継がせる**ときの約束を固定する（2026-09-14）。
+//
+// ⚠️ **一番の要点は「字下げが 1 手ごとに増えないこと」。** 1 手ずつ足すので、
+// 毎手を変化の頭にすると **40 手指させたら 40 段の階段**になり、手順が読めなくなる。
+func TestStudyPlayLine(t *testing.T) {
+	nodeOf := func(s *position.Study, id int) position.Node {
+		for _, n := range s.Nodes() {
+			if n.ID == id {
+				return n
+			}
+		}
+		return position.Node{}
+	}
+
+	// **足して、そこへ進む**（`AddLine` は進まない・`Play` は出所が残らない）。
+	t.Run("指した手に進み、エンジンが残る", func(t *testing.T) {
+		s := position.NewStudy(hirate(t))
+		if err := s.PlayLine("7g7f", "e1", true); err != nil {
+			t.Fatalf("PlayLine: %v", err)
+		}
+		if s.Ply() != 1 {
+			t.Errorf("Ply = %d, want 1（足すだけでなく進むこと）", s.Ply())
+		}
+		n := nodeOf(s, s.CurrentID())
+		if len(n.Sources) != 1 || n.Sources[0] != "e1" {
+			t.Errorf("Sources = %v, want [e1]", n.Sources)
+		}
+		// ⚠️ **人が指した手ではない**（手順リストの黒い丸は付けない）。
+		if n.Hand {
+			t.Error("Hand が立っています（盤で指した手ではありません）")
+		}
+	})
+
+	// ⚠️ **頭は 1 手目だけ。** 続きは 1 本道なので下がらない。
+	t.Run("字下げは1手目だけ", func(t *testing.T) {
+		s := position.NewStudy(hirate(t))
+		if err := s.Play("7g7f"); err != nil {
+			t.Fatalf("Play: %v", err)
+		}
+		moves := []string{"3c3d", "2g2f", "8c8d", "2f2e"}
+		for i, mv := range moves {
+			if err := s.PlayLine(mv, "e1", i == 0); err != nil {
+				t.Fatalf("PlayLine %s: %v", mv, err)
+			}
+		}
+		var head position.Node
+		depth := map[string]int{}
+		for _, n := range s.Nodes() {
+			if n.USI == moves[0] {
+				head = n
+			}
+			depth[n.USI] = n.Depth
+		}
+		if head.Depth != 1 {
+			t.Errorf("頭の Depth = %d, want 1", head.Depth)
+		}
+		// ⚠️ **2 手目から先が 1 段ずつ増えないこと**（階段にならない）。
+		for _, mv := range moves[1:] {
+			if depth[mv] != head.Depth+1 {
+				t.Errorf("%s の Depth = %d, want %d（1 手ごとに下がっています）",
+					mv, depth[mv], head.Depth+1)
+			}
+		}
+		// ⚠️ **本譜は伸びない**（エンジンが指した手は実際に現れた指し手ではない）。
+		if got := s.MainLine(); len(got) != 1 {
+			t.Errorf("MainLine = %v, want 7g7f だけ", got)
+		}
+	})
+
+	// ⚠️ **既にある手を頭にしないこと。** 本譜の続きをなぞっただけで
+	// **実際に現れた指し手が変化に落ちる**（`Branch` を黙って押すのと同じ）。
+	t.Run("既にある手は変化に落とさない", func(t *testing.T) {
+		s := position.NewStudy(hirate(t))
+		for _, mv := range []string{"7g7f", "3c3d"} {
+			if err := s.Play(mv); err != nil {
+				t.Fatalf("Play %s: %v", mv, err)
+			}
+		}
+		if err := s.GoTo(0); err != nil {
+			t.Fatalf("GoTo: %v", err)
+		}
+		if err := s.PlayLine("7g7f", "e1", true); err != nil {
+			t.Fatalf("PlayLine: %v", err)
+		}
+		if got := s.MainLine(); len(got) != 2 {
+			t.Errorf("MainLine = %v, want 2 手（本譜が変化に落ちています）", got)
+		}
+		if n := nodeOf(s, s.CurrentID()); n.Depth != 0 || !n.Main {
+			t.Errorf("既にある手が下がりました: %+v", n)
+		}
+	})
+
+	// 合法手でなければ指せない（`Play` と同じ規則）。**進まないこと。**
+	t.Run("指せない手は断る", func(t *testing.T) {
+		s := position.NewStudy(hirate(t))
+		if err := s.PlayLine("7g7e", "e1", true); err == nil {
+			t.Fatal("指せない手が通りました")
+		}
+		if s.Ply() != 0 {
+			t.Errorf("Ply = %d, want 0（断ったのに進んでいます）", s.Ply())
+		}
+	})
+}
