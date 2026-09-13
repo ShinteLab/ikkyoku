@@ -30,6 +30,7 @@ import {
 import type { StudyState } from "../bindings/github.com/ShinteLab/ikkyoku/app/models";
 import { iconMarkup } from "./icon";
 import { mountSidePane, type SidePaneHandle } from "./sidepane";
+import { enableVeilDrag } from "./veildrag";
 
 // どちらの面の窓か。⚠️ **候補手と手順は別々に切り離せる**ので、設定・イベント・
 // 戻す口はそれぞれ別に持つ。
@@ -43,7 +44,7 @@ export function mountStudyScreen(root: HTMLElement, part: StudyScreenPart = "ana
       <!-- 連続解析のあいだ被せる幕。⚠️ **こちらにも要る** —— 1 手ずつ局面を
            動かしている最中に手順を触ると、自分の操作と連続解析が同じ局面を取り合う。 -->
       <div id="batch-veil" class="veil" hidden>
-        <div class="veil-box">
+        <div class="veil-box" title="ドラッグで動かせます（盤や評価値グラフが隠れているとき）">
           <p id="batch-veil-note" class="veil-note">連続解析中…</p>
           <button id="batch-veil-cancel" class="veil-btn" type="button">解析をキャンセル</button>
         </div>
@@ -54,6 +55,9 @@ export function mountStudyScreen(root: HTMLElement, part: StudyScreenPart = "ana
   const q = <T extends HTMLElement>(sel: string) => root.querySelector<T>(sel)!;
   const veil = q<HTMLElement>("#batch-veil");
   const veilNote = q<HTMLElement>("#batch-veil-note");
+  // ⚠️ **箱は動かせること**（2026-09-14）。この窓に盤は無いが、**評価値グラフや
+  // 手順が隠れる**ので、避けたい場面は同じようにある。
+  enableVeilDrag(veil, q<HTMLElement>(".veil-box"));
 
   // ⚠️ **「ドックに戻す」はその面の中に入れる**（2026-09-09）。候補手なら
   // **解析の行の右端**、手順なら**見出しの行の右端**。窓の一番上に見出しの行を

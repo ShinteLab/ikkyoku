@@ -83,6 +83,7 @@ import { mountEditor } from "./editor";
 import { mountLibrary } from "./library";
 import { mountFetchCards } from "./fetchcards";
 import { mountEvalPane } from "./evalgraphpane";
+import { enableVeilDrag } from "./veildrag";
 import type { EvalMode } from "./evalgraph";
 import { mountSidePane, type EngineScore } from "./sidepane";
 import { openPopup } from "./popup";
@@ -1111,7 +1112,7 @@ export function mountMainScreen(root: HTMLElement): void {
              ⚠️ **薄くすること** —— 下で盤と評価値グラフが 1 手ずつ進むのが
              見えていないと、待っているあいだ何が起きているのか分からない。 -->
         <div id="batch-veil" class="veil" hidden>
-          <div class="veil-box">
+          <div class="veil-box" title="ドラッグで動かせます（盤や評価値グラフが隠れているとき）">
             <p id="batch-veil-note" class="veil-note">連続解析中…</p>
             <button id="batch-veil-cancel" class="veil-btn" type="button">解析をキャンセル</button>
           </div>
@@ -2007,6 +2008,10 @@ export function mountMainScreen(root: HTMLElement): void {
   const batchVeil = root.querySelector<HTMLElement>("#batch-veil")!;
   const batchVeilNote = root.querySelector<HTMLElement>("#batch-veil-note")!;
   const batchVeilCancel = root.querySelector<HTMLButtonElement>("#batch-veil-cancel")!;
+  // ⚠️ **箱は真ん中に出して、邪魔ならドラッグで避けてもらう**（2026-09-14。
+  // 以前は左の真ん中へ決め打ちで寄せていた）。**どこが邪魔かは窓の形と
+  // 「今何を見ているか」で変わる**ので、寄せ先を決め打ちにしない。
+  enableVeilDrag(batchVeil, root.querySelector<HTMLElement>("#batch-veil .veil-box")!);
 
   const winrateRow = root.querySelector<HTMLDivElement>("#winrate-row")!;
   const playerNames = {

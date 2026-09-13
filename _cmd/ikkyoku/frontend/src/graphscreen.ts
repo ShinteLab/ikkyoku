@@ -17,6 +17,7 @@ import {
 } from "../bindings/github.com/ShinteLab/ikkyoku/app";
 import { iconMarkup } from "./icon";
 import { mountEvalPane } from "./evalgraphpane";
+import { enableVeilDrag } from "./veildrag";
 import type { EvalMode } from "./evalgraph";
 
 // 設定に無いエンジンの色（`mainscreen.ts` と同じ値にすること）。
@@ -73,7 +74,7 @@ export function mountGraphScreen(root: HTMLElement) {
            ⚠️ **止める口を中に置くこと**（幕は下を全部塞ぐ。ここには「停止」も
            手順も無いので、出口が無いと窓を閉じるしかなくなる）。 -->
       <div id="batch-veil" class="veil" hidden>
-        <div class="veil-box">
+        <div class="veil-box" title="ドラッグで動かせます（盤や評価値グラフが隠れているとき）">
           <p id="batch-veil-note" class="veil-note">連続解析中…</p>
           <button id="batch-veil-cancel" class="veil-btn" type="button">解析をキャンセル</button>
         </div>
@@ -168,6 +169,9 @@ export function mountGraphScreen(root: HTMLElement) {
   // 切り離していればその窓）。隠れているほうも配ると、**1 手ごとに幕が瞬く。**
   const veil = q<HTMLElement>("#batch-veil");
   const veilNote = q<HTMLElement>("#batch-veil-note");
+  // ⚠️ **箱は動かせること**（2026-09-14）。**折れ線が 1 手ずつ伸びるのを見ながら
+  // 止めるかを決める**窓なので、真ん中に載ったままだと肝心のものが読めない。
+  enableVeilDrag(veil, q<HTMLElement>(".veil-box"));
   Events.On("study:busy", (event: { data: { on: boolean; note: string } }) => {
     veil.hidden = !event.data?.on;
     veilNote.textContent = event.data?.note ?? "";
