@@ -82,6 +82,13 @@ interface Axis {
   ticks: { at: number; text: string; zero: boolean; minor?: boolean; pri?: number }[];
   // label は読み上げ・ツールチップに出す値（**その軸の読み方で**）。
   label(p: EvalPoint): string;
+  // band は**縮尺が違う内側の帯**の端（正規化値。0〜1）。**無ければ帯は無い。**
+  //
+  // ⚠️ **地の色を変えて示すこと**（`.eval-band`）。縮尺の変わり目は
+  // **線 1 本では伝わらない** —— 帯として塗ってあれば「ここだけ物差しが違う」が
+  // 一目で読める（印刷物の軸の破断記号と同じ役目。116px の箱ではあの記号は
+  // 潰れるので、塗り分けのほうが効く）。
+  band?: number;
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
@@ -95,9 +102,15 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v
 //
 // そこで**折れ点を 2 つ置いて、帯ごとに縮尺を変える**:
 //
-//	0〜±500      … 上下半分（**競っている帯。ここを一番広く。100 単位で目盛り**）
-//	±500〜±3000  … そこから 90% まで（**「まぁ勝ちだな」の帯。1000 単位**）
+//	0〜±500      … 上下半分（**線形。競っている帯。100 単位で目盛り**）
+//	±500〜±3000  … そこから 90% まで（**対数**。1000 / 2000 / 3000）
 //	±3000〜±30000 … 残り 10%（**詰み・必至の帯。畳んでよい**）
+//
+// ⚠️ **外側を線形にしないこと**（2026-09-13 に直した）。線形だと
+// **400→500（100 点差）が 10%、500→1000（500 点差）が 8%** と逆転し、
+// **定規として読めない**（差が大きいほうが狭く描かれる）。対数なら
+// 500→1000 が 15.5% になり、「差が大きいほど広い」が戻る。
+// ⚠️ **内側は線形のまま**（100 単位の目盛りが等間隔であることに意味がある）。
 //
 // ⚠️ **これは素の評価値グラフの代わりではない。** 等間隔の目盛りには
 // 「傾きがそのまま点差の動き」という読み方があり、畳んだ軸はそれを捨てている。
@@ -125,7 +138,9 @@ const scaledAt = (cp: number): number => {
     return (a / KNEE) * KNEE_AT;
   }
   if (a <= WIN) {
-    return KNEE_AT + ((a - KNEE) / (WIN - KNEE)) * (WIN_AT - KNEE_AT);
+    // ⚠️ **対数**（等比）。折れ点で縮尺が 1/2 になるだけなので、線形のときの
+    // ような逆転が起きない（線形では 1/5 に落ちていた）。
+    return KNEE_AT + (Math.log(a / KNEE) / Math.log(WIN / KNEE)) * (WIN_AT - KNEE_AT);
   }
   return WIN_AT + (Math.min(a, MATE) - WIN) / (MATE - WIN) * (1 - WIN_AT);
 };
@@ -175,6 +190,8 @@ const scaledAxis: Axis = {
   ticks: scaledTicks(),
   // ⚠️ **読み上げは評価値のまま**（軸を畳んでも数字は畳まない）。
   label: (p) => p.label,
+  // 内側（±500）は線形の帯。**ここだけ物差しが違う**ことを地の色で示す。
+  band: KNEE_AT,
 };
 
 const evalAxis: Axis = {
@@ -453,6 +470,20 @@ export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
     // 評価値は 1000 単位で語られるので、**線の数を増やすより読める数字にする**
     // ほうが目盛りとして役に立つ。⚠️ **CAP を変えたら刻みも見直すこと**
     // （細かすぎると線だらけになって折れ線が読めない）。
+    // ---- 縮尺が違う内側の帯 ------------------------------------------------
+    //
+    // ⚠️ **目盛りより先に描くこと**（下に敷く）。⚠️ **折れ線より先でもある** ——
+    // これは地の色で、読むものではない。
+    //
+    // **「ここだけ物差しが違う」を面で示す。** 折れ点の線 1 本では、そこで
+    // 縮尺が変わったのか、ただの目盛りなのかが読めない。
+    if (ax.band !== undefined) {
+      svg.appendChild(el("rect", {
+        x: left, y: py(ax.band), width: Math.max(right - left, 1),
+        height: Math.max(py(-ax.band) - py(ax.band), 1), class: "eval-band",
+      }));
+    }
+
     // ⚠️ **文字は入るぶんだけ**（`placeLabels`）。線は全部引く —— 細かい刻みの
     // 間隔そのものが「この帯はここまで広い」という目盛りになっている。
     const labelled = placeLabels(ax.ticks, py);
