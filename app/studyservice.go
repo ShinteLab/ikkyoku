@@ -160,6 +160,13 @@ type StudyState struct {
 	Nodes []position.Node `json:"nodes"`
 	// CurrentID は今見ている節点（0 なら根）。**手順リストの現在位置。**
 	CurrentID int `json:"currentId"`
+	// MainTip は**本譜の先端**の節点（手が 1 つも無ければ 0 ＝ 根）。
+	//
+	// **中継を追うときの繋ぎ先**（`FollowProbe`）で、⚠️ **`CurrentID` とは別物** ——
+	// ユーザーが枝の途中を読んでいるのは普通にある。
+	// ⚠️ **`Nodes` を走査して `Main` の最後を探さないこと**（フロントで同じ判定を
+	// 書くと、「分岐にする」で下げた手の扱いが割れる）。
+	MainTip int `json:"mainTip"`
 	// Line は今の経路の節点 id（**ply 番目がその手数の節点**。先頭は根の 0）。
 	//
 	// ⚠️ **連続解析が次に進む先はここから取る。** 枝に居るならその枝を辿る。
@@ -471,6 +478,15 @@ func (s *StudyService) mergeReloadLocked(next *position.Study) position.GraftRes
 	// ——どこを見ているかはユーザーが選んだ状態で、取り直しはあくまで
 	// **URL の側を正にする**操作。
 	return s.study.Graft(next.MainLine())
+}
+
+// mainTipID は本譜の先端の節点（組み立てられなければ根）。**画面へ出す用。**
+func mainTipID(st *position.Study) int {
+	id, _, err := st.MainTip()
+	if err != nil {
+		return 0
+	}
+	return id
 }
 
 // rootSFEN は根の局面の SFEN（組み上がらなければ空）。**同じ対局かの判定用。**
@@ -1047,6 +1063,7 @@ func (s *StudyService) state() StudyState {
 		First:      s.moveBaseLocked(),
 		Nodes:      s.study.Nodes(),
 		CurrentID:  s.study.CurrentID(),
+		MainTip:    mainTipID(s.study),
 		Line:       s.study.Line(),
 		Ply:        s.study.Ply(),
 		Played:     s.study.Played(),

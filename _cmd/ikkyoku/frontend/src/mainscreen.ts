@@ -94,6 +94,7 @@ import type {
   AppSettings,
   EngineSettings,
   FontChoice,
+  FollowProbe,
   FontState,
   GameSummary,
   KifuDBStatus,
@@ -1999,6 +2000,12 @@ export function mountMainScreen(root: HTMLElement): void {
   // 片方から読むと**もう片方を戻したときに「局面が無い」と誤読する**
   // （実際、解析の列を切り離しているとグラフがドックへ戻らなかった）。
   let studyLoaded = false;
+  // 訂正タブの「本譜に繋ぐ」を出すかどうかを伝える口（2026-09-14）。
+  //
+  // ⚠️ **入れ物越しにしてあるのは `mountEditor` がこれより下だから。**
+  // `showStudy` は局面が変わるたびに呼ばれるので、直に `editor` を触ると
+  // **初回の描画が編集器の初期化より前に来たときに落ちる**。
+  let setEditFollowable: (ok: boolean) => void = () => {};
 
   // ---- 盤の周り（勝率バー・対局者・連続解析の幕）----------------------------
   //
@@ -2291,6 +2298,9 @@ ${st.turnLabel}${n}`;
     sidePane.render(loaded ? st : null);
     // 盤の周りの出し入れ（勝率バー・対局者・視点・評価値グラフ・側の列）。
     syncStudyChrome(loaded);
+    // 訂正タブの「本譜に繋ぐ」の出し入れ。⚠️ **手順が 1 手も無ければ出さない**
+    // （繋ぐ先が無いので押しても必ず断られる。最初の 1 局面は「この局面を解析する」）。
+    setEditFollowable(loaded && (st.mainTip ?? 0) > 0);
     // 局面が変わったら点を取り直す（**戻った位置の縦線も動く**）。
     refreshEvalGraph();
   };
@@ -2407,6 +2417,80 @@ ${st.turnLabel}${n}`;
     // **あとから解析タブのボタンで自由に戻せる。**
     setStudyViewpoint(!editNearWhite);
     selectTab(studyTab);
+  };
+
+  // 訂正タブ → **本譜の先へ繋ぐ**（中継を追う口。2026-09-14）。
+  //
+  // ⚠️ **`adoptToStudy` とは別の操作。** あちらは**根ごと入れ替える**（前の手順も
+  // 検討の枝も評価値も捨てる）、こちらは**本譜の先へ足す**（全部残る）。
+  // 中継を数手ごとに撮り直して追うのがこちら。
+  //
+  // ⚠️ **手順をフロントで組み立てないこと。** 盤面の差分から手順を割り出すのは
+  // Go 側（`position.Connect`）で、ここがやるのは**下見の結果を画面に出すこと**と、
+  // **順番が決められないときに人に選ばせること**だけ。
+  //
+  // ⚠️ **一意でないときに勝手に 1 本選ばないこと** —— 選んだ手順は
+  // 「実際に現れた指し手」として棋譜に残る（`TODO.md`「本譜のロック」）。
+  const followToStudy = async (at: { x: number; y: number }) => {
+    const fail = (message: string) => {
+      editStatus.textContent = message;
+      editStatus.classList.add("is-error");
+    };
+    editStatus.textContent = "";
+    editStatus.classList.remove("is-error");
+
+    let probe: FollowProbe;
+    try {
+      probe = await StudyService.FollowProbe();
+    } catch (err) {
+      fail(String(err instanceof Error ? err.message : err));
+      return;
+    }
+
+    // 据える（`goTo` は真 —— **手で押した操作なので繋いだ先を見せる**）。
+    const apply = async (moves: string[]) => {
+      try {
+        const got = await StudyService.FollowApply(moves, probe.rev, true);
+        showStudy(got.state);
+        // ⚠️ **表示視点は触らない**（`adoptToStudy` との違い）。あちらは根ごと
+        // 入れ替えるので撮った向きに合わせるが、**こちらは続いている検討**で、
+        // 視点はその検討に対するユーザーの選択。**勝手に回さない。**
+        selectTab(studyTab);
+        const note = got.note ? ` ${got.note}` : "";
+        sidePane.setStatus(`${got.added}手つなぎました（${moves.join(" ")}）${note}`);
+      } catch (err) {
+        fail(String(err instanceof Error ? err.message : err));
+      }
+    };
+
+    const candidates = probe.candidates ?? [];
+    switch (probe.kind) {
+      case "unique":
+        if (candidates[0]) {
+          await apply(candidates[0].moves ?? []);
+        }
+        return;
+      case "choices":
+        // ⚠️ **押した場所で聞く**（`window.confirm` を使わない。`popup.ts` の ⚠️）。
+        // **並べるのは日本語表記**（USI では順番の違いが読み取れない）。
+        editStatus.textContent = probe.reason;
+        openPopup(at.x, at.y, {
+          label: "どの順番で進んだか",
+          items: candidates.map((c) => ({
+            label: (c.text ?? []).join(" "),
+            onPick: () => void apply(c.moves ?? []),
+          })),
+        });
+        return;
+      default:
+        // same / unreachable / budget。**理由は Go 側が持っている。**
+        // ⚠️ **繋がらなくても木は 1 手も変わっていない**ので、撮った 1 枚は
+        // 訂正タブにそのまま残る（「この局面を解析する」で始め直せる）。
+        editStatus.textContent = probe.reason;
+        if (probe.kind !== "same") {
+          editStatus.classList.add("is-error");
+        }
+    }
   };
 
   // 解析タブの盤の操作（手を進める UI）。**合法手だけ。**
@@ -3279,6 +3363,9 @@ ${st.turnLabel}${n}`;
     onConfirm: () => {
       void adoptToStudy();
     },
+    onFollow: (at) => {
+      void followToStudy(at);
+    },
     onError: (message) => {
       // **訂正タブの中に出す。** 撮影の結果（入力タブの #status）とは別の話で、
       // タブを跨いだ先に理由が出ても読めない。
@@ -3286,6 +3373,9 @@ ${st.turnLabel}${n}`;
       editStatus.classList.add("is-error");
     },
   });
+
+  // ⚠️ **入れ物を繋ぐのは編集器を作ったあと**（上の `setEditFollowable` の ⚠️）。
+  setEditFollowable = (ok) => editor.setFollowable(ok);
 
   // onKifuDBChanged は棚を開き直したときに呼ぶ（棋譜タブの一覧を取り直す）。
   // ⚠️ **設定タブから棋譜タブの DOM を触らないこと** —— 一覧を持っているのは

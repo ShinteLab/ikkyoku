@@ -94,6 +94,11 @@ export interface EditorHandle {
   // 中では null が返る）。タブで隠している以上、開いたときに測り直さないと
   // グリッドが出ないか、前回の大きさのまま残って**1 マスずれたところを編集する**。
   relayout(): void;
+  // setFollowable は「本譜に繋ぐ」を出すかどうか（解析タブに手順があるか）。
+  //
+  // ⚠️ **繋ぐ先が無いのにボタンを出さないこと** —— 押しても必ず断られる
+  // （最初の 1 局面は「この局面を解析する」で始める）。
+  setFollowable(ok: boolean): void;
   // release は掴んでいるもの（「足りない駒」のクリックで掴んだ駒・引きかけの
   // ドラッグ）を離す。
   //
@@ -134,6 +139,19 @@ export interface EditorOptions {
   // （手番や駒台の先後が未決かどうかは Go 側の StudyService.Adopt が言う。
   // フロントで同じ判定を書くと 2 か所に散る）。
   onConfirm(): void;
+  // onFollow は「本譜に繋ぐ」が押されたときに呼ばれる（2026-09-14）。
+  //
+  // ⚠️ **`onConfirm` とは別の操作。** あちらは**根ごと入れ替える**（前の手順も
+  // 評価値も捨てる）、こちらは**本譜の先へ足す**（検討の枝も評価値も残る）。
+  // 中継を数手ごとに撮り直して追うのがこちら。
+  //
+  // **繋げるかの判定も、候補の並べ方も呼び出し側**（`StudyService.FollowProbe`）。
+  // ⚠️ **フロントで手順を組み立てないこと。**
+  // at は候補を並べるダイアログを出す位置（**ボタンの左下**）。
+  //
+  // ⚠️ **マウスの位置ではなくボタンの矩形から取ること** —— 押した場所が
+  // ボタンの中で動くと、同じ操作なのに毎回違うところにダイアログが出る。
+  onFollow(at: { x: number; y: number }): void;
   // onError は操作が通らなかったときの理由（「移動元が空マスです」など）。
   onError(message: string): void;
 }
@@ -148,6 +166,7 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     resetButton: resetBtn,
     onState,
     onConfirm,
+    onFollow,
     onError,
   } = opts;
 
@@ -302,6 +321,10 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   // 出口（＝確定して解析タブへ渡す）と、盤の操作の説明。**一番下**（上の ⚠️）。
   confirmHost.innerHTML = `
     <button id="edit-confirm" class="ghost-btn is-primary" type="button">この局面を解析する</button>
+    <!-- 中継を追うときの口（2026-09-14）。⚠️ **解析タブに手順が無いときは出さない**
+         （繋ぐ先が無い）。⚠️ **「この局面を解析する」と入れ替えないこと** ——
+         あちらは根ごと入れ替える操作で、押し間違えると検討が全部消える。 -->
+    <button id="edit-follow" class="ghost-btn" type="button" hidden>本譜に繋ぐ</button>
     <span class="edit-hint">
       盤 ⇄ 駒台をドラッグ（外すと同時に持ち主が決まる） /
       <strong>「<span id="edit-stock-name">足りない駒</span>」をクリックすると掴んだまま連続で置ける</strong>（残り 0 でも置ける。Esc で離す） /
@@ -425,6 +448,7 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   };
 
   const confirmBtn = confirmHost.querySelector<HTMLButtonElement>("#edit-confirm")!;
+  const followBtn = confirmHost.querySelector<HTMLButtonElement>("#edit-follow")!;
   const body = panel.querySelector<HTMLDivElement>("#edit-body")!;
   const handZones = [handZone(true), handZone(false)];
   const moveNum = panel.querySelector<HTMLInputElement>("#edit-movenum")!;
@@ -540,6 +564,7 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     confirmBtn.title = editable
       ? "この局面を解析タブへ渡します（あとから訂正タブに戻って直せます）"
       : "まだ局面がありません";
+    followBtn.disabled = !editable;
     body.hidden = !editable;
     stage.classList.toggle("is-editing", editable);
     grid.classList.toggle("is-active", editable);
@@ -1260,6 +1285,14 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   // StudyService.Adopt が言う。フロントで同じ判定を書くと 2 か所に散る）。
   confirmBtn.addEventListener("click", () => onConfirm());
 
+  // 中継を追う口（2026-09-14）。⚠️ **こちらは根を入れ替えない** ——
+  // 本譜の先に足すだけなので、検討の枝も評価値も残る。
+  // **繋がるかも、順番が決められるかも Go 側が言う**（`StudyService.FollowProbe`）。
+  followBtn.addEventListener("click", () => {
+    const r = followBtn.getBoundingClientRect();
+    onFollow({ x: r.left, y: r.bottom });
+  });
+
   resetBtn.addEventListener("click", () => {
     void apply(() => PositionService.Reset());
   });
@@ -1327,6 +1360,9 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
       syncLoaded();
       resetBtn.hidden = true;
       onState(null);
+    },
+    setFollowable(ok: boolean) {
+      followBtn.hidden = !ok;
     },
     relayout: layoutGrid,
     release() {
