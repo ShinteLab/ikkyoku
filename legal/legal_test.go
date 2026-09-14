@@ -79,6 +79,19 @@ func TestMovesWithoutKingDoesNotPanic(t *testing.T) {
 	_, _ = legal.Moves(s)
 }
 
+// BenchmarkMoves は `legal.Moves` 1 回の費用を測る。
+//
+// ⚠️ **`position.Connect`（盤面の差分を手順に復元する探索）の上限がこの数字で決まる。**
+// あちらは 1 節点につきここを 1 回呼ぶので、**深さ 4 で数千〜数万回**になる。
+// 遅くなったら直すのはこちら側（盤を作り直さない口を足す）であって、探索側ではない。
+func BenchmarkMoves(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		if _, err := legal.Moves(hirate); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 // 座標 → USI の組み立て（UI から来た「どこからどこへ」を手にする側）。
 // **Moves の読み替えと逆向きなので、往復で固定しておく。**
 func TestUSIRoundTrip(t *testing.T) {

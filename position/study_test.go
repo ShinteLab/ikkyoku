@@ -1167,3 +1167,50 @@ func TestStudyPlayLine(t *testing.T) {
 		}
 	})
 }
+
+// MainTip は**本譜の先端**を返す（繋ぎ先）。
+//
+// ⚠️ **「今見ている場所」ではないこと**が肝。枝の途中を読んでいる最中に中継が
+// 進んでも、繋ぐ先は本譜の先端でなければならない。
+// ⚠️ **「分岐にする」で下げた手から先は本譜ではない**ので、先端もそこまで戻る。
+func TestStudyMainTip(t *testing.T) {
+	s := position.NewStudy(hirate(t))
+	if id, p, err := s.MainTip(); err != nil || id != 0 || p == nil {
+		t.Fatalf("手が無いときは根のはず: id=%d err=%v", id, err)
+	}
+	if err := s.Play("7g7f"); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	if err := s.Play("3c3d"); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	tip, tipPos, err := s.MainTip()
+	if err != nil {
+		t.Fatalf("MainTip: %v", err)
+	}
+	if tip != s.CurrentID() {
+		t.Fatalf("先端 = %d, 今の節点 = %d", tip, s.CurrentID())
+	}
+	if tipPos.Turn != position.TurnBlack {
+		t.Errorf("2 手指した先端の手番 = %v, want 先手番", tipPos.Turn)
+	}
+
+	// ⚠️ **枝を見に行っても先端は動かない。**
+	if err := s.GoTo(1); err != nil {
+		t.Fatalf("GoTo: %v", err)
+	}
+	if err := s.Play("8c8d"); err != nil { // 1 手目から分かれた枝
+		t.Fatalf("Play: %v", err)
+	}
+	if id, _, err := s.MainTip(); err != nil || id != tip {
+		t.Fatalf("枝に居るのに先端が動きました: %d (want %d), err=%v", id, tip, err)
+	}
+
+	// ⚠️ **「分岐にする」を押したら、先端もそこまで戻る**（本譜が縮む）。
+	if err := s.Branch(1); err != nil {
+		t.Fatalf("Branch: %v", err)
+	}
+	if id, _, err := s.MainTip(); err != nil || id != 0 {
+		t.Fatalf("本譜を畳んだのに先端が根に戻りません: %d, err=%v", id, err)
+	}
+}

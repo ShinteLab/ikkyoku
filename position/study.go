@@ -443,6 +443,27 @@ func (s *Study) MainLine() []string {
 	return out
 }
 
+// MainTip は**本譜の先端**の節点 id と、その局面を返す（手が 1 つも無ければ 0 と根）。
+//
+// **中継を追うときの繋ぎ先**（`position.Connect` に渡す元の局面）。
+//
+// ⚠️ **`Current()` ではない。** ユーザーが枝の途中を読んでいることは普通にあるので、
+// そちらを繋ぎ先にすると**検討の枝に中継の手が生える**。
+// ⚠️ **見ている場所は動かさない**（ここは読むだけ）。
+// ⚠️ **`MainLine` と同じところで止まる** —— 「分岐にする」で下げた手から先は
+// 本譜ではないので、**先端もそこまで戻る**（`Graft` と同じ見え方になる）。
+func (s *Study) MainTip() (int, *Position, error) {
+	n := s.top
+	for len(n.kids) > 0 && !n.kids[0].variation {
+		n = n.kids[0]
+	}
+	p, err := s.positionAt(n)
+	if err != nil {
+		return n.id, nil, err
+	}
+	return n.id, p, nil
+}
+
 // Legal は今の局面で指せる手を返す。
 //
 // ⚠️ **エラーでも局面は生きている**（設計原則3）。玉の欠けた局面などでは合法手を
