@@ -21,7 +21,7 @@ func adopted(t *testing.T) *StudyService {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	pos := NewPositionService(logger)
-	if _, err := pos.Load(hirateBoard); err != nil {
+	if _, err := pos.Load(hirateBoard, nil); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	if _, err := pos.SetTurn(1); err != nil { // 先手番
@@ -161,7 +161,7 @@ func TestStudyServiceGoToAndDropFrom(t *testing.T) {
 func TestStudyServiceAdoptResetsMoves(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	pos := NewPositionService(logger)
-	if _, err := pos.Load(hirateBoard); err != nil {
+	if _, err := pos.Load(hirateBoard, nil); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	if _, err := pos.SetTurn(1); err != nil {

@@ -45,7 +45,7 @@ func TestStudyServicePlayers(t *testing.T) {
 	if _, err := s.LoadKifu(kif); err != nil {
 		t.Fatalf("LoadKifu: %v", err)
 	}
-	if _, err := pos.Load(hirateBoard); err != nil {
+	if _, err := pos.Load(hirateBoard, nil); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	if _, err := pos.SetTurn(1); err != nil { // 先手番

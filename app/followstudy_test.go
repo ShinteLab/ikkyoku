@@ -15,7 +15,7 @@ func following(t *testing.T) (*StudyService, *PositionService) {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	pos := NewPositionService(logger)
-	if _, err := pos.Load(hirateBoard); err != nil {
+	if _, err := pos.Load(hirateBoard, nil); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	if _, err := pos.SetTurn(1); err != nil {
@@ -26,6 +26,25 @@ func following(t *testing.T) (*StudyService, *PositionService) {
 		t.Fatalf("Adopt: %v", err)
 	}
 	return study, pos
+}
+
+// shotWith は「撮った盤面 + マスごとの確信度」を訂正タブに置く。
+//
+// ⚠️ **確信度が無いと修復は働かない**（人が並べた盤を機械が覆さないため）。
+func shotWith(t *testing.T, pos *PositionService, boardSFEN string, conf []float64) {
+	t.Helper()
+	if _, err := pos.Load(boardSFEN, conf); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+}
+
+// evenConf は全マス同じ確信度の表を作る。
+func evenConf(v float64) []float64 {
+	out := make([]float64, 81)
+	for i := range out {
+		out[i] = v
+	}
+	return out
 }
 
 // shot は「初期局面から n 手進んだ盤面を撮った」状態を訂正タブに作る。
@@ -43,7 +62,7 @@ func shot(t *testing.T, pos *PositionService, moves ...string) {
 			t.Fatalf("ApplyMove(%q): %v", m, err)
 		}
 	}
-	if _, err := pos.Load(p.BoardSFEN()); err != nil {
+	if _, err := pos.Load(p.BoardSFEN(), nil); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 }
@@ -163,7 +182,7 @@ func TestFollowProbeLeavesTreeAlone(t *testing.T) {
 	s, pos := following(t)
 	before := s.State()
 	// 歩が一気に 2 マス進んだ盤面（＝認識の誤りの模擬。合法手では到達できない）。
-	if _, err := pos.Load("lnsgkgsnl/1r5b1/ppppppppp/9/2P6/9/PP1PPPPPP/1B5R1/LNSGKGSNL"); err != nil {
+	if _, err := pos.Load("lnsgkgsnl/1r5b1/ppppppppp/9/2P6/9/PP1PPPPPP/1B5R1/LNSGKGSNL", nil); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	p, err := s.FollowProbe()
@@ -281,11 +300,81 @@ func TestFollowApplyKeepsEvals(t *testing.T) {
 func TestFollowProbeWithoutStudy(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	pos := NewPositionService(logger)
-	if _, err := pos.Load(hirateBoard); err != nil {
+	if _, err := pos.Load(hirateBoard, nil); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	s := NewStudyService(logger, pos)
 	if _, err := s.FollowProbe(); err == nil {
 		t.Fatal("繋ぐ先が無いのに通りました")
+	}
+}
+
+// ⚠️ **認識が外したマスを覆して繋ぐ**（修復。2026-09-15）。
+//
+// **これが入ると人は 1 マスも直さなくてよくなる** —— 撮って押すだけで追える。
+// ⚠️ **直したマスを必ず返すこと**（`Fixed`）。黙って直すと、盤に出ている局面が
+// 「撮ったもの」なのか「こちらが直したもの」なのか区別が付かなくなる。
+func TestFollowProbeRepairs(t *testing.T) {
+	s, pos := following(t)
+	// ▲7六歩まで進んでいて、認識が 9三の歩を落とした盤面。
+	shotWith(t, pos, "lnsgkgsnl/1r5b1/1pppppppp/9/9/2P6/PP1PPPPPP/1B5R1/LNSGKGSNL", evenConf(0.3))
+
+	p, err := s.FollowProbe()
+	if err != nil {
+		t.Fatalf("FollowProbe: %v", err)
+	}
+	if p.Kind != FollowUnique {
+		t.Fatalf("Kind = %q, want %q（%s）", p.Kind, FollowUnique, p.Reason)
+	}
+	if len(p.Candidates) != 1 || len(p.Candidates[0].Moves) != 1 || p.Candidates[0].Moves[0] != "7g7f" {
+		t.Fatalf("候補 = %+v, want [7g7f]", p.Candidates)
+	}
+	if len(p.Fixed) != 1 {
+		t.Fatalf("直したマスが返っていません: %+v", p.Fixed)
+	}
+	if p.Fixed[0].Square != "９三" {
+		t.Errorf("直したマス = %q, want ９三", p.Fixed[0].Square)
+	}
+	if p.Fixed[0].Was != "空" || p.Fixed[0].Now != "後手の歩" {
+		t.Errorf("直した中身 = %q → %q", p.Fixed[0].Was, p.Fixed[0].Now)
+	}
+}
+
+// ⚠️ **確信度が無い盤（手合割・詰将棋）では修復しないこと。**
+//
+// 人が並べたものを機械が覆す理由は無い。**厳密一致のままにする。**
+func TestFollowProbeNoRepairWithoutConfidence(t *testing.T) {
+	s, pos := following(t)
+	// 同じ盤面を、確信度を付けずに置く。
+	shotWith(t, pos, "lnsgkgsnl/1r5b1/1pppppppp/9/9/2P6/PP1PPPPPP/1B5R1/LNSGKGSNL", nil)
+	p, err := s.FollowProbe()
+	if err != nil {
+		t.Fatalf("FollowProbe: %v", err)
+	}
+	if p.Kind == FollowUnique {
+		t.Fatalf("確信度が無いのに修復しました: %+v", p.Candidates)
+	}
+}
+
+// ⚠️ **人が直したマスは覆さないこと。**
+//
+// 1 マス直したのに修復で戻されると、**直しても直しても戻る**という一番たちの
+// 悪い壊れ方になる。
+func TestFollowProbeKeepsHumanEdits(t *testing.T) {
+	s, pos := following(t)
+	// 認識は 9三を「先手の歩」と誤り、人が盤から外した（＝空にした）。
+	shotWith(t, pos, "lnsgkgsnl/1r5b1/Ppppppppp/9/9/2P6/PP1PPPPPP/1B5R1/LNSGKGSNL", evenConf(0.3))
+	if _, err := pos.Remove(2, 0); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	p, err := s.FollowProbe()
+	if err != nil {
+		t.Fatalf("FollowProbe: %v", err)
+	}
+	// 人が空にしたマスを「後手の歩」に戻すのが修復の唯一の道なので、**繋がらない**。
+	for _, fx := range p.Fixed {
+		if fx.Square == "９三" {
+			t.Fatalf("人が直したマスを覆しました: %+v", fx)
+		}
 	}
 }

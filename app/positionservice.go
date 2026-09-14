@@ -45,6 +45,14 @@ type PositionService struct {
 	// 直す」作業で、学習ラベルも画素と一致していなければならない）。回すのは
 	// `adoptPosition` の 1 か所だけ。
 	nearWhite bool
+	// confidence は**撮った盤面に対する認識器のマスごとの確信度**（行優先）。
+	//
+	// **中継を追うときの「どのマスなら覆してよいか」の根拠**（`followCost`）。
+	// ⚠️ **nil なら認識を通っていない**（手合割・詰将棋）ので、**修復をしない**。
+	// 人が並べた盤を機械が覆してよい理由は無い。
+	// ⚠️ **撮った向きのまま持つこと**（盤と揃える）。解析へ渡すときに
+	// **盤と一緒に回す**（`followCost`）。
+	confidence *[9][9]float64
 }
 
 func NewPositionService(logger *slog.Logger) *PositionService {
@@ -139,7 +147,26 @@ type EditState struct {
 //
 // **撮るたびに呼ぶ。** 1 回のキャプチャは他と独立している（設計原則1）ので、
 // 前の訂正内容を引き継がない。壊れた盤面でも読めた分で始める（設計原則3）。
-func (s *PositionService) Load(boardSFEN string) (EditState, error) {
+func (s *PositionService) Load(boardSFEN string, cellConfidence []float64) (EditState, error) {
+	return s.loadBoard(boardSFEN, confGrid(cellConfidence))
+}
+
+// confGrid は 81 個の確信度を表にする（**行優先**。数が合わなければ nil）。
+//
+// ⚠️ **足りない配列を 0 で埋めないこと** —— 確信度 0 は「まったく自信が無い」
+// という**意味のある値**なので、「知らない」と区別が付かなくなる。
+func confGrid(v []float64) *[9][9]float64 {
+	if len(v) != 81 {
+		return nil
+	}
+	var g [9][9]float64
+	for i, x := range v {
+		g[i/9][i%9] = x
+	}
+	return &g
+}
+
+func (s *PositionService) loadBoard(boardSFEN string, conf *[9][9]float64) (EditState, error) {
 	p, err := position.FromBoardSFEN(boardSFEN)
 
 	s.mu.Lock()
@@ -147,6 +174,7 @@ func (s *PositionService) Load(boardSFEN string) (EditState, error) {
 	s.origin = p.BoardSFEN()
 	// **撮った局面は駒台を逆算する**（訂正の拠り所）。戻す先もそちら。
 	s.originHandsFixed = false
+	s.confidence = conf
 	st := s.state()
 	s.mu.Unlock()
 
@@ -189,6 +217,8 @@ func (s *PositionService) LoadHandicap(handicap string) (EditState, error) {
 	s.origin = p.BoardSFEN()
 	s.originHandsFixed = true
 	s.nearWhite = false
+	// ⚠️ **認識を通っていないので確信度は無い**（人が並べた盤を機械が覆さない）。
+	s.confidence = nil
 	return s.state(), nil
 }
 
@@ -220,6 +250,8 @@ func (s *PositionService) LoadEmpty() (EditState, error) {
 	s.origin = p.BoardSFEN()
 	s.originHandsFixed = false
 	s.nearWhite = false
+	// ⚠️ **認識を通っていないので確信度は無い**（人が並べた盤を機械が覆さない）。
+	s.confidence = nil
 	return s.state(), nil
 }
 
@@ -279,12 +311,14 @@ func (s *PositionService) State() EditState {
 // **落とした駒が未決に戻り、捨てた拍子に確定できなくなる**。
 func (s *PositionService) Reset() (EditState, error) {
 	s.mu.Lock()
-	origin, fixed := s.origin, s.originHandsFixed
+	origin, fixed, conf := s.origin, s.originHandsFixed, s.confidence
 	s.mu.Unlock()
 	if origin == "" {
 		return s.State(), nil
 	}
-	st, err := s.Load(origin)
+	// ⚠️ **確信度は持ち越すこと。** 戻す先は同じ認識結果なので、捨てると
+	// 「訂正を捨てて戻す」を押しただけで**修復が効かなくなる**。
+	st, err := s.loadBoard(origin, conf)
 	if err != nil || !fixed {
 		return st, err
 	}
@@ -484,6 +518,69 @@ func (s *PositionService) adoptPosition() (*position.Position, bool) {
 		return s.pos.Clone(), false
 	}
 	return s.pos.Rotate180(), true
+}
+
+// 費用表の定数。⚠️ **どちらも実測で決めた数ではない**（`position.DefaultTolerance`
+// と一緒に、実際の中継で当たり具合を見て調整すること）。
+const (
+	// humanEditCost は**人が直したマス**の費用。予算では絶対に届かない値にする。
+	//
+	// ⚠️ **人が決めたものを機械が覆してよい理由が無い。** 1 マス直したのに
+	// 修復で戻されると、**直しても直しても戻る**という一番たちの悪い壊れ方になる。
+	humanEditCost = 1000
+	// minCellCost は確信度がいくら低くても払う下限。
+	//
+	// ⚠️ **0 のマスを作らないこと。** 認識器が推論しなかったマス（空マスなど）は
+	// 確信度 0 で返るので、そのまま使うと**いくらでもただで覆せる** ——
+	// **予算という歯止めが効かなくなる。**
+	minCellCost = 0.15
+)
+
+// followCost は「認識結果を覆すのにかかる費用」の表を返す（`position.Connect` 用）。
+//
+// 2 つ目の戻り値は**修復してよいか**。⚠️ **認識を通っていない盤（手合割・詰将棋）
+// では false** —— 人が並べたものを機械が覆す理由が無い。
+//
+// ⚠️ **`adoptPosition` と同じ向きに回して返すこと。** 盤だけ回して費用を回さないと、
+// **別のマスの確信度で判断する**ことになる（画面からは気づけない）。
+func (s *PositionService) followCost() (*position.CellCost, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.pos == nil || s.confidence == nil {
+		return nil, false
+	}
+	// **人が直したマスを見つけるために、読み込んだときの盤と突き合わせる。**
+	origin, err := position.FromSFEN(s.origin)
+	if err != nil {
+		origin = nil
+	}
+	c := &position.CellCost{}
+	for r := 0; r < 9; r++ {
+		for f := 0; f < 9; f++ {
+			v := s.confidence[r][f]
+			if v < minCellCost {
+				v = minCellCost
+			}
+			if origin != nil && cellEdited(s.pos.Board, origin, r, f) {
+				v = humanEditCost
+			}
+			c[r][f] = v
+		}
+	}
+	if s.nearWhite {
+		c = c.Rotate180()
+	}
+	return c, true
+}
+
+// cellEdited はそのマスが読み込んだときから変わっているか（＝人が直したか）。
+func cellEdited(cur, origin *position.Board, rank, file int) bool {
+	a, err1 := cur.At(rank, file)
+	b, err2 := origin.At(rank, file)
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	return a != b
 }
 
 // edit は 1 操作を適用して新しい状態を返す共通処理。

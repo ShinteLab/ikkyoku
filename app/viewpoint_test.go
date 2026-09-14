@@ -19,7 +19,7 @@ const (
 func edited(t *testing.T, board string) *PositionService {
 	t.Helper()
 	s := NewPositionService(slog.New(slog.NewTextHandler(io.Discard, nil)))
-	if _, err := s.Load(board); err != nil {
+	if _, err := s.Load(board, nil); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	return s

@@ -338,13 +338,146 @@ func TestConnectRefusesUnknownTurn(t *testing.T) {
 	}
 }
 
-// ⚠️ **食い違いを許す探索はまだ無い。** 黙って無視すると
-// 「許したつもりで厳密一致していた」ことに気づけないので、エラーで断る。
-func TestConnectToleranceNotImplemented(t *testing.T) {
+// ⚠️ **覆してよい費用に負の数は入れられない**（意味が無いので黙って 0 に倒さない）。
+func TestConnectNegativeTolerance(t *testing.T) {
 	from := mustPos(t, connectHirate)
 	if _, err := position.ConnectSFEN(context.Background(), from, from.Board.SFEN(),
-		position.ConnectOptions{Tolerance: 1}); err == nil {
-		t.Fatal("Tolerance を指定しても通ってしまいました")
+		position.ConnectOptions{Tolerance: -1}); err == nil {
+		t.Fatal("負の Tolerance が通ってしまいました")
+	}
+}
+
+// 「認識が 1 マス外した盤面」の模擬 —— 7六歩まで進んでいて、9三の歩が抜けている。
+func repairTarget(t *testing.T) string {
+	t.Helper()
+	return "lnsgkgsnl/1r5b1/1pppppppp/9/9/2P6/PP1PPPPPP/1B5R1/LNSGKGSNL"
+}
+
+// ⚠️ **認識が外したマスを覆して繋ぐ**（修復探索。2026-09-15）。
+//
+// **これが入ると人は 1 マスも直さなくてよくなる。** 合法手から辿り着いた盤面が
+// 正しいので、認識の誤りはそちらで上書きされる。
+// ⚠️ **どこを覆したかを必ず返すこと**（`Fixed`）—— 黙って直すと、盤に出ている
+// 局面が「撮ったもの」なのか「直したもの」なのか区別が付かなくなる。
+func TestConnectRepairsOneCell(t *testing.T) {
+	from := mustPos(t, connectHirate)
+	r := connect(t, from, repairTarget(t), position.ConnectOptions{Tolerance: 1})
+	if r.Stop != position.StopFound || !r.Unique {
+		t.Fatalf("修復して繋がりませんでした: %+v", r)
+	}
+	if len(r.Moves) != 1 || r.Moves[0] != "7g7f" {
+		t.Fatalf("Moves = %v, want [7g7f]", r.Moves)
+	}
+	if r.Cost <= 0 {
+		t.Errorf("覆したのに Cost が 0 です: %v", r.Cost)
+	}
+	if len(r.Fixed) != 1 {
+		t.Fatalf("Fixed = %+v, want 1 マス", r.Fixed)
+	}
+	// 9三（rank=2, file=0）。認識では空、実際は後手の歩。
+	fx := r.Fixed[0]
+	if fx.Rank != 2 || fx.File != 0 {
+		t.Errorf("直したマス = (%d,%d), want (2,0)", fx.Rank, fx.File)
+	}
+	if !fx.Was.IsEmpty() || fx.Now.IsEmpty() || fx.Now.Black() {
+		t.Errorf("直した中身が違います: was=%s now=%s", fx.Was.Name(), fx.Now.Name())
+	}
+}
+
+// ⚠️ **厳密一致を先に試すこと。** 認識と合法性が完全に一致したなら、それが
+// 一番強い証拠。**覆す余地があっても覆さない。**
+func TestConnectPrefersExact(t *testing.T) {
+	from := mustPos(t, connectHirate)
+	r := connect(t, from, advance(t, from, "7g7f"), position.ConnectOptions{Tolerance: 2})
+	if r.Stop != position.StopFound || !r.Unique {
+		t.Fatalf("繋がりませんでした: %+v", r)
+	}
+	if r.Cost != 0 || len(r.Fixed) != 0 {
+		t.Fatalf("厳密に一致しているのに覆しています: cost=%v fixed=%+v", r.Cost, r.Fixed)
+	}
+}
+
+// ⚠️ **マスごとの費用で覆しやすさが変わること**（ここが修復の肝）。
+//
+// 認識器が**自信の無かった**マスは安く覆せて、**自信のあった**マス（や
+// **人が直した**マス）は同じ予算では覆らない。**盤も予算も同じで、
+// 費用の表だけを替えて結果が変わること**を見る。
+//
+// ⚠️ **他のマスも高くしてあるのは、比べたいものを 1 つに絞るため。**
+// 安いままにすると「9三の歩が 9四へ動いた」という**合法な説明**が同じ費用で
+// 成立してしまい（実際にそうなった）、何を測っているのか分からなくなる。
+func TestConnectCellCost(t *testing.T) {
+	from := mustPos(t, connectHirate)
+	target := repairTarget(t)
+
+	table := func(at float64) *position.CellCost {
+		c := &position.CellCost{}
+		for r := 0; r < 9; r++ {
+			for f := 0; f < 9; f++ {
+				c[r][f] = 50 // ここ以外は覆せない
+			}
+		}
+		c[2][0] = at
+		return c
+	}
+
+	// 認識器が自信の無かったマス → 覆せる。
+	got := connect(t, from, target, position.ConnectOptions{Tolerance: 1, Cost: table(0.2)})
+	if got.Stop != position.StopFound || !got.Unique {
+		t.Fatalf("安いマスなら覆せるはず: %+v", got)
+	}
+	if len(got.Moves) != 1 || got.Moves[0] != "7g7f" {
+		t.Fatalf("Moves = %v, want [7g7f]", got.Moves)
+	}
+	if got.Cost > 0.5 {
+		t.Errorf("費用が重み付けされていません: %v", got.Cost)
+	}
+	if len(got.Fixed) != 1 || got.Fixed[0].Rank != 2 || got.Fixed[0].File != 0 {
+		t.Errorf("直したマスが違います: %+v", got.Fixed)
+	}
+
+	// 人が直したマス → 同じ予算では覆らない。
+	if got := connect(t, from, target, position.ConnectOptions{Tolerance: 1, Cost: table(50)}); got.Stop == position.StopFound {
+		t.Fatalf("覆してはいけないマスを覆しました: %v", got.Moves)
+	}
+}
+
+// ⚠️ **予算を超えたら繋がないこと。** 緩めすぎると嘘の手順を作る側に倒れるので、
+// 「たくさん外している ＝ 別の局面か、認識が崩れている」として断る。
+func TestConnectRepairRespectsBudget(t *testing.T) {
+	from := mustPos(t, connectHirate)
+	// 9三・8三・7三の歩が 3 枚とも抜けている（1 手では説明が付かない）。
+	bad := "lnsgkgsnl/1r5b1/3pppppp/9/9/2P6/PP1PPPPPP/1B5R1/LNSGKGSNL"
+	if r := connect(t, from, bad, position.ConnectOptions{Tolerance: 1}); r.Stop == position.StopFound {
+		t.Fatalf("予算を超えているのに繋がりました: %v（cost=%v）", r.Moves, r.Cost)
+	}
+}
+
+// ⚠️ **1 手も指さずに予算内なら「変わっていない」。** 空の手順を据えにいかないこと
+// （認識が数マス外しただけで、盤は 1 手も進んでいない形）。
+func TestConnectRepairSameBoard(t *testing.T) {
+	from := mustPos(t, connectHirate)
+	// 初期局面のまま、9三の歩だけ認識が落とした。
+	glitch := "lnsgkgsnl/1r5b1/1pppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL"
+	r := connect(t, from, glitch, position.ConnectOptions{Tolerance: 1})
+	if r.Stop != position.StopSame {
+		t.Fatalf("Stop = %v, want StopSame", r.Stop)
+	}
+	if len(r.Moves) != 0 || len(r.Solutions) != 0 {
+		t.Fatalf("0 手のはずが手順が入っています: %+v", r)
+	}
+}
+
+// ⚠️ **打ち切ったときは修復へ進まないこと。**
+//
+// 「探し切れなかった」のであって「厳密には無い」とは分かっていない。そこで
+// 覆しにいくと、**探せば見つかったはずの正しい手順を差し置いて直した局面を据える。**
+func TestConnectBudgetDoesNotFallIntoRepair(t *testing.T) {
+	from := mustPos(t, connectHirate)
+	board := advance(t, from, "7g7f", "3c3d")
+	r := connect(t, from, board, position.ConnectOptions{MaxNodes: 1, Tolerance: 2})
+	if r.Stop != position.StopBudget {
+		t.Fatalf("Stop = %v, want StopBudget", r.Stop)
 	}
 }
 
@@ -375,5 +508,30 @@ func BenchmarkConnect(b *testing.B) {
 				}
 			}
 		})
+	}
+}
+
+// BenchmarkConnectRepair は**修復探索の時間の歯止め**。
+//
+// ⚠️ **厳密一致が空振りしてから走る**ので、素直に 2 回ぶん掛かる。
+// **ここが重くなると、撮るたびに数秒待つアプリになる。**
+func BenchmarkConnectRepair(b *testing.B) {
+	p, err := position.FromFullSFEN(connectHirate)
+	if err != nil {
+		b.Fatal(err)
+	}
+	board, err := position.FromSFEN("lnsgkgsnl/1r5b1/1pppppppp/9/9/2P6/PP1PPPPPP/1B5R1/LNSGKGSNL")
+	if err != nil {
+		b.Fatal(err)
+	}
+	opt := position.ConnectOptions{Tolerance: 1}
+	for i := 0; i < b.N; i++ {
+		r, err := position.Connect(context.Background(), p, board, opt)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if r.Stop != position.StopFound {
+			b.Fatalf("繋がりませんでした: %v", r.Stop)
+		}
 	}
 }

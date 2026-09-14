@@ -74,7 +74,12 @@ const cellLabel = (rank: number, file: number) => `${9 - file}${RANK_KANJI[rank]
 
 export interface EditorHandle {
   // load は認識結果（盤面部分の SFEN）を読み込んで訂正を始める。撮るたびに呼ぶ。
-  load(boardSFEN: string): Promise<void>;
+  // cellConfidence は**認識器がマスごとにどれくらい自信を持っていたか**
+  // （81 個・行優先。無ければ省く）。
+  //
+  // ⚠️ **中継を追うときの「どのマスなら覆してよいか」の根拠**（`FollowProbe`）。
+  // 渡さないと**修復が働かず、認識が 1 マス外すたびに人が直すことになる。**
+  load(boardSFEN: string, cellConfidence?: number[]): Promise<void>;
   // loadHandicap は**手合割の初期局面**から並べ始める（独自ハンデ。2026-09-12）。
   //
   // ⚠️ **画像の無い局面が訂正タブに入る唯一の口。** 撮った画像・認識の情報・
@@ -1340,8 +1345,8 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   });
 
   return {
-    async load(boardSFEN: string) {
-      await apply(() => PositionService.Load(boardSFEN));
+    async load(boardSFEN: string, cellConfidence?: number[]) {
+      await apply(() => PositionService.Load(boardSFEN, cellConfidence ?? null));
       syncLoaded();
     },
     // 手合割の初期局面から並べ始める（入力タブの「訂正タブで調整」。2026-09-12）。

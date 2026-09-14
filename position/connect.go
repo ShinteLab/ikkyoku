@@ -41,6 +41,17 @@ const (
 	DefaultMaxNodes = 20000
 	// DefaultMaxSolutions は集める手順の本数（画面に並べて人に選ばせるため）。
 	DefaultMaxSolutions = 8
+	// DefaultTolerance は**認識結果をどれだけ覆してよいか**の既定（費用の総和）。
+	//
+	// ⚠️ **実測で決めた数ではない**（2026-09-15 時点）。マスごとの費用を
+	// 「認識器の確信度」にすると、**確信度 1.0 のマス 1 枚、または自信の無い
+	// マス数枚**ぶんに当たる。**実際の中継で当たり具合を見て調整すること。**
+	DefaultTolerance = 1.0
+	// repairCollect は修復探索で集める解の数（**絞り込む前**）。
+	//
+	// 費用の一番安い組だけを残すので、`MaxSolutions` より多めに集めておかないと
+	// **もっと安い解を打ち切りで取りこぼす**。
+	repairCollect = 64
 	// DefaultMaxWaste は**食い違いを埋めない手を何手まで見込むか**。
 	//
 	// ⚠️ **これが無いと「合法手で到達できない盤面は落ちる」が成り立たない**
@@ -55,6 +66,36 @@ const (
 	// 盤を動かす側の無駄も乗る**ので 3 以上になる。**その間に線を引いている。**
 	DefaultMaxWaste = 2
 )
+
+// CellCost は**マスごとの「認識結果を覆すのにかかる費用」**（rank, file の順）。
+//
+// ⚠️ **数が大きいほど覆しにくい。** 認識器の確信度をそのまま入れるのが素直で、
+// **自信の無かったマスは安く覆せて、自信のあったマスは簡単には覆らない**。
+// ⚠️ **人が直したマスには大きな値を入れること** —— 人が決めたものを機械が
+// 覆してよい理由が無い。
+//
+// ⚠️ **画像の概念を持ち込んでいない**（`position` は画像を知らない層）。
+// ここにあるのは 81 個の数だけで、それが何に由来するかは呼び出し側の話。
+type CellCost [9][9]float64
+
+func (c *CellCost) at(rank, file int) float64 {
+	if c == nil {
+		return 1.0 // 費用の表が無ければ「1 マス＝1」
+	}
+	return c[rank][file]
+}
+
+// Fix は**認識結果を覆した 1 マス**（修復探索でだけ出る）。
+//
+// ⚠️ **必ず画面に出すこと。** 黙って直すと、盤に出ている局面が
+// 「撮ったもの」なのか「こちらが直したもの」なのか区別が付かなくなる。
+type Fix struct {
+	Rank, File int
+	// Was は認識結果（覆される前）。
+	Was Cell
+	// Now は合法手から辿り着いた側（こちらが正しいと判断した）。
+	Now Cell
+}
 
 // StopReason は探索が終わった理由。
 //
@@ -112,12 +153,16 @@ type ConnectOptions struct {
 	// ⚠️ **「1 手も無駄を許さない」は負の数で表す。** ゼロ値が既定である以上、
 	// 0 にその意味は持たせられない（0 を書いた設定が黙って既定に戻るのと同じ話）。
 	MaxWaste int
-	// Tolerance は**盤面の食い違いを何マスまで許すか**。
+	// Tolerance は**認識結果をどれだけ覆してよいか**（費用の総和の上限）。
 	//
-	// ⚠️ **まだ 0 しか受け付けない**（非 0 はエラー）。認識の誤りを合法性で
-	// 訂正できるようになる代わりに、**手順を捏造する側に倒れうる**ので、
-	// 厳密一致のテストが固まるまで入れない。**口だけ開けてある。**
-	Tolerance int
+	// **0 なら厳密一致**（今までどおり）。0 より大きいと、厳密一致で 1 本も
+	// 見つからなかったときにだけ**修復探索**へ進む。
+	//
+	// ⚠️ **厳密一致を先に試す順序を入れ替えないこと。** 認識と合法性が完全に
+	// 一致したなら、それが一番強い証拠。**覆すのは最後の手段。**
+	Tolerance float64
+	// Cost はマスごとの覆す費用（nil なら全マス 1.0 ＝「何マスまで」と同じ意味）。
+	Cost *CellCost
 }
 
 func (o ConnectOptions) maxDepth() int {
@@ -171,6 +216,13 @@ type ConnectResult struct {
 	Nodes int
 	// Stop は終わった理由。
 	Stop StopReason
+	// Cost は採った手順が**認識結果をどれだけ覆したか**（厳密一致なら 0）。
+	Cost float64
+	// Fixed は覆したマス（`Unique` のときだけ埋まる）。
+	//
+	// ⚠️ **空でないなら、盤に出ているのは「撮ったもの」ではない。**
+	// **必ず画面に出すこと。**
+	Fixed []Fix
 }
 
 // Connect は確定局面 from から、盤面 target に至る手順を探す。
@@ -195,8 +247,8 @@ func Connect(ctx context.Context, from *Position, target *Board, opt ConnectOpti
 	if target == nil {
 		return ConnectResult{}, fmt.Errorf("ikkyoku/position: 繋ぐ先の盤面がありません")
 	}
-	if opt.Tolerance != 0 {
-		return ConnectResult{}, fmt.Errorf("ikkyoku/position: 盤面の食い違いを許す探索はまだありません")
+	if opt.Tolerance < 0 {
+		return ConnectResult{}, fmt.Errorf("ikkyoku/position: 覆してよい費用に負の数は入れられません")
 	}
 	if from.Turn == TurnUnknown {
 		return ConnectResult{}, fmt.Errorf("ikkyoku/position: 手番が決まっていないので繋げません")
@@ -205,27 +257,73 @@ func Connect(ctx context.Context, from *Position, target *Board, opt ConnectOpti
 		return ConnectResult{}, err
 	}
 
-	depth := opt.maxDepth()
 	root := from.Clone()
 
 	// 下界。**ここで落ちれば `legal.Moves` を 1 回も呼ばない。**
-	// 認識の誤りの大半（駒が 1 枚湧いた・消えた）はここで即死する。
-	h := newDiff(root.Board, target).bound(root.Turn)
-	if h == 0 {
+	// 認識の誤りの大半（駒が何枚も湧いた・消えた）はここで即死する。
+	if newDiff(root.Board, target, nil, 0).same() {
 		return ConnectResult{Depth: 0, Stop: StopSame}, nil
 	}
+
+	// ⚠️ **厳密一致を先に試す**（`Tolerance` のコメント）。認識と合法性が完全に
+	// 一致したなら、それが一番強い証拠。**覆すのは最後の手段。**
+	r, err := search(ctx, root, target, opt, nil, 0, opt.maxSolutions()+1)
+	if err != nil || r.Stop == StopFound || opt.Tolerance == 0 {
+		return r, err
+	}
+	// ⚠️ **打ち切りのときは修復へ進まない。** 「探し切れなかった」のであって
+	// 「厳密には無い」とは分かっていない —— そこで覆しにいくと、
+	// **探せば見つかったはずの正しい手順を差し置いて直した局面を据える**。
+	if r.Stop == StopBudget {
+		return r, nil
+	}
+
+	// **修復探索。** 認識が外したマスを、合法手から辿り着いた側で覆す。
+	// ⚠️ **集めてから一番安い組だけ残す**（`repairCollect`）。
+	rep, err := search(ctx, root, target, opt, opt.Cost, opt.Tolerance, repairCollect)
+	if err != nil {
+		return ConnectResult{}, err
+	}
+	if rep.Stop != StopFound {
+		rep.Nodes += r.Nodes
+		// ⚠️ **手順が無く、かつ元の局面との違いが予算に収まるなら「変わっていない」。**
+		// 認識が数マス外しただけで盤は 1 手も進んでいなかった、という形。
+		// **空の手順を据えにいかないための逃げ道**（`dfs` が 0 手を解にしない）。
+		if newDiff(root.Board, target, opt.Cost, opt.Tolerance).cost <= opt.Tolerance+costEpsilon {
+			return ConnectResult{Depth: 0, Nodes: rep.Nodes, Stop: StopSame}, nil
+		}
+		// **厳密一致の側の理由を返す**（修復まで届かなかったことは言わない）。
+		if r.Stop == StopTooFar {
+			return r, nil
+		}
+		return rep, nil
+	}
+	rep.Nodes += r.Nodes
+	return rep.trim(opt.maxSolutions()), nil
+}
+
+// search は 1 回ぶんの反復深化（厳密一致も修復も同じ骨格）。
+//
+// cost / tolerance が両方ゼロ値なら**厳密一致**。
+func search(ctx context.Context, root *Position, target *Board, opt ConnectOptions,
+	cost *CellCost, tolerance float64, collect int) (ConnectResult, error) {
+	depth := opt.maxDepth()
+	h := newDiff(root.Board, target, cost, tolerance).bound(root.Turn)
 	if h > depth {
 		return ConnectResult{Stop: StopTooFar}, nil
 	}
-
 	// ⚠️ **下界から MaxWaste 手ぶんまでしか探さない。** ここを外して MaxDepth まで
 	// 素直に探すと、**相手が往復して戻る手順**でほとんどの盤面が「繋がって」しまい、
 	// 認識の誤りを落とす働きが消える（`DefaultMaxWaste` のコメント）。
 	if top := h + opt.maxWaste(); top < depth {
 		depth = top
 	}
+	if h < 1 {
+		h = 1 // 0 手は呼ぶ前に弾いてある（`StopSame`）
+	}
 
-	s := &connect{ctx: ctx, target: target, maxNodes: opt.maxNodes(), want: opt.maxSolutions() + 1}
+	s := &connect{ctx: ctx, target: target, maxNodes: opt.maxNodes(),
+		want: collect, cost: cost, tolerance: tolerance}
 	for limit := h; limit <= depth; limit++ {
 		s.limit = limit
 		s.path = s.path[:0]
@@ -258,26 +356,68 @@ type connect struct {
 	target   *Board
 	limit    int
 	maxNodes int
-	// want は集める解の上限（MaxSolutions + 1。**超えたことが分かるように 1 多い**）。
-	want  int
-	nodes int
-	path  []string
-	seen  map[string]bool
-	sols  [][]string
+	// want は集める解の上限（**超えたことが分かるように 1 多く**取る）。
+	want int
+	// cost / tolerance は修復探索のとき。**厳密一致では両方ゼロ値。**
+	cost      *CellCost
+	tolerance float64
+	nodes     int
+	path      []string
+	seen      map[string]bool
+	sols      []solution
+}
+
+// solution は見つかった手順 1 本（**費用つき**）。
+type solution struct {
+	moves []string
+	cost  float64
+	fixed []Fix
 }
 
 func (s *connect) result(limit int) ConnectResult {
-	r := ConnectResult{Solutions: s.sols, Depth: limit, Nodes: s.nodes, Stop: StopFound}
-	if len(r.Solutions) >= s.want {
-		r.Solutions = r.Solutions[:s.want-1]
+	// ⚠️ **一番安い組だけ残す。** 覆す量が違う手順を同列に並べると、
+	// **たまたま多く覆したほうが選択肢に混じる**（選ばせる意味が薄れる）。
+	best := s.sols[0].cost
+	for _, sol := range s.sols[1:] {
+		if sol.cost < best {
+			best = sol.cost
+		}
+	}
+	r := ConnectResult{Depth: limit, Nodes: s.nodes, Stop: StopFound, Cost: best}
+	for _, sol := range s.sols {
+		if sol.cost <= best+costEpsilon {
+			r.Solutions = append(r.Solutions, sol.moves)
+			if len(r.Solutions) == 1 {
+				r.Fixed = sol.fixed
+			}
+		}
+	}
+	return r.trim(s.want - 1)
+}
+
+// trim は候補を n 本までに切り、一意かどうかを決め直す。
+func (r ConnectResult) trim(n int) ConnectResult {
+	if n < 1 {
+		n = 1
+	}
+	if len(r.Solutions) > n {
+		r.Solutions = r.Solutions[:n]
 		r.More = true
 	}
 	r.Unique = len(r.Solutions) == 1 && !r.More
+	r.Moves = nil
 	if r.Unique {
 		r.Moves = append([]string(nil), r.Solutions[0]...)
+	} else {
+		// ⚠️ **一意でなければ「どこを直したか」も出さない** —— どの候補の話か
+		// 決まっていないのに直した跡だけ見せると、嘘の説明になる。
+		r.Fixed = nil
 	}
 	return r
 }
+
+// costEpsilon は費用の同点判定の遊び（float の丸め対策）。
+const costEpsilon = 1e-9
 
 // dfs は深さ優先で limit 手まで辿る。戻り値は「打ち切ったか」。
 //
@@ -287,9 +427,18 @@ func (s *connect) dfs(pos *Position, g int) bool {
 	if s.ctx != nil && s.ctx.Err() != nil {
 		return true // 止めたのは呼び出し側。**到達不能ではない**ので打ち切り扱い
 	}
-	d := newDiff(pos.Board, s.target)
-	if d.same() {
-		s.sols = append(s.sols, append([]string(nil), s.path...))
+	d := newDiff(pos.Board, s.target, s.cost, s.tolerance)
+	// ⚠️ **受理は「費用が予算に収まったか」。** 厳密一致では予算も費用も 0 なので、
+	// **1 マスでも違えば通らない**（今までどおり）。
+	// ⚠️ **根そのものを解にしないこと**（`g > 0`）。修復探索では「1 手も指さずに
+	// 予算内」が起こりうるが、それは**何も起きていない**ということなので、
+	// 空の手順を据えるのではなく `StopSame` として扱う（呼び出し側）。
+	if g > 0 && d.cost <= s.tolerance+costEpsilon {
+		s.sols = append(s.sols, solution{
+			moves: append([]string(nil), s.path...),
+			cost:  d.cost,
+			fixed: d.fixes(pos.Board, s.target),
+		})
 		return false
 	}
 	// f = g + h。⚠️ **下界は admissible なので、これで解を取りこぼさない。**
@@ -371,21 +520,39 @@ type diff struct {
 	// needBlack / needWhite は盤上の駒数の食い違いから出した
 	// 「その側が指さねばならない手数」。
 	needBlack, needWhite int
+	// cost は食い違っているマスの費用の合計（**厳密一致なら「食い違った枚数」**）。
+	cost float64
+	// forgive は予算内で見逃せるマスの数（**下界を緩める量**）。
+	forgive int
 }
 
-func newDiff(cur, tgt *Board) *diff {
+func newDiff(cur, tgt *Board, cost *CellCost, budget float64) *diff {
 	d := &diff{}
+	// ⚠️ **厳密一致では 1 バイトも確保しないこと。** ここは節点ごとに呼ばれるので、
+	// 修復用の作業を素通しにすると**厳密一致のほうが目に見えて遅くなる**
+	// （実測で深さ 4 が 0.68ms → 1.18ms に落ちた）。
+	var mismatch []float64
+	if budget > 0 {
+		mismatch = make([]float64, 0, 8)
+	}
 	var curCount, tgtCount [2][16]int // [先後][ベース駒]
 	for r := 0; r < 9; r++ {
 		for f := 0; f < 9; f++ {
 			c, t := cur.cells[r][f], tgt.cells[r][f]
-			if !t.IsEmpty() && c != t {
-				d.want[r][f] = true
-				d.arrive++
-			}
-			if !c.IsEmpty() && t.IsEmpty() {
-				d.free[r][f] = true
-				d.vacate++
+			if c != t {
+				// **食い違ったマスは A か D のどちらか一方**（両方には入らない）。
+				if !t.IsEmpty() {
+					d.want[r][f] = true
+					d.arrive++
+				} else {
+					d.free[r][f] = true
+					d.vacate++
+				}
+				v := cost.at(r, f)
+				d.cost += v
+				if mismatch != nil {
+					mismatch = append(mismatch, v)
+				}
 			}
 			// ⚠️ **成りはベース駒コードを変えない**ので、この表には出ない
 			// （＝成る手は「打つ」にも「取られる」にも数えられない。それで正しい）。
@@ -414,7 +581,45 @@ func newDiff(cur, tgt *Board) *diff {
 	}
 	d.needBlack = blackDrops + whiteLost
 	d.needWhite = whiteDrops + blackLost
+	d.forgive = forgivable(mismatch, budget)
 	return d
+}
+
+// forgivable は予算内で見逃せるマスの最大数（**安い順に詰める**）。
+//
+// ⚠️ **下界を緩めるためだけの数。** 実際にどのマスを見逃すかは探索が決めるので、
+// ここは「一番都合よく見逃せたら何枚か」＝**下界として安全な側**を返す。
+func forgivable(mismatch []float64, budget float64) int {
+	if budget <= 0 || len(mismatch) == 0 {
+		return 0
+	}
+	sorted := append([]float64(nil), mismatch...)
+	sort.Float64s(sorted)
+	n, sum := 0, 0.0
+	for _, v := range sorted {
+		if sum+v > budget+costEpsilon {
+			break
+		}
+		sum += v
+		n++
+	}
+	return n
+}
+
+// fixes は「認識結果を覆したマス」を並べる（**費用が 0 でないマスだけ**）。
+func (d *diff) fixes(cur, tgt *Board) []Fix {
+	if d.arrive == 0 && d.vacate == 0 {
+		return nil
+	}
+	out := make([]Fix, 0, d.arrive+d.vacate)
+	for r := 0; r < 9; r++ {
+		for f := 0; f < 9; f++ {
+			if cur.cells[r][f] != tgt.cells[r][f] {
+				out = append(out, Fix{Rank: r, File: f, Was: tgt.cells[r][f], Now: cur.cells[r][f]})
+			}
+		}
+	}
+	return out
 }
 
 func (d *diff) same() bool { return d.arrive == 0 && d.vacate == 0 }
@@ -428,12 +633,27 @@ func (d *diff) same() bool { return d.arrive == 0 && d.vacate == 0 }
 //	盤上の駒数   打つ／取られるは 1 手につき 1 単位。**手番は交互**なので、
 //	             先手が nb 手・後手が nw 手指せるところまで進まないと埋まらない
 func (d *diff) bound(turn Turn) int {
-	h := d.arrive
-	if d.vacate > h {
-		h = d.vacate
+	// ⚠️ **見逃せるぶんだけ下界を緩めること**（修復探索のとき）。緩めないと
+	// **直せば届く手順を「隔たりが大きすぎる」で切り捨てる**。
+	// **緩めすぎは遅くなるだけ**だが、緩め足りないと解を取りこぼす。
+	k := d.forgive
+	h := atLeast(d.arrive-k, d.vacate-k)
+	// 駒数のほうは 1 マス見逃すと**両側の要求が 1 つずつ**消えうる
+	// （相手の駒が消えた ＝ 取った、が同時に無くなる）ので 2k で引く。
+	nb, nw := d.needBlack-2*k, d.needWhite-2*k
+	if n := alternating(turn, nb, nw); n > h {
+		h = n
 	}
-	if k := alternating(turn, d.needBlack, d.needWhite); k > h {
-		h = k
+	return h
+}
+
+func atLeast(a, b int) int {
+	h := a
+	if b > h {
+		h = b
+	}
+	if h < 0 {
+		return 0
 	}
 	return h
 }

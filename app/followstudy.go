@@ -55,6 +55,18 @@ type FollowChoice struct {
 	Text []string `json:"text"`
 }
 
+// FollowFix は**認識を覆した 1 マス**（修復したときだけ出る）。
+//
+// ⚠️ **必ず画面に出すこと。** 黙って直すと、盤に出ている局面が「撮ったもの」なのか
+// 「こちらが直したもの」なのか区別が付かなくなる。
+type FollowFix struct {
+	// Square は「９三」のようなマスの名前。
+	Square string `json:"square"`
+	// Was は認識結果（覆される前）。Now は覆した後。
+	Was string `json:"was"`
+	Now string `json:"now"`
+}
+
 // FollowProbe は「繋げるか」の下見。**木は 1 手も触っていない。**
 type FollowProbe struct {
 	// Kind は上の 5 つのどれか。
@@ -74,6 +86,11 @@ type FollowProbe struct {
 	Depth int `json:"depth"`
 	// Reason は繋がらなかった理由（繋がるなら空）。**そのまま画面に出す文。**
 	Reason string `json:"reason"`
+	// Fixed は**認識を覆したマス**（覆していなければ空）。
+	//
+	// ⚠️ **空でないなら、繋いだ先の盤は「撮ったもの」ではない。**
+	// **画面に出すこと**（黙って直さない）。
+	Fixed []FollowFix `json:"fixed"`
 }
 
 // FollowApplied は据えた結果。
@@ -118,15 +135,23 @@ func (s *StudyService) FollowProbe() (FollowProbe, error) {
 	rev, main, rootSfen := s.rev, s.study.MainLine(), rootSFEN(s.study)
 	s.mu.Unlock()
 
+	// ⚠️ **修復は認識を通った盤のときだけ**（手合割・詰将棋では費用表が無い）。
+	// 人が並べた盤を機械が覆す理由は無いので、そちらは厳密一致のまま。
+	opt := position.ConnectOptions{}
+	if cost, ok := s.src.followCost(); ok {
+		opt.Cost, opt.Tolerance = cost, position.DefaultTolerance
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), followTimeout)
 	defer cancel()
-	r, err := position.Connect(ctx, from, p.Board, position.ConnectOptions{})
+	r, err := position.Connect(ctx, from, p.Board, opt)
 	if err != nil {
 		return FollowProbe{}, err
 	}
 	s.logger.Info("本譜の先に繋げるか下見しました",
 		"tip", tipID, "stop", r.Stop.String(), "depth", r.Depth,
-		"candidates", len(r.Solutions), "nodes", r.Nodes, "rotated", rotated)
+		"candidates", len(r.Solutions), "nodes", r.Nodes,
+		"cost", r.Cost, "fixed", len(r.Fixed), "rotated", rotated)
 
 	out := FollowProbe{Rev: rev, Depth: r.Depth, Candidates: []FollowChoice{}}
 	switch r.Stop {
@@ -157,7 +182,7 @@ func (s *StudyService) FollowProbe() (FollowProbe, error) {
 		})
 	}
 	if r.Unique {
-		out.Kind = FollowUnique
+		out.Kind, out.Fixed = FollowUnique, followFixes(r.Fixed)
 		return out, nil
 	}
 	out.Kind = FollowChoices
@@ -241,4 +266,30 @@ func followText(rootSfen string, main, moves []string) []string {
 		out = append(out, text)
 	}
 	return out
+}
+
+// followFixes は覆したマスを画面に出せる形にする。
+//
+// ⚠️ **マスの名前を作っているだけで、棋譜の表記ではない**（指し手の表記は
+// `core/kifu` の仕事。**そちらをここに書き写さないこと**）。
+func followFixes(in []position.Fix) []FollowFix {
+	out := make([]FollowFix, 0, len(in))
+	for _, f := range in {
+		out = append(out, FollowFix{
+			Square: squareText(f.Rank, f.File),
+			Was:    f.Was.Name(),
+			Now:    f.Now.Name(),
+		})
+	}
+	return out
+}
+
+// squareText は盤の座標を「９三」にする（file 0 が 9 筋、rank 0 が一段目）。
+func squareText(rank, file int) string {
+	files := [...]string{"９", "８", "７", "６", "５", "４", "３", "２", "１"}
+	ranks := [...]string{"一", "二", "三", "四", "五", "六", "七", "八", "九"}
+	if rank < 0 || rank > 8 || file < 0 || file > 8 {
+		return "?"
+	}
+	return files[file] + ranks[rank]
 }

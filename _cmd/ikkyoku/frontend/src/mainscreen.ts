@@ -2399,6 +2399,26 @@ ${st.turnLabel}${n}`;
     // **盤の下に行を積むぶんだけ盤が小さくなっていた。**
   };
 
+  // cellConfidence は認識器のマスごとの確信度を 81 個の並びにする（行優先）。
+  //
+  // ⚠️ **中継を追うときの「どのマスなら覆してよいか」の根拠**になるので、
+  // **撮ったときに必ず渡すこと**（渡さないと修復が働かず、認識が 1 マス外すたびに
+  // 人が直すことになる）。⚠️ **判断は Go 側** —— ここは形を整えるだけ。
+  // ⚠️ **並び順を信用せず row/col で置くこと**（欠けた行があっても崩れない）。
+  const cellConfidence = (dbg: Debug | null | undefined): number[] | undefined => {
+    const cells = dbg?.cells;
+    if (!cells || cells.length === 0) {
+      return undefined;
+    }
+    const out = new Array<number>(81).fill(0);
+    for (const c of cells) {
+      if (c.row >= 0 && c.row < 9 && c.col >= 0 && c.col < 9) {
+        out[c.row * 9 + c.col] = c.confidence ?? 0;
+      }
+    }
+    return out;
+  };
+
   // 訂正タブ → 解析タブ。**受け渡しはこの 1 か所だけ。**
   //
   // ⚠️ **確定しているかの判定は Go 側（StudyService.Adopt）に任せる。** 手番か
@@ -2452,6 +2472,17 @@ ${st.turnLabel}${n}`;
       return;
     }
 
+    // ⚠️ **認識を覆したなら必ず言うこと。** 黙って直すと、盤に出ている局面が
+    // 「撮ったもの」なのか「こちらが直したもの」なのか区別が付かなくなる。
+    const fixedNote = () => {
+      const fixed = probe.fixed ?? [];
+      if (fixed.length === 0) {
+        return "";
+      }
+      const detail = fixed.map((f) => `${f.square} ${f.was}→${f.now}`).join("、");
+      return ` 認識を${fixed.length}マス直しました（${detail}）`;
+    };
+
     // 据える（`goTo` は真 —— **手で押した操作なので繋いだ先を見せる**）。
     const apply = async (moves: string[]) => {
       try {
@@ -2462,7 +2493,7 @@ ${st.turnLabel}${n}`;
         // 視点はその検討に対するユーザーの選択。**勝手に回さない。**
         selectTab(studyTab);
         const note = got.note ? ` ${got.note}` : "";
-        sidePane.setStatus(`${got.added}手つなぎました（${moves.join(" ")}）${note}`);
+        sidePane.setStatus(`${got.added}手つなぎました（${moves.join(" ")}）${fixedNote()}${note}`);
       } catch (err) {
         fail(String(err instanceof Error ? err.message : err));
       }
@@ -3813,7 +3844,7 @@ ${st.turnLabel}${n}`;
     // **撮ったら訂正タブへ移る。** 認識結果はまず直すものなので、そこが行き先。
     // 盤が取れなかったときは直すものが無いので、理由の出ている入力タブに留まる。
     if (result.sfen) {
-      void editor.load(result.sfen).then(() => selectTab(editTab));
+      void editor.load(result.sfen, cellConfidence(result.debug)).then(() => selectTab(editTab));
     } else {
       editor.clear();
       showBoard("", "shot");

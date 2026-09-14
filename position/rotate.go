@@ -50,6 +50,24 @@ func (p *Position) Rotate180() *Position {
 	return c
 }
 
+// Rotate180 は費用の表も同じ向きに回す（`Board.Rotate180` と対で使う）。
+//
+// ⚠️ **盤を回したら費用も回すこと。** 忘れると**別のマスの確信度で判断する**ことに
+// なり、認識器が自信を持っていたマスを平気で覆す（しかも画面からは気づけない）。
+// ⚠️ **中身は入れ替えない**（先後の区別が無い数なので、位置だけ移す）。
+func (c *CellCost) Rotate180() *CellCost {
+	if c == nil {
+		return nil
+	}
+	out := &CellCost{}
+	for r := 0; r < 9; r++ {
+		for f := 0; f < 9; f++ {
+			out[8-r][8-f] = c[r][f]
+		}
+	}
+	return out
+}
+
 // flip は手番を入れ替える。**未決は未決のまま**（決めていないことを決めない）。
 func (t Turn) flip() Turn {
 	switch t {
