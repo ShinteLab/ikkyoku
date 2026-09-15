@@ -719,6 +719,56 @@ func (s *CaptureService) Capture() (CaptureResult, error) {
 	return s.deliver(img, path, ImageSourceScreen), nil
 }
 
+// CaptureQuiet は**知らせずに撮る**（中継の追従。2026-09-15）。
+//
+// ⚠️ **`Capture` との違いは「撮ったあと何もしない」こと。** イベントを出さず、
+// メイン画面も前に出さず、タブも動かさない。**追従中に前に出られたら中継が見えない**し、
+// **訂正タブへ飛ばすのは「訂正するかどうかをこちらが決める」ことになる**
+// （それは人が決めること）。
+//
+// ⚠️ **PNG も残さない。** 追従は 1 秒ごとに撮るので、残すと**ディスクが埋まる**
+// うえ、**大半は「盤が映っていない」で捨てるフレーム**。
+// 残すなら**採用した 1 枚だけ**で、それは別の話（Phase 6 の「録画」）。
+//
+// ⚠️ **枠の門番は掛けたまま**（`Capture` と同じ）。「どこを撮るのかが画面に
+// 見えていること」は追従でも変わらない。
+func (s *CaptureService) CaptureQuiet() (CaptureResult, error) {
+	if err := s.requireFrame(); err != nil {
+		return CaptureResult{}, err
+	}
+	region, _, err := s.captureRegion()
+	if err != nil {
+		return CaptureResult{}, err
+	}
+	img, err := ikkyoku.Capture(region)
+	if err != nil {
+		return CaptureResult{}, err
+	}
+
+	b := img.Bounds()
+	result := CaptureResult{
+		Width: b.Dx(), Height: b.Dy(), Source: ImageSourceScreen,
+		Warnings: []string{}, HandTotal: map[string]int{},
+	}
+	// ⚠️ **認識に失敗しても成功として返す**（設計原則3）。呼び出し側は
+	// 盤面が空なら見送るだけで、**追従そのものは続く。**
+	board, err := recognize.FromImage(img)
+	if err != nil {
+		result.RecognizeError = err.Error()
+		return result, nil
+	}
+	result.SFEN = board.SFEN
+	result.Confidence = board.Confidence
+	if w := board.Warnings; w != nil {
+		result.Warnings = w
+	}
+	if h := board.HandTotal; h != nil {
+		result.HandTotal = h
+	}
+	result.Debug = board.Debug
+	return result, nil
+}
+
 // OpenImage は画像ファイルを選んで、撮った 1 枚と同じ経路に載せる（入力タブの
 // 「画像ファイルを読み込む」）。
 //

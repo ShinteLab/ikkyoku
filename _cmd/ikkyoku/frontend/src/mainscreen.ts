@@ -74,6 +74,7 @@ import {
   AnalyzeService,
   FontService,
   KifuService,
+  PositionService,
   SettingsService,
   StudyService,
   TrainingService,
@@ -968,6 +969,18 @@ export function mountMainScreen(root: HTMLElement): void {
 
                  溢れたぶんは省略して title に出す（**選んでコピーはできる**）。 -->
             <div id="study-sfen-row" class="study-sfen-row" hidden>
+              <!-- 中継を追う（2026-09-15）。**押しているあいだ撮り続けて、繋がるなら
+                   人に聞かずに手を足す。**
+
+                   ⚠️ **訂正タブへは飛ばさない。** 「訂正を挟むかどうか」を
+                   こちらが決めることになる（それは人が決めること）。
+                   **おかしくてもとにかく進み、違うと思ったら人が戻る。**
+
+                   ⚠️ **置き場所が盤の下なのは、行を増やさないため**（SFEN の行に
+                   相乗り）。盤の大きさは式で決まるので、行を足すと盤が縮む。 -->
+              <button id="study-follow" class="ghost-btn is-tiny" type="button" hidden
+                      aria-pressed="false"
+                      title="中継の画面を撮り続けて、進んだ手を本譜に足します（枠を出しておいてください）">中継を追う</button>
               <span class="field-label">SFEN</span>
               <code id="study-sfen" class="sfen" title="今見ている局面">-</code>
             </div>
@@ -1939,6 +1952,7 @@ export function mountMainScreen(root: HTMLElement): void {
   const studyPlaceholder = root.querySelector<HTMLParagraphElement>("#study-placeholder")!;
   const studySfenOut = root.querySelector<HTMLElement>("#study-sfen")!;
   const studySfenRow = root.querySelector<HTMLElement>("#study-sfen-row")!;
+  const studyFollowBtn = root.querySelector<HTMLButtonElement>("#study-follow")!;
   // 盤の脇の駒台（読み取り専用）。**訂正タブの駒台とは別物**で、
   // ドラッグの入口も「足りない駒」も持たない。
   const studyHandSlots = {
@@ -2298,6 +2312,8 @@ ${st.turnLabel}${n}`;
     sidePane.render(loaded ? st : null);
     // 盤の周りの出し入れ（勝率バー・対局者・視点・評価値グラフ・側の列）。
     syncStudyChrome(loaded);
+    // 中継を追うボタンも局面があるときだけ（繋ぐ先が無いと足せない）。
+    studyFollowBtn.hidden = !loaded;
     // 訂正タブの「本譜に繋ぐ」の出し入れ。**局面があれば出す。**
     //
     // ⚠️ **「手順が 1 手以上あるとき」にしないこと**（2026-09-15 に直した）。
@@ -2597,6 +2613,80 @@ ${st.turnLabel}${n}`;
   };
 
 
+
+  // ---- 中継を追う（2026-09-15）------------------------------------------
+  //
+  // **撮る → 認識する → 繋がるなら足す、を止めるまで繰り返す。**
+  //
+  // ⚠️ **訂正タブへ飛ばさないこと。** 「訂正を挟むかどうか」をこちらが決めることに
+  // なる。**おかしくてもとにかく進み、違うと思ったら人が戻る**（そのために
+  // 推測で足した手には印が付いている。`Node.Guess`）。
+  //
+  // ⚠️ **1 周ずつ順番に回すこと**（`setInterval` にしない）。認識は数秒かかるので、
+  // **間隔で撮ると前の 1 枚を認識している最中に次が積み上がる。**
+  //
+  // ⚠️ **繰り返しがフロントにあるのは連続解析と同じ形。** ただし**こちらは
+  // 局面を動かさない**（動かすかは `FollowAuto` が「先端を見ていたか」で決める）。
+  const followTickMs = 1200;
+  let followOn = false;
+  let followTimer: number | undefined;
+
+  const setFollowing = (on: boolean) => {
+    followOn = on;
+    studyFollowBtn.setAttribute("aria-pressed", on ? "true" : "false");
+    studyFollowBtn.classList.toggle("is-active", on);
+    studyFollowBtn.textContent = on ? "追跡中…" : "中継を追う";
+    if (!on && followTimer !== undefined) {
+      window.clearTimeout(followTimer);
+      followTimer = undefined;
+    }
+  };
+
+  const followStop = (message: string) => {
+    setFollowing(false);
+    if (message) {
+      sidePane.setStatus(message);
+    }
+  };
+
+  const followTick = async () => {
+    if (!followOn) {
+      return;
+    }
+    try {
+      const shot = await CaptureService.CaptureQuiet();
+      if (!shot.sfen) {
+        // 盤が取れなかった（枠に盤が映っていない）。**黙って次へ。**
+        return;
+      }
+      await PositionService.Load(shot.sfen, cellConfidence(shot.debug) ?? null);
+      const got = await StudyService.FollowAuto();
+      showStudy(got.state);
+      if (got.applied) {
+        const moves = got.text?.join(" ") || got.moves?.join(" ") || "";
+        const mark = got.guess ? "（推測）" : "";
+        sidePane.setStatus(`${moves}${mark} を足しました`);
+      }
+    } catch (err) {
+      // ⚠️ **枠が出ていない等はここに来る。** 黙って回し続けると理由が読めないので
+      // **止めて理由を出す**（設計原則3 は「落ちない」であって「黙る」ではない）。
+      followStop(String(err instanceof Error ? err.message : err));
+      return;
+    }
+    if (followOn) {
+      followTimer = window.setTimeout(() => void followTick(), followTickMs);
+    }
+  };
+
+  studyFollowBtn.addEventListener("click", () => {
+    if (followOn) {
+      followStop("中継の追跡を止めました");
+      return;
+    }
+    setFollowing(true);
+    sidePane.setStatus("中継を追っています（止めるにはもう一度押してください）");
+    void followTick();
+  });
 
   // 解析タブの盤の操作（手を進める UI）。**合法手だけ。**
   //

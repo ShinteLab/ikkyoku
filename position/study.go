@@ -89,6 +89,14 @@ type Node struct {
 	// ⚠️ **`Play` を通るのは盤の操作だけではない**（`FromKIF` も 1 手ずつ指す）ので、
 	// **`Play` に印を付ける実装にしないこと。**
 	Hand bool `json:"hand,omitempty"`
+	// Guess は**撮った画面から推測で足した手**か（2026-09-15。中継の追従）。
+	//
+	// ⚠️ **これが「戻る判断」の材料そのもの。** 中継を追っているあいだは
+	// **おかしくてもとにかく進む**（人に判断させない）ので、**どの手が確かで
+	// どの手が推測なのかが見えていないと、どこまで戻ればよいか分からない。**
+	//
+	// ⚠️ **ぴったり一致したときは付けないこと** —— 全部に付くと印の意味が消える。
+	Guess bool `json:"guess,omitempty"`
 	// Chosen は**この手を「本線」に選んだか**（手順リストの「本線にする」。2026-08-18）。
 	//
 	// 変化の中の分かれ道は既定でどれも同格（全部 1 段下げて並ぶ）なので、
@@ -127,6 +135,8 @@ type treeNode struct {
 	sources []string
 	// hand は人が盤で指した手か（`Node.Hand`）。
 	hand bool
+	// guess は撮った画面から推測で足した手か（`Node.Guess`）。
+	guess bool
 	// variation は**この手から先は本譜ではない**という印（「分岐にする」）。
 	//
 	// ⚠️ **順番だけでは表せないから要る**（2026-08-14）。枝と本譜の違いは
@@ -225,6 +235,7 @@ func pathUSI(n *treeNode) []string {
 //	cont（変化の続き）… 子が 1 つなら同じ深さ（→ cont）／2 つ以上なら全部 1 段下げる
 //
 // ```
+//
 //	*70 ５四歩              ← main
 //	     71 ９七角           ← head（変化はここから始まる）
 //	         72 ６四歩       ← ⚠️ **1 本でも下げる**。以降は同じ深さで続く
@@ -232,6 +243,7 @@ func pathUSI(n *treeNode) []string {
 //	         72 ２九龍       ← 2 本目も同じ深さ（**先に足したほうを上位にしない**）
 //	         73 ３二飛打
 //	*71 ３二飛打            ← 本譜は下げない
+//
 // ```
 //
 // **head で必ず下げるのが肝**（2 回目の修正）。こうすると:
@@ -354,6 +366,7 @@ func (n *treeNode) node(depth int, main bool) Node {
 		Chosen:  n.chosen,
 		Sources: append([]string(nil), n.sources...),
 		Hand:    n.hand,
+		Guess:   n.guess,
 	}
 }
 
@@ -582,12 +595,34 @@ func (s *Study) AddLine(moves []string, source string) (int, int, string) {
 // ⚠️ **消さずに据える。** 食い違ったところで、**新しい手を `kids[0]`（本譜側）に
 // 置き、それまでの続きは枝として残る**。ユーザーが足した検討を、中継が 1 手進む
 // たびに捨てないための形（`TODO.md`「本譜のロック」の一番よくある使い方）。
-func (s *Study) Graft(moves []string) GraftResult {
+func (s *Study) Graft(moves []string) GraftResult { return s.graft(moves, len(moves), mark{}) }
+
+// GraftGuess は**後ろの n 手を「推測で足した手」として**据える
+// （中継の追従。2026-09-15）。
+//
+// ⚠️ **印を付けるのは後ろの n 手だけ。** 渡すのは「本譜 + 新しい手」なので、
+// **全部に付けると、それまでの確かな手まで推測扱いになる**（印の意味が消える）。
+//
+// ⚠️ **`Graft` と分けてあるのは、棋譜（KIF / URL）の手に印を付けないため。**
+// あちらは**実際に現れた指し手**で、推測ではない。**1 つにまとめないこと。**
+func (s *Study) GraftGuess(moves []string, n int) GraftResult {
+	if n < 0 {
+		n = 0
+	}
+	return s.graft(moves, len(moves)-n, mark{guess: true})
+}
+
+// graft は据え直す。markFrom 番目以降の手にだけ印を付ける。
+func (s *Study) graft(moves []string, markFrom int, m mark) GraftResult {
 	var r GraftResult
 	at, pos := s.top, s.root.Clone()
 	for i, mv := range moves {
 		before := len(at.kids)
-		next, err := s.grow(at, pos, mv, mark{})
+		at2 := mark{}
+		if i >= markFrom {
+			at2 = m
+		}
+		next, err := s.grow(at, pos, mv, at2)
 		if err != nil {
 			r.Note = fmt.Sprintf("%d手目で止まりました: %v", i+1, err)
 			return r
@@ -654,6 +689,8 @@ type mark struct {
 	engine string
 	// hand は人が盤で指したか。
 	hand bool
+	// guess は撮った画面から推測で足したか（中継の追従）。
+	guess bool
 }
 
 // grow は at の子として move を生やす（**既にあるならそれを返す**）。
@@ -699,6 +736,9 @@ func (s *Study) grow(at *treeNode, pos *Position, move string, m mark) (*treeNod
 func (n *treeNode) addMark(m mark) {
 	if m.hand {
 		n.hand = true
+	}
+	if m.guess {
+		n.guess = true
 	}
 	if m.engine == "" {
 		return

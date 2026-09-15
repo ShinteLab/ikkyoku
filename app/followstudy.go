@@ -254,7 +254,7 @@ func (s *StudyService) FollowApply(moves []string, rev int, goTo bool) (a Follow
 		return FollowApplied{}, fmt.Errorf("局面が変わりました。もう一度お試しください")
 	}
 
-	g := s.study.Graft(append(s.study.MainLine(), moves...))
+	g := s.study.GraftGuess(append(s.study.MainLine(), moves...), len(moves))
 	if g.Note != "" && g.Added == 0 {
 		return FollowApplied{}, fmt.Errorf("%s", g.Note)
 	}
@@ -436,4 +436,72 @@ func rootSFENOf(p *position.Position) string {
 		return ""
 	}
 	return v
+}
+
+// FollowAuto は**下見して、繋がるなら人に聞かずに繋ぐ**（中継の追従。2026-09-15）。
+//
+// ⚠️ **ここが「録画」の 1 手ぶん。** 訂正タブを挟むかどうかを**こちらが決めない**
+// のが要点で、**おかしくてもとにかく進む**（判断するのは人で、そのために
+// 戻れるようにしてある）。
+//
+// ⚠️ **進めないのは「情報が無いとき」だけ。** 盤が映っていない（CM・解説）・
+// 盤面が変わっていない・どの手か決められない —— どれも**正しさの判断ではなく、
+// 足せる手が無いという事実**。⚠️ **ここに「怪しいから止める」を足さないこと。**
+//
+// ⚠️ **見ている場所は「先端を見ていたときだけ」動かす。** 戻って検討している
+// 最中に飛ばされると、**中継が進むたびに読んでいた枝から引き剥がされる**。
+func (s *StudyService) FollowAuto() (a FollowAuto, err error) {
+	p, e := s.FollowProbe()
+	if e != nil {
+		return FollowAuto{}, e
+	}
+	a = FollowAuto{Kind: p.Kind, Reason: p.Reason, Guess: p.Guess, Fit: p.Fit,
+		Fixed: p.Fixed, Mismatch: p.Mismatch}
+	if p.Kind != FollowUnique || len(p.Candidates) == 0 {
+		// **足せる手が無い**（変わっていない／読めない／決められない）。
+		a.State = s.State()
+		return a, nil
+	}
+
+	// ⚠️ **先端を見ていたなら付いていく**（`tail -f` と同じ）。
+	// 戻って読んでいるなら**動かさない**（`mergeReloadLocked` と同じ約束）。
+	s.mu.Lock()
+	atTip := s.study != nil && s.study.CurrentID() == mainTipID(s.study)
+	s.mu.Unlock()
+
+	moves := p.Candidates[0].Moves
+	applied, err := s.FollowApply(moves, p.Rev, atTip)
+	if err != nil {
+		return a, err
+	}
+	a.Applied, a.Moves, a.Added = true, moves, applied.Added
+	a.Text = p.Candidates[0].Text
+	a.Note, a.State = applied.Note, applied.State
+	return a, nil
+}
+
+// FollowAuto は 1 手ぶんの追従の結果。
+type FollowAuto struct {
+	// Applied は手を足したか（**偽でも失敗ではない** —— 足せる手が無かっただけ）。
+	Applied bool `json:"applied"`
+	// Moves / Text は足した手（USI と日本語表記）。
+	Moves []string `json:"moves"`
+	Text  []string `json:"text"`
+	// Added は新しく生えた手数。
+	Added int `json:"added"`
+	// Kind は下見の結果（`FollowUnique` 以外なら足していない）。
+	Kind string `json:"kind"`
+	// Guess は推測で選んだか。⚠️ **手順にも印が付く**（`Node.Guess`）。
+	Guess bool `json:"guess"`
+	// Fit は盤面の一致度（0〜1）。
+	Fit float64 `json:"fit"`
+	// Fixed は認識を覆したマス。Mismatch は説明できなかったマス。
+	Fixed    []FollowFix `json:"fixed"`
+	Mismatch []FollowFix `json:"mismatch"`
+	// Reason は足せなかった理由（足したなら空）。
+	Reason string `json:"reason"`
+	// Note は本譜を押しのけたときの断り。
+	Note string `json:"note"`
+	// State は結果の解析タブの状態。**そのまま描ける。**
+	State StudyState `json:"state"`
 }

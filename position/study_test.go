@@ -1214,3 +1214,33 @@ func TestStudyMainTip(t *testing.T) {
 		t.Fatalf("本譜を畳んだのに先端が根に戻りません: %d, err=%v", id, err)
 	}
 }
+
+// GraftGuess は**後ろの n 手だけ**を推測の印にする。
+//
+// ⚠️ **全部に付けないこと。** 渡すのは「本譜 + 新しい手」なので、全部に付けると
+// **それまでの確かな手まで推測扱い**になり、**どこまで戻ればよいか**が読めなくなる
+// （印の意味そのものが消える）。
+func TestStudyGraftGuessMarksOnlyNew(t *testing.T) {
+	s := position.NewStudy(hirate(t))
+	if g := s.Graft([]string{"7g7f", "3c3d"}); g.Added != 2 {
+		t.Fatalf("Graft: %+v", g)
+	}
+	if g := s.GraftGuess([]string{"7g7f", "3c3d", "2g2f"}, 1); g.Added != 1 {
+		t.Fatalf("GraftGuess: %+v", g)
+	}
+	for _, n := range s.Nodes() {
+		want := n.USI == "2g2f"
+		if n.Guess != want {
+			t.Errorf("%s の Guess = %v, want %v", n.USI, n.Guess, want)
+		}
+	}
+	// ⚠️ **棋譜として据えた手には付かないこと**（実際に現れた指し手なので）。
+	if g := s.Graft([]string{"7g7f", "3c3d", "2g2f", "8c8d"}); g.Added != 1 {
+		t.Fatalf("Graft: %+v", g)
+	}
+	for _, n := range s.Nodes() {
+		if n.USI == "8c8d" && n.Guess {
+			t.Error("棋譜の手に推測の印が付きました")
+		}
+	}
+}

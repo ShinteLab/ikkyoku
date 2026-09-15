@@ -458,3 +458,94 @@ func TestFollowProbeDoesNotGuessWhenUnclear(t *testing.T) {
 		t.Fatalf("1 手では説明が付かないのに推測で決め打ちました: %+v", p.Candidates)
 	}
 }
+
+// ⚠️ **追従は人に判断させないこと**（2026-09-15）。
+//
+// **「訂正を挟むかどうか」をこちらが決めない**のが要点。繋がるなら聞かずに繋ぎ、
+// 足せる手が無いときだけ黙って見送る。**判断するのは人で、そのために戻れる。**
+func TestFollowAutoAdvances(t *testing.T) {
+	s, pos := following(t)
+	shotWith(t, pos, "lnsgkgsnl/1r5b1/2ppppppp/9/4p4/2P6/PP1PPPPPP/1B5R1/LNSGKGSNL",
+		evenConf(0.5))
+
+	a, err := s.FollowAuto()
+	if err != nil {
+		t.Fatalf("FollowAuto: %v", err)
+	}
+	if !a.Applied || a.Added != 1 {
+		t.Fatalf("進んでいません: %+v", a)
+	}
+	if !a.Guess {
+		t.Error("推測で選んだので Guess が立つはず")
+	}
+	// ⚠️ **手順にも印が付くこと**（どこまで戻ればよいかの材料）。
+	nodes := a.State.Nodes
+	if len(nodes) != 1 || !nodes[0].Guess {
+		t.Fatalf("推測の印が付いていません: %+v", nodes)
+	}
+	// **先端を見ていたので付いていく。**
+	if a.State.CurrentID != a.State.MainTip {
+		t.Errorf("先端に付いていっていません: cur=%d tip=%d", a.State.CurrentID, a.State.MainTip)
+	}
+}
+
+// ⚠️ **戻って読んでいる最中は、見ている場所を動かさないこと。**
+//
+// 中継が進むたびに引き剥がされると、**検討そのものができない**。
+func TestFollowAutoKeepsPositionWhenBrowsing(t *testing.T) {
+	s, pos := following(t)
+	if _, err := s.Play("7g7f"); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	if _, err := s.Play("3c3d"); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	// **1 手目まで戻って読んでいる。**
+	if _, err := s.GoTo(1); err != nil {
+		t.Fatalf("GoTo: %v", err)
+	}
+	shot(t, pos, "7g7f", "3c3d", "2g2f")
+
+	a, err := s.FollowAuto()
+	if err != nil {
+		t.Fatalf("FollowAuto: %v", err)
+	}
+	if !a.Applied {
+		t.Fatalf("進んでいません: %+v", a)
+	}
+	if a.State.CurrentID != 1 {
+		t.Errorf("読んでいる場所から引き剥がされました: %d", a.State.CurrentID)
+	}
+}
+
+// ⚠️ **足せる手が無いときは黙って見送ること**（失敗にしない）。
+//
+// 盤が映っていない・変わっていない・決められない —— どれも**正しさの判断ではなく、
+// 足せる手が無いという事実**。
+func TestFollowAutoSkipsQuietly(t *testing.T) {
+	cases := []struct {
+		name  string
+		board string
+		conf  []float64
+	}{
+		{"盤が映っていない", "9/9/9/9/9/9/9/9/9", evenConf(0.5)},
+		{"変わっていない", hirateBoard, evenConf(0.5)},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s, pos := following(t)
+			before := s.State().Rev
+			shotWith(t, pos, c.board, c.conf)
+			a, err := s.FollowAuto()
+			if err != nil {
+				t.Fatalf("FollowAuto: %v（見送りは失敗にしない）", err)
+			}
+			if a.Applied {
+				t.Fatalf("足せないはずが進みました: %+v", a)
+			}
+			if s.State().Rev != before {
+				t.Error("見送ったのに木が動きました")
+			}
+		})
+	}
+}

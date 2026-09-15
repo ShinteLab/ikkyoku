@@ -159,7 +159,7 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
       num: string, label: string, id: number, title: string,
       o?: {
         depth?: number; main?: boolean; parent?: number; fork?: boolean;
-        sources?: string[]; hand?: boolean;
+        sources?: string[]; hand?: boolean; guess?: boolean;
       },
     ) => {
       // ⚠️ **行は chip とトグルの 2 つ**（ボタンの中にボタンは置けない）。
@@ -216,6 +216,18 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
         dot.title = "自分で指した手";
         b.appendChild(dot);
       }
+      // 中継の画面から**推測で足した手**（2026-09-15）。
+      //
+      // ⚠️ **これが「どこまで戻ればよいか」の材料そのもの。** 追従中は
+      // **おかしくてもとにかく進む**ので、**どの手が確かでどの手が推測かが
+      // 見えていないと、違うと思ったときに戻る先が分からない。**
+      // ⚠️ **ぴったり一致した手には出ない**（Go 側が印を付けない）。
+      if (o?.guess) {
+        const dot = document.createElement("span");
+        dot.className = "move-source is-guess";
+        dot.title = "中継の画面から推測で足した手（違っていたらここから消せます）";
+        b.appendChild(dot);
+      }
       // ⚠️ **手の後ろに出す**（前に置くと、手数と手のあいだに割り込んで
       // **縦に並んだ手の頭が揃わなくなる**）。
       // ⚠️ **複数出しうる** —— 同じ手を 2 つのエンジンが挙げるのは普通で、
@@ -258,7 +270,7 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
             (m.main ? "" : "（枝）") + "（右クリックでこの手から下を消します）",
           {
             depth: m.depth, main: m.main, parent: m.parent, fork: isFork(m),
-            sources: m.sources ?? [], hand: m.hand ?? false,
+            sources: m.sources ?? [], hand: m.hand ?? false, guess: m.guess ?? false,
           }),
       );
     }
