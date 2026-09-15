@@ -602,21 +602,6 @@ func (s *AnalyzeService) runOne(
 		best := p.Lines[0] // Lines は Rank の昇順（analyze.Progress）
 		s.study.recordEval(target.Epoch, target.NodeID, entry.ID, label, best.Score, best.Depth)
 	}
-	// ⚠️ **どのエンジンだったかも控える**（2026-09-16）。**記録した時点の写し**なので、
-	// あとで設定を変えても控えは動かない（勝率をポナンザ定数の変更で計算し直さない
-	// のと同じ約束 —— 点は「そのとき何と出たか」の記録）。
-	// ⚠️ **折れ線を描くためではない**（あちらは設定から引く）。開き直したときに
-	// **その数字を信じてよいかを決める材料**として残す。
-	s.study.noteEngine(StudyEngine{
-		ID:         entry.ID,
-		Label:      label,
-		Name:       entry.Name,
-		EngineName: entry.EngineName,
-		Path:       entry.Path,
-		Color:      s.settings.engineColor(entry.ID),
-		MultiPV:    opt.MultiPV,
-		Options:    entry.Options,
-	})
 	res, err := s.sessionFor(entry).Analyze(ctx, target.Root, opt, func(p analyze.Progress) {
 		record(p)
 		s.emit("analyze:info", AnalyzeProgress{

@@ -1,6 +1,8 @@
 package app
 
 import (
+	"bytes"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"os"
@@ -97,46 +99,33 @@ func TestStudySessionKeepsBranchPoints(t *testing.T) {
 	}
 }
 
-// ⚠️ **どのエンジンだったかが残ること**（2026-09-16。ユーザーの要望）。
-// 凡例の 1 語だけでは、**同じ名前で中身を入れ替えた登録と区別が付かない。**
-func TestStudySessionKeepsEngine(t *testing.T) {
+// ⚠️ **どのエンジンが出した値かが残ること**（2026-09-16）。
+//
+// ⚠️ **残すのは ID と凡例の名前だけ。** exe のパスも option も設定
+// （`Config.Engines`）にあるので、**`EngineID` で引けば済む** —— 写すと
+// 同じことが 2 か所に載って片方だけ古くなる。**それが成り立つ条件が
+// 「ID を使い回さない」**で、`ikkyoku.NextEngineID` がそうしてある。
+func TestStudySessionKeepsEngineID(t *testing.T) {
 	s := analyzed(t)
-	s.noteEngine(StudyEngine{
-		ID: "e1", Label: "水匠", Name: "水匠", EngineName: "Suisho",
-		Path: `C:\engines\suisho.exe`, Color: "#6ad3ff", MultiPV: 3,
-		Options: map[string]string{"Threads": "8"},
-	})
 	rec, ok := s.sessionRecord()
 	if !ok {
 		t.Fatal("控えが作れません")
 	}
-	if len(rec.Engines) != 1 {
-		t.Fatalf("エンジンの控え = %+v", rec.Engines)
+	if len(rec.Evals) != 1 || rec.Evals[0].EngineID != "e1" {
+		t.Fatalf("エンジンの id が残っていません: %+v", rec.Evals)
 	}
-	got := rec.Engines[0]
-	if got.EngineName != "Suisho" || got.Path == "" || got.Options["Threads"] != "8" {
-		t.Errorf("エンジンの素性が落ちています: %+v", got)
+	// ⚠️ **凡例の名前だけは写す** —— 登録を消したあとでも折れ線に名前が要る
+	// （生の id が並ぶと、どの線が何なのか読めない）。
+	if rec.Evals[0].Label == "" {
+		t.Error("凡例の名前が落ちています")
 	}
 	back := empty(t)
 	if err := back.restoreSession(rec); err != nil {
 		t.Fatalf("restoreSession: %v", err)
 	}
-	again, _ := back.sessionRecord()
-	if len(again.Engines) != 1 || again.Engines[0].EngineName != "Suisho" {
-		t.Errorf("復元でエンジンの素性が落ちています: %+v", again.Engines)
-	}
-}
-
-// ⚠️ **option は写しで持つこと。** 設定の中の map をそのまま抱えると、
-// **あとで設定を変えたときに控えまで書き換わる**（「記録した時点の写し」が壊れる）。
-func TestStudySessionCopiesEngineOptions(t *testing.T) {
-	s := analyzed(t)
-	opts := map[string]string{"Threads": "8"}
-	s.noteEngine(StudyEngine{ID: "e1", Options: opts})
-	opts["Threads"] = "1" // 設定タブで変えた、のつもり
-	rec, _ := s.sessionRecord()
-	if rec.Engines[0].Options["Threads"] != "8" {
-		t.Errorf("控えが後から書き換わっています: %+v", rec.Engines[0].Options)
+	g := back.Evals()
+	if len(g.Series) != 1 || g.Series[0].EngineID != "e1" || g.Series[0].Label == "" {
+		t.Errorf("復元で折れ線の素性が落ちています: %+v", g.Series)
 	}
 }
 
@@ -245,5 +234,60 @@ func TestStudyStoreRestoreWithoutFiles(t *testing.T) {
 	}
 	if ok {
 		t.Error("何も無いのに戻したことになっています")
+	}
+}
+
+// ⚠️ **控えに手数も指し手も入れないこと**（2026-09-16）。**どれも同じ控えの中の
+// 木から引ける**ので、写すと同じことが 2 か所に載って食い違いうる。
+// **復元で木から引き直して、元と 1 つも違わないこと**まで見る。
+func TestStudySessionPointsCarryNoTreeData(t *testing.T) {
+	s := analyzed(t)
+	rec, ok := s.sessionRecord()
+	if !ok {
+		t.Fatal("控えが作れません")
+	}
+	body, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	// 点の側に木の話（手数・棋譜手数・指し手）が出てこないこと。
+	// ⚠️ 木の節点は `usi` / `text` を持つので、**点の鍵の名前で見る。**
+	for _, key := range []string{`"ply"`, `"number"`, `"move"`} {
+		if bytes.Contains(body, []byte(key)) {
+			t.Errorf("控えに %s が入っています（木から引けるもの）", key)
+		}
+	}
+
+	// 復元すると、手数も棋譜手数も指し手も元どおりであること。
+	before := s.Evals().Series[0].Points
+	back := empty(t)
+	if err := back.restoreSession(rec); err != nil {
+		t.Fatalf("restoreSession: %v", err)
+	}
+	after := back.Evals().Series[0].Points
+	if len(after) != len(before) {
+		t.Fatalf("点の数 = %d, want %d", len(after), len(before))
+	}
+	for i := range after {
+		if after[i] != before[i] {
+			t.Errorf("点 %d が復元で変わりました: %+v, want %+v", i, after[i], before[i])
+		}
+	}
+}
+
+// ⚠️ **木に無い節点の点は捨てること。** 描く先が無いので持っていても意味が無く、
+// 残すと**手数も指し手も分からない点**が折れ線に混ざる。
+func TestStudySessionDropsPointsWithoutNode(t *testing.T) {
+	s := analyzed(t)
+	rec, _ := s.sessionRecord()
+	n := len(rec.Evals[0].Points)
+	rec.Evals[0].Points = append(rec.Evals[0].Points, StudyEvalPoint{ID: 9999, CP: 500})
+	back := empty(t)
+	if err := back.restoreSession(rec); err != nil {
+		t.Fatalf("restoreSession: %v", err)
+	}
+	again, _ := back.sessionRecord()
+	if len(again.Evals[0].Points) != n {
+		t.Errorf("木に無い点が残っています: %d, want %d", len(again.Evals[0].Points), n)
 	}
 }

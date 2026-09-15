@@ -1,12 +1,15 @@
 package ikkyoku
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Config は永続化する設定（ディスプレイ番号・領域・保存先）。
@@ -941,18 +944,44 @@ func (c Config) MateEngine() (EngineEntry, bool) {
 // DefaultEngineID は同梱エンジンを既定で登録したときの ID。
 const DefaultEngineID = "builtin"
 
-// NextEngineID は既存の一覧とぶつからない ID を作る。
+// NextEngineID はエンジンの ID を**発行する**。
+//
+// ⚠️ **空いた番号を使い回さないこと**（2026-09-16 に直した）。以前は
+// `engine-1` から順に空きを探していたので、**`engine-2` を消して別のエンジンを
+// 足すとまた `engine-2` になった**。設定ファイルの中だけで通じればよかった頃は
+// それでよかったが、**検討の控えが評価値をこの ID で指すようになった**ので
+// （`app/studyrecord.go`）、使い回すと**前のエンジンの評価値が別のエンジンの
+// ものとして読まれる**。
+//
+// ⚠️ **人が読む名前をここに混ぜないこと。** 表示は `DisplayName`（人が付けた
+// 名前 → エンジンの名乗り → パス）の担当で、ID は**指すためだけのもの**。
+//
+// 一覧を受けるのは**万一ぶつかったときに振り直す**ため（乱数が取れない環境で
+// 時刻に落ちるので、そこだけ重なりうる）。
 func NextEngineID(engines []EngineEntry) string {
 	used := make(map[string]bool, len(engines))
 	for _, e := range engines {
 		used[e.ID] = true
 	}
-	for i := 1; ; i++ {
-		id := fmt.Sprintf("engine-%d", i)
+	for {
+		id := issueEngineID()
 		if !used[id] {
 			return id
 		}
 	}
+}
+
+// issueEngineID は使い回されない ID を 1 つ作る。
+//
+// ⚠️ **乱数が取れなくても ID を返すこと**（登録できないより、まず動くほう。
+// 設計原則3）。落ちる先が時刻なので、そこだけは重なりうる —— 呼ぶ側
+// （`NextEngineID`）が一覧と突き合わせる。
+func issueEngineID() string {
+	var b [6]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Sprintf("engine-%d", time.Now().UnixNano())
+	}
+	return "engine-" + hex.EncodeToString(b[:])
 }
 
 // migrateEngines は旧形式（`engine`）の設定を `engines` へ移す。

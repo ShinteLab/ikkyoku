@@ -28,50 +28,47 @@ import (
 // 控えは「あると嬉しいもの」で、**無いと動かないものにしない。**
 const studyRecordVersion = 1
 
-// StudyEngine は**その評価値を出したエンジン**（記録した時点の写し）。
-//
-// ⚠️ **控えを開き直したときに「この数字を信じてよいか」を決める材料。**
-// 折れ線の凡例に出す 1 語（`Label`）だけでは、**同じ名前で中身を入れ替えた**
-// 登録と区別が付かない。
-//
-// ⚠️ **記録した時点の写しであること。** あとで設定を変えても動かさない ——
-// 勝率をポナンザ定数の変更で計算し直さないのと同じで、**点は「そのとき何と
-// 出たか」の記録**。
-type StudyEngine struct {
-	// ID は設定の登録 ID（**点の鍵**）。
-	ID string `json:"id"`
-	// Label は凡例に出ていた名前（`EngineEntry.DisplayName()` の結果）。
-	Label string `json:"label,omitempty"`
-	// Name は**人が付けた名前**。⚠️ **`EngineName` より前に出すもの。**
-	Name string `json:"name,omitempty"`
-	// EngineName は**エンジンが名乗った名前**（`usi` の `id name`）。
-	//
-	// ⚠️ **人が付けた名前とは別物。** 同じ exe を option 違いで 2 つ登録すると
-	// **名乗りは同じ**になるので、これだけでは区別できない。
-	EngineName string `json:"engineName,omitempty"`
-	// Path は exe のパス（**同梱エンジンなら空**）。
-	Path string `json:"path,omitempty"`
-	// Color は折れ線の色（`#rrggbb`）。**解決済みの値を持つ**ので、
-	// 登録が消えていても控えのとおりに描ける。
-	Color string `json:"color,omitempty"`
-	// MultiPV はそのとき出させた候補手の本数。
-	MultiPV int `json:"multiPv,omitempty"`
-	// Options はそのとき読ませた option（**人が設定した値だけ**）。
-	//
-	// ⚠️ **宣言された既定値は入れない**（`OptionSpecs`）。あれはエンジンの版に
-	// 属する話で、**この木に効いていたのは人が入れた値のほう**。
-	Options map[string]string `json:"options,omitempty"`
-}
-
 // StudyEvalSeries はエンジン 1 つぶんの点（**木の全部**）。
 //
 // ⚠️ **`EvalSeries` と似ているが別物。** あちらは**今の経路の点だけ**を折れ線に
 // する描画用で、こちらは**枝の点も残らず**持つ。経路で絞って控えると、
 // **開き直したときに枝の評価値だけ消えている。**
+//
+// ⚠️ **エンジンの素性をここに写さないこと**（2026-09-16 に一度入れて外した）。
+// exe のパスも名乗った名前も option も**設定（`Config.Engines`）にある**ので、
+// **`EngineID` で引けば済む** —— 写すと**同じことが 2 か所に載り、片方だけ古くなる。**
+// それが成り立つ条件が **ID を発行して使い回さないこと**で、
+// `ikkyoku.NextEngineID` がそうしてある。
 type StudyEvalSeries struct {
-	EngineID string      `json:"engineId"`
-	Label    string      `json:"label,omitempty"`
-	Points   []EvalPoint `json:"points"`
+	// EngineID は設定の登録 ID（`EngineEntry.ID`）。**素性はここから引く。**
+	EngineID string `json:"engineId"`
+	// Label は凡例に出ていた名前。
+	//
+	// ⚠️ **これだけは写す。** 登録を消したあとでも**折れ線に名前が要る**
+	// （生の id が凡例に並ぶと、どの線が何なのか読めない）。設定から引けるうちは
+	// そちらが勝つので、これは**引けなくなったときの控え**。
+	Label  string           `json:"label,omitempty"`
+	Points []StudyEvalPoint `json:"points"`
+}
+
+// StudyEvalPoint は控える 1 点。
+//
+// ⚠️ **手数も棋譜手数も指し手の表記も持たない**（2026-09-16 に落とした）。
+// **どれも同じ控えの中の木から引ける** —— `ID` が節点を指しているので、
+// 手数は節点の手数、指し手は節点の表記そのもの。写すと**同じことが 2 か所に
+// 載って食い違いうる**（木は「７六歩」、点は「同歩」というような）。
+//
+// ⚠️ **残っている 5 つは木から引けないもの**（エンジンが出した答え）。
+// `WinRate` と `Label` は**計算し直さない** —— **点は「そのとき何と出たか」の
+// 記録**で、あとでポナンザ定数や書式を変えても動かさない。
+type StudyEvalPoint struct {
+	// ID は手順ツリーの節点（**手数も指し手もここから引く**）。
+	ID      int     `json:"id"`
+	CP      int     `json:"cp,omitempty"`
+	Mate    int     `json:"mate,omitempty"`
+	WinRate float64 `json:"winRate"`
+	Label   string  `json:"label,omitempty"`
+	Depth   int     `json:"depth,omitempty"`
 }
 
 // StudyRecord は検討セッション 1 つぶんの控え。
@@ -97,9 +94,7 @@ type StudyRecord struct {
 	Game position.Game `json:"game"`
 	// SourceURL は棋譜の取得元（**URL から読んだときだけ**）。
 	SourceURL string `json:"sourceUrl,omitempty"`
-	// Engines は**どのエンジンだったか**（`Evals` と同じ並び）。
-	Engines []StudyEngine `json:"engines"`
-	// Evals は評価値の点（木の全部）。
+	// Evals は評価値の点（木の全部）。**どのエンジンだったかは `EngineID` で引く。**
 	Evals []StudyEvalSeries `json:"evals"`
 }
 
@@ -131,15 +126,6 @@ func (s *StudyService) newSessionLocked() {
 	s.session = newSessionID()
 }
 
-// noteEngine は**そのエンジンが何だったか**を控える（`AnalyzeService` から）。
-//
-// ⚠️ **公開しない**（Service の公開メソッドはフロントの API になる）。
-func (s *StudyService) noteEngine(e StudyEngine) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.evals.note(e)
-}
-
 // sessionRecord は今の検討を控えにする（**まだ採っていなければ false**）。
 //
 // ⚠️ **公開しない。** 控えの出し入れはフロントの操作ではない。
@@ -161,17 +147,6 @@ func (s *StudyService) sessionRecord() (StudyRecord, bool) {
 	game := s.game
 	// ⚠️ **指し手は落とす**（木が本物。両方持つと必ず割れる）。
 	game.Moves = nil
-	evals := s.evals.all()
-	engines := make([]StudyEngine, 0, len(evals))
-	for _, se := range evals {
-		if e, ok := s.evals.engines[se.EngineID]; ok {
-			engines = append(engines, e)
-			continue
-		}
-		// **控えが無くても id と凡例の名前だけは残す**（設計原則3）——
-		// 折れ線は描ける。分からないのは「どの exe だったか」だけ。
-		engines = append(engines, StudyEngine{ID: se.EngineID, Label: se.Label})
-	}
 	return StudyRecord{
 		Version:   studyRecordVersion,
 		ID:        s.session,
@@ -179,8 +154,7 @@ func (s *StudyService) sessionRecord() (StudyRecord, bool) {
 		Study:     snap,
 		Game:      game,
 		SourceURL: s.sourceURL,
-		Engines:   engines,
-		Evals:     evals,
+		Evals:     s.evals.all(),
 	}, true
 }
 
@@ -205,7 +179,30 @@ func (s *StudyService) restoreSession(rec StudyRecord) error {
 	s.game = rec.Game
 	s.sourceURL = rec.SourceURL
 	s.session = rec.ID
-	s.evals.load(rec.Evals, rec.Engines)
+	// ⚠️ **点の手数と指し手は木から引き直す**（控えには入っていない）。
+	// **木に無い節点の点は捨てる** —— 描く先が無いので持っていても意味が無い。
+	nodes := map[int]position.Node{}
+	for _, n := range study.Nodes() {
+		nodes[n.ID] = n
+	}
+	base := 0
+	if n := study.Root().MoveNumber; n > 0 {
+		base = n - 1
+	}
+	s.evals.load(rec.Evals, func(id int) (int, int, string, bool) {
+		if id == 0 {
+			return 0, base, "", true
+		}
+		n, ok := nodes[id]
+		if !ok {
+			return 0, 0, "", false
+		}
+		text := n.Text
+		if text == "" {
+			text = n.USI
+		}
+		return n.Number, base + n.Number, text, true
+	})
 	// ⚠️ **`rev` は進める**（別ウィンドウが描き直せるように）。⚠️ **`study:changed`
 	// はここで出さない** —— 起動時なので、まだ聞いている窓が無い。
 	s.rev++

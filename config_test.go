@@ -235,11 +235,33 @@ func TestLoadConfigPrefersEngines(t *testing.T) {
 	}
 }
 
-// 追加した ID が既存とぶつからないこと。
+// エンジンの ID を**発行する**こと（2026-09-16）。
+//
+// ⚠️ **空いた番号を使い回さないこと**がここの要点。以前は空きを順に探していたので
+// **`engine-2` を消して別のエンジンを足すとまた `engine-2`** になった。
+// **検討の控えが評価値をこの ID で指す**ようになったので、使い回すと
+// **前のエンジンの評価値が別のエンジンのものとして読まれる**（画面を見ても
+// 気づけない壊れ方）。
 func TestNextEngineID(t *testing.T) {
 	engines := []EngineEntry{{ID: "engine-1"}, {ID: "engine-3"}}
-	if got := NextEngineID(engines); got != "engine-2" {
-		t.Errorf("NextEngineID() = %q, want engine-2", got)
+	got := NextEngineID(engines)
+	// ⚠️ **空いている "engine-2" を拾わないこと。**
+	if got == "engine-2" {
+		t.Fatalf("空いた番号を使い回しています: %q", got)
+	}
+	for _, e := range engines {
+		if got == e.ID {
+			t.Fatalf("既存とぶつかっています: %q", got)
+		}
+	}
+	// 続けて発行しても重ならないこと。
+	seen := map[string]bool{got: true}
+	for i := 0; i < 50; i++ {
+		id := NextEngineID(engines)
+		if seen[id] {
+			t.Fatalf("同じ ID を 2 回発行しています: %q", id)
+		}
+		seen[id] = true
 	}
 }
 
