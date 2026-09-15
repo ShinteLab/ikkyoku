@@ -695,3 +695,47 @@ func TestEngineNameRoundTrip(t *testing.T) {
 		t.Fatalf("名乗りが残っていません: %+v", got.EngineList()[0])
 	}
 }
+
+// 検討の控えの置き場（2026-09-16）。
+//
+// ⚠️ **棚（`KifuDB`）と同じ場所に倒さないこと。** あちらは「棋譜」の置き場で、
+// こちらは**棋譜になる前の検討**も含めて残す場所。**同じ入れ物にすると、
+// 中継を撮っている最中の検討が置けない**（棚の主キーは取得元）。
+func TestConfigStudyDir(t *testing.T) {
+	// 指定してあればそのまま。
+	c := Config{StudyDirPath: `D:\shogi\studies`}
+	got, err := c.StudyDir()
+	if err != nil {
+		t.Fatalf("StudyDir: %v", err)
+	}
+	if got != `D:\shogi\studies` {
+		t.Errorf("指定したパスが使われていません: %q", got)
+	}
+
+	// 空なら既定（ikkyoku 配下の studies）。
+	def, err := Config{}.StudyDir()
+	if err != nil {
+		t.Fatalf("StudyDir(既定): %v", err)
+	}
+	if filepath.Base(def) != "studies" || filepath.Base(filepath.Dir(def)) != "ikkyoku" {
+		t.Errorf("既定の場所が違います: %q", def)
+	}
+
+	// 空白だけのときも既定へ倒す（設定ファイルは手で編集する前提）。
+	blank, err := Config{StudyDirPath: "  "}.StudyDir()
+	if err != nil {
+		t.Fatalf("StudyDir(空白): %v", err)
+	}
+	if blank != def {
+		t.Errorf("空白が既定に倒れていません: %q", blank)
+	}
+
+	// ⚠️ **棚と同じファイルを指さないこと。**
+	db, err := Config{}.KifuDB()
+	if err != nil {
+		t.Fatalf("KifuDB: %v", err)
+	}
+	if def == db || def == filepath.Dir(db) {
+		t.Errorf("棚と同じ場所を指しています: studies=%q db=%q", def, db)
+	}
+}

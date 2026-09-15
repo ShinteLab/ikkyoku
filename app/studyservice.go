@@ -84,6 +84,20 @@ type StudyService struct {
 	//
 	// ⚠️ **画面に出す数ではない。** 手数とは何の関係も無い。
 	rev int
+	// session は今の検討の id（**控え 1 ファイルの鍵**。2026-09-16）。
+	//
+	// ⚠️ **根を入れ替えたら振り直すこと**（`newSessionLocked`）。別の対局の話に
+	// なったのに同じ id で書くと、**前の検討の控えが上書きされる。**
+	//
+	// ⚠️ **棚（`kicho`）の id とは無関係。** 中継を撮っている最中は棚に行が
+	// 作れないので、**同一性を棋譜から借りない**（`studyrecord.go`）。
+	session string
+	// dirty は**控えを書き直す必要がある**ことを知らせる口（`StudyStore` が入れる）。
+	//
+	// ⚠️ **nil でも動くこと**（設計原則3）。控えはおまけで、**無いと解析が
+	// できないものにしない。**
+	// ⚠️ **ロックを持ったまま呼ぶので、ここで待たないこと**（詰まる）。
+	dirty func()
 	// evals は手順の 1 手ごとの評価値（評価値グラフ。2026-08-12）。
 	//
 	// ⚠️ **置き場所がここなのは、記録が手順に紐づくから。** 節点を消す操作
@@ -228,7 +242,7 @@ func (s *StudyService) Adopt() (st StudyState, err error) {
 	s.sourceURL = ""
 	// **評価値グラフも捨てる。** 別の局面から始まる別の手順なので、前の折れ線を
 	// 残すと**違う対局の評価値が同じ横軸に並ぶ。**
-	s.evals.reset()
+	s.newSessionLocked()
 	st = s.changed()
 	s.mu.Unlock()
 
@@ -301,7 +315,7 @@ func (s *StudyService) loadKifuFrom(text, sourceURL string) (load KifuLoad, err 
 	s.game = k.Game
 	// **取得元が分かっている入口だけが埋める**（貼り付けは空）。
 	s.sourceURL = strings.TrimSpace(sourceURL)
-	s.evals.reset()
+	s.newSessionLocked()
 	st := s.changed()
 	s.mu.Unlock()
 
@@ -463,7 +477,7 @@ func (s *StudyService) mergeReloadLocked(next *position.Study) position.GraftRes
 	if s.study == nil || rootSFEN(s.study) == "" || rootSFEN(s.study) != rootSFEN(next) {
 		// **別の対局**（あるいは初回）。木ごと入れ替えて折れ線も捨てる。
 		s.study = next
-		s.evals.reset()
+		s.newSessionLocked()
 		return position.GraftResult{}
 	}
 	// **見ている位置は動かさない**（2026-08-19。以前は「最後の手を見ていたなら
@@ -539,7 +553,7 @@ func (s *StudyService) NewGame(handicap string) (load KifuLoad, err error) {
 	s.game = position.Game{Handicap: name}
 	// **取り直す先も無い。**
 	s.sourceURL = ""
-	s.evals.reset()
+	s.newSessionLocked()
 	st := s.changed()
 	s.mu.Unlock()
 
@@ -814,7 +828,7 @@ func (s *StudyService) Clear() (st StudyState) {
 	s.study = nil
 	s.game = position.Game{}
 	s.sourceURL = ""
-	s.evals.reset()
+	s.newSessionLocked()
 	return s.changed()
 }
 
@@ -931,6 +945,10 @@ func (s *StudyService) recordEval(epoch, id int, engineID, label string, sc anal
 	if text == "" {
 		text = node.USI
 	}
+	// ⚠️ **ここでも控えを促すこと。** 評価値は `changed()` を通らないので、
+	// **これが無いと「手は進めたが解析はまだ」の状態しか残らない**（評価値が
+	// 1 つも入っていない控えになる ＝ Step 1 の目的が果たせない）。
+	defer s.markDirty()
 	s.evals.record(epoch, engineID, label, EvalPoint{
 		ID:      id,
 		Ply:     node.Number,
@@ -1020,7 +1038,20 @@ func (s *StudyService) analyzeTarget() (analyzeTarget, error) {
 // ⚠️ **ロックを取った状態で呼ぶこと。**
 func (s *StudyService) changed() StudyState {
 	s.rev++
+	s.markDirty()
 	return s.state()
+}
+
+// markDirty は**控えを書き直す必要がある**ことを知らせる（2026-09-16）。
+//
+// ⚠️ **ロックを取った状態で呼ぶこと**（呼ぶ側が既に持っている）。
+// ⚠️ **ここで書かないこと** —— ディスクへの書き込みをロックの中でやると、
+// **解析の途中経過が届くたびに待たされる**（深さが進むたび・エンジンの数だけ来る）。
+// 知らせるだけで、間引くのも書くのも `StudyStore` の仕事。
+func (s *StudyService) markDirty() {
+	if s.dirty != nil {
+		s.dirty()
+	}
 }
 
 // publish は「解析タブの局面が変わった」を**全部の窓へ**知らせる（`study:changed`）。

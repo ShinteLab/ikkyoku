@@ -269,6 +269,14 @@ type Config struct {
 	// 印にすると「2 つに印が付いている」という表せてはいけない状態が作れる。
 	PieceFont string `json:"pieceFont,omitempty"`
 
+	// StudyDirPath は**検討の控え**の置き場（2026-09-16）。
+	//
+	// **空なら `os.UserConfigDir()/ikkyoku/studies`**（解決は `Config.StudyDir`
+	// の 1 か所。**ここにもフロントにも書かないこと**）。
+	//
+	// ⚠️ **棚（`KifuDBPath`）とは別物。** あちらは「棋譜」の置き場で、こちらは
+	// **棋譜になる前の検討**（撮った 1 局面から始めたもの）も残す場所。
+	StudyDirPath string `json:"studyDirPath,omitempty"`
 	// KifuDBPath は棋譜データベース（kicho の SQLite）のファイルパス。
 	//
 	// **空なら `os.UserConfigDir()/ikkyoku/kicho.db`**（既定値の解決は
@@ -989,6 +997,31 @@ type TrainingConfig struct {
 	// （suteme はループバックからのアクセスを認証免除にしている）。
 	// 別のマシンへ送るときだけ、suteme の APIタブで発行したものを入れる。
 	Token string `json:"token,omitempty"`
+}
+
+// DefaultStudyDir は既定の**検討の控え**の置き場を返す
+// （os.UserConfigDir()/ikkyoku/studies）。
+//
+// ⚠️ **棚（`kicho.db`）とは別。** 棚は「棋譜」の置き場で、こちらは
+// **棋譜になる前の検討**も含めて丸ごと残す場所（`app/studyrecord.go`）。
+// **同じ入れ物にしないこと** —— 棚の主キーは `(source, source_id)` なので、
+// 中継を撮っている最中の検討は行が作れない。
+func DefaultStudyDir() (string, error) {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return "", fmt.Errorf("ikkyoku: 設定ディレクトリの取得に失敗しました: %w", err)
+	}
+	return filepath.Join(dir, "ikkyoku", "studies"), nil
+}
+
+// StudyDir は実際に使う控えの置き場を返す。
+//
+// ⚠️ **「空なら既定」の解決はここ 1 か所**（`KifuDB` と同じ約束）。
+func (c Config) StudyDir() (string, error) {
+	if p := strings.TrimSpace(c.StudyDirPath); p != "" {
+		return p, nil
+	}
+	return DefaultStudyDir()
 }
 
 // DefaultKifuDBPath は既定の棋譜データベースのパスを返す

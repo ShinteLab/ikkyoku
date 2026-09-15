@@ -1,5 +1,7 @@
 package app
 
+import "sort"
+
 // 評価値グラフの記録（解析タブ。2026-08-12）。
 //
 // **手順の 1 手ごとに「エンジンが出した最善手の評価値」を残す**だけの入れ物。
@@ -127,6 +129,16 @@ type evalStore struct {
 	// ⚠️ **手数で持たないこと**（枝が入ると同じ手数が何本もある）。節点で持つと、
 	// **戻って別の手を指しても前の枝の評価値がそのまま残る**（消す必要が無い）。
 	points map[string]map[int]EvalPoint
+	// engines は**その評価値を出したエンジン**の控え（記録した時点の写し）。
+	//
+	// ⚠️ **`label` と別に持つ。** あちらは凡例に出す 1 語だが、こちらは
+	// **「どのエンジンの、どの設定で出した値か」** —— 控えを開き直したときに
+	// **その数字を信じてよいかを決める材料**になる（exe・名乗った名前・option）。
+	//
+	// ⚠️ **記録した時点の写しであること**（あとで設定を変えても動かない）。
+	// 勝率をポナンザ定数の変更で計算し直さないのと同じ約束 ——
+	// **点は「そのとき何と出たか」の記録。**
+	engines map[string]StudyEngine
 	// epoch は根の世代。**根を入れ替えたときだけ進める。**
 	//
 	// ⚠️ **これが無いと、前の対局の途中経過が新しい木の同じ id に書き戻る**
@@ -154,6 +166,83 @@ func (s *evalStore) record(epoch int, engineID, label string, p EvalPoint) {
 	s.points[engineID][p.ID] = p
 }
 
+// note は**そのエンジンが何だったか**を控える（記録した時点の写し）。
+//
+// ⚠️ **上書きすること。** option を変えて解析し直したなら、**最後に読ませた形**が
+// その木に効いている（点も上書きされている）。
+func (s *evalStore) note(e StudyEngine) {
+	if e.ID == "" {
+		return
+	}
+	if s.engines == nil {
+		s.engines = map[string]StudyEngine{}
+	}
+	// ⚠️ **option は写しを持つこと。** 渡されるのは設定の中の map なので、
+	// そのまま抱えると**あとで設定を変えたときに控えまで書き換わる**
+	// （「記録した時点の写し」が守れない）。
+	if len(e.Options) > 0 {
+		opts := make(map[string]string, len(e.Options))
+		for k, v := range e.Options {
+			opts[k] = v
+		}
+		e.Options = opts
+	} else {
+		e.Options = nil
+	}
+	s.engines[e.ID] = e
+}
+
+// all は**木の全部の点**をエンジンの登場順で返す（控えを書くとき）。
+//
+// ⚠️ **`series` と混同しないこと。** あちらは**今の経路の点だけ**を折れ線に
+// するためのもので、こちらは**枝の点も残らず**返す —— 控えは木ごと残すので、
+// 経路で絞ると**開き直したときに枝の評価値だけ消えている**ことになる。
+func (s *evalStore) all() []StudyEvalSeries {
+	out := make([]StudyEvalSeries, 0, len(s.order))
+	for _, id := range s.order {
+		m := s.points[id]
+		if len(m) == 0 {
+			continue
+		}
+		pts := make([]EvalPoint, 0, len(m))
+		for _, p := range m {
+			pts = append(pts, p)
+		}
+		// ⚠️ **並べておくこと**（map の取り出し順は毎回違う）。控えが毎回
+		// 違うバイト列になると、**変わっていないのに書き直す**ことになる。
+		sort.Slice(pts, func(i, j int) bool { return pts[i].ID < pts[j].ID })
+		out = append(out, StudyEvalSeries{EngineID: id, Label: s.label[id], Points: pts})
+	}
+	return out
+}
+
+// load は控えから点を戻す（**復元のときだけ**）。
+//
+// ⚠️ **`epoch` は進めない。** 復元は「前の続きを開く」のであって根の入れ替えでは
+// なく、そもそも走っている解析が無い（起動直後）。
+func (s *evalStore) load(series []StudyEvalSeries, engines []StudyEngine) {
+	s.order = nil
+	s.label = map[string]string{}
+	s.points = map[string]map[int]EvalPoint{}
+	s.engines = map[string]StudyEngine{}
+	for _, se := range series {
+		if se.EngineID == "" {
+			continue
+		}
+		if _, ok := s.points[se.EngineID]; !ok {
+			s.points[se.EngineID] = map[int]EvalPoint{}
+			s.order = append(s.order, se.EngineID)
+		}
+		s.label[se.EngineID] = se.Label
+		for _, p := range se.Points {
+			s.points[se.EngineID][p.ID] = p
+		}
+	}
+	for _, e := range engines {
+		s.note(e)
+	}
+}
+
 // drop は消えた節点の記録を捨てる（**手順を消したとき**）。
 //
 // ⚠️ **epoch は進めない。** 消えたのはこの節点だけで、**他の枝で走っている解析の
@@ -172,6 +261,7 @@ func (s *evalStore) reset() {
 	s.order = nil
 	s.label = nil
 	s.points = nil
+	s.engines = nil
 }
 
 // series は**今の経路にある点だけ**を手数の順で組み立てる。

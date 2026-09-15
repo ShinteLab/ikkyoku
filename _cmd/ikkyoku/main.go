@@ -168,6 +168,26 @@ func main() {
 	}
 	// 設定タブで場所を変えたらその場で開き直す（認識器の読み込み元と同じ扱い）。
 	settingsSvc.OnKifuDBPath = kifuSvc.Open
+	// 検討の控え（2026-09-16）。**再起動しても前回の続きから始められるように、
+	// 木と評価値を丸ごと残す。**
+	//
+	// ⚠️ **棚（`kicho`）とは別の話。** 棚の主キーは `(source, source_id)` なので
+	// **中継を撮っている最中は行が作れない**（まだ「棋譜」ではない）。
+	// ⚠️ **開けなくても起動を止めないこと**（設計原則3）—— 控えはおまけ。
+	// ⚠️ **`Restore` を `Start` より先に呼ぶこと** —— 逆にすると、復元する前の
+	// 空の状態を控えに書いてしまう。
+	var studyStore *ikkyokuapp.StudyStore
+	if dir, err := cfg.StudyDir(); err != nil {
+		logger.Warn("検討の控えの場所を決められませんでした", "error", err)
+	} else {
+		studyStore = ikkyokuapp.NewStudyStore(logger, dir, studySvc)
+		if ok, err := studyStore.Restore(); err != nil {
+			logger.Warn("前回の検討を戻せませんでした", "dir", dir, "error", err)
+		} else if !ok {
+			logger.Debug("戻す検討はありませんでした", "dir", dir)
+		}
+		studyStore.Start()
+	}
 	// 枠の素通し（設定「枠の内側で後ろの画面を操作する」）。
 	// **枠の HWND を触るのは CaptureService** なので、設定タブからの切り替えは
 	// ここで繋いだこのフックを通る（SettingsService はウィンドウを持っていない）。
@@ -215,6 +235,11 @@ func main() {
 	quit := func() {
 		saveWindowState(wins, logger)
 		analyzeSvc.Close()
+		// ⚠️ **解析を止めてから控えること。** 先に控えると、**止める直前まで
+		// 届いていた評価値が落ちる**（間引きの幅だけ遅れて届くため）。
+		if studyStore != nil {
+			_ = studyStore.Close()
+		}
 		kifuSvc.Close()
 	}
 	captureSvc.beforeQuit = quit

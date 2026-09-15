@@ -1062,6 +1062,22 @@ func (s *SettingsService) ponanzaConstant() float64 {
 	return s.cfg.PonanzaConstant
 }
 
+// engineColor は折れ線の色を解決する（2026-09-16。控えに残すため）。
+//
+// ⚠️ **既定色は「登録一覧の何番目か」で決まる**（`EngineEntry.DisplayColor`）。
+// **数え方に「解析に使う」を外した登録も入れること** —— 詰めて数えると、
+// チェックを外した瞬間に他のエンジンの既定色が入れ替わる。
+func (s *SettingsService) engineColor(id string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, e := range s.cfg.EngineList() {
+		if e.ID == id {
+			return e.DisplayColor(i)
+		}
+	}
+	return ""
+}
+
 // SetPonanzaConstant は勝率の変換に使う定数を保存する（解析タブの勝率バー）。
 //
 // **0 以下なら既定に戻す**（設定ファイルからも消える）。欄を空にしたときの
