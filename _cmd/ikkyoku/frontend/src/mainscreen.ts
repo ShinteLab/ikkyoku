@@ -2020,6 +2020,26 @@ export function mountMainScreen(root: HTMLElement): void {
   // `showStudy` は局面が変わるたびに呼ばれるので、直に `editor` を触ると
   // **初回の描画が編集器の初期化より前に来たときに落ちる**。
   let setEditFollowable: (ok: boolean) => void = () => {};
+  // followWaiting は**次に来るはずの手数**（棋譜の数え方。0 は局面が無いとき）。
+  //
+  // ⚠️ **枠の札に出すのはこれ**（2026-09-15。時刻から替えた）。時刻は
+  // 「1 周が回った」しか言わないが、**中継の画面にも手数が出ている**ので、
+  // こちらが何手目を待っているかが分かれば**手を飛ばしたことに気づける**
+  // （画面の手数と食い違っていたら、その差がそのまま取りこぼした手数）。
+  let followWaiting = 0;
+
+  // followWaitFrom は本譜の先端から「次に来るはずの手数」を割り出す。
+  //
+  // ⚠️ **`moveNumber` を使わないこと** —— あちらは**今見ている局面**の手数で、
+  // 枝を読んでいると本譜の先端とずれる（追っているのは本譜の先端のほう）。
+  // ⚠️ **`first` を足すこと** —— `Node.Number` は**根からの**手数で、棋譜の手数ではない。
+  const followWaitFrom = (st: StudyState) => {
+    if (!st.loaded) {
+      return 0;
+    }
+    const tip = (st.nodes ?? []).find((n) => n.id === st.mainTip);
+    return (st.first ?? 0) + (tip?.number ?? 0) + 1;
+  };
 
   // ---- 盤の周り（勝率バー・対局者・連続解析の幕）----------------------------
   //
@@ -2322,6 +2342,10 @@ ${st.turnLabel}${n}`;
     // **根そのものが繋ぎ先**で、`MainTip` は 0 のまま正しい。
     // **本譜が無い状態が普通で、あるのが特別**（`TODO.md`「本譜のロック」）。
     setEditFollowable(loaded);
+    // ⚠️ **待っている手数はここで取ること。** 追跡のループの中だけで数えると、
+    // **人が手順を消したり分岐にしたりしたときに古いまま**になる
+    // （`study:changed` もここへ来る）。
+    followWaiting = followWaitFrom(st);
     // 局面が変わったら点を取り直す（**戻った位置の縦線も動く**）。
     refreshEvalGraph();
   };
@@ -2630,30 +2654,11 @@ ${st.turnLabel}${n}`;
   const followTickMs = 1200;
   let followOn = false;
   let followTimer: number | undefined;
-  // ⚠️ **最後に手が付いた時刻**（2026-09-15）。長考のあいだは**何分も何も起きない**
-  // ので、**「動いていないのか、止まっているのか」が札の文だけでは読めない**
-  // （実機で「止まってたりしませんよね？」と聞かれた）。
-  let followLastMoveAt = 0;
   // ⚠️ **最後に 1 周を終えた時刻**（2026-09-15）。**これが「動いている証明」**で、
   // 見張りの判断もこれ。⚠️ **経過秒だけでは証明にならない** ——
   // ループが死んでも数字は増え続ける（実機で指摘された）。
   let followTickAt = 0;
   let followWatch: number | undefined;
-
-  // followElapsed は最後に手が付いてからの経過（短く。枠は狭い）。
-  const followElapsed = () => {
-    if (!followLastMoveAt) {
-      return "";
-    }
-    const sec = Math.floor((Date.now() - followLastMoveAt) / 1000);
-    if (sec < 10) {
-      return "";
-    }
-    if (sec < 60) {
-      return `${sec}秒`;
-    }
-    return `${Math.floor(sec / 60)}分${String(sec % 60).padStart(2, "0")}秒`;
-  };
 
   // ⚠️ **状態は枠へも流すこと**（2026-09-15。実機で「枠側が録画しているか
   // 分からない」と出た）。**追跡中に見ているのは中継**なので、
@@ -2662,21 +2667,14 @@ ${st.turnLabel}${n}`;
     void Events.Emit("follow:state", { on: followOn, text });
   };
 
-  // followNote は状態に**最後に見た時刻**を添える。
+  // followNote は状態に**次に来るはずの手数**を添える。
   //
-  // ⚠️ **時刻にしてあるのが要点**（2026-09-15）。**1 周ごとに必ず変わる**ので、
-  // **止まれば数字も止まる** —— 経過秒だと**ループが死んでも増え続ける**ので、
-  // 動いている証明にならない（実機で指摘された）。
-  //
-  // 長考のあいだの「何分も何も起きない」は、最後に手が付いてからの経過を添えて出す。
-  const followNote = (label: string) => {
-    const now = new Date();
-    const hhmmss = [now.getHours(), now.getMinutes(), now.getSeconds()]
-      .map((v) => String(v).padStart(2, "0"))
-      .join(":");
-    const e = followElapsed();
-    return e ? `${label} ${hhmmss}・${e}` : `${label} ${hhmmss}`;
-  };
+  // ⚠️ **時刻も経過秒も出さないこと**（2026-09-15 に実機で外した）。どちらも
+  // **動いている証明にならない**うえ（止まっても数字は進む）、札は狭いので
+  // **役に立つものを 1 つだけ出す**。生きているかは
+  // **「追跡中」と「待機中」の切替**で読む。
+  const followNote = (label: string) =>
+    followWaiting > 0 ? `${label}・${followWaiting}手目待ち` : label;
 
   const setFollowing = (on: boolean) => {
     followOn = on;
@@ -2692,7 +2690,6 @@ ${st.turnLabel}${n}`;
       followWatch = undefined;
     }
     if (on) {
-      followLastMoveAt = Date.now();
       followTickAt = Date.now();
       // ⚠️ **見張りを付けること**（2026-09-15）。**1 周の予約を取りこぼすと
       // 追跡が黙って死ぬ**という壊れ方を実際にやったので、
@@ -2707,7 +2704,7 @@ ${st.turnLabel}${n}`;
         void followTick();
       }, followTickMs * 2);
     }
-    publishFollow(on ? "追跡中" : "");
+    publishFollow(on ? followNote("追跡中") : "");
   };
 
   // ⚠️ **枠のボタンからも入り切りできること。** 状態を持っているのはこちらだけで、
@@ -2751,7 +2748,6 @@ ${st.turnLabel}${n}`;
       const moves = got.text?.join(" ") || got.moves?.join(" ") || "";
       const mark = got.guess ? "（推測）" : "";
       sidePane.setStatus(`${moves}${mark} を足しました`);
-      followLastMoveAt = Date.now();
       publishFollow(followNote(`${moves}${mark}`));
     } else {
       publishFollow(followNote("追跡中"));
@@ -4272,7 +4268,7 @@ ${st.turnLabel}${n}`;
     // **追っている最中に枠を出し直すと「追跡中」が出ないまま**になる
     // （状態を持っているのはこちらだけ）。
     if (event.data) {
-      publishFollow(followOn ? "追跡中" : "");
+      publishFollow(followOn ? followNote("追跡中") : "");
     }
   });
   // 起動した時点で出ていることがある（設定「起動時に盤面を探す」）。
