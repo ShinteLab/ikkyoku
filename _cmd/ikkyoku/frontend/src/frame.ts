@@ -11,7 +11,7 @@
 // CaptureService.Layout() から受け取って CSS 変数に流し込む。以前はフロントにも同じ
 // 定数を置いていたが、ずれると枠が写り込むという直接的な不具合になるため一本化した。
 import { Events } from "@wailsio/runtime";
-import { FiCamera, FiChevronDown, FiCrop, FiX } from "react-icons/fi";
+import { FiCamera, FiChevronDown, FiCrop, FiRadio, FiX } from "react-icons/fi";
 import { CaptureService } from "../bindings/ikkyoku";
 import { iconMarkup } from "./icon";
 
@@ -65,7 +65,17 @@ export function mountFrame(root: HTMLElement): void {
                 title="盤に合わせる(画面に出ている盤を探して枠を合わせる)">${iconMarkup(FiCrop)}</button>
         <button id="frame-capture" class="frame-btn is-primary is-icon" type="button"
                 aria-label="撮る" title="撮る">${iconMarkup(FiCamera)}</button>
+        <!-- 中継を追う（2026-09-15）。⚠️ **枠に置いてあるのが要点** ——
+             追跡中に見ているのは**中継**なので、状態も操作も**そこに無いと届かない**
+             （実機で「枠側が録画しているか分からない」と出た）。 -->
+        <button id="frame-follow" class="frame-btn is-icon" type="button"
+                aria-pressed="false" aria-label="中継を追う"
+                title="中継を追う（撮り続けて、進んだ手を本譜に足します）">${iconMarkup(FiRadio)}</button>
       </div>
+      <!-- 追跡中の札。⚠️ **状態メッセージの欄とは別にしてある** —— あちらは撮影の
+           一時的な文で、こちらは**追っているあいだずっと出ている**。混ぜると
+           撮った瞬間に「追跡中」が消える。 -->
+      <span id="frame-follow-state" class="frame-follow" hidden></span>
       <span class="frame-title"></span>
       <div class="frame-actions">
         <button id="frame-hide" class="frame-btn is-icon" type="button"
@@ -88,6 +98,22 @@ export function mountFrame(root: HTMLElement): void {
   `;
 
   const title = root.querySelector<HTMLSpanElement>(".frame-title")!;
+  const followBtn = root.querySelector<HTMLButtonElement>("#frame-follow")!;
+  const followState = root.querySelector<HTMLSpanElement>("#frame-follow-state")!;
+
+  // 追跡の状態はメイン画面が持っている（ループもあちら）。**枠は映すだけ。**
+  //
+  // ⚠️ **枠側で状態を覚えないこと** —— メイン画面のボタンからも止められるので、
+  // 2 か所が別々に覚えると食い違う（枠の「枠を表示」と同じ話）。
+  followBtn.addEventListener("click", () => void Events.Emit("follow:toggle", null));
+  Events.On("follow:state", (e: { data: { on: boolean; text: string } }) => {
+    const on = !!e.data?.on;
+    followBtn.setAttribute("aria-pressed", on ? "true" : "false");
+    followBtn.classList.toggle("is-active", on);
+    followBtn.title = on ? "中継の追跡を止める" : "中継を追う（撮り続けて、進んだ手を本譜に足します）";
+    followState.hidden = !on;
+    followState.textContent = e.data?.text ?? "";
+  });
   const menuBtn = root.querySelector<HTMLButtonElement>("#frame-menu")!;
   const menu = root.querySelector<HTMLDivElement>("#frame-menu-items")!;
   const settingsBtn = root.querySelector<HTMLButtonElement>("#frame-settings")!;

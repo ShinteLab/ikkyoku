@@ -2631,6 +2631,13 @@ ${st.turnLabel}${n}`;
   let followOn = false;
   let followTimer: number | undefined;
 
+  // ⚠️ **状態は枠へも流すこと**（2026-09-15。実機で「枠側が録画しているか
+  // 分からない」と出た）。**追跡中に見ているのは中継**なので、
+  // 状態も操作も**枠に無いと届かない**（メイン画面は裏に回っている）。
+  const publishFollow = (text: string) => {
+    void Events.Emit("follow:state", { on: followOn, text });
+  };
+
   const setFollowing = (on: boolean) => {
     followOn = on;
     studyFollowBtn.setAttribute("aria-pressed", on ? "true" : "false");
@@ -2640,7 +2647,12 @@ ${st.turnLabel}${n}`;
       window.clearTimeout(followTimer);
       followTimer = undefined;
     }
+    publishFollow(on ? "追跡中" : "");
   };
+
+  // ⚠️ **枠のボタンからも入り切りできること。** 状態を持っているのはこちらだけで、
+  // 枠は映すだけ（2 か所が別々に覚えると食い違う）。
+  Events.On("follow:toggle", () => studyFollowBtn.click());
 
   const followStop = (message: string) => {
     setFollowing(false);
@@ -2666,7 +2678,9 @@ ${st.turnLabel}${n}`;
       if (shot.offBoard) {
         // ⚠️ **止めないこと。** 大盤はすぐ本物へ戻るので、**待てばよい**。
         // ⚠️ **理由は出すこと** —— 黙って止まっていると壊れたように見える。
-        sidePane.setStatus(`別の盤が映っています（${shot.offBoardReason}）。待っています`);
+        const why = `別の盤が映っています（${shot.offBoardReason}）。待っています`;
+        sidePane.setStatus(why);
+        publishFollow("待機中（別の盤）");
         return;
       }
       await PositionService.Load(shot.sfen, cellConfidence(shot.debug) ?? null);
@@ -2676,6 +2690,9 @@ ${st.turnLabel}${n}`;
         const moves = got.text?.join(" ") || got.moves?.join(" ") || "";
         const mark = got.guess ? "（推測）" : "";
         sidePane.setStatus(`${moves}${mark} を足しました`);
+        publishFollow(`${moves}${mark}`);
+      } else {
+        publishFollow("追跡中");
       }
     } catch (err) {
       // ⚠️ **枠が出ていない等はここに来る。** 黙って回し続けると理由が読めないので
@@ -4169,6 +4186,12 @@ ${st.turnLabel}${n}`;
   // 知らせる）ので、押したときに自分で状態を書き換えない。
   Events.On("frame:visible", (event: { data: boolean }) => {
     showFrameState(event.data);
+    // ⚠️ **枠が出たら追跡の状態を送り直すこと。** 枠は出たばかりで何も知らないので、
+    // **追っている最中に枠を出し直すと「追跡中」が出ないまま**になる
+    // （状態を持っているのはこちらだけ）。
+    if (event.data) {
+      publishFollow(followOn ? "追跡中" : "");
+    }
   });
   // 起動した時点で出ていることがある（設定「起動時に盤面を探す」）。
   void (async () => {

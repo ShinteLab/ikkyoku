@@ -316,6 +316,17 @@ html.is-frame #app {
   font-size: 15px;
 }
 
+/* 追跡中のボタン（2026-09-15）。⚠️ **押せる状態が色で読めること** ——
+   アイコンだけなので、入っているかどうかはこれでしか分からない。 */
+.frame-btn.is-active {
+  color: #ffd9d6;
+  background: #6b2f2b;
+}
+
+.frame-btn.is-active:hover {
+  background: #7d3832;
+}
+
 .frame-btn.is-primary {
   font-weight: 600;
   background: #ff4d4d;
@@ -3702,6 +3713,50 @@ html.is-graph #app {
    ⚠️ **赤にしないこと**（訂正タブの赤は「捨てる/危険」に使っている）。
    ⚠️ **`is-over`（ドラッグ中の行き先）より弱くすること** —— 掴んでいる最中は
    そちらが主役で、こちらは背景の情報。 */
+/* 追跡中の札（2026-09-15。枠のツールバー）。⚠️ **中継に重ねて常時見えるもの**
+   なので、**赤い丸 + 短い文**だけにする（撮る/合わせるの邪魔をしない）。
+   ⚠️ **`.frame-title` とは別** —— あちらは撮影の一時的な文。 */
+.frame-follow {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  max-width: 46%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 11.5px;
+  color: #f2f3f5;
+}
+
+.frame-follow[hidden] {
+  display: none;
+}
+
+/* ⚠️ **点滅させること。** 止まっているのか動いているのかが、
+   文字だけでは読めない（長考のあいだ何分も同じ文が出たままになる）。 */
+.frame-follow::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #e0544a;
+  animation: frame-follow-blink 1.6s ease-in-out infinite;
+}
+
+@keyframes frame-follow-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+
+/* ⚠️ **動きを嫌う設定を尊重すること**（点滅は目に障る人がいる）。 */
+@media (prefers-reduced-motion: reduce) {
+  .frame-follow::before {
+    animation: none;
+  }
+}
+
 .edit-cell.is-mismatch {
   border-color: #e0a44a;
   background: rgba(224, 164, 74, 0.22);
