@@ -2630,12 +2630,39 @@ ${st.turnLabel}${n}`;
   const followTickMs = 1200;
   let followOn = false;
   let followTimer: number | undefined;
+  // ⚠️ **最後に手が付いた時刻**（2026-09-15）。長考のあいだは**何分も何も起きない**
+  // ので、**「動いていないのか、止まっているのか」が札の文だけでは読めない**
+  // （実機で「止まってたりしませんよね？」と聞かれた）。
+  let followLastMoveAt = 0;
+
+  // followElapsed は最後に手が付いてからの経過（短く。枠は狭い）。
+  const followElapsed = () => {
+    if (!followLastMoveAt) {
+      return "";
+    }
+    const sec = Math.floor((Date.now() - followLastMoveAt) / 1000);
+    if (sec < 10) {
+      return "";
+    }
+    if (sec < 60) {
+      return `${sec}秒`;
+    }
+    return `${Math.floor(sec / 60)}分${String(sec % 60).padStart(2, "0")}秒`;
+  };
 
   // ⚠️ **状態は枠へも流すこと**（2026-09-15。実機で「枠側が録画しているか
   // 分からない」と出た）。**追跡中に見ているのは中継**なので、
   // 状態も操作も**枠に無いと届かない**（メイン画面は裏に回っている）。
   const publishFollow = (text: string) => {
     void Events.Emit("follow:state", { on: followOn, text });
+  };
+
+  // followNote は状態に経過を添える（**長考のあいだ生きていることを見せる**）。
+  // ⚠️ **経過が短いうちは付けないこと** —— 手が付くたびに秒数が出ては消えると、
+  // 札がちらついて読めない。
+  const followNote = (label: string) => {
+    const e = followElapsed();
+    return e ? `${label}・${e}` : label;
   };
 
   const setFollowing = (on: boolean) => {
@@ -2646,6 +2673,9 @@ ${st.turnLabel}${n}`;
     if (!on && followTimer !== undefined) {
       window.clearTimeout(followTimer);
       followTimer = undefined;
+    }
+    if (on) {
+      followLastMoveAt = Date.now();
     }
     publishFollow(on ? "追跡中" : "");
   };
@@ -2680,7 +2710,7 @@ ${st.turnLabel}${n}`;
         // ⚠️ **理由は出すこと** —— 黙って止まっていると壊れたように見える。
         const why = `別の盤が映っています（${shot.offBoardReason}）。待っています`;
         sidePane.setStatus(why);
-        publishFollow("待機中（別の盤）");
+        publishFollow(followNote("待機中（別の盤）"));
         return;
       }
       await PositionService.Load(shot.sfen, cellConfidence(shot.debug) ?? null);
@@ -2690,9 +2720,10 @@ ${st.turnLabel}${n}`;
         const moves = got.text?.join(" ") || got.moves?.join(" ") || "";
         const mark = got.guess ? "（推測）" : "";
         sidePane.setStatus(`${moves}${mark} を足しました`);
+        followLastMoveAt = Date.now();
         publishFollow(`${moves}${mark}`);
       } else {
-        publishFollow("追跡中");
+        publishFollow(followNote("追跡中"));
       }
     } catch (err) {
       // ⚠️ **枠が出ていない等はここに来る。** 黙って回し続けると理由が読めないので

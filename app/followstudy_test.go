@@ -608,3 +608,32 @@ func TestFollowProbeIsFastForOneMove(t *testing.T) {
 		t.Fatalf("Kind = %q, want %q", got.Kind, FollowUnique)
 	}
 }
+
+// ⚠️ **長考中（盤が動いていない）は、認識がぶれていても手を足さないこと。**
+//
+// 実機のログで見つけた形（`moves=[] fit=0.945 margin=0.15`）——
+// **「何も動いていない」が 1 位なら、差が小さくても足す手は無い。**
+// ⚠️ **「決められない」に落とさないこと** —— 落とすと深い探索へ進み、
+// **1 tick まるごと無駄になる**（進んでも「隔たりが大きすぎます」が返るだけ）。
+func TestFollowProbeSameDespiteNoise(t *testing.T) {
+	s, pos := following(t)
+	// 盤は初期局面のまま。**認識が 3 マス外している**（9三・8三が抜け、5五に湧いた）。
+	shotWith(t, pos, "lnsgkgsnl/1r5b1/2ppppppp/9/4p4/9/PPPPPPPPP/1B5R1/LNSGKGSNL",
+		evenConf(0.5))
+
+	got, err := s.FollowProbe()
+	if err != nil {
+		t.Fatalf("FollowProbe: %v", err)
+	}
+	if got.Kind != FollowSame {
+		t.Fatalf("Kind = %q, want %q（%s）", got.Kind, FollowSame, got.Reason)
+	}
+	// 追従でも手が増えないこと。
+	a, err := s.FollowAuto()
+	if err != nil {
+		t.Fatalf("FollowAuto: %v", err)
+	}
+	if a.Applied {
+		t.Fatalf("動いていないのに手を足しました: %+v", a)
+	}
+}

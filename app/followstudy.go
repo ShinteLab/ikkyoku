@@ -203,11 +203,20 @@ func (s *StudyService) FollowProbe() (FollowProbe, error) {
 					"盤が映っている場面で撮り直してください", int(top.Fit*100))
 				return out, nil
 			}
+			// ⚠️ **「何も動いていない」が 1 位なら、差は問わずにそこで終わり**
+			// （2026-09-15 に実機のログで気づいた）。長考中は**毎 tick これ**になる。
+			//
+			// **足せる手が無いのに深い探索へ進む理由が無い** —— 進んでも
+			// 「隔たりが大きすぎます」が返るだけで、**1 tick まるごと無駄**。
+			//
+			// ⚠️ **差が小さいからといって「決められない」に落とさないこと。**
+			// 動いていないのが一番よく合うなら、**手を足さないのが正解**で、
+			// 迷う余地は無い（**足す側にだけ差を要求する**）。
+			if len(top.Moves) == 0 {
+				out.Kind, out.Reason = FollowSame, "盤面は変わっていません"
+				return out, nil
+			}
 			if got.Decided(position.DefaultMinFit, position.DefaultMinMargin) {
-				if len(top.Moves) == 0 {
-					out.Kind, out.Reason = FollowSame, "盤面は変わっていません"
-					return out, nil
-				}
 				// ⚠️ **費用 0 は推測ではない**（認識とぴったり合っている）。
 				out.Kind, out.Depth, out.Guess = FollowUnique, len(top.Moves), top.Cost > 0
 				out.Fixed = followFixes(top.Fixed)
