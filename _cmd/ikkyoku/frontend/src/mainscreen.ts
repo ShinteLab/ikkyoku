@@ -2564,9 +2564,23 @@ ${st.turnLabel}${n}`;
         const moves = probe.candidates?.[0]?.text?.join(" ") ?? "";
         const fixed = probe.fixed ?? [];
         const note = fixed.length > 0 ? `／認識を${fixed.length}マス直します` : "";
+        // ⚠️ **ぴったり一致と推測を同じ言い方にしないこと。** 確かさが違う。
+        if (probe.guess) {
+          const fit = Math.round((probe.fit ?? 0) * 100);
+          editor.setFollowNote(
+            `おそらく本譜の${probe.depth}手先です（${moves}）${note}／盤面の一致 ${fit}%`,
+            true,
+          );
+          return;
+        }
         editor.setFollowNote(`本譜の${probe.depth}手先です（${moves}）${note}`);
         return;
       }
+      case "unreadable":
+        // ⚠️ **「繋がらない」とは別の話**（撮り直す側）。光らせても意味が無いので消す。
+        editor.setMismatch([]);
+        editor.setFollowNote(probe.reason, true);
+        return;
       case "choices":
         editor.setFollowNote(`${probe.reason}。「本譜に繋ぐ」で候補から選べます`, true);
         return;

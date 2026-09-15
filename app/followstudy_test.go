@@ -378,3 +378,83 @@ func TestFollowProbeKeepsHumanEdits(t *testing.T) {
 		}
 	}
 }
+
+// ⚠️ **認識が大きく外していても、候補の中から選んで繋げること**（2026-09-15）。
+//
+// **これが「認識器が 100% でないと動かない」への答え。** 厳密一致も修復も
+// 空振りしたら、**問いを変えて「どの候補が一番よく合うか」を聞く。**
+func TestFollowProbeGuesses(t *testing.T) {
+	s, pos := following(t)
+	// ▲7六歩まで進み、**さらに認識が 3 マス外している**盤面。
+	shotWith(t, pos, "lnsgkgsnl/1r5b1/2ppppppp/9/4p4/2P6/PP1PPPPPP/1B5R1/LNSGKGSNL",
+		evenConf(0.5))
+
+	p, err := s.FollowProbe()
+	if err != nil {
+		t.Fatalf("FollowProbe: %v", err)
+	}
+	if p.Kind != FollowUnique {
+		t.Fatalf("Kind = %q, want %q（%s）", p.Kind, FollowUnique, p.Reason)
+	}
+	if !p.Guess {
+		t.Error("ぴったり一致ではないので Guess が立つはず")
+	}
+	if len(p.Candidates) != 1 || p.Candidates[0].Moves[0] != "7g7f" {
+		t.Fatalf("候補 = %+v, want [7g7f]", p.Candidates)
+	}
+	// ⚠️ **どこを覆すのかは必ず返すこと**（黙って直さない）。
+	if len(p.Fixed) == 0 {
+		t.Error("外していたマスが返っていません")
+	}
+	if p.Fit < 0.9 {
+		t.Errorf("Fit = %v, want 0.9 以上", p.Fit)
+	}
+	// 据えられること。
+	if _, err := s.FollowApply(p.Candidates[0].Moves, p.Rev, false); err != nil {
+		t.Fatalf("FollowApply: %v", err)
+	}
+	if n := len(s.State().Nodes); n != 1 {
+		t.Fatalf("手順 = %d, want 1", n)
+	}
+}
+
+// ⚠️ **盤が映っていない画面は候補を出さないこと**（CM・解説）。
+//
+// ここで落とせないと、**映っていない盤から適当な手を選んで棋譜に足す**ことになる。
+// ⚠️ **「繋がらない」とは別の種類**にすること —— 次にすることが違う（撮り直す）。
+func TestFollowProbeUnreadableFrame(t *testing.T) {
+	s, pos := following(t)
+	shotWith(t, pos, "9/9/9/9/9/9/9/9/9", evenConf(0.5))
+	p, err := s.FollowProbe()
+	if err != nil {
+		t.Fatalf("FollowProbe: %v", err)
+	}
+	if p.Kind != FollowUnreadable {
+		t.Fatalf("Kind = %q, want %q（%s）", p.Kind, FollowUnreadable, p.Reason)
+	}
+	if len(p.Candidates) != 0 {
+		t.Fatalf("読めていないのに候補を出しました: %+v", p.Candidates)
+	}
+}
+
+// ⚠️ **1 手では説明が付かない盤面を、推測で 1 手に決め打たないこと。**
+//
+// **これが推測を入れたことで増えた一番の危険。** 「一番よく合う候補」は必ず 1 つ
+// 出てしまうので、**差が付いていないのに採る**と指していない手が棋譜に残る。
+//
+// ⚠️ **どの `Kind` に落ちるかは固定しない** —— 厳密一致が深いところで拾えば
+// それでよいし（そちらのほうが確か）、拾えなければ候補を並べる。
+// **見るのは「推測で 1 本に決めていないこと」だけ。**
+func TestFollowProbeDoesNotGuessWhenUnclear(t *testing.T) {
+	s, pos := following(t)
+	// ▲7六歩 と ▲8六歩 の両方が指されている（1 手では説明が付かない）。
+	shotWith(t, pos, "lnsgkgsnl/1r5b1/ppppppppp/9/9/1PP6/P2PPPPPP/1B5R1/LNSGKGSNL",
+		evenConf(0.5))
+	p, err := s.FollowProbe()
+	if err != nil {
+		t.Fatalf("FollowProbe: %v", err)
+	}
+	if p.Kind == FollowUnique && p.Guess {
+		t.Fatalf("1 手では説明が付かないのに推測で決め打ちました: %+v", p.Candidates)
+	}
+}
