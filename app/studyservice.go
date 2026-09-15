@@ -175,6 +175,14 @@ type StudyState struct {
 	// URL 欄の中身から判断しないこと** —— 入力タブの欄はいつでも書き換えられるので、
 	// **今の手順がどこから来たか**とは別物になる。
 	SourceURL string `json:"sourceUrl"`
+	// GameID は棚（`kicho`）の棋譜 id（**棚と結んでいるときだけ**。2026-09-16）。
+	//
+	// **「棚に登録する」を出すかどうかの鍵**（結んでいるなら出さない —— 通すと
+	// 同じ対局が棚に 2 件並ぶ）。⚠️ **空が普通**（撮った 1 局面・貼り付け・
+	// URL から取っただけ）。
+	//
+	// ⚠️ **id を画面に出すためのものではない**（人が読む値ではない）。
+	GameID string `json:"gameId"`
 
 	// RootSFEN は根の局面（採ったときの局面）。**エンジンに渡すのはこれ + Played。**
 	RootSFEN string `json:"rootSfen"`
@@ -575,6 +583,16 @@ func (s *StudyService) mergeReloadLocked(next *position.Study) position.GraftRes
 	// ——どこを見ているかはユーザーが選んだ状態で、取り直しはあくまで
 	// **URL の側を正にする**操作。
 	return s.study.Graft(next.MainLine())
+}
+
+// currentGameID は今の検討が結んでいる棚の棋譜 id（結んでいなければ空）。
+//
+// ⚠️ **公開しない**（Service の公開メソッドはフロントの API になる）。
+// 画面へ出したいなら `StudyState` に載せること。
+func (s *StudyService) currentGameID() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.gameID
 }
 
 // mainTipID は本譜の先端の節点（組み立てられなければ根）。**画面へ出す用。**
@@ -1218,6 +1236,7 @@ func (s *StudyService) state() StudyState {
 		White:      s.game.White,
 		Handicap:   handicapLabel(s.game.Handicap),
 		SourceURL:  s.sourceURL,
+		GameID:     s.gameID,
 		Rev:        s.rev,
 	}
 }

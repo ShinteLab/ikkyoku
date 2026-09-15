@@ -34,6 +34,24 @@ func adopted(t *testing.T) *StudyService {
 	return study
 }
 
+// adoptedFrom は**指定した盤面**を採った解析タブを返す（途中の局面を根にする用）。
+func adoptedFrom(t *testing.T, board string) *StudyService {
+	t.Helper()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	pos := NewPositionService(logger)
+	if _, err := pos.Load(board, nil); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if _, err := pos.SetTurn(2); err != nil { // 後手番
+		t.Fatalf("SetTurn: %v", err)
+	}
+	study := NewStudyService(logger, pos)
+	if _, err := study.Adopt(); err != nil {
+		t.Fatalf("Adopt: %v", err)
+	}
+	return study
+}
+
 // 採った直後は根に居て、合法手が出ていること。
 // **合法手が出ないと、盤を押しても何も光らない**（画面が死んで見える）。
 func TestStudyServiceAdoptHasLegalMoves(t *testing.T) {

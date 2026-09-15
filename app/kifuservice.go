@@ -48,11 +48,17 @@ type KifuService struct {
 	// 戻り先として残る。
 	study *StudyService
 
-	// store は検討の控え（2026-09-16。Step 2。`SetStudyStore` が入れる）。
+	// Store は検討の控え（2026-09-16。Step 2）。**`_cmd/ikkyoku` が起動時に差す。**
 	//
 	// **「解析する」で前の検討を開き直す**のと、**一覧の「解析あり」の印**に使う。
+	//
+	// ⚠️ **メソッド（`SetStudyStore`）にしないこと**（2026-09-16 に一度やって
+	// 直した）。**Service の公開メソッドはそのままフロントの API になる**ので、
+	// `StudyStore` まで bindings のモデルに出てくる。**差し込みは公開フィールド**
+	// （`SettingsService.PickFile` / `AnalyzeService.Emit` と同じ形）。
+	//
 	// ⚠️ **nil でも動くこと**（設計原則3）—— 印が出ず、毎回まっさらに始まるだけ。
-	store *StudyStore
+	Store *StudyStore
 
 	mu      sync.Mutex
 	path    string
@@ -67,12 +73,6 @@ type KifuService struct {
 func NewKifuService(logger *slog.Logger, study *StudyService) *KifuService {
 	return &KifuService{logger: logger, study: study}
 }
-
-// SetStudyStore は検討の控えを繋ぐ（`_cmd/ikkyoku` が起動時に 1 度だけ。2026-09-16）。
-//
-// ⚠️ **nil でも動くこと**（設計原則3）。控えが無ければ「解析あり」の印が出ず、
-// 「解析する」が毎回まっさらに始まるだけで、**棚も解析も今までどおり動く。**
-func (s *KifuService) SetStudyStore(store *StudyStore) { s.store = store }
 
 // 操作ごとの制限時間。
 //
@@ -492,8 +492,8 @@ func (s *KifuService) Search(q SearchQuery) (SearchResult, error) {
 //
 // ⚠️ **控えが無くても一覧は出ること**（設計原則3）。印が付かないだけ。
 func (s *KifuService) markAnalyzed(g GameSummary) GameSummary {
-	if s.store != nil {
-		g.Analyzed = s.store.HasGame(g.ID)
+	if s.Store != nil {
+		g.Analyzed = s.Store.HasGame(g.ID)
 	}
 	return g
 }
@@ -564,10 +564,10 @@ func (s *KifuService) SendToStudy(id string) (KifuLoad, error) {
 	if err != nil {
 		return KifuLoad{State: s.study.State()}, err
 	}
-	if s.store == nil {
+	if s.Store == nil {
 		return s.SendToStudyGame(d)
 	}
-	st, ok := s.store.RestoreGame(d.ID)
+	st, ok := s.Store.RestoreGame(d.ID)
 	if !ok {
 		return s.SendToStudyGame(d)
 	}
@@ -885,4 +885,47 @@ func (s *KifuService) UnwatchAll() (int, error) {
 	defer cancel()
 
 	return lib.UnwatchAll(ctx)
+}
+
+// SaveStudy は**今の検討を棚に登録する**（2026-09-16。Step 3）。
+//
+// **撮った 1 局面から始めた検討にも「棚のどの棋譜か」を持たせるための口。**
+// 入れれば `GameID` が付き、次からは棋譜タブから前の検討の続きを開ける
+// （Step 2 の口にそのまま乗る）。
+//
+// ⚠️ **棚に入るのは本譜だけ**（`core/kifu` がまだ木を持っていない）。
+// **枝が消えるわけではない** —— 木は控え（`ikkyoku/studies/`）にそのまま残り、
+// 棋譜タブから開けば戻る。
+//
+// ⚠️ **既に棚の棋譜と結んでいるなら断ること。** 通すと**同じ対局が棚に 2 件**
+// 並び、しかも**控えが新しいほうに移る**ので、前の行から開けなくなる。
+func (s *KifuService) SaveStudy() (GameSummary, error) {
+	if id := s.study.currentGameID(); id != "" {
+		return GameSummary{}, fmt.Errorf(
+			"この検討は既に棚の棋譜と結んでいます（棋譜タブの「解析する」で続きから開けます）")
+	}
+	text, err := s.study.exportKIF()
+	if err != nil {
+		return GameSummary{}, err
+	}
+	lib, err := s.library()
+	if err != nil {
+		return GameSummary{}, err
+	}
+	ctx, cancel := kifuDBContext()
+	defer cancel()
+
+	// ⚠️ **`ImportKIF` は毎回新しい棋譜として登録する**（取得元での一意な ID が
+	// 無いため）。**押すたびに増える**ので、上の「既に結んでいるなら断る」が
+	// そのまま歯止めになっている。
+	rec, err := lib.ImportKIF(ctx, text)
+	if err != nil {
+		return GameSummary{}, describeKifuError(err)
+	}
+	// ⚠️ **結んでから控えを書かせること**（`saveNow`）。書かないと**索引に
+	// 載らない**ので、一覧の「解析あり」の印が次の起動まで出ない。
+	s.study.setGameID(rec.ID)
+	s.study.saveNow()
+	s.logger.Info("検討を棚に登録しました", "id", rec.ID, "moves", rec.Moves)
+	return s.markAnalyzed(toSummary(rec)), nil
 }

@@ -11,10 +11,11 @@
 // ⚠️ **局面も持たない。** 描くのは渡された `StudyState` そのもので、
 // 操作は Service を呼ぶだけ。どちらの窓から押しても、変わるのは Go 側の 1 つの手順。
 import { Events } from "@wailsio/runtime";
-import { FiRefreshCw } from "react-icons/fi";
+import { FiRefreshCw, FiBookmark } from "react-icons/fi";
 
 import {
   AnalyzeService,
+  KifuService,
   SettingsService,
   StudyService,
 } from "../bindings/github.com/ShinteLab/ikkyoku/app";
@@ -240,6 +241,17 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
                    文言は showStudy が URL つきで入れ替える。 -->
               <button id="study-reload" class="icon-btn" type="button" hidden
                       aria-label="棋譜を再読み込み">${iconMarkup(FiRefreshCw)}</button>
+              <!-- 棚に登録する（2026-09-16。Step 3）。**まだ棚と結んでいない
+                   検討だけ出す。** 押すと本譜が KIF になって棚に入り、以後は
+                   棋譜タブから前の検討の続きを開けるようになる。
+
+                   ⚠️ **結んでいるときは出さないこと** —— 通すと同じ対局が棚に
+                   2 件並び、しかも控えが新しいほうに移るので前の行から開けなくなる。
+                   ⚠️ **入力タブの「棚に登録する」とは別物。** あちらは
+                   **貼り付けた KIF** を入れる口で、こちらは**今の検討**を入れる口。
+                   ⚠️ **アイコンだけなので、意味は aria-label / title が持つ。** -->
+              <button id="study-shelve" class="icon-btn" type="button" hidden
+                      aria-label="この検討を棋譜に登録">${iconMarkup(FiBookmark)}</button>
               <!-- ⚠️ **文言は syncBatchButton が入れる**（「x手目から解析」）。
                    ここに書いてあるのは、まだ局面が無いときの見た目だけ。
                    ⚠️ この markup は template literal の中なので、
@@ -303,6 +315,7 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
   const studyWarnings = q<HTMLUListElement>("#study-warnings");
   const studyMoves = q<HTMLDivElement>("#study-moves");
   const studyReload = q<HTMLButtonElement>("#study-reload");
+  const studyShelve = q<HTMLButtonElement>("#study-shelve");
   const studyMoveStatus = q<HTMLParagraphElement>("#study-move-status");
 
   // fillWarnings は警告のリストを書き換える（`mainscreen.ts` にも同じものがある）。
@@ -1874,6 +1887,35 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
   // ⚠️ **結果は必ず出すこと。** 手順が伸びていなければ画面はほとんど変わらないので、
   // 何も出さないと**押しても効いていないように見える**。差し替えが起きたときは
   // 自分で指した手が消えているので、なおさら黙って済ませない。
+  // 棚に登録する（2026-09-16。Step 3）。
+  //
+  // ⚠️ **断られることがあるのが普通**（根が初期局面でないとき）。**理由は
+  // そのまま出すこと** —— Go 側が「なぜできないか」と「失うものは無いこと」まで
+  // 言っているので、こちらで言い換えない。
+  studyShelve.addEventListener("click", () => {
+    void (async () => {
+      studyShelve.disabled = true;
+      studyMoveStatus.textContent = "棋譜に登録しています…";
+      studyMoveStatus.hidden = false;
+      studyMoveStatus.classList.remove("is-error");
+      try {
+        const saved = await KifuService.SaveStudy();
+        // ⚠️ **状態を取り直すこと** —— 棚と結んだので、このボタンが消える。
+        onState(await StudyService.State());
+        studyMoveStatus.textContent =
+          `棋譜タブに登録しました（${saved.event || saved.black || "名前なし"}）。` +
+          `以後は棋譜タブの「解析する」で続きから開けます`;
+        studyMoveStatus.hidden = false;
+      } catch (err) {
+        studyMoveStatus.textContent = String(err instanceof Error ? err.message : err);
+        studyMoveStatus.hidden = false;
+        studyMoveStatus.classList.add("is-error");
+      } finally {
+        studyShelve.disabled = false;
+      }
+    })();
+  });
+
   studyReload.addEventListener("click", () => {
     void (async () => {
       studyReload.disabled = true;
@@ -1956,6 +1998,9 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
       // 入力タブの URL 欄を見ないこと —— あちらは打ち換えられる。
       const src = next?.sourceUrl ?? "";
       studyReload.hidden = !loaded || src === "";
+      // ⚠️ **既に棚と結んでいるなら出さない**（2026-09-16）。通すと同じ対局が
+      // 棚に 2 件並び、しかも控えが新しいほうに移るので前の行から開けなくなる。
+      studyShelve.hidden = !loaded || (next?.gameId ?? "") !== "";
       // ⚠️ **アイコンだけのボタンなので、title を空にしないこと**
       // （文字が無いぶん、何のボタンかはこれでしか読めない）。
       studyReload.title = src
