@@ -297,6 +297,17 @@ const placeLabels = (
 // 目盛りを下に戻すなら、ここも 15px 前後に戻すこと（戻さないと文字が切れる）。
 const PAD = { top: 8, right: 10, bottom: 6, left: 36 };
 
+// 欄外の帯の高さ（2026-09-16）。**分かれ道の印だけを置く場所。**
+//
+// ⚠️ **評価値の位置に印を出さないこと** —— 解析は**似た評価値の局面に対して
+// 何度も掛ける**ので、折れ線の上に印を重ねると**線そのものが読めなくなる**。
+// 知りたいのは「その手数に別の手順がある」だけで、**縦の位置に意味は無い。**
+//
+// ⚠️ **このぶん折れ線が縦に縮む**（`bottom` から引く）。116px のうち 10px なので
+// 約 1 割。⚠️ **`--eval-graph-h` は変わらない**ので、畳んだときの
+// `--board-area-h` の式（実測で決めた 20px）には**波及しない**。
+const GUTTER = 10;
+
 export interface EvalGraphHandle {
   // render は Go から返ってきたグラフを描く（null なら空にする）。
   render(graph: EvalGraph | null): void;
@@ -483,7 +494,9 @@ export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
     const left = PAD.left;
     const right = w - PAD.right;
     const top = PAD.top;
-    const bottom = h - PAD.bottom;
+    // ⚠️ **欄外の帯のぶんを引くこと**（2026-09-16）。折れ線も目盛りもカーソルも
+    // これで決まるので、**引き忘れると印の上に折れ線が乗る。**
+    const bottom = h - PAD.bottom - GUTTER;
     const mid = (top + bottom) / 2;
     const half = (bottom - top) / 2;
     const px = (n: number) => left + ((n - x0) / span) * (right - left);
@@ -683,6 +696,32 @@ export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
           x: px(n), y: mid + 3, class: "eval-tick is-axis", "text-anchor": "middle",
         }),
       ).textContent = String(n);
+    }
+
+    // ---- 欄外の分かれ道の印（2026-09-16）------------------------------------
+    //
+    // **「この手数に別の手順がある」とだけ言う印。** 折れ線は今の経路 1 本しか
+    // 描かないので、**掘った枝がそこに在ること自体がグラフから読めなかった。**
+    //
+    // ⚠️ **欄外に置くこと**（折れ線の上に出さない）。解析は似た評価値の局面に
+    // 何度も掛けるので、**評価値の位置に印を打つと線が読めなくなる。**
+    // ⚠️ **縦の位置に意味は無い** —— 読ませるのは横（手数）だけ。
+    // ⚠️ **押せるようにしないこと** —— 枝が 2 本以上ある分かれ道では
+    // 行き先が決まらない。**決まらないものを選ばせない**（設計原則）。
+    // ⚠️ **本数でも解析済みかでも見た目を変えないこと** —— 印は「在るか無いか」
+    // だけ。帯は 10px しかないので、本数を積むと 2 本で天井になる。
+    // ⚠️ **`.eval-fork` と同じ紫にしてあるが別物**（あちらは欄内の縦の破線で、
+    // **今居る枝がどこから分かれたか**の 1 本）。**色は意味、形は役割。**
+    const branches = (graph?.branches ?? []).filter((n) => n >= x0 && n <= x1);
+    if (branches.length > 0) {
+      // 帯の仕切り。⚠️ **印が 1 つも無いときは引かない** —— 空の帯に罫線だけ
+      // 残ると、何も無いのに何かがある場所に見える。
+      svg.appendChild(el("line", { x1: left, x2: right, y1: bottom, y2: bottom, class: "eval-gutter" }));
+      for (const n of branches) {
+        svg.appendChild(el("line", {
+          x1: px(n), x2: px(n), y1: h - PAD.bottom, y2: bottom + 2, class: "eval-branch",
+        }));
+      }
     }
 
     // ---- 凡例 --------------------------------------------------------------

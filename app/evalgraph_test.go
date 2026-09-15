@@ -318,3 +318,58 @@ func TestEvalGraphRefLineOnBranch(t *testing.T) {
 		t.Errorf("本譜に居るのに分岐扱いです: fork=%d ref=%+v", g.Fork, g.Ref)
 	}
 }
+
+// 枝が分かれている手に**欄外の印**が出ること（2026-09-16）。
+//
+// ⚠️ **折れ線は分かれ道を何も言わない。** 描くのは今の経路 1 本だけなので、
+// **掘った枝がそこに在ること自体がグラフから読めない** —— この印だけが言える。
+//
+// ここで見ているのは 3 つ:
+//   - ⚠️ **解析していない枝でも印が出ること**（評価値が付いているかを見ない）。
+//     落とすと「次に掘る候補」が消える
+//   - ⚠️ **枝が何本あっても印は 1 つ**（手数が重複しない）。本数は読ませない
+//   - ⚠️ **今の経路の上だけ**（横軸に乗っていない分かれ道に印を打たない）
+func TestEvalGraphMarksBranches(t *testing.T) {
+	s := adopted(t)
+	if g := s.Evals(); len(g.Branches) != 0 {
+		t.Fatalf("まだ分かれていないのに印があります: %+v", g.Branches)
+	}
+	if _, err := s.Play("7g7f"); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	if _, err := s.Play("3c3d"); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	// 1 手目に戻って別の手 → 1 手目のところで分かれる。**評価値は付けない。**
+	if _, err := s.GoTo(1); err != nil {
+		t.Fatalf("GoTo: %v", err)
+	}
+	if _, err := s.Play("8c8d"); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	g := s.Evals()
+	if len(g.Branches) != 1 || g.Branches[0] != 1 {
+		t.Fatalf("分かれ道の印 = %+v, want [1]", g.Branches)
+	}
+	// 3 本目を足しても**印は 1 つのまま**（本数は読ませない）。
+	if _, err := s.GoTo(1); err != nil {
+		t.Fatalf("GoTo: %v", err)
+	}
+	if _, err := s.Play("1c1d"); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	if g := s.Evals(); len(g.Branches) != 1 || g.Branches[0] != 1 {
+		t.Errorf("枝の本数で印が増えています: %+v", g.Branches)
+	}
+	// 根から別の手を指すと、今の経路は根 → その手。**1 手目の分かれ道は
+	// もうこの経路に乗っていない**ので印は出ない（出す先が横軸に無い）。
+	if _, err := s.GoTo(0); err != nil {
+		t.Fatalf("GoTo: %v", err)
+	}
+	if _, err := s.Play("2h6h"); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	if g := s.Evals(); len(g.Branches) != 1 || g.Branches[0] != 0 {
+		t.Errorf("経路に無い分かれ道の印が出ています: %+v", g.Branches)
+	}
+}

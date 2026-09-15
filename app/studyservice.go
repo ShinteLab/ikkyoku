@@ -829,7 +829,7 @@ func (s *StudyService) Evals() EvalGraph {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.study == nil {
-		return EvalGraph{Series: []EvalSeries{}, IDs: []int{}, Ref: []EvalSeries{}}
+		return EvalGraph{Series: []EvalSeries{}, IDs: []int{}, Ref: []EvalSeries{}, Branches: []int{}}
 	}
 	// ⚠️ **点は「今の経路」だけ**（枝と本譜を 1 本の折れ線に混ぜない）。
 	line := s.study.Line()
@@ -872,6 +872,23 @@ func (s *StudyService) Evals() EvalGraph {
 	}
 	if g.Ref == nil {
 		g.Ref = []EvalSeries{}
+	}
+	// **枝が分かれている手に、欄外の印を打つ**（2026-09-16）。
+	//
+	// ⚠️ **id ではなく棋譜手数で渡すこと** —— 印を置くのは横軸の上で、
+	// **押せるようにはしない**（複数の枝があるとどれへ行くのか決まらない。
+	// 決まらないものを選ばせないのがこのアプリの方針）。
+	// ⚠️ **手数は `line` の添字から出す**（`Branching` が返すのは同じ 1 本の上の
+	// 節点なので、節点を引き直す必要が無い）。
+	branching := map[int]bool{}
+	for _, id := range s.study.Branching() {
+		branching[id] = true
+	}
+	g.Branches = []int{}
+	for i, id := range line {
+		if branching[id] {
+			g.Branches = append(g.Branches, base+i)
+		}
 	}
 	return g
 }
