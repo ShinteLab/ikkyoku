@@ -560,6 +560,21 @@ func (s *StudyService) FollowAuto(boardSFEN string, cellConfidence []float64) (a
 	}
 	if !a.Applied {
 		a.State = s.State()
+		// ⚠️ **1 手も足せないときは「目線が逆かもしれない」を疑う**
+		// （2026-09-15 に実機で踏んだ）。
+		//
+		// **実機の症状**: 後手で対局していたら 1 手目から 1 手も進まなかった。
+		// ゲーム画面は**自分が手前**に出るので、後手なら**盤が上下逆に映る** ——
+		// 相手（先手）が指した手は、アプリから見ると「上側＝後手が動いた」に
+		// なるので、**先手のどの手でも説明できず「変わっていません」で終わる。**
+		//
+		// ⚠️ **平手の初期局面は上下対称なので、盤を見ても目線が逆だと分からない。**
+		// **最初の 1 手が指されて初めて分かる**ので、ここが唯一の検出の機会。
+		//
+		// ⚠️ **黙って回さないこと**（`CLAUDE.md` の「取り込みの向き」）——
+		// 盤の向きは**局面の解釈そのもの**で、手順の並びとは重みが違う。
+		// **人に言うところまで**にする。
+		a.Flipped, a.FlipMove = s.looksFlipped(board, cost, rotated)
 	}
 	if a.Added > 1 {
 		s.logger.Info("1 枚から追いつきました", "moves", a.Moves, "guess", a.Guess)
@@ -598,4 +613,34 @@ type FollowAuto struct {
 	Note string `json:"note"`
 	// State は結果の解析タブの状態。**そのまま描ける。**
 	State StudyState `json:"state"`
+	// Flipped は**盤が上下逆に映っている疑い**（2026-09-15）。
+	//
+	// ⚠️ **これが立っても勝手に回さない。** 画面に出して人に決めてもらう
+	// （訂正タブの「目線」）。**盤の向きは局面の解釈そのもの**なので、
+	// 黙って変えると何が起きたのか分からなくなる。
+	Flipped bool `json:"flipped"`
+	// FlipMove は「逆向きなら繋がる」と判断した根拠の手（日本語表記）。
+	//
+	// ⚠️ **根拠を出すこと** —— 「目線が逆かも」とだけ言われても確かめようが無い。
+	FlipMove string `json:"flipMove"`
+}
+
+// looksFlipped は**盤を 180 度回したら繋がるか**を見る（2026-09-15）。
+//
+// ⚠️ **読むだけ。木も訂正タブも 1 つも触らない。**
+// ⚠️ **1 手も足せなかったときだけ呼ぶこと** —— 繋がっているのに疑う理由は無いし、
+// 毎周回すと**そのぶん追従が遅くなる**（`Rank` は 29µs だが、ただではない）。
+func (s *StudyService) looksFlipped(board *position.Board, cost *position.CellCost, rotated bool) (bool, string) {
+	if board == nil {
+		return false, ""
+	}
+	var flipCost *position.CellCost
+	if cost != nil {
+		flipCost = cost.Rotate180()
+	}
+	p, err := s.followProbe(board.Rotate180(), flipCost, flipCost != nil, !rotated)
+	if err != nil || p.Kind != FollowUnique || len(p.Candidates) == 0 {
+		return false, ""
+	}
+	return true, strings.Join(p.Candidates[0].Text, " ")
 }

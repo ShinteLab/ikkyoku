@@ -769,3 +769,54 @@ func TestFollowAutoStopsWhenCaughtUp(t *testing.T) {
 		t.Errorf("Kind = %q, want %q", a.Kind, FollowSame)
 	}
 }
+
+// ⚠️ **盤が上下逆に映っていることに気づくこと**（2026-09-15 に実機で踏んだ）。
+//
+// **実機の症状**: 後手で対局していたら 1 手目から 1 手も進まなかった。
+// ゲーム画面は**自分が手前**に出るので、後手なら**盤が上下逆に映る** ——
+// 相手（先手）の手は、アプリから見ると「上側＝後手が動いた」ことになるので、
+// **先手のどの手でも説明できず「変わっていません」で終わる。**
+//
+// ⚠️ **平手の初期局面は上下対称なので、盤を見ても目線が逆だと分からない。**
+// **最初の 1 手が指されて初めて分かる**ので、ここが唯一の検出の機会。
+func TestFollowAutoNoticesFlippedBoard(t *testing.T) {
+	s, _ := following(t)
+
+	// **上下逆に映った「1 手進んだ盤面」。** そのままでは先手の手で説明できない。
+	flipped, err := position.FromSFEN(boardAfter(t, "7g7f"))
+	if err != nil {
+		t.Fatalf("FromSFEN: %v", err)
+	}
+	a, err := s.FollowAuto(flipped.Rotate180().SFEN(), evenConf(0.9))
+	if err != nil {
+		t.Fatalf("FollowAuto: %v", err)
+	}
+	if a.Applied {
+		t.Fatalf("上下逆なのに手を足しました: %+v", a.Moves)
+	}
+	if !a.Flipped {
+		t.Fatalf("目線が逆だと気づいていません: kind=%q reason=%q", a.Kind, a.Reason)
+	}
+	// ⚠️ **根拠を出すこと**（「逆かも」だけでは確かめようが無い）。
+	if a.FlipMove == "" {
+		t.Error("根拠の手が空です")
+	}
+}
+
+// ⚠️ **繋がっているときに「逆かも」と言わないこと。**
+//
+// 正しく追えているのに疑いを出すと、**本当に逆のときに信じてもらえない。**
+func TestFollowAutoDoesNotCryFlipWhenFine(t *testing.T) {
+	s, _ := following(t)
+
+	a, err := s.FollowAuto(boardAfter(t, "7g7f"), evenConf(0.9))
+	if err != nil {
+		t.Fatalf("FollowAuto: %v", err)
+	}
+	if !a.Applied {
+		t.Fatalf("進んでいません: %+v", a)
+	}
+	if a.Flipped {
+		t.Error("正しく繋がっているのに「目線が逆」と言いました")
+	}
+}
