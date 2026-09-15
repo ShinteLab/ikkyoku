@@ -2748,6 +2748,19 @@ ${st.turnLabel}${n}`;
       const moves = got.text?.join(" ") || got.moves?.join(" ") || "";
       const mark = got.guess ? "（推測）" : "";
       sidePane.setStatus(`${moves}${mark} を足しました`);
+      // ⚠️ **手を決めた 1 枚だけを残す**（2026-09-15。デバッグ用の「録画」）。
+      // 中継には**棋士の手が映り込む**ので、誤認識したときに
+      // **「手が被ったのか、認識器が弱いのか」を切り分ける手掛かり**が要る。
+      //
+      // ⚠️ **手数は足したあとの `followWaiting` から逆算すること** ——
+      // `showStudy` が先に走っているので、**次の手数**になっている。
+      // ⚠️ **待たないこと**（`void`）。残せなくても追跡は続く（設計原則3）。
+      const added = got.moves?.length ?? 0;
+      void CaptureService.SaveFollowFrame(
+        Math.max(followWaiting - added, 0),
+        got.moves ?? [],
+        !!got.guess,
+      );
       publishFollow(followNote(`${moves}${mark}`));
     } else {
       publishFollow(followNote("追跡中"));

@@ -12,6 +12,8 @@ import (
 	"image/png"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -112,6 +114,20 @@ type CaptureService struct {
 	// 毎回出すと読めないが、**何も出さないと「正常に見送っている」のか
 	// 「止まっている」のかがログから分からない**（実機で聞かれた）。
 	quietOutcome string
+
+	// followDir は**追跡中の録画**の保存先（空なら残さない）。
+	//
+	// ⚠️ **残すのは「マスタ」と「手を決めた 1 枚」だけ**（2026-09-15）。
+	// 中継には**棋士の手が映り込む**ので、誤認識したときに
+	// **「手が被ったのか、認識器が弱いのか」を切り分ける手掛かり**が要る
+	// （実機で出た話）。⚠️ **見送ったフレームは残さないこと** ——
+	// 1 秒ごとに撮るので、全部残すとディスクが埋まるうえ**大半は空振り**。
+	followDir string
+	// lastQuiet は**直近に黙って撮った 1 枚**（採用が決まってから残すため）。
+	//
+	// ⚠️ **撮った時点ではまだ「その手を決めた画像」かどうか分からない** ——
+	// 決めるのは解析タブ側（`FollowAuto`）なので、**答えが返るまで持っておく**。
+	lastQuiet image.Image
 
 	// clickThrough は設定「枠の内側で後ろの画面を操作する」（`ikkyoku.Config.ClickThrough`）。
 	clickThrough bool
@@ -769,6 +785,11 @@ func (s *CaptureService) CaptureQuiet() (CaptureResult, error) {
 	if err != nil {
 		return CaptureResult{}, err
 	}
+	// ⚠️ **採用が決まるまで控えておく**（`SaveFollowFrame`）。手を決めたかどうかは
+	// **解析タブ側が返事をするまで分からない**ので、ここでは残すか決められない。
+	s.mu.Lock()
+	s.lastQuiet = img
+	s.mu.Unlock()
 
 	b := img.Bounds()
 	result := CaptureResult{
@@ -852,17 +873,114 @@ func (s *CaptureService) AnchorBoard() (CaptureResult, error) {
 	if !ok {
 		return r, fmt.Errorf("盤が映っていないので、追う盤を決められません")
 	}
+	dir := s.startFollowDir()
 	s.mu.Lock()
 	s.boardAnchor = sig
 	s.mu.Unlock()
-	s.logger.Info("追う盤を決めました", "board", sig.Board, "color", sig.Color)
+	s.logger.Info("追う盤を決めました", "board", sig.Board, "color", sig.Color, "dir", dir)
 	return r, nil
+}
+
+// startFollowDir は録画の保存先を作り、**マスタ画像**を残す（2026-09-15）。
+//
+// ⚠️ **マスタを残すのが要点。** 追いかける基準そのものなので、
+// **これが無いと「なぜ別の盤だと判断したか」を後から確かめられない**
+// （`recognize.Signature` は矩形と色しか持っていない）。
+//
+// ⚠️ **失敗しても追跡を止めないこと**（設計原則3）。録画はおまけで、
+// **残らなくても中継は追える。**
+func (s *CaptureService) startFollowDir() string {
+	base, err := ikkyoku.DefaultOutDir()
+	if err != nil {
+		s.logger.Warn("録画の保存先が決められません", "error", err)
+		return ""
+	}
+	// ⚠️ **今撮った 1 枚をそのまま使うこと**（`CaptureQuiet` が控えている）。
+	// 撮り直すと**マスタと記述子が別のフレームになる** —— 数えるのは同じ盤でも、
+	// 手が被った瞬間などに**画像と判断がずれる**。
+	s.mu.Lock()
+	img := s.lastQuiet
+	s.mu.Unlock()
+	dir := filepath.Join(base, "follow", time.Now().Format("20060102-150405"))
+	if img != nil {
+		if _, err := ikkyoku.SavePNGAs(img, dir, "master.png"); err != nil {
+			s.logger.Warn("マスタ画像を残せません", "error", err)
+			return ""
+		}
+	}
+	s.mu.Lock()
+	s.followDir = dir
+	s.mu.Unlock()
+	return dir
+}
+
+// SaveFollowFrame は**手を決めた 1 枚**を録画として残す（2026-09-15）。
+//
+// number は最初の手の手数（棋譜の数え方）、moves はその 1 枚で足した手（USI）。
+// ⚠️ **guess（推測で足したか）を名前に入れること** —— **後から見たいのはそれ**で、
+// 「手が映り込んで誤認識した」はまず推測の側に出る。
+//
+// ⚠️ **戻り値でエラーを返さないこと。** 呼ぶのは追跡のループの中なので、
+// **残せなかっただけで追跡が止まるのは割に合わない**（設計原則3）。
+// 理由はログに出す。
+func (s *CaptureService) SaveFollowFrame(number int, moves []string, guess bool) string {
+	s.mu.Lock()
+	dir, img := s.followDir, s.lastQuiet
+	s.mu.Unlock()
+	if dir == "" || img == nil {
+		return ""
+	}
+	name := followFrameName(number, moves, guess)
+	path, err := ikkyoku.SavePNGAs(img, dir, name)
+	if err != nil {
+		s.logger.Warn("採用した画像を残せません", "name", name, "error", err)
+		return ""
+	}
+	return path
+}
+
+// followFrameName は「042-7g7f-guess.png」のような名前を組み立てる。
+//
+// ⚠️ **手数を 0 詰めにすること** —— そうしないとファイルの並びが手順の順に
+// ならない（9 手目の次に 10 手目ではなく 100 手目が並ぶ）。
+// ⚠️ **パス区切りを作らないこと**（`SavePNGAs` が弾くが、ここで作らないのが本筋）。
+func followFrameName(number int, moves []string, guess bool) string {
+	if number < 0 {
+		number = 0
+	}
+	parts := make([]string, 0, len(moves))
+	for _, mv := range moves {
+		if mv = strings.Map(safeNameRune, mv); mv != "" {
+			parts = append(parts, mv)
+		}
+	}
+	name := fmt.Sprintf("%03d", number)
+	if len(parts) > 0 {
+		name += "-" + strings.Join(parts, "_")
+	}
+	if guess {
+		name += "-guess"
+	}
+	return name + ".png"
+}
+
+// safeNameRune はファイル名に使ってよい字だけを通す（USI は英数字なので普通は素通り）。
+func safeNameRune(r rune) rune {
+	switch {
+	case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '+', r == '*':
+		return r
+	default:
+		return -1
+	}
 }
 
 // ClearBoardAnchor は追う盤を忘れる（追跡を止めたとき）。
 func (s *CaptureService) ClearBoardAnchor() {
 	s.mu.Lock()
+	// ⚠️ **録画も畳むこと。** 次に「追う」を押したら**別の対局**かもしれないので、
+	// 前の回の続きに書き足すと**1 つのディレクトリに 2 局が混ざる**。
 	s.boardAnchor, s.quietOutcome = recognize.Signature{}, ""
+	s.followDir, s.lastQuiet = "", nil
 	s.mu.Unlock()
 }
 
