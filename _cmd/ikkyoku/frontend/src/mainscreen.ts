@@ -2659,6 +2659,16 @@ ${st.turnLabel}${n}`;
         // 盤が取れなかった（枠に盤が映っていない）。**黙って次へ。**
         return;
       }
+      // ⚠️ **追っている盤でなければ見送る**（2026-09-15）。中継には**大盤**
+      // （解説用）が映り、あちらは**将棋の局面としては矛盾しない**ので
+      // 盤面だけでは弾けない —— 解説が本譜から 1 手の変化を並べていたら、
+      // **その手をそのまま棋譜に足してしまう。**
+      if (shot.offBoard) {
+        // ⚠️ **止めないこと。** 大盤はすぐ本物へ戻るので、**待てばよい**。
+        // ⚠️ **理由は出すこと** —— 黙って止まっていると壊れたように見える。
+        sidePane.setStatus(`別の盤が映っています（${shot.offBoardReason}）。待っています`);
+        return;
+      }
       await PositionService.Load(shot.sfen, cellConfidence(shot.debug) ?? null);
       const got = await StudyService.FollowAuto();
       showStudy(got.state);
@@ -2680,12 +2690,27 @@ ${st.turnLabel}${n}`;
 
   studyFollowBtn.addEventListener("click", () => {
     if (followOn) {
+      void CaptureService.ClearBoardAnchor();
       followStop("中継の追跡を止めました");
       return;
     }
+    // ⚠️ **押した瞬間の盤を「追う盤」として覚える。** 撮るたびに覚え直すと、
+    // **大盤に切り替わった 1 枚でマスタがそちらへ移る**（以降ずっと大盤を追う）。
+    // ⚠️ **だから押すときは本物の盤が映っていること**が前提 —— 失敗したら
+    // 理由を出して始めない（黙って始めると大盤を追い始める）。
     setFollowing(true);
-    sidePane.setStatus("中継を追っています（止めるにはもう一度押してください）");
-    void followTick();
+    sidePane.setStatus("追う盤を決めています…");
+    void CaptureService.AnchorBoard()
+      .then(() => {
+        if (!followOn) {
+          return;
+        }
+        sidePane.setStatus("中継を追っています（止めるにはもう一度押してください）");
+        void followTick();
+      })
+      .catch((err) => {
+        followStop(String(err instanceof Error ? err.message : err));
+      });
   });
 
   // 解析タブの盤の操作（手を進める UI）。**合法手だけ。**

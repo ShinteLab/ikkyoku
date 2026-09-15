@@ -96,6 +96,17 @@ type CaptureService struct {
 	// 読み直さなくて済むよう覚えておく。
 	recognizerStatus RecognizerStatus
 
+	// boardAnchor は**追いかけている盤の見た目**（2026-09-15。中継の追従）。
+	//
+	// ⚠️ **中継には大盤（解説用）が映る。** あちらは将棋の局面としては矛盾しない
+	// ので、**盤面だけを見ていては弾けない** —— 解説が本譜から 1 手の変化を
+	// 並べていたら、そのまま棋譜に足してしまう。
+	//
+	// ⚠️ **覚えるのは人が「追う」と言ったときだけ**（`AnchorBoard`）。
+	// 撮るたびに覚え直すと、**大盤に切り替わった 1 枚でマスタがそちらへ移る。**
+	// ⚠️ **ゼロ値は「決めていない」** —— そのときは何も落とさない（設計原則3）。
+	boardAnchor recognize.Signature
+
 	// clickThrough は設定「枠の内側で後ろの画面を操作する」（`ikkyoku.Config.ClickThrough`）。
 	clickThrough bool
 	// clickStop は素通しの見張り（watchCursor）を止めるチャネル。
@@ -670,6 +681,14 @@ type CaptureResult struct {
 	Warnings   []string       `json:"warnings"`   // 局面として成立していない点
 	HandTotal  map[string]int `json:"handTotal"`  // 駒台の推定枚数(先後不明)
 
+	// OffBoard は**追いかけている盤とは別の盤が映っている**（中継の大盤など）。
+	//
+	// ⚠️ **「盤が映っていない」とは別物。** あちらは一致度が落とすもので、
+	// こちらは**盤としては読めているが、追っている盤ではない**。
+	// **次にすることが違う**（待つ / 撮り直す）。
+	OffBoard bool `json:"offBoard"`
+	// OffBoardReason はその理由（同じ盤なら空）。
+	OffBoardReason string `json:"offBoardReason"`
 	// RecognizeError は「撮れたが認識できなかった」ときの理由。
 	// キャプチャ自体の失敗はこれではなく Capture のエラーで表す。
 	RecognizeError string `json:"recognizeError"`
@@ -766,7 +785,56 @@ func (s *CaptureService) CaptureQuiet() (CaptureResult, error) {
 		result.HandTotal = h
 	}
 	result.Debug = board.Debug
+
+	// ⚠️ **追っている盤かどうかを見る**（2026-09-15）。中継には**大盤**（解説用）が
+	// 映り、あちらは**将棋の局面としては矛盾しない**ので盤面だけでは弾けない ——
+	// 解説が本譜から 1 手の変化を並べていたら**そのまま棋譜に足してしまう**。
+	s.mu.Lock()
+	anchor, has := s.boardAnchor, s.boardAnchor.Board.Dx() > 0
+	s.mu.Unlock()
+	if has {
+		if got, ok := recognize.SignatureOf(board.Debug); ok {
+			if same, why := anchor.Matches(got); !same {
+				result.OffBoard, result.OffBoardReason = true, why
+			}
+		}
+	}
 	return result, nil
+}
+
+// AnchorBoard は**今映っている盤を「これから追う盤」として覚える**（2026-09-15）。
+//
+// ⚠️ **記述子だけを覚える**（局面は覚えない）。手が進めば駒は動くので、
+// **同じ盤かどうかの判断には使えない。**
+//
+// ⚠️ **覚えるのは人が「追う」と言ったときだけ。** 撮るたびに覚え直すと、
+// **大盤に切り替わった 1 枚でマスタがそちらへ移ってしまう**（そこから先は
+// ずっと大盤を追う）。
+func (s *CaptureService) AnchorBoard() (CaptureResult, error) {
+	s.mu.Lock()
+	s.boardAnchor = recognize.Signature{}
+	s.mu.Unlock()
+
+	r, err := s.CaptureQuiet()
+	if err != nil {
+		return r, err
+	}
+	sig, ok := recognize.SignatureOf(r.Debug)
+	if !ok {
+		return r, fmt.Errorf("盤が映っていないので、追う盤を決められません")
+	}
+	s.mu.Lock()
+	s.boardAnchor = sig
+	s.mu.Unlock()
+	s.logger.Info("追う盤を決めました", "board", sig.Board, "color", sig.Color)
+	return r, nil
+}
+
+// ClearBoardAnchor は追う盤を忘れる（追跡を止めたとき）。
+func (s *CaptureService) ClearBoardAnchor() {
+	s.mu.Lock()
+	s.boardAnchor = recognize.Signature{}
+	s.mu.Unlock()
 }
 
 // OpenImage は画像ファイルを選んで、撮った 1 枚と同じ経路に載せる（入力タブの
