@@ -27,9 +27,13 @@ import (
 
 // followTimeout は経路探索に使ってよい時間。
 //
-// 実測では深さ 4 で 1ms 足らずだが、**上限は節点数（`position.DefaultMaxNodes`）で
-// 掛かっている**ので、これは「万一そこが効かなかったとき」の保険。
-const followTimeout = 3 * time.Second
+// ⚠️ **追従は 1 秒ごとに回る**ので、ここが長いと**1 tick がまるごと止まる**
+// （実機で 3 秒に張り付いた）。**深いところを探すのは「2 手以上飛んだとき」だけ**
+// なので、**見切って候補を並べるほうが早い。**
+//
+// ⚠️ **上限は節点数でも掛かっている**（`position.DefaultMaxNodes`）。
+// こちらは「1 節点が思ったより重かったとき」の保険。
+const followTimeout = 1500 * time.Millisecond
 
 // 繋ぎ方の種類（`FollowProbe.Kind`）。**画面の出し分けはこれ 1 つで決まる。**
 const (
@@ -170,6 +174,54 @@ func (s *StudyService) FollowProbe() (FollowProbe, error) {
 		opt.Cost, opt.Tolerance = cost, position.DefaultTolerance
 	}
 
+	out := FollowProbe{Rev: rev, Candidates: []FollowChoice{}}
+
+	// ⚠️ **まず「どの候補が一番よく合うか」を聞く**（2026-09-15 に順番を入れ替えた）。
+	//
+	// **中継は 0 手か 1 手しか進まないのが普通**で、そこは `Rank`（実測 29µs）だけで
+	// 片が付く。⚠️ **以前は先に `Connect` を回しており、中盤の局面では 3 秒の
+	// タイムアウトに当たったうえ、打ち切りでは推測へ進まない作りだったので
+	// 追跡が無反応になった**（実機のログ: `stop=探し切れませんでした nodes=10021`）。
+	//
+	// ⚠️ **厳密一致が弱くなるわけではない** —— ぴったり合う候補は費用 0 で必ず
+	// 1 位になる。`Connect` に残るのは**2 手以上飛んだとき**の仕事だけ。
+	var ranked position.RankResult
+	if fromImage {
+		got, rerr := position.Rank(from, p.Board, opt)
+		if rerr == nil && len(got.Candidates) > 0 {
+			ranked = got
+			top := got.Candidates[0]
+			out.Fit = top.Fit
+			s.logger.Info("候補を並べました", "tip", tipID, "moves", top.Moves,
+				"fit", top.Fit, "margin", got.Margin, "cost", top.Cost, "rotated", rotated)
+
+			// ⚠️ **盤として読めていないならここで終わり**（CM・解説の画面）。
+			// 深く探しても意味が無いので `Connect` へ進まない。
+			if !got.Readable(position.DefaultMinFit) {
+				out.Kind = FollowUnreadable
+				out.Reason = fmt.Sprintf("この画面は今の対局の盤面として読めません（一致 %d%%）。"+
+					"盤が映っている場面で撮り直してください", int(top.Fit*100))
+				return out, nil
+			}
+			if got.Decided(position.DefaultMinFit, position.DefaultMinMargin) {
+				if len(top.Moves) == 0 {
+					out.Kind, out.Reason = FollowSame, "盤面は変わっていません"
+					return out, nil
+				}
+				// ⚠️ **費用 0 は推測ではない**（認識とぴったり合っている）。
+				out.Kind, out.Depth, out.Guess = FollowUnique, len(top.Moves), top.Cost > 0
+				out.Fixed = followFixes(top.Fixed)
+				out.Candidates = []FollowChoice{{
+					Moves: top.Moves,
+					Text:  followText(rootSfen, main, top.Moves),
+				}}
+				return out, nil
+			}
+		}
+	}
+
+	// **1 手では決まらなかった。** ここから先は「何手進んだのか」を探す仕事
+	// （CM を挟んで飛んだとき）。⚠️ **時間がかかるのはこちらだけ。**
 	ctx, cancel := context.WithTimeout(context.Background(), followTimeout)
 	defer cancel()
 	r, err := position.Connect(ctx, from, p.Board, opt)
@@ -181,27 +233,16 @@ func (s *StudyService) FollowProbe() (FollowProbe, error) {
 		"candidates", len(r.Solutions), "nodes", r.Nodes,
 		"cost", r.Cost, "fixed", len(r.Fixed), "rotated", rotated)
 
-	out := FollowProbe{Rev: rev, Depth: r.Depth, Candidates: []FollowChoice{}}
+	out.Depth = r.Depth
 	switch r.Stop {
 	case position.StopSame:
 		out.Kind, out.Reason = FollowSame, "盤面は変わっていません"
 		return out, nil
-	case position.StopBudget:
-		out.Kind, out.Reason = FollowBudget, "手順を探し切れませんでした。もう一度お試しください"
-		return out, nil
-	case position.StopTooFar, position.StopUnreachable:
-		// ⚠️ **ここで諦めないこと**（2026-09-15 に変えた）。
-		// **「認識した盤面に到達できるか」を聞くと、認識が数マス外しただけで落ちる**
-		// ——「認識器が 100% でないと動かない」という実機の指摘はそこから来た。
-		// 次は**問いを変えて**「どの候補が一番よく合うか」を聞く（`position.Rank`）。
-		// ⚠️ **画像から起こした盤のときだけ**（人が並べた盤は推測しない）。
-		if !fromImage {
-			out.Kind = FollowUnreachable
-			out.Mismatch = followFixes(r.Near)
-			out.Reason = unreachableReason(out.Mismatch, r.NearDepth)
-			return out, nil
-		}
-		return s.guessFollow(from, p.Board, opt, out)
+	case position.StopBudget, position.StopTooFar, position.StopUnreachable:
+		// ⚠️ **ここで行き止まりにしないこと**（2026-09-15 に実機で踏んだ）。
+		// 打ち切り（`StopBudget`）でも**先に並べた候補は残っている**ので、それを出す。
+		// **黙って無反応になるのが一番たちが悪い。**
+		return s.fallbackFollow(ranked, r, rootSfen, main, fromImage, out), nil
 	}
 
 	// ⚠️ **並べきれないなら選ばせない。** 候補として出せない以上、決めようが無い。
@@ -361,81 +402,38 @@ func squareText(rank, file int) string {
 	return files[file] + ranks[rank]
 }
 
-// guessFollow は**候補の中で一番よく合うもの**を選ぶ（厳密一致が空振りしたとき）。
+// fallbackFollow は `Connect` が決められなかったときの出口。
 //
-// ⚠️ **ここが「認識器が 100% でなくても動く」の実体。** 前の局面が分かっている以上、
-// 次にあり得る盤面は合法手のぶん（約 100 通り）しかなく、**候補どうしは 2〜4 マスしか
-// 違わない**ので、**残りのマスの認識ミスは全候補に等しく乗って相殺される**。
-//
-// ⚠️ **2 つの歯止めを混ぜないこと。** 「盤として読めていない」（＝撮り直す）と
-// 「どれか決められない」（＝深く探すか人に聞く）は**次にすることが違う**。
-func (s *StudyService) guessFollow(from *position.Position, target *position.Board,
-	opt position.ConnectOptions, out FollowProbe) (FollowProbe, error) {
-	r, err := position.Rank(from, target, opt)
-	if err != nil || len(r.Candidates) == 0 {
+// ⚠️ **黙って無反応にしないこと**（2026-09-15 に実機で踏んだ）。打ち切りでも
+// **先に並べた候補は残っている**ので、それを出す。「何も起きない」が一番たちが悪い。
+func (s *StudyService) fallbackFollow(ranked position.RankResult, r position.ConnectResult,
+	rootSfen string, main []string, fromImage bool, out FollowProbe) FollowProbe {
+	// 人が並べた盤（手合割・詰将棋）は推測しない。食い違いだけ出す。
+	if !fromImage || len(ranked.Candidates) == 0 {
 		out.Kind = FollowUnreachable
-		out.Reason = "今の本譜からは繋がりません"
-		return out, nil
+		out.Mismatch = followFixes(r.Near)
+		out.Reason = unreachableReason(out.Mismatch, r.NearDepth)
+		return out
 	}
-	top := r.Candidates[0]
-	out.Fit, out.Guess = top.Fit, true
-	s.logger.Info("候補から選びました",
-		"moves", top.Moves, "fit", top.Fit, "margin", r.Margin, "cost", top.Cost)
-
-	// ⚠️ **そもそも盤として読めていないなら、候補を出さないこと。**
-	// CM や解説の画面はどの候補とも合わないので、ここで落とさないと
-	// **映っていない盤から適当な手を選んで棋譜に足す**ことになる。
-	if !r.Readable(position.DefaultMinFit) {
-		out.Kind = FollowUnreadable
-		out.Reason = fmt.Sprintf("この画面は今の対局の盤面として読めません（一致 %d%%）。"+
-			"盤が映っている場面で撮り直してください", int(top.Fit*100))
-		return out, nil
-	}
-
-	// **差が付いていれば言い切る。** 食い違ったマスは「認識が外していた所」として返す。
-	if r.Decided(position.DefaultMinFit, position.DefaultMinMargin) {
-		if len(top.Moves) == 0 {
-			out.Kind, out.Depth = FollowSame, 0
-			out.Reason = "盤面は変わっていません（認識の細かい違いは無視しました）"
-			return out, nil
-		}
-		out.Kind, out.Depth = FollowUnique, len(top.Moves)
-		out.Fixed = followFixes(top.Fixed)
-		out.Candidates = []FollowChoice{{
-			Moves: top.Moves,
-			Text:  followText(rootSFENOf(from), nil, top.Moves),
-		}}
-		return out, nil
-	}
-
-	// **決められないときは候補を並べる**（1 本選ぶと嘘になる）。
-	out.Kind = FollowChoices
-	for _, c := range r.Candidates {
+	out.Guess = true
+	out.Mismatch = followFixes(ranked.Candidates[0].Fixed)
+	for _, c := range ranked.Candidates {
 		if len(c.Moves) == 0 {
-			continue // 「何もしない」は選択肢として出さない（繋ぐ操作ではない）
+			continue // 「何もしない」は繋ぐ選択肢ではない
 		}
 		out.Candidates = append(out.Candidates, FollowChoice{
 			Moves: c.Moves,
-			Text:  followText(rootSFENOf(from), nil, c.Moves),
+			Text:  followText(rootSfen, main, c.Moves),
 		})
 	}
 	if len(out.Candidates) == 0 {
 		out.Kind = FollowUnreachable
 		out.Reason = "今の本譜からは繋がりません"
-		return out, nil
+		return out
 	}
-	out.Mismatch = followFixes(top.Fixed)
+	out.Kind = FollowChoices
 	out.Reason = "どの手が指されたか決められません（認識が曖昧か、2 手以上進んでいます）"
-	return out, nil
-}
-
-// rootSFENOf は表記を組み立てる起点（**候補は先端からの 1 手**なので先端が根）。
-func rootSFENOf(p *position.Position) string {
-	v, err := p.SFEN()
-	if err != nil {
-		return ""
-	}
-	return v
+	return out
 }
 
 // FollowAuto は**下見して、繋がるなら人に聞かずに繋ぐ**（中継の追従。2026-09-15）。

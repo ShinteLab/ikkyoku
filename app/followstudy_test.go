@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ShinteLab/ikkyoku/analyze"
 	"github.com/ShinteLab/ikkyoku/position"
@@ -547,5 +548,63 @@ func TestFollowAutoSkipsQuietly(t *testing.T) {
 				t.Error("見送ったのに木が動きました")
 			}
 		})
+	}
+}
+
+// ⚠️ **大きく進んだ盤面でも無反応にならないこと**（2026-09-15 に実機で踏んだ）。
+//
+// 大盤解説のあいだに何手も進むと、深く探しても届かない。**そのときに
+// 「探し切れませんでした」で行き止まりにすると、追跡が黙って止まる**
+// （実機のログ: `stop=探し切れませんでした nodes=10021`。以降ずっと無反応）。
+//
+// ⚠️ **見るのは「次にできることが返ること」。** どれを返すかは固定しない ——
+// 1 手ずつ追いつく（`unique`）でも、候補を並べる（`choices`）でもよい。
+func TestFollowProbeDoesNotDeadEnd(t *testing.T) {
+	s, pos := following(t)
+	// 初期局面から 6 手進んだ盤面（`MaxDepth` を超える）。
+	p, err := position.FromFullSFEN(hirateBoard + " b - 1")
+	if err != nil {
+		t.Fatalf("FromFullSFEN: %v", err)
+	}
+	for _, m := range []string{"7g7f", "3c3d", "2g2f", "8c8d", "2f2e", "8d8e"} {
+		if err := p.ApplyMove(m); err != nil {
+			t.Fatalf("ApplyMove(%q): %v", m, err)
+		}
+	}
+	shotWith(t, pos, p.BoardSFEN(), evenConf(0.5))
+
+	got, err := s.FollowProbe()
+	if err != nil {
+		t.Fatalf("FollowProbe: %v", err)
+	}
+	switch got.Kind {
+	case FollowUnique, FollowChoices:
+		if len(got.Candidates) == 0 {
+			t.Fatalf("%s なのに候補がありません", got.Kind)
+		}
+	default:
+		t.Fatalf("次にできることが返りません: kind=%q reason=%q", got.Kind, got.Reason)
+	}
+}
+
+// ⚠️ **1 手進んだだけなら深い探索に入らないこと**（2026-09-15）。
+//
+// 中継は 0 手か 1 手しか進まないのが普通で、そこは候補を並べるだけで片が付く。
+// **深い探索を先に回していたせいで、中盤の局面では 3 秒のタイムアウトに
+// 当たっていた**（実機）。⚠️ **速さの歯止め** —— 遅くなったらここが落ちる。
+func TestFollowProbeIsFastForOneMove(t *testing.T) {
+	s, pos := following(t)
+	shot(t, pos, "7g7f")
+
+	start := time.Now()
+	got, err := s.FollowProbe()
+	if err != nil {
+		t.Fatalf("FollowProbe: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 300*time.Millisecond {
+		t.Errorf("1 手の下見に %v かかりました（深い探索に入っている）", elapsed)
+	}
+	if got.Kind != FollowUnique {
+		t.Fatalf("Kind = %q, want %q", got.Kind, FollowUnique)
 	}
 }

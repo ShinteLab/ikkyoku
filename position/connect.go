@@ -25,7 +25,6 @@ import (
 	"fmt"
 	"math"
 	"sort"
-	"strconv"
 
 	"github.com/ShinteLab/ikkyoku/legal"
 )
@@ -347,7 +346,7 @@ func search(ctx context.Context, root *Position, target *Board, opt ConnectOptio
 	for limit := h; limit <= depth; limit++ {
 		s.limit = limit
 		s.path = s.path[:0]
-		s.seen = map[string]bool{positionKey(root): true}
+		s.seen = map[posKey]bool{keyOf(root): true}
 		if over := s.dfs(root, 0); len(s.sols) > 0 {
 			return s.result(limit), nil
 		} else if over {
@@ -392,7 +391,7 @@ type connect struct {
 	tolerance float64
 	nodes     int
 	path      []string
-	seen      map[string]bool
+	seen      map[posKey]bool
 	sols      []solution
 	// best は**一番近づけた節点**（繋がらなかったときに「どこが説明できないか」
 	// を言うため）。⚠️ **厳密一致のときも取ること** —— 手掛かりが要るのは
@@ -506,7 +505,7 @@ func (s *connect) dfs(pos *Position, g int) bool {
 		// ⚠️ **経路内の再来を刈る**（同じ局面へ戻る枝を延々と展開しないため）。
 		// **千日手を禁じているのではない** —— 1 本の手順の中で同じ局面を 2 度通っても、
 		// 盤面から手順を復元する話には何も足さない。
-		key := positionKey(next)
+		key := keyOf(next)
 		if s.seen[key] {
 			continue
 		}
@@ -525,26 +524,46 @@ func (s *connect) dfs(pos *Position, g int) bool {
 	return false
 }
 
-// positionKey は経路内の再来を見るための鍵（盤面 + 手番 + 駒台）。
-// ⚠️ **手数は入れない**（手数だけ違う同じ局面を別物にしない）。
-func positionKey(p *Position) string {
-	black, white := p.Hands()
-	return p.Board.SFEN() + "|" + p.Turn.mark() + "|" + handKey(black) + "|" + handKey(white)
+// posKey は経路内の再来を見るための鍵（**盤面 + 手番**）。
+//
+// ⚠️ **文字列にしないこと**（2026-09-15 に直した）。以前は `Board.SFEN()` を組んで
+// 駒台を並べ替えて連結していたが、**これを子の数（約 100）×節点ぶん**やるので
+// **1 節点 300µs**まで落ちていた（実機のログで発覚。3 秒で 1 万節点しか進まない）。
+// `Cell` は比較可能なので、**配列をそのまま鍵にすれば確保も並べ替えも要らない。**
+//
+// ⚠️ **駒台は入れない。** 盤面と手番が同じなら経路内の再来と見なして十分で、
+// **入れると鍵が太るだけ**（駒台まで一致して盤面が違う経路は無い）。
+// ⚠️ **1 マス 1 バイトに詰めること。** `[9][9]Cell` をそのまま鍵にすると
+// **2KB 近い鍵をマスが毎回ハッシュする**ことになり、文字列より遅くなった
+// （実測で深さ 4 が 0.79ms → 2.0ms）。
+type posKey struct {
+	cells [81]uint8
+	turn  Turn
 }
 
-func handKey(h map[int]int) string {
-	keys := make([]int, 0, len(h))
-	for k, v := range h {
-		if v > 0 {
-			keys = append(keys, k)
+// cellCode は 1 マスを 1 バイトにする（0 が空マス）。
+func cellCode(c Cell) uint8 {
+	if !c.filled {
+		return 0
+	}
+	v := uint8(c.piece+1) & 0x0f
+	if c.black {
+		v |= 0x10
+	}
+	if c.promoted {
+		v |= 0x20
+	}
+	return v
+}
+
+func keyOf(p *Position) posKey {
+	k := posKey{turn: p.Turn}
+	for r := 0; r < 9; r++ {
+		for f := 0; f < 9; f++ {
+			k.cells[r*9+f] = cellCode(p.Board.cells[r][f])
 		}
 	}
-	sort.Ints(keys)
-	s := ""
-	for _, k := range keys {
-		s += strconv.Itoa(k) + ":" + strconv.Itoa(h[k]) + ","
-	}
-	return s
+	return k
 }
 
 // diff は「今の盤」と「目指す盤」の食い違い。
