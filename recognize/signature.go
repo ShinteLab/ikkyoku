@@ -34,8 +34,16 @@ const (
 	ShiftToleranceCells = 0.8
 	// ColorTolerance は盤の地色の許容（0〜255）。
 	//
-	// 大盤は照明も素材も違うので差が出やすい。⚠️ **これだけで判断しないこと** ——
-	// 同じ中継でもカメラの露出で動く。
+	// ⚠️ **これで落とさないこと**（2026-09-15 に実機で踏んだ）。**ゲーム画面は
+	// 対局ごとに背景と照明が変わり、盤の地色もそれに引きずられる** ——
+	// 落とす条件にしていたせいで、**同じ盤を「別の盤」と言って追跡が全部
+	// 見送られた**（1 手目から進まなかった）。
+	//
+	// ⚠️ **偽陽性（別の盤を拾う）より偽陰性（本物を弾く）のほうが重い。**
+	// 別の盤を拾っても `Rank` の一致度と差がもう一度落とすが、
+	// **弾いたらそこで終わり**（黙って何も起きなくなる）。
+	//
+	// 今は**ログに出すためだけ**に残してある（大盤を色で見分けられるかの材料）。
 	ColorTolerance = 34
 )
 
@@ -86,11 +94,21 @@ func (s Signature) Matches(o Signature) (bool, string) {
 	if abs(dx) > ShiftToleranceCells || abs(dy) > ShiftToleranceCells {
 		return false, fmt.Sprintf("盤の位置が違います（%.1f マスぶん）", max(abs(dx), abs(dy)))
 	}
-	// **地色**（最後の一押し。これだけで判断しない）。
-	if d := int(s.Color) - int(o.Color); abs(float64(d)) > ColorTolerance {
-		return false, "盤の色が違います"
-	}
+	// ⚠️ **地色では落とさない**（上の `ColorTolerance` の注記）。
+	// 判断に使うのは**大きさと位置**だけ —— 大盤は画面に占める大きさも場所も違う。
 	return true, ""
+}
+
+// ColorGap は地色の隔たり（**判断には使わない。ログに出すためだけ**）。
+//
+// ⚠️ **これを `Matches` に戻さないこと** —— 戻すと、背景が変わるゲーム画面で
+// **同じ盤を「別の盤」と言って追跡が丸ごと止まる**（2026-09-15 に実機で踏んだ）。
+func (s Signature) ColorGap(o Signature) int {
+	d := int(s.Color) - int(o.Color)
+	if d < 0 {
+		return -d
+	}
+	return d
 }
 
 // ratio は 2 つの長さの違いを比で返す（大きいほうを分母にする）。

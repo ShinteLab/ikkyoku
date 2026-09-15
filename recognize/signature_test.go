@@ -19,7 +19,10 @@ func sig(x, y, w, h int, color uint8) recognize.Signature {
 // ⚠️ **中継の大盤を追いかけないための歯止め**（2026-09-15）。
 //
 // 大盤は**将棋の局面としては矛盾しない**ので、盤面だけを見ていては弾けない。
-// **画面に占める大きさと位置と地色**で「別の盤」と判断する。
+// **画面に占める大きさと位置**で「別の盤」と判断する。
+//
+// ⚠️ **地色では判断しない**（2026-09-15 に実機で外した）。下の
+// `TestSignatureIgnoresColor` を読むこと。
 func TestSignatureRejectsDifferentBoard(t *testing.T) {
 	master := sig(100, 100, 360, 392, 180)
 	cases := []struct {
@@ -28,7 +31,6 @@ func TestSignatureRejectsDifferentBoard(t *testing.T) {
 	}{
 		{"大きさが違う（大盤に切り替わった）", sig(40, 40, 700, 763, 180)},
 		{"位置が違う（別の場所に映っている）", sig(400, 100, 360, 392, 180)},
-		{"地色が違う（別の盤）", sig(100, 100, 360, 392, 90)},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -55,6 +57,8 @@ func TestSignatureAllowsSmallDrift(t *testing.T) {
 		{"少し寄った", sig(94, 102, 384, 418, 180)},
 		{"少しずれた", sig(112, 108, 360, 392, 180)},
 		{"露出が変わった", sig(100, 100, 360, 392, 160)},
+		// ⚠️ **地色が大きく変わっても同じ盤**（下の注記）。
+		{"背景が変わった（ゲーム画面）", sig(100, 100, 360, 392, 90)},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -98,5 +102,25 @@ func TestSignatureOf(t *testing.T) {
 	}
 	if _, ok := recognize.SignatureOf(&suteme.Debug{}); ok {
 		t.Error("盤が取れていないのに記述子が返りました")
+	}
+}
+
+// ⚠️ **地色で落とさないこと**（2026-09-15 に実機で踏んだ）。
+//
+// **実機の症状**: ゲーム画面は対局ごとに背景と照明が変わり、**盤の地色もそれに
+// 引きずられる**。地色を落とす条件にしていたせいで、**同じ盤を「別の盤」と言って
+// 追跡が丸ごと見送られた**（1 手目から 1 手も進まなかった）。
+//
+// ⚠️ **偽陽性より偽陰性のほうが重い。** 別の盤を拾っても `position.Rank` の
+// 一致度と差がもう一度落とすが、**弾いたらそこで終わり**（黙って何も起きなくなる）。
+func TestSignatureIgnoresColor(t *testing.T) {
+	master := sig(100, 100, 360, 392, 180)
+	dark := sig(100, 100, 360, 392, 40)
+	if ok, why := master.Matches(dark); !ok {
+		t.Fatalf("地色で落としました: %s", why)
+	}
+	// **隔たりは取れること**（ログに出して、大盤を色で見分けられるか測るため）。
+	if got := master.ColorGap(dark); got != 140 {
+		t.Errorf("ColorGap = %d, want 140", got)
 	}
 }

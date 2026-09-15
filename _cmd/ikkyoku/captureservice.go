@@ -108,6 +108,13 @@ type CaptureService struct {
 	// 撮るたびに覚え直すと、**大盤に切り替わった 1 枚でマスタがそちらへ移る。**
 	// ⚠️ **ゼロ値は「決めていない」** —— そのときは何も落とさない（設計原則3）。
 	boardAnchor recognize.Signature
+	// anchorRegion は**マスタを取ったときの撮影範囲**（2026-09-15）。
+	//
+	// ⚠️ **記述子は画像の中の座標なので、枠を動かすと必ず食い違う** ——
+	// 盤は同じなのに「盤の位置が違います」になり、**そこから全部見送られる**
+	// （実機で踏んだ。「盤が映っていないのかも」と枠をずらしたら止まった）。
+	// **枠を動かすのは狙いを直す操作**であって、追う盤を変える操作ではない。
+	anchorRegion ikkyoku.Region
 	// quietOutcome は直近の `CaptureQuiet` の結果の種類（`board` / `none` / `off`）。
 	//
 	// ⚠️ **変わり目だけログに出すため**（2026-09-15）。追従は 1 秒ごとに回るので
@@ -833,11 +840,23 @@ func (s *CaptureService) CaptureQuiet() (CaptureResult, error) {
 	// 解説が本譜から 1 手の変化を並べていたら**そのまま棋譜に足してしまう**。
 	s.mu.Lock()
 	anchor, has := s.boardAnchor, s.boardAnchor.Board.Dx() > 0
+	moved := has && s.anchorRegion != region
 	s.mu.Unlock()
 	if has {
 		if got, ok := recognize.SignatureOf(board.Debug); ok {
-			if same, why := anchor.Matches(got); !same {
+			// ⚠️ **枠を動かしたらマスタを取り直す**（2026-09-15 に実機で踏んだ）。
+			// 記述子は**画像の中の座標**なので、枠が動けば盤は同じでも必ず食い違い、
+			// **そこから全部見送られる**。**枠を動かすのは狙いを直す操作。**
+			if moved {
+				s.mu.Lock()
+				s.boardAnchor, s.anchorRegion = got, region
+				s.mu.Unlock()
+				s.logger.Info("枠が動いたので追う盤を取り直しました", "board", got.Board)
+			} else if same, why := anchor.Matches(got); !same {
 				result.OffBoard, result.OffBoardReason = true, why
+				s.logger.Info("別の盤と判断しました", "reason", why,
+					"master", anchor.Board, "got", got.Board,
+					"colorGap", anchor.ColorGap(got))
 			}
 		}
 	}
@@ -877,7 +896,7 @@ func (s *CaptureService) noteQuiet(r CaptureResult) {
 // ずっと大盤を追う）。
 func (s *CaptureService) AnchorBoard() (CaptureResult, error) {
 	s.mu.Lock()
-	s.boardAnchor, s.quietOutcome = recognize.Signature{}, ""
+	s.boardAnchor, s.anchorRegion, s.quietOutcome = recognize.Signature{}, ikkyoku.Region{}, ""
 	s.mu.Unlock()
 
 	r, err := s.CaptureQuiet()
@@ -889,8 +908,12 @@ func (s *CaptureService) AnchorBoard() (CaptureResult, error) {
 		return r, fmt.Errorf("盤が映っていないので、追う盤を決められません")
 	}
 	dir := s.startFollowDir()
+	region, _, rerr := s.captureRegion()
+	if rerr != nil {
+		return r, rerr
+	}
 	s.mu.Lock()
-	s.boardAnchor = sig
+	s.boardAnchor, s.anchorRegion = sig, region
 	s.mu.Unlock()
 	s.logger.Info("追う盤を決めました", "board", sig.Board, "color", sig.Color, "dir", dir)
 	return r, nil
@@ -1054,7 +1077,7 @@ func (s *CaptureService) ClearBoardAnchor() {
 	s.mu.Lock()
 	// ⚠️ **録画も畳むこと。** 次に「追う」を押したら**別の対局**かもしれないので、
 	// 前の回の続きに書き足すと**1 つのディレクトリに 2 局が混ざる**。
-	s.boardAnchor, s.quietOutcome = recognize.Signature{}, ""
+	s.boardAnchor, s.anchorRegion, s.quietOutcome = recognize.Signature{}, ikkyoku.Region{}, ""
 	s.followDir, s.lastQuiet, s.followMisses, s.lastMissKind = "", nil, 0, ""
 	s.mu.Unlock()
 }
