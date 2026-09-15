@@ -106,6 +106,12 @@ type CaptureService struct {
 	// 撮るたびに覚え直すと、**大盤に切り替わった 1 枚でマスタがそちらへ移る。**
 	// ⚠️ **ゼロ値は「決めていない」** —— そのときは何も落とさない（設計原則3）。
 	boardAnchor recognize.Signature
+	// quietOutcome は直近の `CaptureQuiet` の結果の種類（`board` / `none` / `off`）。
+	//
+	// ⚠️ **変わり目だけログに出すため**（2026-09-15）。追従は 1 秒ごとに回るので
+	// 毎回出すと読めないが、**何も出さないと「正常に見送っている」のか
+	// 「止まっている」のかがログから分からない**（実機で聞かれた）。
+	quietOutcome string
 
 	// clickThrough は設定「枠の内側で後ろの画面を操作する」（`ikkyoku.Config.ClickThrough`）。
 	clickThrough bool
@@ -799,7 +805,30 @@ func (s *CaptureService) CaptureQuiet() (CaptureResult, error) {
 			}
 		}
 	}
+	s.noteQuiet(result)
 	return result, nil
+}
+
+// noteQuiet は**結果の種類が変わったときだけ**ログに出す。
+//
+// ⚠️ **毎回出さないこと**（1 秒ごとに回るので読めなくなる）。
+// ⚠️ **何も出さないのも駄目** —— 盤が映っていないあいだ Go 側が無言になると、
+// **正常に見送っているのか止まっているのかがログから分からない**（実機で聞かれた）。
+func (s *CaptureService) noteQuiet(r CaptureResult) {
+	kind, msg := "board", "盤を見つけました（追跡）"
+	switch {
+	case r.SFEN == "":
+		kind, msg = "none", "盤が映っていません（追跡・見送り）"
+	case r.OffBoard:
+		kind, msg = "off", "別の盤が映っています（追跡・見送り）"
+	}
+	s.mu.Lock()
+	changed := s.quietOutcome != kind
+	s.quietOutcome = kind
+	s.mu.Unlock()
+	if changed {
+		s.logger.Info(msg, "reason", r.OffBoardReason, "confidence", r.Confidence)
+	}
 }
 
 // AnchorBoard は**今映っている盤を「これから追う盤」として覚える**（2026-09-15）。
@@ -812,7 +841,7 @@ func (s *CaptureService) CaptureQuiet() (CaptureResult, error) {
 // ずっと大盤を追う）。
 func (s *CaptureService) AnchorBoard() (CaptureResult, error) {
 	s.mu.Lock()
-	s.boardAnchor = recognize.Signature{}
+	s.boardAnchor, s.quietOutcome = recognize.Signature{}, ""
 	s.mu.Unlock()
 
 	r, err := s.CaptureQuiet()
@@ -833,7 +862,7 @@ func (s *CaptureService) AnchorBoard() (CaptureResult, error) {
 // ClearBoardAnchor は追う盤を忘れる（追跡を止めたとき）。
 func (s *CaptureService) ClearBoardAnchor() {
 	s.mu.Lock()
-	s.boardAnchor = recognize.Signature{}
+	s.boardAnchor, s.quietOutcome = recognize.Signature{}, ""
 	s.mu.Unlock()
 }
 

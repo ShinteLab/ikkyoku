@@ -2634,6 +2634,11 @@ ${st.turnLabel}${n}`;
   // ので、**「動いていないのか、止まっているのか」が札の文だけでは読めない**
   // （実機で「止まってたりしませんよね？」と聞かれた）。
   let followLastMoveAt = 0;
+  // ⚠️ **最後に 1 周を終えた時刻**（2026-09-15）。**これが「動いている証明」**で、
+  // 見張りの判断もこれ。⚠️ **経過秒だけでは証明にならない** ——
+  // ループが死んでも数字は増え続ける（実機で指摘された）。
+  let followTickAt = 0;
+  let followWatch: number | undefined;
 
   // followElapsed は最後に手が付いてからの経過（短く。枠は狭い）。
   const followElapsed = () => {
@@ -2657,12 +2662,20 @@ ${st.turnLabel}${n}`;
     void Events.Emit("follow:state", { on: followOn, text });
   };
 
-  // followNote は状態に経過を添える（**長考のあいだ生きていることを見せる**）。
-  // ⚠️ **経過が短いうちは付けないこと** —— 手が付くたびに秒数が出ては消えると、
-  // 札がちらついて読めない。
+  // followNote は状態に**最後に見た時刻**を添える。
+  //
+  // ⚠️ **時刻にしてあるのが要点**（2026-09-15）。**1 周ごとに必ず変わる**ので、
+  // **止まれば数字も止まる** —— 経過秒だと**ループが死んでも増え続ける**ので、
+  // 動いている証明にならない（実機で指摘された）。
+  //
+  // 長考のあいだの「何分も何も起きない」は、最後に手が付いてからの経過を添えて出す。
   const followNote = (label: string) => {
+    const now = new Date();
+    const hhmmss = [now.getHours(), now.getMinutes(), now.getSeconds()]
+      .map((v) => String(v).padStart(2, "0"))
+      .join(":");
     const e = followElapsed();
-    return e ? `${label}・${e}` : label;
+    return e ? `${label} ${hhmmss}・${e}` : `${label} ${hhmmss}`;
   };
 
   const setFollowing = (on: boolean) => {
@@ -2674,8 +2687,25 @@ ${st.turnLabel}${n}`;
       window.clearTimeout(followTimer);
       followTimer = undefined;
     }
+    if (followWatch !== undefined) {
+      window.clearInterval(followWatch);
+      followWatch = undefined;
+    }
     if (on) {
       followLastMoveAt = Date.now();
+      followTickAt = Date.now();
+      // ⚠️ **見張りを付けること**（2026-09-15）。**1 周の予約を取りこぼすと
+      // 追跡が黙って死ぬ**という壊れ方を実際にやったので、
+      // **止まっていたら自力で立て直す**。⚠️ **これは保険であって設計ではない** ——
+      // 予約の出口を 1 か所にしてあるのが本体（`followSchedule`）。
+      followWatch = window.setInterval(() => {
+        if (!followOn || Date.now() - followTickAt < followTickMs * 5) {
+          return;
+        }
+        console.warn("[follow] 1 周が返ってこないので立て直します");
+        followTickAt = Date.now();
+        void followTick();
+      }, followTickMs * 2);
     }
     publishFollow(on ? "追跡中" : "");
   };
@@ -2691,49 +2721,70 @@ ${st.turnLabel}${n}`;
     }
   };
 
+  // followOnce は 1 周ぶん。**途中で return してよい**（次の予約は呼び出し側）。
+  //
+  // ⚠️ **ここで次の予約をしないこと**（2026-09-15 に実機で踏んだ）。
+  // 見送りの `return` が予約を飛ばしていて、**盤が映らなかった最初の 1 回で
+  // ループが死んでいた** —— 大盤解説で死に、盤に戻っても復活しなかった。
+  // **「1 周やる」と「回し続ける」を同じ関数に混ぜない。**
+  const followOnce = async () => {
+    const shot = await CaptureService.CaptureQuiet();
+    if (!shot.sfen) {
+      // 盤が取れなかった（枠に盤が映っていない）。**黙って次へ。**
+      publishFollow(followNote("待機中（盤が映っていません）"));
+      return;
+    }
+    // ⚠️ **追っている盤でなければ見送る**（2026-09-15）。中継には**大盤**
+    // （解説用）が映り、あちらは**将棋の局面としては矛盾しない**ので
+    // 盤面だけでは弾けない —— 解説が本譜から 1 手の変化を並べていたら、
+    // **その手をそのまま棋譜に足してしまう。**
+    if (shot.offBoard) {
+      // ⚠️ **止めないこと。** 大盤はすぐ本物へ戻るので、**待てばよい**。
+      sidePane.setStatus(`別の盤が映っています（${shot.offBoardReason}）。待っています`);
+      publishFollow(followNote("待機中（別の盤）"));
+      return;
+    }
+    await PositionService.Load(shot.sfen, cellConfidence(shot.debug) ?? null);
+    const got = await StudyService.FollowAuto();
+    showStudy(got.state);
+    if (got.applied) {
+      const moves = got.text?.join(" ") || got.moves?.join(" ") || "";
+      const mark = got.guess ? "（推測）" : "";
+      sidePane.setStatus(`${moves}${mark} を足しました`);
+      followLastMoveAt = Date.now();
+      publishFollow(followNote(`${moves}${mark}`));
+    } else {
+      publishFollow(followNote("追跡中"));
+    }
+  };
+
+  // followSchedule は次の 1 周を予約する。⚠️ **出口はここ 1 か所**
+  // （予約し忘れ ＝ 追跡が黙って死ぬ、という壊れ方を作らないため）。
+  const followSchedule = () => {
+    if (followTimer !== undefined) {
+      window.clearTimeout(followTimer);
+      followTimer = undefined;
+    }
+    if (followOn) {
+      followTimer = window.setTimeout(() => void followTick(), followTickMs);
+    }
+  };
+
   const followTick = async () => {
     if (!followOn) {
       return;
     }
+    followTickAt = Date.now();
     try {
-      const shot = await CaptureService.CaptureQuiet();
-      if (!shot.sfen) {
-        // 盤が取れなかった（枠に盤が映っていない）。**黙って次へ。**
-        return;
-      }
-      // ⚠️ **追っている盤でなければ見送る**（2026-09-15）。中継には**大盤**
-      // （解説用）が映り、あちらは**将棋の局面としては矛盾しない**ので
-      // 盤面だけでは弾けない —— 解説が本譜から 1 手の変化を並べていたら、
-      // **その手をそのまま棋譜に足してしまう。**
-      if (shot.offBoard) {
-        // ⚠️ **止めないこと。** 大盤はすぐ本物へ戻るので、**待てばよい**。
-        // ⚠️ **理由は出すこと** —— 黙って止まっていると壊れたように見える。
-        const why = `別の盤が映っています（${shot.offBoardReason}）。待っています`;
-        sidePane.setStatus(why);
-        publishFollow(followNote("待機中（別の盤）"));
-        return;
-      }
-      await PositionService.Load(shot.sfen, cellConfidence(shot.debug) ?? null);
-      const got = await StudyService.FollowAuto();
-      showStudy(got.state);
-      if (got.applied) {
-        const moves = got.text?.join(" ") || got.moves?.join(" ") || "";
-        const mark = got.guess ? "（推測）" : "";
-        sidePane.setStatus(`${moves}${mark} を足しました`);
-        followLastMoveAt = Date.now();
-        publishFollow(`${moves}${mark}`);
-      } else {
-        publishFollow(followNote("追跡中"));
-      }
+      await followOnce();
     } catch (err) {
       // ⚠️ **枠が出ていない等はここに来る。** 黙って回し続けると理由が読めないので
       // **止めて理由を出す**（設計原則3 は「落ちない」であって「黙る」ではない）。
       followStop(String(err instanceof Error ? err.message : err));
       return;
     }
-    if (followOn) {
-      followTimer = window.setTimeout(() => void followTick(), followTickMs);
-    }
+    followTickAt = Date.now();
+    followSchedule();
   };
 
   studyFollowBtn.addEventListener("click", () => {
