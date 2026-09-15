@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ShinteLab/core/kifu"
 	"github.com/ShinteLab/core/sfen"
 	"github.com/ShinteLab/ikkyoku/position"
 )
@@ -139,5 +140,36 @@ func TestFromFullSFEN(t *testing.T) {
 	// **未決が残らない**（残ると SFEN が組み上がらず解析できない）。
 	if len(p.Unassigned()) != 0 {
 		t.Errorf("未決が残っている: %v", p.Unassigned())
+	}
+}
+
+// ⚠️ **盤面図だけの棋譜（0 手）も読めること**（2026-09-16）。
+//
+// **撮った 1 局面を棚に入れて開き直す口がここを通る**（Step 3）。
+// **まだ 1 手も指していない検討は普通にある**ので、断ると自分で書いた棋譜を
+// 自分で開けない。
+func TestFromKIFBoardOnly(t *testing.T) {
+	const board = "lnsgkgsnl/1r5b1/ppppppppp/9/9/2P6/PP1PPPPPP/1B5R1/LNSGKGSNL"
+	doc := kifu.Document{Start: board + " w - 1"}
+	st, load, err := position.FromKIF(doc.String())
+	if err != nil {
+		t.Fatalf("FromKIF: %v\n%s", err, doc.String())
+	}
+	if load.Loaded != 0 || load.Total != 0 {
+		t.Errorf("手が入っています: %+v", load)
+	}
+	got, err := st.Root().SFEN()
+	if err != nil {
+		t.Fatalf("SFEN: %v", err)
+	}
+	if got != board+" w - 1" {
+		t.Errorf("局面が違います: %s", got)
+	}
+}
+
+// 盤面図も手も無ければ今までどおり断ること（**貼り間違いの受け皿**）。
+func TestFromKIFRefusesEmpty(t *testing.T) {
+	if _, _, err := position.FromKIF("手合割：平手\n"); err == nil {
+		t.Error("中身の無い棋譜が読めてしまっています")
 	}
 }

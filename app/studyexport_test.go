@@ -1,9 +1,10 @@
 package app
 
 import (
-	"errors"
 	"strings"
 	"testing"
+
+	"github.com/ShinteLab/ikkyoku/position"
 )
 
 // 検討の本譜が KIF になること（2026-09-16。Step 3）。
@@ -72,26 +73,45 @@ func TestStudyExportKIFMainLineOnly(t *testing.T) {
 	}
 }
 
-// ⚠️ **根が初期局面でないなら断ること**（2026-09-16）。
+// 撮った中盤の局面が根でも、**盤面図つきの棋譜として書けること**（2026-09-16）。
 //
-// **KIF は「手合割 ＋ 初手からの指し手」でしか局面を表せない。** 撮った中盤の
-// 局面をそのまま書き出すと、**平手の初形に手順だけが乗った別の対局**になる。
-// **黙って平手として出すのが一番たちが悪い**（嘘の棋譜が棚に入る）。
-func TestStudyExportKIFRefusesMidGameRoot(t *testing.T) {
-	s := adoptedFrom(t, "lnsgkgsnl/1r5b1/ppppppppp/9/9/2P6/PP1PPPPPP/1B5R1/LNSGKGSNL")
-	_, err := s.exportKIF()
-	if err == nil {
-		t.Fatal("途中の局面から始まった検討を棋譜にしています")
+// ⚠️ **黙って平手として出さないこと**がここの要点。手合割として書き出すと、
+// 開き直したときに**平手の初形に手順だけが乗った別の対局**になる。
+func TestStudyExportKIFMidGameRoot(t *testing.T) {
+	const board = "lnsgkgsnl/1r5b1/ppppppppp/9/9/2P6/PP1PPPPPP/1B5R1/LNSGKGSNL"
+	s := adoptedFrom(t, board)
+	got, err := s.exportKIF()
+	if err != nil {
+		t.Fatalf("exportKIF: %v", err)
 	}
-	if !errors.Is(err, errStudyNotFromStart) {
-		t.Errorf("断る理由が違います: %v", err)
+	// ⚠️ **盤面図が出て、手合割は出ないこと**（両方あると読み手で局面が変わる）。
+	if !strings.Contains(got, "+---------------------------+") {
+		t.Fatalf("盤面図が出ていません:\n%s", got)
 	}
-	// ⚠️ **失うものが無いことを言っていること**（控えには残る）。
-	if !strings.Contains(err.Error(), "控えて") {
-		t.Errorf("控えが残ることに触れていません: %v", err)
+	if strings.Contains(got, "手合割") {
+		t.Errorf("盤面図と手合割が両方出ています:\n%s", got)
+	}
+	// ⚠️ **後手番なら手番の行が要る**（無いと先手番として読まれる）。
+	if !strings.Contains(got, "後手番") {
+		t.Errorf("手番の行が出ていません:\n%s", got)
+	}
+	// 読み戻して同じ局面になること（**これが無いと自分でも開けない**）。
+	back, _, err := position.FromKIF(got)
+	if err != nil {
+		t.Fatalf("FromKIF: %v\n%s", err, got)
+	}
+	want, err := s.study.Root().SFEN()
+	if err != nil {
+		t.Fatalf("SFEN: %v", err)
+	}
+	gotSFEN, err := back.Root().SFEN()
+	if err != nil {
+		t.Fatalf("SFEN(戻り): %v", err)
+	}
+	if gotSFEN != want {
+		t.Errorf("開き直すと別の局面です:\n got = %s\nwant = %s", gotSFEN, want)
 	}
 }
-
 // 手合割の対局も、その手合割の初期局面として書き出せること。
 func TestStudyExportKIFHandicap(t *testing.T) {
 	s := adopted(t)

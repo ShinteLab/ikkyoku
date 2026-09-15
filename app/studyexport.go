@@ -11,6 +11,10 @@ package app
 // **枝は KIF に出ない。** ⚠️ **枝が消えるわけではない** —— 木は控え
 // （`ikkyoku/studies/`）にそのまま残り、棋譜タブから開けば戻る。
 //
+// **撮った中盤の局面が根でも書ける**（2026-09-16。`core/kifu` に盤面図が入った）。
+// ⚠️ **手数は戻らない** —— 盤面図には手数の欄が無いので、開き直すと 1 手目から
+// 数え直しになる（**局面と手順は正しい**）。
+//
 // ⚠️ **KIF の組み立てを ikkyoku に書かないこと。** ヘッダの順も指し手の桁も
 // `core/kifu` の担当で、ここがやるのは**木から手を並べて渡す**ところまで。
 
@@ -41,21 +45,17 @@ func (s *StudyService) exportKIF() (string, error) {
 	// 別名を吸収するので、**ここで名前の表を持たないこと。**
 	handicap := strings.TrimSpace(doc.Handicap)
 
-	// ⚠️ **根が手合割の初期局面と一致していること**（2026-09-16）。
+	// ⚠️ **根が手合割の初期局面でないなら盤面図で書く**（2026-09-16）。
 	//
-	// **KIF は「手合割 ＋ 初手からの指し手」でしか局面を表せない**（`core/kifu`
-	// は盤面図を書かない）。撮った中盤の局面を根にした検討をそのまま書き出すと、
-	// **その局面を初期局面と取り違えた棋譜**ができる —— 開き直すと平手の初形に
-	// 手順だけが乗った、**まったく別の対局**になる。
+	// **KIF は本来「手合割 ＋ 初手からの指し手」でしか局面を表せない。** 撮った
+	// 中盤の局面を根にした検討をそのまま手合割として書き出すと、**その局面を
+	// 初期局面と取り違えた棋譜**になる —— 開き直すと平手の初形に手順だけが
+	// 乗った、**まったく別の対局**。**黙って平手として出さないこと。**
 	//
-	// ⚠️ **黙って平手として出さないこと。** 嘘の棋譜が棚に入るのが一番たちが悪い
-	// （`TODO.md`「本譜のロック」が守りたいのはまさにそこ）。
-	start, err := kifu.StartSFEN(handicap)
-	if err != nil {
-		return "", fmt.Errorf("手合割が分かりません（%s）: %w", handicap, err)
-	}
-	if root != start {
-		return "", errStudyNotFromStart
+	// ⚠️ **両方は書かない**（`kifu.Document.String` が盤面図を優先する）。
+	// 並べると、読み手によって別の局面になる。
+	if start, err := kifu.StartSFEN(handicap); err != nil || root != start {
+		doc.Start = root
 	}
 
 	moves := s.study.MainLine()
@@ -80,16 +80,6 @@ func (s *StudyService) exportKIF() (string, error) {
 	doc.ShowTime = false
 	return doc.String(), nil
 }
-
-// errStudyNotFromStart は**根が初期局面ではない**ので KIF にできないこと。
-//
-// ⚠️ **これは今のところ直しようがない**（`core/kifu` が盤面図を書かない）。
-// 撮った中盤の局面から始めた検討は棚に入れられない —— **控え
-// （`ikkyoku/studies/`）には今までどおり残る**ので、失うものは無い。
-var errStudyNotFromStart = fmt.Errorf(
-	"この検討は初期局面から始まっていないので、棋譜（KIF）にできません" +
-		"（KIF は手合割と初手からの指し手でしか局面を表せません）。" +
-		"検討そのものは控えてあるので、次の起動でも続きから開けます")
 
 // setGameID は棚に入れた棋譜と結ぶ（`KifuService.SaveStudy` から）。
 //
