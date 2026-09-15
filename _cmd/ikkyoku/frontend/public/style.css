@@ -327,6 +327,33 @@ html.is-frame #app {
   background: #7d3832;
 }
 
+/* 追跡が 1 周するたびに打つ（2026-09-15）。⚠️ **`infinite` にしないこと** ——
+   時計で回る点滅は**ループが死んでも光り続ける**ので、動いている証明にならない
+   （枠の時刻表示を外したのと同じ理由）。打ち直しているのは `frame.ts` で、
+   **来なくなれば光らない**。 */
+.frame-btn.is-beat {
+  animation: frame-follow-beat 1.2s ease-out 1;
+}
+
+@keyframes frame-follow-beat {
+  0% {
+    color: #fff;
+    background: #ff4d4d;
+  }
+  100% {
+    color: #ffd9d6;
+    background: #6b2f2b;
+  }
+}
+
+/* ⚠️ **動きを嫌う設定を尊重すること**（点滅は目に障る人がいる）。
+   追跡中かどうかは `.is-active` の色が持っているので、光らなくても読める。 */
+@media (prefers-reduced-motion: reduce) {
+  .frame-btn.is-beat {
+    animation: none;
+  }
+}
+
 .frame-btn.is-primary {
   font-weight: 600;
   background: #ff4d4d;
@@ -3719,7 +3746,6 @@ html.is-graph #app {
 .frame-follow {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
   flex: 0 0 auto;
   max-width: 46%;
   overflow: hidden;
@@ -3733,29 +3759,6 @@ html.is-graph #app {
   display: none;
 }
 
-/* ⚠️ **点滅させること。** 止まっているのか動いているのかが、
-   文字だけでは読めない（長考のあいだ何分も同じ文が出たままになる）。 */
-.frame-follow::before {
-  content: "";
-  flex: 0 0 auto;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #e0544a;
-  animation: frame-follow-blink 1.6s ease-in-out infinite;
-}
-
-@keyframes frame-follow-blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.25; }
-}
-
-/* ⚠️ **動きを嫌う設定を尊重すること**（点滅は目に障る人がいる）。 */
-@media (prefers-reduced-motion: reduce) {
-  .frame-follow::before {
-    animation: none;
-  }
-}
 
 .edit-cell.is-mismatch {
   border-color: #e0a44a;

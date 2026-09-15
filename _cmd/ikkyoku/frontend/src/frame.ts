@@ -113,6 +113,18 @@ export function mountFrame(root: HTMLElement): void {
     followBtn.title = on ? "中継の追跡を止める" : "中継を追う（撮り続けて、進んだ手を本譜に足します）";
     followState.hidden = !on;
     followState.textContent = e.data?.text ?? "";
+    // ⚠️ **1 周ごとにボタンを打ち直すこと**（2026-09-15）。**これが動いている証明。**
+    // このイベントは**追跡が 1 周するたびに来る**ので、**止まれば光らない**。
+    // ⚠️ **CSS の `infinite` で点滅させないこと** —— 時計で回る点滅は
+    // **ループが死んでも光り続ける**ので証明にならない（枠の時刻表示を外したのと
+    // 同じ理由）。⚠️ **札に色の丸を足さないこと** —— 凡例が増えるだけで、
+    // **見るところはボタン 1 つ**のほうが読める。
+    followBtn.classList.remove("is-beat");
+    if (on) {
+      // アニメーションを頭から流し直すには、一度外して**レイアウトを確定させる**。
+      void followBtn.offsetWidth;
+      followBtn.classList.add("is-beat");
+    }
   });
   const menuBtn = root.querySelector<HTMLButtonElement>("#frame-menu")!;
   const menu = root.querySelector<HTMLDivElement>("#frame-menu-items")!;
