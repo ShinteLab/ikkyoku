@@ -48,6 +48,12 @@ type KifuService struct {
 	// 戻り先として残る。
 	study *StudyService
 
+	// store は検討の控え（2026-09-16。Step 2。`SetStudyStore` が入れる）。
+	//
+	// **「解析する」で前の検討を開き直す**のと、**一覧の「解析あり」の印**に使う。
+	// ⚠️ **nil でも動くこと**（設計原則3）—— 印が出ず、毎回まっさらに始まるだけ。
+	store *StudyStore
+
 	mu      sync.Mutex
 	path    string
 	lib     *kicho.Library
@@ -61,6 +67,12 @@ type KifuService struct {
 func NewKifuService(logger *slog.Logger, study *StudyService) *KifuService {
 	return &KifuService{logger: logger, study: study}
 }
+
+// SetStudyStore は検討の控えを繋ぐ（`_cmd/ikkyoku` が起動時に 1 度だけ。2026-09-16）。
+//
+// ⚠️ **nil でも動くこと**（設計原則3）。控えが無ければ「解析あり」の印が出ず、
+// 「解析する」が毎回まっさらに始まるだけで、**棚も解析も今までどおり動く。**
+func (s *KifuService) SetStudyStore(store *StudyStore) { s.store = store }
 
 // 操作ごとの制限時間。
 //
@@ -263,6 +275,13 @@ type GameSummary struct {
 	// Finished は終局済みかどうか。UI で手数の横に「（終局）」を出すのに使う。
 	Finished bool `json:"finished"`
 	Moves    int  `json:"moves"`
+	// Analyzed は**この棋譜の検討の控えがあるか**（2026-09-16。Step 2）。
+	//
+	// **一覧に印を出すためだけのもの。** ⚠️ **無いのが普通**（棚から開いて
+	// 解析した棋譜だけに付く）ので、**あることを前提にした画面にしないこと。**
+	// ⚠️ **控えが無くても「解析する」は今までどおり押せる**（設計原則3）——
+	// これは「前の続きから開く」の目印であって、可否の話ではない。
+	Analyzed bool `json:"analyzed"`
 }
 
 // GameDetail は棋譜 1 件の詳細（KIF 本文つき）。
@@ -275,6 +294,10 @@ type GameDetail struct {
 	Encoding string `json:"encoding"`
 }
 
+// toSummary は棚の 1 行を画面用に変換する。
+//
+// ⚠️ **「解析あり」の印はここでは付けない**（`store.Record` は控えを知らない）。
+// 付けるのは一覧を組み立てる側（`markAnalyzed`）。
 func toSummary(r store.Record) GameSummary {
 	s := GameSummary{
 		ID:        r.ID,
@@ -460,9 +483,19 @@ func (s *KifuService) Search(q SearchQuery) (SearchResult, error) {
 		Shown:     len(res.Games),
 	}
 	for _, r := range res.Games {
-		out.Games = append(out.Games, toSummary(r))
+		out.Games = append(out.Games, s.markAnalyzed(toSummary(r)))
 	}
 	return out, nil
+}
+
+// markAnalyzed は**この棋譜の検討の控えがあるか**を書き込む。
+//
+// ⚠️ **控えが無くても一覧は出ること**（設計原則3）。印が付かないだけ。
+func (s *KifuService) markAnalyzed(g GameSummary) GameSummary {
+	if s.store != nil {
+		g.Analyzed = s.store.HasGame(g.ID)
+	}
+	return g
 }
 
 // Count は保存件数を返す。
@@ -520,12 +553,33 @@ func (s *KifuService) Delete(id string) error {
 // **戻り値は KifuLoad を共有している** —— フロントの描き方が
 // 「根を入れ替えて解析タブを開き、1 行の説明を出す」で同じだから
 // （新規対局・貼り付け・URL が既にそうしている）。**別の経路を作らないこと。**
+// ⚠️ **前に解析していたなら、その続きを開く**（2026-09-16。Step 2）。
+// **枝も評価値もそのまま戻る**のがこの口の値打ちで、棚の棋譜はそのあと
+// **据え直す**（`graftKifu`）—— 棚の側が伸びていても検討を捨てない。
+//
+// ⚠️ **控えが読めなくても「解析する」は成立すること**（設計原則3）。
+// そのときは今までどおり棋譜を読み込むだけ。
 func (s *KifuService) SendToStudy(id string) (KifuLoad, error) {
 	d, err := s.Get(id)
 	if err != nil {
 		return KifuLoad{State: s.study.State()}, err
 	}
-	return s.SendToStudyGame(d)
+	if s.store == nil {
+		return s.SendToStudyGame(d)
+	}
+	st, ok := s.store.RestoreGame(d.ID)
+	if !ok {
+		return s.SendToStudyGame(d)
+	}
+	// **棚の棋譜を据え直す**（前より伸びているかもしれない）。
+	// ⚠️ **据え直せなくても復元は成立している** —— 検討は開けているので、
+	// 棋譜が読めなかったことだけを断って返す。
+	load, err := s.study.graftKifu(d.KIF)
+	if err != nil {
+		s.logger.Warn("棋譜を据え直せませんでした", "id", d.ID, "error", err)
+		return KifuLoad{State: st, Note: "前の検討を開きました（棚の棋譜は読めませんでした）"}, nil
+	}
+	return load, nil
 }
 
 // SendToStudyGame は手元にある棋譜（棚に入れていないものも）を解析タブへ送る。
@@ -550,7 +604,10 @@ func (s *KifuService) SendToStudyGame(d GameDetail) (KifuLoad, error) {
 		// 向こうを直してもここだけ古い言い方で残る。
 		return KifuLoad{State: s.study.State()}, kicho.ErrEmptyKifu
 	}
-	return s.study.loadKifuFrom(d.KIF, kicho.RefetchableURL(d.Source, d.SourceURL))
+	// ⚠️ **棚の id も渡す**（2026-09-16）。**控えをこの棋譜に紐づける鍵**で、
+	// 次に同じ棋譜を開いたときに前の検討が戻るのはこれがあるから。
+	// **棚に入っていない棋譜（取得しただけ）は空**（`d.ID` が無い）。
+	return s.study.loadKifuFrom(d.KIF, kicho.RefetchableURL(d.Source, d.SourceURL), d.ID)
 }
 
 // Fetch は URL（か棋譜 ID）から棋譜を取得する（**保存はしない**）。

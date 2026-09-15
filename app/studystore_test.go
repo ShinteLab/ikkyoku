@@ -291,3 +291,157 @@ func TestStudySessionDropsPointsWithoutNode(t *testing.T) {
 		t.Errorf("木に無い点が残っています: %d, want %d", len(again.Evals[0].Points), n)
 	}
 }
+
+// ---- 棚の棋譜と結ぶ（Step 2）---------------------------------------------
+
+// loaded は棚から開いたことにして棋譜を読み込む（`gameID` が付く）。
+func loaded(t *testing.T, s *StudyService, gameID string) {
+	t.Helper()
+	const kif = "手合割：平手\n手数----指手---------消費時間--\n   1 ７六歩(77)\n   2 ３四歩(33)\n"
+	if _, err := s.loadKifuFrom(kif, "", gameID); err != nil {
+		t.Fatalf("loadKifuFrom: %v", err)
+	}
+}
+
+// 棚から開いた検討の控えに**棚の棋譜 id が付くこと**（2026-09-16。Step 2）。
+//
+// ⚠️ **これが無いと「次に同じ棋譜を開いたら解析が戻る」が成立しない。**
+func TestStudySessionKeepsGameID(t *testing.T) {
+	s := adopted(t)
+	loaded(t, s, "game-1")
+	record(t, s, "e1", score(70))
+	rec, ok := s.sessionRecord()
+	if !ok {
+		t.Fatal("控えが作れません")
+	}
+	if rec.GameID != "game-1" {
+		t.Fatalf("棚の棋譜 id = %q, want game-1", rec.GameID)
+	}
+	// ⚠️ **根を入れ替えたら捨てること**（撮った局面は棚のどの棋譜でもない）。
+	if _, err := s.NewGame(""); err != nil {
+		t.Fatalf("NewGame: %v", err)
+	}
+	if again, _ := s.sessionRecord(); again.GameID != "" {
+		t.Errorf("別の対局に前の棚の id が残っています: %q", again.GameID)
+	}
+}
+
+// 棚の棋譜を開き直すと**前の検討がそのまま戻ること**（Step 2 の目的）。
+func TestStudyStoreRestoreGame(t *testing.T) {
+	dir := t.TempDir()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	s := adopted(t)
+	loaded(t, s, "game-1")
+	record(t, s, "e1", score(70))
+	// 枝を 1 本掘る（**これが戻ることが値打ち**）。
+	if _, err := s.GoTo(1); err != nil {
+		t.Fatalf("GoTo: %v", err)
+	}
+	if _, err := s.Play("8c8d"); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	record(t, s, "e1", score(-40))
+	store := NewStudyStore(logger, dir, s)
+	store.flush()
+
+	// 別のアプリを立ち上げた、のつもり。
+	back := empty(t)
+	other := NewStudyStore(logger, dir, back)
+	if !other.HasGame("game-1") {
+		t.Fatal("「解析あり」の印が出ません")
+	}
+	if other.HasGame("game-2") {
+		t.Error("解析していない棋譜に印が出ています")
+	}
+	if _, ok := other.RestoreGame("game-1"); !ok {
+		t.Fatal("前の検討を開けません")
+	}
+	if len(back.State().Nodes) != len(s.State().Nodes) {
+		t.Errorf("手順が戻っていません: %d 節点, want %d",
+			len(back.State().Nodes), len(s.State().Nodes))
+	}
+	if len(back.Evals().Series) != 1 {
+		t.Errorf("折れ線が戻っていません: %+v", back.Evals().Series)
+	}
+}
+
+// ⚠️ **棚の棋譜 id が無い検討は索引に載らないこと**（撮った 1 局面・貼り付け）。
+// **それが普通**で、棚に入っているほうが特別。
+func TestStudyStoreIgnoresSessionsWithoutGame(t *testing.T) {
+	dir := t.TempDir()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	store := NewStudyStore(logger, dir, analyzed(t))
+	store.flush()
+	other := NewStudyStore(logger, dir, empty(t))
+	if other.HasGame("") {
+		t.Error("空の id に印が出ています")
+	}
+	if _, ok := other.RestoreGame(""); ok {
+		t.Error("空の id で開けてしまいます")
+	}
+}
+
+// ⚠️ **控えが無い棋譜では黙って false を返すこと**（設計原則3）。
+// **「解析する」が押せなくなってはいけない。**
+func TestStudyStoreRestoreGameMissing(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	store := NewStudyStore(logger, t.TempDir(), empty(t))
+	if _, ok := store.RestoreGame("game-9"); ok {
+		t.Error("無い控えを開いたことになっています")
+	}
+}
+
+// ⚠️ **開き直すときは今の検討と入れ替えること**（`restoreSession` の門番は通らない）。
+// 人が「この棋譜を解析する」と言っているのだから、入れ替えるのが正しい。
+func TestStudyStoreRestoreGameReplacesLiveStudy(t *testing.T) {
+	dir := t.TempDir()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	s := adopted(t)
+	loaded(t, s, "game-1")
+	NewStudyStore(logger, dir, s).flush()
+
+	// 別の検討をしている最中に開く。
+	live := adopted(t)
+	if _, err := live.Play("7g7f"); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	if _, ok := NewStudyStore(logger, dir, live).RestoreGame("game-1"); !ok {
+		t.Fatal("始まっている検討の上から開けません")
+	}
+	rec, _ := live.sessionRecord()
+	if rec.GameID != "game-1" {
+		t.Errorf("入れ替わっていません: %q", rec.GameID)
+	}
+}
+
+// ⚠️ **セッションを入れ替える前に控えを書かせること。** 間引きの幅（3 秒）の
+// あいだに入れ替えると、**直前までの手と評価値が前のセッションから落ちる。**
+func TestStudyStoreSavesBeforeSwitching(t *testing.T) {
+	dir := t.TempDir()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	s := adopted(t)
+	loaded(t, s, "game-1")
+	store := NewStudyStore(logger, dir, s)
+	store.Start()
+	defer store.Close()
+
+	// **書かせずに**手を足してから、別の棋譜へ入れ替える。
+	if _, err := s.Play("2g2f"); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	loaded(t, s, "game-2")
+
+	// 前の棋譜の控えに、入れ替え直前の手が入っていること。
+	if _, ok := store.RestoreGame("game-1"); !ok {
+		t.Fatal("前の棋譜の控えがありません")
+	}
+	found := false
+	for _, n := range s.State().Nodes {
+		if n.USI == "2g2f" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("入れ替え直前の手が控えから落ちています")
+	}
+}

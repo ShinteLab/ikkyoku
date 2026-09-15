@@ -54,6 +54,17 @@ type StudyStore struct {
 	// ⚠️ **時刻を含めて比べないこと** —— 毎回違う値になるので、
 	// **何も変わっていなくても書き続ける**ことになる。
 	last []byte
+
+	// mu は索引を守る（**`StudyService` のロックとは別物**）。
+	mu sync.Mutex
+	// games は棚の棋譜 id → 一番新しい控えのファイル名（2026-09-16。Step 2）。
+	//
+	// **棋譜タブの「解析あり」の印と、開いたときの復元がここを引く。**
+	// ⚠️ **棚に入っていない検討は載らない**（`GameID` が空）。**それが普通**で、
+	// 棚に入っているほうが特別。
+	games map[string]string
+	// indexed は索引を組んだか（**一度だけ全部読む**）。
+	indexed bool
 }
 
 // NewStudyStore は控えの置き場を用意する（**ディレクトリはまだ作らない**）。
@@ -68,13 +79,16 @@ func NewStudyStore(logger *slog.Logger, dir string, svc *StudyService) *StudySto
 	}
 }
 
-// Start は自動保存を始める（`StudyService` に知らせ口を差す）。
+// Start は自動保存を始める（`StudyService` に 2 つの口を差す）。
 //
 // ⚠️ **`Restore` のあとに呼ぶこと。** 先に始めると、**復元する前の空の状態を
 // 控えに書いてしまう**（そのまま前回の控えが消える、ではないが余計な 1 本が増える）。
 func (t *StudyStore) Start() {
 	t.svc.mu.Lock()
 	t.svc.dirty = t.mark
+	// ⚠️ **今すぐ書かせる口も差すこと。** セッションを入れ替える前にこれを
+	// 通さないと、**間引きの幅（3 秒）のぶんが前のセッションから落ちる。**
+	t.svc.save = t.flush
 	t.svc.mu.Unlock()
 	go t.loop()
 }
@@ -157,6 +171,7 @@ func (t *StudyStore) flush() {
 		return
 	}
 	t.last = body
+	t.remember(rec.GameID, rec.ID)
 	t.prune()
 }
 
@@ -174,6 +189,8 @@ func (t *StudyStore) write(id string, body []byte) error {
 }
 
 // Restore は**一番新しい控え**を戻す（戻せたなら true）。
+//
+// ⚠️ **棚の棋譜から開く側は `RestoreGame`**（あちらは今の検討と入れ替える）。
 //
 // ⚠️ **1 つしか試さない。** 読めなかったときに古いものへ遡ると、
 // **何日も前の検討が黙って開く**ことになる（何が起きたのか画面から読めない）。
@@ -238,4 +255,115 @@ func (t *StudyStore) prune() {
 			t.logger.Warn("古い控えを消せませんでした", "name", n, "error", err)
 		}
 	}
+}
+
+// ---- 棚の棋譜と結ぶ（2026-09-16。Step 2）--------------------------------
+//
+// **棋譜タブから開いた棋譜には `GameID` が付く**ので、次に同じ棋譜を開いたときに
+// 前の検討（枝も評価値も）がそのまま戻る。
+//
+// ⚠️ **検討の一覧 UI は作らない。** 索引は**棋譜タブ（棚）が既に持っている** ——
+// ここが答えるのは「この棋譜に控えがあるか」「あるならどれか」だけ。
+
+// index は控えを一度だけ全部読んで、棚の棋譜 id ごとに**一番新しいもの**を覚える。
+//
+// ⚠️ **一度だけにすること。** 棋譜タブの一覧は 1 画面で何十行も引くので、
+// 行ごとにディスクを舐めると一覧が固まる。以後は書いたときに足すだけ
+// （`remember`）。
+func (t *StudyStore) index() {
+	if t.indexed {
+		return
+	}
+	t.indexed = true
+	t.games = map[string]string{}
+	names, err := t.list()
+	if err != nil {
+		t.logger.Warn("控えの索引を作れませんでした", "dir", t.dir, "error", err)
+		return
+	}
+	// ⚠️ **古い順に読むこと**（`list` がそう返す）。同じ棋譜の控えが複数あったら
+	// **後から書いたほうが勝つ**（あとの行が上書きする）。
+	for _, n := range names {
+		body, err := os.ReadFile(filepath.Join(t.dir, n))
+		if err != nil {
+			continue
+		}
+		// ⚠️ **`gameId` だけ読めればよい**（木も評価値も要らない）。
+		var head struct {
+			GameID string `json:"gameId"`
+		}
+		if err := json.Unmarshal(body, &head); err != nil || head.GameID == "" {
+			continue
+		}
+		t.games[head.GameID] = n
+	}
+}
+
+// remember は索引を更新する（書いたとき）。
+func (t *StudyStore) remember(gameID, sessionID string) {
+	if gameID == "" {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.index()
+	t.games[gameID] = sessionID + ".json"
+}
+
+// HasGame は棚の棋譜に控えがあるか（**棋譜タブの「解析あり」の印**）。
+//
+// ⚠️ **無いのが普通。** 撮った 1 局面も貼り付けも URL から取っただけも
+// `GameID` を持たないので、印が付くのは**棚から開いて解析した棋譜だけ**。
+func (t *StudyStore) HasGame(gameID string) bool {
+	if gameID == "" {
+		return false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.index()
+	return t.games[gameID] != ""
+}
+
+// RestoreGame は棚の棋譜に紐づく控えを開く（**棋譜タブの「解析する」**）。
+//
+// ⚠️ **今の検討と入れ替える**（`adoptSession`）。`Restore`（起動時）と違って
+// **人が「この棋譜を解析する」と言っている**ので、門番は要らない。
+//
+// ⚠️ **戻せなくてもエラーにしないこと**（false を返すだけ）。呼び出し側は
+// **棋譜を普通に読み込む**へ落ちればよく、**控えが読めないことで
+// 「解析する」が押せなくなってはいけない**（設計原則3）。
+func (t *StudyStore) RestoreGame(gameID string) (StudyState, bool) {
+	if gameID == "" {
+		return StudyState{}, false
+	}
+	t.mu.Lock()
+	t.index()
+	name := t.games[gameID]
+	t.mu.Unlock()
+	if name == "" {
+		return StudyState{}, false
+	}
+	path := filepath.Join(t.dir, name)
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.logger.Warn("控えが読めませんでした", "path", path, "error", err)
+		return StudyState{}, false
+	}
+	var rec StudyRecord
+	if err := json.Unmarshal(body, &rec); err != nil {
+		t.logger.Warn("控えが読めませんでした", "path", path, "error", err)
+		return StudyState{}, false
+	}
+	st, err := t.svc.adoptSession(rec)
+	if err != nil {
+		t.logger.Warn("控えを開けませんでした", "path", path, "error", err)
+		return StudyState{}, false
+	}
+	// ⚠️ **開いた中身を `last` に入れること**（復元直後に同じ内容を書き直さない）。
+	rec.SavedAt = 0
+	if b, err := json.Marshal(rec); err == nil {
+		t.last = b
+	}
+	t.logger.Info("この棋譜の前の検討を開きました", "gameId", gameID, "path", path)
+	return st, true
 }

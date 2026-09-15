@@ -80,7 +80,11 @@ type StudyRecord struct {
 	// **中継を撮っている最中は決まらない** —— そこに合わせると、
 	// 「棋譜になる前は残せない」という行き止まりに入る。
 	ID string `json:"id"`
-	// GameID は棚（`kicho`）の棋譜 id。**空でよい**（Step 2 で結ぶ）。
+	// GameID は棚（`kicho`）の棋譜 id。**空でよい。**
+	//
+	// **これがあると、次に同じ棋譜を棚から開いたときに前の検討が戻る**
+	// （2026-09-16。Step 2）。⚠️ **空が普通**（撮った 1 局面・貼り付け・
+	// URL から取っただけ）—— **棚に入っているのが特別**という向きで扱うこと。
 	GameID string `json:"gameId,omitempty"`
 	// SavedAt は控えた時刻（Unix 秒）。**復元するのは一番新しいもの。**
 	SavedAt int64 `json:"savedAt"`
@@ -152,6 +156,7 @@ func (s *StudyService) sessionRecord() (StudyRecord, bool) {
 		ID:        s.session,
 		SavedAt:   time.Now().Unix(),
 		Study:     snap,
+		GameID:    s.gameID,
 		Game:      game,
 		SourceURL: s.sourceURL,
 		Evals:     s.evals.all(),
@@ -163,10 +168,7 @@ func (s *StudyService) sessionRecord() (StudyRecord, bool) {
 // ⚠️ **既に検討が始まっていたら何もしない。** 起動直後に呼ぶ前提で、
 // **人が始めた検討を控えで上書きしない**（それは黙って作業を捨てるのと同じ）。
 func (s *StudyService) restoreSession(rec StudyRecord) error {
-	if rec.Version != studyRecordVersion {
-		return fmt.Errorf("ikkyoku/app: 控えの版が違います: %d", rec.Version)
-	}
-	study, err := position.RestoreStudy(rec.Study)
+	study, err := parseSession(rec)
 	if err != nil {
 		return err
 	}
@@ -175,9 +177,46 @@ func (s *StudyService) restoreSession(rec StudyRecord) error {
 	if s.study != nil {
 		return fmt.Errorf("ikkyoku/app: 既に検討が始まっています")
 	}
+	s.applySessionLocked(rec, study)
+	return nil
+}
+
+// adoptSession は控えを**今の検討と入れ替える**（棚から開いたとき）。
+//
+// ⚠️ **人が「この棋譜を解析する」と言ったのだから入れ替えるのが正しい** ——
+// `restoreSession` の門番（既に検討が始まっていたら何もしない）はここには要らない。
+// ⚠️ **今の検討は控えに残る**（1 セッション 1 ファイル）ので、消えるわけではない。
+// ⚠️ **呼ぶ前に控えを書かせること**（`saveNow`）—— 間引きの幅（3 秒）のあいだに
+// 入れ替えると、**直前までの手と評価値が前のセッションから落ちる**。
+func (s *StudyService) adoptSession(rec StudyRecord) (StudyState, error) {
+	study, err := parseSession(rec)
+	if err != nil {
+		return s.State(), err
+	}
+	s.saveNow()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.applySessionLocked(rec, study)
+	return s.changed(), nil
+}
+
+// parseSession は控えを読めるかどうかまで見る（**まだ何も入れ替えない**）。
+//
+// ⚠️ **組み立てが通ってから入れ替えること** —— 途中で落ちると、
+// **前の検討も新しい検討も無い状態**になる（`ReloadKifu` と同じ作法）。
+func parseSession(rec StudyRecord) (*position.Study, error) {
+	if rec.Version != studyRecordVersion {
+		return nil, fmt.Errorf("ikkyoku/app: 控えの版が違います: %d", rec.Version)
+	}
+	return position.RestoreStudy(rec.Study)
+}
+
+// applySessionLocked は控えの中身を入れる。**ロックを取った状態で呼ぶこと。**
+func (s *StudyService) applySessionLocked(rec StudyRecord, study *position.Study) {
 	s.study = study
 	s.game = rec.Game
 	s.sourceURL = rec.SourceURL
+	s.gameID = rec.GameID
 	s.session = rec.ID
 	// ⚠️ **点の手数と指し手は木から引き直す**（控えには入っていない）。
 	// **木に無い節点の点は捨てる** —— 描く先が無いので持っていても意味が無い。
@@ -203,8 +242,21 @@ func (s *StudyService) restoreSession(rec StudyRecord) error {
 		}
 		return n.Number, base + n.Number, text, true
 	})
-	// ⚠️ **`rev` は進める**（別ウィンドウが描き直せるように）。⚠️ **`study:changed`
-	// はここで出さない** —— 起動時なので、まだ聞いている窓が無い。
+	// ⚠️ **`rev` は進める**（別ウィンドウが描き直せるように）。
+	// ⚠️ **ここで `study:changed` は出さない** —— 起動時には聞いている窓が無く、
+	// 棚から開くときは呼び出し側（`adoptSession`）が `changed()` を通す。
 	s.rev++
-	return nil
+}
+
+// saveNow は控えを今すぐ書かせる（`StudyStore` が入れる）。
+//
+// ⚠️ **ロックを取る前に呼ぶこと**（向こうが `sessionRecord` でロックを取る）。
+// ⚠️ **nil でも動くこと**（設計原則3）。
+func (s *StudyService) saveNow() {
+	s.mu.Lock()
+	f := s.save
+	s.mu.Unlock()
+	if f != nil {
+		f()
+	}
 }

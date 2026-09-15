@@ -5400,6 +5400,23 @@ html.is-graph #app {
   outline-offset: 1px;
 }
 
+/* 前に解析した棋譜の印（2026-09-16）。**押せるものではない** ——
+   開く口は棋戦名のリンク 1 つで、これは「押すと続きから開く」と分かるための印。
+   ⚠️ **色は評価値グラフの枝と同じ紫**（検討＝枝の色、で揃えてある）。
+   ⚠️ **控えめにすること** —— 一覧で目を引くのは棋戦名と対局者で、
+   これは付いていることに気づけばよい。 */
+.library-analyzed {
+  display: inline-block;
+  margin-top: 2px;
+  padding: 0 5px;
+  font-size: 10.5px;
+  line-height: 15px;
+  color: #b3a8ff;
+  white-space: nowrap;
+  background: #2f2b45;
+  border-radius: 3px;
+}
+
 .library-table .is-num {
   text-align: right;
   font-variant-numeric: tabular-nums;
