@@ -23,6 +23,7 @@ package position
 import (
 	"context"
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 
@@ -223,6 +224,17 @@ type ConnectResult struct {
 	// ⚠️ **空でないなら、盤に出ているのは「撮ったもの」ではない。**
 	// **必ず画面に出すこと。**
 	Fixed []Fix
+	// Near は**一番近づけた盤面と認識結果の食い違い**（繋がらなかったときの手掛かり）。
+	//
+	// ⚠️ **これが無いと「繋がりません」としか言えない。** 何マスがどう食い違って
+	// いるのかが分からなければ、**人はどこを直せばよいのか分からない**
+	// （81 マスを端から見直すことになる）。`Was` が認識結果、`Now` が
+	// **本譜から辿るとそうなるはずの駒**。
+	Near []Fix
+	// NearCost は Near のときの費用（予算とどれくらい離れているか）。
+	NearCost float64
+	// NearDepth は Near がどこまで手を進めたところか。
+	NearDepth int
 }
 
 // Connect は確定局面 from から、盤面 target に至る手順を探す。
@@ -286,6 +298,10 @@ func Connect(ctx context.Context, from *Position, target *Board, opt ConnectOpti
 	}
 	if rep.Stop != StopFound {
 		rep.Nodes += r.Nodes
+		// ⚠️ **手掛かりは厳密一致の側のものを使う。** あちらは費用の表を持たない
+		// ので `NearCost` が**そのまま「何マス食い違っているか」**になる
+		// （修復側は重み付けなので、画面に出しても人には読めない数になる）。
+		rep.Near, rep.NearCost, rep.NearDepth = r.Near, r.NearCost, r.NearDepth
 		// ⚠️ **手順が無く、かつ元の局面との違いが予算に収まるなら「変わっていない」。**
 		// 認識が数マス外しただけで盤は 1 手も進んでいなかった、という形。
 		// **空の手順を据えにいかないための逃げ道**（`dfs` が 0 手を解にしない）。
@@ -308,10 +324,14 @@ func Connect(ctx context.Context, from *Position, target *Board, opt ConnectOpti
 func search(ctx context.Context, root *Position, target *Board, opt ConnectOptions,
 	cost *CellCost, tolerance float64, collect int) (ConnectResult, error) {
 	depth := opt.maxDepth()
-	h := newDiff(root.Board, target, cost, tolerance).bound(root.Turn)
-	if h > depth {
-		return ConnectResult{Stop: StopTooFar}, nil
+	d0 := newDiff(root.Board, target, cost, tolerance)
+	if h := d0.bound(root.Turn); h > depth {
+		// ⚠️ **探索していなくても手掛かりは返すこと。** ここで落ちるのは
+		// 「隔たりが大きすぎる」ときなので、**どこが違うのかが一番知りたい。**
+		return ConnectResult{Stop: StopTooFar, Near: d0.fixes(root.Board, target),
+			NearCost: d0.cost}, nil
 	}
+	h := d0.bound(root.Turn)
 	// ⚠️ **下界から MaxWaste 手ぶんまでしか探さない。** ここを外して MaxDepth まで
 	// 素直に探すと、**相手が往復して戻る手順**でほとんどの盤面が「繋がって」しまい、
 	// 認識の誤りを落とす働きが消える（`DefaultMaxWaste` のコメント）。
@@ -323,7 +343,7 @@ func search(ctx context.Context, root *Position, target *Board, opt ConnectOptio
 	}
 
 	s := &connect{ctx: ctx, target: target, maxNodes: opt.maxNodes(),
-		want: collect, cost: cost, tolerance: tolerance}
+		want: collect, cost: cost, tolerance: tolerance, bestCost: math.Inf(1)}
 	for limit := h; limit <= depth; limit++ {
 		s.limit = limit
 		s.path = s.path[:0]
@@ -331,10 +351,19 @@ func search(ctx context.Context, root *Position, target *Board, opt ConnectOptio
 		if over := s.dfs(root, 0); len(s.sols) > 0 {
 			return s.result(limit), nil
 		} else if over {
-			return ConnectResult{Nodes: s.nodes, Stop: StopBudget}, nil
+			return s.miss(StopBudget), nil
 		}
 	}
-	return ConnectResult{Nodes: s.nodes, Stop: StopUnreachable}, nil
+	return s.miss(StopUnreachable), nil
+}
+
+// miss は繋がらなかった結果に**一番近づけたところ**を載せて返す。
+func (s *connect) miss(why StopReason) ConnectResult {
+	r := ConnectResult{Nodes: s.nodes, Stop: why, Near: s.bestFixes, NearDepth: s.bestDepth}
+	if !math.IsInf(s.bestCost, 1) {
+		r.NearCost = s.bestCost
+	}
+	return r
 }
 
 // ConnectSFEN は盤面部分の SFEN を受ける口（`recognize.Board.SFEN` をそのまま渡せる）。
@@ -365,6 +394,12 @@ type connect struct {
 	path      []string
 	seen      map[string]bool
 	sols      []solution
+	// best は**一番近づけた節点**（繋がらなかったときに「どこが説明できないか」
+	// を言うため）。⚠️ **厳密一致のときも取ること** —— 手掛かりが要るのは
+	// むしろそちら。
+	bestCost  float64
+	bestFixes []Fix
+	bestDepth int
 }
 
 // solution は見つかった手順 1 本（**費用つき**）。
@@ -428,6 +463,9 @@ func (s *connect) dfs(pos *Position, g int) bool {
 		return true // 止めたのは呼び出し側。**到達不能ではない**ので打ち切り扱い
 	}
 	d := newDiff(pos.Board, s.target, s.cost, s.tolerance)
+	if d.cost < s.bestCost {
+		s.bestCost, s.bestFixes, s.bestDepth = d.cost, d.fixes(pos.Board, s.target), g
+	}
 	// ⚠️ **受理は「費用が予算に収まったか」。** 厳密一致では予算も費用も 0 なので、
 	// **1 マスでも違えば通らない**（今までどおり）。
 	// ⚠️ **根そのものを解にしないこと**（`g > 0`）。修復探索では「1 手も指さずに

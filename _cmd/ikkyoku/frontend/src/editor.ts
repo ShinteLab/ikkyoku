@@ -99,6 +99,19 @@ export interface EditorHandle {
   // 中では null が返る）。タブで隠している以上、開いたときに測り直さないと
   // グリッドが出ないか、前回の大きさのまま残って**1 マスずれたところを編集する**。
   relayout(): void;
+  // setMismatch は**本譜から説明できなかったマス**を盤の上で光らせる
+  // （撮った直後の下見。2026-09-15）。空の配列で消える。
+  //
+  // ⚠️ **これが「どこを直せばよいか」の答えそのもの。** 出さないと、
+  // 「繋がりません」と言われた人は**81 マスを端から見直すことになる**。
+  // ⚠️ **盤の中身は 1 マスも変えない**（光らせるだけ。直すのは人）。
+  setMismatch(cells: { rank: number; file: number }[]): void;
+  // setFollowNote は下見の結果を「本譜に繋ぐ」の隣に出す（空で消える）。
+  //
+  // ⚠️ **`onError`（操作の失敗）と同じ行に出さないこと** —— あちらは 1 操作ぶんの
+  // 一時的な文で、こちらは**撮った瞬間からずっと出ている情報**。混ぜると
+  // 互いに上書きし合う（実際にそうなりかけた）。
+  setFollowNote(text: string, caution?: boolean): void;
   // setFollowable は「本譜に繋ぐ」を出すかどうか（**解析タブに局面があるか**）。
   //
   // ⚠️ **「手順があるか」ではない**（2026-09-15 に直した）。画像から追うときは
@@ -332,6 +345,10 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
          ⚠️ **「この局面を解析する」と入れ替えないこと** ——
          あちらは根ごと入れ替える操作で、押し間違えると検討が全部消える。 -->
     <button id="edit-follow" class="ghost-btn" type="button" hidden>本譜に繋ぐ</button>
+    <!-- 下見の結果（2026-09-15）。⚠️ **訂正タブの状態の行とは別にしてある** ——
+         あちらは操作の結果（失敗の理由）を出す行で、こちらは**撮った瞬間から
+         ずっと出ている情報**。同じ行に出すと互いに上書きし合う。 -->
+    <span id="follow-note" class="note"></span>
     <span class="edit-hint">
       盤 ⇄ 駒台をドラッグ（外すと同時に持ち主が決まる） /
       <strong>「<span id="edit-stock-name">足りない駒</span>」をクリックすると掴んだまま連続で置ける</strong>（残り 0 でも置ける。Esc で離す） /
@@ -456,6 +473,7 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
 
   const confirmBtn = confirmHost.querySelector<HTMLButtonElement>("#edit-confirm")!;
   const followBtn = confirmHost.querySelector<HTMLButtonElement>("#edit-follow")!;
+  const followNote = confirmHost.querySelector<HTMLElement>("#follow-note")!;
   const body = panel.querySelector<HTMLDivElement>("#edit-body")!;
   const handZones = [handZone(true), handZone(false)];
   const moveNum = panel.querySelector<HTMLInputElement>("#edit-movenum")!;
@@ -1367,6 +1385,17 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
       syncLoaded();
       resetBtn.hidden = true;
       onState(null);
+    },
+    setFollowNote(text: string, caution?: boolean) {
+      followNote.textContent = text;
+      followNote.classList.toggle("is-caution", !!caution);
+    },
+    setMismatch(list) {
+      const want = new Set(list.map((c) => `${c.rank},${c.file}`));
+      for (const cell of cells) {
+        const key = `${cell.dataset.rank},${cell.dataset.file}`;
+        cell.classList.toggle("is-mismatch", want.has(key));
+      }
     },
     setFollowable(ok: boolean) {
       followBtn.hidden = !ok;

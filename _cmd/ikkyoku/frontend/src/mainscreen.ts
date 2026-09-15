@@ -2471,6 +2471,7 @@ ${st.turnLabel}${n}`;
       fail(String(err instanceof Error ? err.message : err));
       return;
     }
+    editor.setMismatch(probe.mismatch ?? []);
 
     // ⚠️ **認識を覆したなら必ず言うこと。** 黙って直すと、盤に出ている局面が
     // 「撮ったもの」なのか「こちらが直したもの」なのか区別が付かなくなる。
@@ -2528,6 +2529,60 @@ ${st.turnLabel}${n}`;
         }
     }
   };
+
+  // 撮った直後に**自動で下見する**（2026-09-15）。
+  //
+  // ⚠️ **押すまで分からないのは設計が逆だった。** 撮って訂正タブに着いた時点で
+  // 「これは本譜に繋がるのか」「繋がらないならどこが違うのか」が分からないと、
+  // **人はどこを直せばよいか分からない**（実機で「繋がりません」としか出なかった）。
+  //
+  // ⚠️ **木は 1 手も触らない**（下見だけ）。据えるのは今までどおり人が押したとき。
+  // ⚠️ **繋ぐ先が無ければ何もしない**（解析タブが空のときは黙っている）。
+  // ⚠️ **最後に頼んだ 1 回だけを描くこと。** 直すたびに呼ぶので、
+  // **古い下見が後から届いて光るマスが巻き戻る**（1 マス直したのに増えて見える）。
+  let previewSeq = 0;
+  const previewFollow = async () => {
+    const seq = ++previewSeq;
+    if (!studyLoaded) {
+      editor.setMismatch([]);
+      editor.setFollowNote("");
+      return;
+    }
+    let probe: FollowProbe;
+    try {
+      probe = await StudyService.FollowProbe();
+    } catch {
+      return; // ⚠️ **下見の失敗で撮影も訂正も台無しにしない**（設計原則3）
+    }
+    if (seq !== previewSeq) {
+      return; // 追い越された
+    }
+    // **説明できないマスを盤の上で光らせる。** ここが「どこを直せばよいか」の答え。
+    editor.setMismatch(probe.mismatch ?? []);
+    switch (probe.kind) {
+      case "unique": {
+        const moves = probe.candidates?.[0]?.text?.join(" ") ?? "";
+        const fixed = probe.fixed ?? [];
+        const note = fixed.length > 0 ? `／認識を${fixed.length}マス直します` : "";
+        editor.setFollowNote(`本譜の${probe.depth}手先です（${moves}）${note}`);
+        return;
+      }
+      case "choices":
+        editor.setFollowNote(`${probe.reason}。「本譜に繋ぐ」で候補から選べます`, true);
+        return;
+      case "same":
+        editor.setFollowNote("本譜の先端と同じ盤面です");
+        return;
+      case "budget":
+        editor.setFollowNote("");
+        return; // 一時的なものなので黙っておく（押せば分かる）
+      default:
+        // ⚠️ **理由には食い違ったマスが入っている**（Go 側が組み立てる）。
+        editor.setFollowNote(probe.reason, true);
+    }
+  };
+
+
 
   // 解析タブの盤の操作（手を進める UI）。**合法手だけ。**
   //
@@ -3395,6 +3450,9 @@ ${st.turnLabel}${n}`;
       // 押しづらくなる（実際にそうなっていた）。全文は title で読める。
       showSfenNote(st.analyzeSfen && st.analyzeSfen !== st.sfen ? st.analyzeSfen : "");
       fillWarnings(boardWarnings, st.warnings ?? []);
+      // ⚠️ **直すたびに下見し直す**（2026-09-15）。1 マス直せば光るマスが減り、
+      // **全部消えれば繋がる** —— それが見えていることが「どう直すか」の答え。
+      void previewFollow();
     },
     onConfirm: () => {
       void adoptToStudy();
@@ -3844,7 +3902,13 @@ ${st.turnLabel}${n}`;
     // **撮ったら訂正タブへ移る。** 認識結果はまず直すものなので、そこが行き先。
     // 盤が取れなかったときは直すものが無いので、理由の出ている入力タブに留まる。
     if (result.sfen) {
-      void editor.load(result.sfen, cellConfidence(result.debug)).then(() => selectTab(editTab));
+      void editor
+        .load(result.sfen, cellConfidence(result.debug))
+        .then(() => {
+          selectTab(editTab);
+          // **撮ったその場で「繋がるか」を出す**（押させない）。
+          void previewFollow();
+        });
     } else {
       editor.clear();
       showBoard("", "shot");

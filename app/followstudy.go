@@ -18,6 +18,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ShinteLab/core/kifu"
@@ -60,6 +61,11 @@ type FollowChoice struct {
 // ⚠️ **必ず画面に出すこと。** 黙って直すと、盤に出ている局面が「撮ったもの」なのか
 // 「こちらが直したもの」なのか区別が付かなくなる。
 type FollowFix struct {
+	// Rank / File は盤の座標（rank 0 が一段目、file 0 が 9 筋）。
+	//
+	// ⚠️ **盤の上で光らせるのに要る**（`Square` は読ませる用で、位置決めには使えない）。
+	Rank int `json:"rank"`
+	File int `json:"file"`
 	// Square は「９三」のようなマスの名前。
 	Square string `json:"square"`
 	// Was は認識結果（覆される前）。Now は覆した後。
@@ -91,6 +97,13 @@ type FollowProbe struct {
 	// ⚠️ **空でないなら、繋いだ先の盤は「撮ったもの」ではない。**
 	// **画面に出すこと**（黙って直さない）。
 	Fixed []FollowFix `json:"fixed"`
+	// Mismatch は**本譜から説明できなかったマス**（繋がらなかったときだけ）。
+	//
+	// ⚠️ **これを返さないと「繋がりません」としか言えない。** どこがどう違うのかが
+	// 分からなければ**人は 81 マスを端から見直すことになる**。
+	// `Was` が認識結果、`Now` が**本譜から辿るとそうなるはずの駒**なので、
+	// **そのまま直し方の指示になる。**
+	Mismatch []FollowFix `json:"mismatch"`
 }
 
 // FollowApplied は据えた結果。
@@ -165,7 +178,8 @@ func (s *StudyService) FollowProbe() (FollowProbe, error) {
 		// ⚠️ **ここで木を触らない。** 撮った 1 枚は訂正タブに残っているので、
 		// **「この局面を解析する」で新しく始められる**（設計原則3）。
 		out.Kind = FollowUnreachable
-		out.Reason = "今の本譜からは繋がりません（認識の誤りか、別の対局かもしれません）"
+		out.Mismatch = followFixes(r.Near)
+		out.Reason = unreachableReason(out.Mismatch, r.NearDepth)
 		return out, nil
 	}
 
@@ -268,6 +282,36 @@ func followText(rootSfen string, main, moves []string) []string {
 	return out
 }
 
+// unreachableReason は「繋がらない」を**どこが説明できないか**まで含めて言う。
+//
+// ⚠️ **「繋がりません」だけで済ませないこと。** それでは人はどこを直せばよいか
+// 分からず、**81 マスを端から見直すことになる**（実機でそうなった）。
+func unreachableReason(miss []FollowFix, depth int) string {
+	if len(miss) == 0 {
+		return "今の本譜からは繋がりません（認識の誤りか、別の対局かもしれません）"
+	}
+	// **多いときは全部並べない**（読めなくなるので、頭の 3 つと件数）。
+	const show = 3
+	parts := make([]string, 0, show)
+	for i, m := range miss {
+		if i == show {
+			break
+		}
+		parts = append(parts, fmt.Sprintf("%s %s→%s", m.Square, m.Was, m.Now))
+	}
+	more := ""
+	if len(miss) > show {
+		more = fmt.Sprintf(" ほか%dマス", len(miss)-show)
+	}
+	at := "本譜の先端"
+	if depth > 0 {
+		at = fmt.Sprintf("本譜の%d手先", depth)
+	}
+	return fmt.Sprintf("今の本譜からは繋がりません。%sと%dマス食い違っています（%s%s）。"+
+		"「→」の右が本譜から辿ったときの駒です",
+		at, len(miss), strings.Join(parts, "、"), more)
+}
+
 // followFixes は覆したマスを画面に出せる形にする。
 //
 // ⚠️ **マスの名前を作っているだけで、棋譜の表記ではない**（指し手の表記は
@@ -276,6 +320,8 @@ func followFixes(in []position.Fix) []FollowFix {
 	out := make([]FollowFix, 0, len(in))
 	for _, f := range in {
 		out = append(out, FollowFix{
+			Rank:   f.Rank,
+			File:   f.File,
 			Square: squareText(f.Rank, f.File),
 			Was:    f.Was.Name(),
 			Now:    f.Now.Name(),
