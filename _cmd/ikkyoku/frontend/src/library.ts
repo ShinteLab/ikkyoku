@@ -239,29 +239,16 @@ export function mountLibrary(
       link.type = "button";
       link.className = "library-link";
       link.textContent = g.event || "(棋戦名なし)";
-      link.title = g.analyzed
-        ? `${SOURCE_LABELS[g.source] ?? g.source} ／ クリックで解析タブへ（前の検討の続きから開きます）`
-        : `${SOURCE_LABELS[g.source] ?? g.source} ／ クリックで解析タブへ`;
+      link.title = `${SOURCE_LABELS[g.source] ?? g.source} ／ クリックで解析タブへ`;
       // ⚠️ **押しているあいだは押せなくすること**（`analyze` が自分で外す）。
       // 続けて押すと**同じ棋譜を 2 回送って根が入れ替わる。**
       link.addEventListener("click", () => void analyze(g.id, link));
       event.append(link);
 
-      // 前に解析した棋譜の印（2026-09-16。Step 2）。
-      //
-      // ⚠️ **押せるものにしないこと。** 開く口は棋戦名のリンク 1 つで、
-      // これは**「押すと続きから開く」と分かるための印**でしかない
-      // （同じことをする口を 2 つ置かない）。
-      // ⚠️ **無いのが普通**（棚から開いて解析した棋譜だけに付く）ので、
-      // **付いていないことを「できない」と読ませないこと** —— 解析は
-      // どの行からでも押せる。
-      if (g.analyzed) {
-        const mark = document.createElement("span");
-        mark.className = "library-analyzed";
-        mark.textContent = "検討";
-        mark.title = "前の検討が残っています（枝も評価値も、続きから開きます）";
-        event.append(mark);
-      }
+      // ⚠️ **「検討あり」の印を足さないこと**（2026-09-16 に入れて外した）。
+      // **ほとんどの棋譜は一度は開く**ので、印を付けると**全部に付いて
+      // 情報量がゼロ**になる。**前の検討があれば黙って続きから開く**だけでよい
+      // （押した結果で分かる）。
 
       // 「表示」は**先手より前**（2026-09-14）。⚠️ **行の左端に戻さないこと** ——
       // 左端は一覧を目で追う起点（開始日）で、**そこに押すものがあると、

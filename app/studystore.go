@@ -59,7 +59,7 @@ type StudyStore struct {
 	mu sync.Mutex
 	// games は棚の棋譜 id → 一番新しい控えのファイル名（2026-09-16。Step 2）。
 	//
-	// **棋譜タブの「解析あり」の印と、開いたときの復元がここを引く。**
+	// **棋譜タブの「解析する」で前の検討を開くときに引く。**
 	// ⚠️ **棚に入っていない検討は載らない**（`GameID` が空）。**それが普通**で、
 	// 棚に入っているほうが特別。
 	games map[string]string
@@ -267,9 +267,9 @@ func (t *StudyStore) prune() {
 
 // index は控えを一度だけ全部読んで、棚の棋譜 id ごとに**一番新しいもの**を覚える。
 //
-// ⚠️ **一度だけにすること。** 棋譜タブの一覧は 1 画面で何十行も引くので、
-// 行ごとにディスクを舐めると一覧が固まる。以後は書いたときに足すだけ
-// （`remember`）。
+// ⚠️ **一度だけにすること**（以後は書いたときに足すだけ。`remember`）。
+// 控えは 1 セッション 1 ファイルなので、**引くたびにディレクトリを舐めると
+// 「解析する」を押すたびに待たされる。**
 func (t *StudyStore) index() {
 	if t.indexed {
 		return
@@ -308,20 +308,6 @@ func (t *StudyStore) remember(gameID, sessionID string) {
 	defer t.mu.Unlock()
 	t.index()
 	t.games[gameID] = sessionID + ".json"
-}
-
-// HasGame は棚の棋譜に控えがあるか（**棋譜タブの「解析あり」の印**）。
-//
-// ⚠️ **無いのが普通。** 撮った 1 局面も貼り付けも URL から取っただけも
-// `GameID` を持たないので、印が付くのは**棚から開いて解析した棋譜だけ**。
-func (t *StudyStore) HasGame(gameID string) bool {
-	if gameID == "" {
-		return false
-	}
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.index()
-	return t.games[gameID] != ""
 }
 
 // RestoreGame は棚の棋譜に紐づく控えを開く（**棋譜タブの「解析する」**）。

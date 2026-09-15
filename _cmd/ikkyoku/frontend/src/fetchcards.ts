@@ -99,9 +99,6 @@ const cardFromWatch = (w: WatchEntry): FetchCard => {
     endMark: w.endMark,
     finished: w.finished,
     moves: w.moves,
-    // ⚠️ **カードは棚の行ではない**ので、検討の控えの印は付かない（2026-09-16）。
-    // 控えは棚の棋譜 id に紐づくもので、**仮の一覧にはその id が無い。**
-    analyzed: false,
     kif: "",
     encoding: "",
   };

@@ -50,7 +50,7 @@ type KifuService struct {
 
 	// Store は検討の控え（2026-09-16。Step 2）。**`_cmd/ikkyoku` が起動時に差す。**
 	//
-	// **「解析する」で前の検討を開き直す**のと、**一覧の「解析あり」の印**に使う。
+	// **「解析する」で前の検討を開き直す**のに使う。
 	//
 	// ⚠️ **メソッド（`SetStudyStore`）にしないこと**（2026-09-16 に一度やって
 	// 直した）。**Service の公開メソッドはそのままフロントの API になる**ので、
@@ -275,13 +275,6 @@ type GameSummary struct {
 	// Finished は終局済みかどうか。UI で手数の横に「（終局）」を出すのに使う。
 	Finished bool `json:"finished"`
 	Moves    int  `json:"moves"`
-	// Analyzed は**この棋譜の検討の控えがあるか**（2026-09-16。Step 2）。
-	//
-	// **一覧に印を出すためだけのもの。** ⚠️ **無いのが普通**（棚から開いて
-	// 解析した棋譜だけに付く）ので、**あることを前提にした画面にしないこと。**
-	// ⚠️ **控えが無くても「解析する」は今までどおり押せる**（設計原則3）——
-	// これは「前の続きから開く」の目印であって、可否の話ではない。
-	Analyzed bool `json:"analyzed"`
 }
 
 // GameDetail は棋譜 1 件の詳細（KIF 本文つき）。
@@ -294,10 +287,6 @@ type GameDetail struct {
 	Encoding string `json:"encoding"`
 }
 
-// toSummary は棚の 1 行を画面用に変換する。
-//
-// ⚠️ **「解析あり」の印はここでは付けない**（`store.Record` は控えを知らない）。
-// 付けるのは一覧を組み立てる側（`markAnalyzed`）。
 func toSummary(r store.Record) GameSummary {
 	s := GameSummary{
 		ID:        r.ID,
@@ -483,20 +472,15 @@ func (s *KifuService) Search(q SearchQuery) (SearchResult, error) {
 		Shown:     len(res.Games),
 	}
 	for _, r := range res.Games {
-		out.Games = append(out.Games, s.markAnalyzed(toSummary(r)))
+		out.Games = append(out.Games, toSummary(r))
 	}
 	return out, nil
 }
 
-// markAnalyzed は**この棋譜の検討の控えがあるか**を書き込む。
-//
-// ⚠️ **控えが無くても一覧は出ること**（設計原則3）。印が付かないだけ。
-func (s *KifuService) markAnalyzed(g GameSummary) GameSummary {
-	if s.Store != nil {
-		g.Analyzed = s.Store.HasGame(g.ID)
-	}
-	return g
-}
+// ⚠️ **一覧に「検討あり」の印を出さないこと**（2026-09-16 に入れて外した）。
+// **ほとんどの棋譜は一度は開く**ので、印を付けると**全部に付いて情報量がゼロ**に
+// なる。⚠️ **一覧の行に「たいてい真になる印」を足さないこと** —— 行が増えた
+// ぶんだけ読みにくくなるだけで、何も分からない。
 
 // Count は保存件数を返す。
 //
@@ -923,9 +907,9 @@ func (s *KifuService) SaveStudy() (GameSummary, error) {
 		return GameSummary{}, describeKifuError(err)
 	}
 	// ⚠️ **結んでから控えを書かせること**（`saveNow`）。書かないと**索引に
-	// 載らない**ので、一覧の「解析あり」の印が次の起動まで出ない。
+	// 載らない**ので、次の起動まで「解析する」が続きから開かない。
 	s.study.setGameID(rec.ID)
 	s.study.saveNow()
 	s.logger.Info("検討を棚に登録しました", "id", rec.ID, "moves", rec.Moves)
-	return s.markAnalyzed(toSummary(rec)), nil
+	return toSummary(rec), nil
 }

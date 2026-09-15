@@ -347,11 +347,9 @@ func TestStudyStoreRestoreGame(t *testing.T) {
 	// 別のアプリを立ち上げた、のつもり。
 	back := empty(t)
 	other := NewStudyStore(logger, dir, back)
-	if !other.HasGame("game-1") {
-		t.Fatal("「解析あり」の印が出ません")
-	}
-	if other.HasGame("game-2") {
-		t.Error("解析していない棋譜に印が出ています")
+	// ⚠️ **別の棋譜の控えを開かないこと**（索引が id で引けている歯止め）。
+	if _, ok := other.RestoreGame("game-2"); ok {
+		t.Error("解析していない棋譜の控えを開いています")
 	}
 	if _, ok := other.RestoreGame("game-1"); !ok {
 		t.Fatal("前の検討を開けません")
@@ -373,9 +371,6 @@ func TestStudyStoreIgnoresSessionsWithoutGame(t *testing.T) {
 	store := NewStudyStore(logger, dir, analyzed(t))
 	store.flush()
 	other := NewStudyStore(logger, dir, empty(t))
-	if other.HasGame("") {
-		t.Error("空の id に印が出ています")
-	}
 	if _, ok := other.RestoreGame(""); ok {
 		t.Error("空の id で開けてしまいます")
 	}
