@@ -2658,6 +2658,11 @@ ${st.turnLabel}${n}`;
   // ループが死んでも数字は増え続ける（実機で指摘された）。
   let followTickAt = 0;
   let followWatch: number | undefined;
+  // ⚠️ **繋がらない周が続いた回数**（2026-09-15）。**遅れが開きすぎると二度と
+  // 追いつけない** —— `Connect` が探すのは 4 手までなので、そこを超えたら
+  // **黙って「待機中」のまま何十手も過ぎる**（実機で 90 手ぶん無反応になった）。
+  // **人が気づけるようにするのが目的**で、直す手立ては撮り直して繋ぎ直すこと。
+  let followLost = 0;
 
   // ⚠️ **状態は枠へも流すこと**（2026-09-15。実機で「枠側が録画しているか
   // 分からない」と出た）。**追跡中に見ているのは中継**なので、
@@ -2690,6 +2695,7 @@ ${st.turnLabel}${n}`;
     }
     if (on) {
       followTickAt = Date.now();
+      followLost = 0;
       // ⚠️ **見張りを付けること**（2026-09-15）。**1 周の予約を取りこぼすと
       // 追跡が黙って死ぬ**という壊れ方を実際にやったので、
       // **止まっていたら自力で立て直す**。⚠️ **これは保険であって設計ではない** ——
@@ -2723,12 +2729,12 @@ ${st.turnLabel}${n}`;
   // 見送りの `return` が予約を飛ばしていて、**盤が映らなかった最初の 1 回で
   // ループが死んでいた** —— 大盤解説で死に、盤に戻っても復活しなかった。
   // **「1 周やる」と「回し続ける」を同じ関数に混ぜない。**
-  const followOnce = async () => {
+  const followOnce = async (): Promise<boolean> => {
     const shot = await CaptureService.CaptureQuiet();
     if (!shot.sfen) {
       // 盤が取れなかった（枠に盤が映っていない）。**黙って次へ。**
       publishFollow(followNote("待機中（盤が映っていません）"));
-      return;
+      return false;
     }
     // ⚠️ **追っている盤でなければ見送る**（2026-09-15）。中継には**大盤**
     // （解説用）が映り、あちらは**将棋の局面としては矛盾しない**ので
@@ -2738,7 +2744,7 @@ ${st.turnLabel}${n}`;
       // ⚠️ **止めないこと。** 大盤はすぐ本物へ戻るので、**待てばよい**。
       sidePane.setStatus(`別の盤が映っています（${shot.offBoardReason}）。待っています`);
       publishFollow(followNote("待機中（別の盤）"));
-      return;
+      return false;
     }
     // ⚠️ **訂正タブへ流さないこと**（2026-09-15 に実機で踏んだ）。
     // 以前はここで `PositionService.Load` を呼んでいたので、
@@ -2767,20 +2773,50 @@ ${st.turnLabel}${n}`;
         !!got.guess,
       );
       publishFollow(followNote(`${moves}${mark}`));
-    } else {
-      publishFollow(followNote("追跡中"));
+      followLost = 0;
+      // ⚠️ **手が増えたなら間を置かずにもう 1 周**。**認識に 2 秒かかる**ので、
+      // そのうえ待つと**1 手進むのに 3 秒以上**になり、早指しに構造的に追いつけない
+      // （実機で 4 手目以降ずっと置いていかれた）。
+      return true;
     }
+    // ⚠️ **「変わっていない」は迷子ではない**（長考中は毎周これ）。
+    // 数えるのは**繋ごうとして繋がらなかった周**だけ。
+    if (got.kind === "same" || got.kind === "unreadable") {
+      followLost = 0;
+      publishFollow(followNote("追跡中"));
+      return false;
+    }
+    followLost += 1;
+    if (followLost >= followLostLimit) {
+      sidePane.setStatus(
+        `本譜に繋がらない状態が続いています（${got.reason || got.kind}）。` +
+          "撮って「この局面を解析する」で繋ぎ直してください",
+      );
+      publishFollow(followNote("見失っています"));
+      return false;
+    }
+    publishFollow(followNote("追跡中"));
+    return false;
   };
+
+  // followLostLimit は「見失った」と言い出すまでの周回数。
+  //
+  // ⚠️ **1 周で言わないこと** —— 駒が飛んでいる途中のフレームは普通に繋がらないので、
+  // **たまたま繋がらない周は正常**。続くことが異常。
+  const followLostLimit = 5;
 
   // followSchedule は次の 1 周を予約する。⚠️ **出口はここ 1 か所**
   // （予約し忘れ ＝ 追跡が黙って死ぬ、という壊れ方を作らないため）。
-  const followSchedule = () => {
+  const followSchedule = (soon = false) => {
     if (followTimer !== undefined) {
       window.clearTimeout(followTimer);
       followTimer = undefined;
     }
     if (followOn) {
-      followTimer = window.setTimeout(() => void followTick(), followTickMs);
+      // ⚠️ **追いついていないなら間を置かない。** 認識だけで 2 秒かかるので、
+      // **待ち時間はそのぶん遅れが開く**。⚠️ **0 にはしないこと**
+      // （画面の更新が入る隙間が無くなる）。
+      followTimer = window.setTimeout(() => void followTick(), soon ? 50 : followTickMs);
     }
   };
 
@@ -2789,8 +2825,9 @@ ${st.turnLabel}${n}`;
       return;
     }
     followTickAt = Date.now();
+    let soon = false;
     try {
-      await followOnce();
+      soon = await followOnce();
     } catch (err) {
       // ⚠️ **枠が出ていない等はここに来る。** 黙って回し続けると理由が読めないので
       // **止めて理由を出す**（設計原則3 は「落ちない」であって「黙る」ではない）。
@@ -2798,7 +2835,7 @@ ${st.turnLabel}${n}`;
       return;
     }
     followTickAt = Date.now();
-    followSchedule();
+    followSchedule(soon);
   };
 
   studyFollowBtn.addEventListener("click", () => {

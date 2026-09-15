@@ -704,3 +704,68 @@ func TestFollowProbeStillReadsEditor(t *testing.T) {
 		t.Fatalf("訂正タブの盤から繋がっていません: %+v", got)
 	}
 }
+
+// ⚠️ **1 枚の画像から取れるだけ取ること**（2026-09-15 に実機で踏んだ）。
+//
+// **実機の症状**: ゲーム画面で試したら 4 手目までしか追えず、そこから 90 手まで
+// 無反応になった。**認識 1 枚に 2.1 秒**かかるのに**1 周 1 手**しか足していな
+// かったので、**3 秒に 1 手**しか進めず、遅れが一方的に開いて
+// **`Connect` の探索範囲（4 手）を超えた時点で永久に復帰できなくなった。**
+//
+// **撮った 1 枚には何手ぶんも先が写っている。** 1 手だけ取って残りを捨て、
+// また 2 秒かけて撮り直すのは無駄でしかない。
+func TestFollowAutoCatchesUpFromOneFrame(t *testing.T) {
+	s, _ := following(t)
+
+	// **2 手進んだ盤面が 1 枚に写っている**（実機で起きていたのがこれ）。
+	//
+	// ⚠️ **手順が入れ替えられない組み合わせにすること** —— 7g7f と 2g2f のように
+	// **互いに独立な 2 手は順番が決まらない**（`▲7六 △3四 ▲2六` と
+	// `▲2六 △3四 ▲7六` が同じ盤面になる）ので、**繋がらないのが正しい。**
+	want := []string{"7g7f", "3c3d"}
+	a, err := s.FollowAuto(boardAfter(t, want...), evenConf(0.9))
+	if err != nil {
+		t.Fatalf("FollowAuto: %v", err)
+	}
+	if !a.Applied {
+		t.Fatalf("進んでいません: %+v", a)
+	}
+	if a.Added != 2 {
+		t.Fatalf("足したのは %d 手（2 手のはず）: %v", a.Added, a.Moves)
+	}
+	for i, mv := range want {
+		if a.Moves[i] != mv {
+			t.Fatalf("手順が違います: %v, want %v", a.Moves, want)
+		}
+	}
+	// ⚠️ **日本語表記も手数ぶん揃っていること**（画面に出すのはこちら）。
+	if len(a.Text) != 2 {
+		t.Errorf("表記が %d 個（2 個のはず）: %v", len(a.Text), a.Text)
+	}
+	// **先端を見ていたので付いていく。**
+	if a.State.CurrentID != a.State.MainTip {
+		t.Errorf("先端に付いていっていません: cur=%d tip=%d", a.State.CurrentID, a.State.MainTip)
+	}
+}
+
+// ⚠️ **追いつき切ったら止まること**（無限に手を生やさない）。
+//
+// **盤面が本譜と同じなら 1 手も足さない** —— 繰り返しの終わり方がこれ。
+func TestFollowAutoStopsWhenCaughtUp(t *testing.T) {
+	s, _ := following(t)
+
+	if _, err := s.FollowAuto(boardAfter(t, "7g7f", "3c3d"), evenConf(0.9)); err != nil {
+		t.Fatalf("FollowAuto: %v", err)
+	}
+	// **同じ盤面をもう一度渡す。** 追いつき済みなので 1 手も増えないこと。
+	a, err := s.FollowAuto(boardAfter(t, "7g7f", "3c3d"), evenConf(0.9))
+	if err != nil {
+		t.Fatalf("FollowAuto: %v", err)
+	}
+	if a.Applied {
+		t.Fatalf("追いつき済みなのに手を足しました: %+v", a.Moves)
+	}
+	if a.Kind != FollowSame {
+		t.Errorf("Kind = %q, want %q", a.Kind, FollowSame)
+	}
+}

@@ -471,6 +471,16 @@ func (s *StudyService) fallbackFollow(ranked position.RankResult, r position.Con
 //
 // ⚠️ **見ている場所は「先端を見ていたときだけ」動かす。** 戻って検討している
 // 最中に飛ばされると、**中継が進むたびに読んでいた枝から引き剥がされる**。
+//
+// ⚠️ **1 枚から取れるだけ取ること**（2026-09-15 に実機で踏んだ）。**認識 1 枚に
+// 2.1 秒かかる**ので、**1 周 1 手にすると 3 秒に 1 手しか進めない** ——
+// ゲーム画面はそれより速く進むので、**遅れが一方的に開いて 4 手を超えた時点で
+// 永久に復帰できなくなった**（実機で 4 手目以降 90 手まで無反応）。
+//
+// **撮った 1 枚には「何手ぶんも先」が写っている。** それを 1 手だけ取り出して
+// 残りを捨て、また 2 秒かけて撮り直すのは無駄でしかない。
+// ⚠️ **1 手ごとの判断の厳しさは変えていない** —— 同じ `followProbe` を
+// 同じ盤に対して繰り返すだけで、**決められなくなった時点で止まる**。
 func (s *StudyService) FollowAuto(boardSFEN string, cellConfidence []float64) (a FollowAuto, err error) {
 	// ⚠️ **訂正タブを通さないこと**（2026-09-15 に実機で踏んだ）。
 	// 以前は呼び出し側が毎周 `PositionService.Load` を呼んでいたので、
@@ -482,34 +492,65 @@ func (s *StudyService) FollowAuto(boardSFEN string, cellConfidence []float64) (a
 	}
 	// ⚠️ **修復してよいのは費用表があるときだけ**（`followCost` と同じ約束）。
 	// 確信度が無ければ**どのマスを覆してよいかの根拠が無い**ので、厳密一致に倒す。
-	p, e := s.followProbe(board, cost, cost != nil, rotated)
-	if e != nil {
-		return FollowAuto{}, e
-	}
-	a = FollowAuto{Kind: p.Kind, Reason: p.Reason, Guess: p.Guess, Fit: p.Fit,
-		Fixed: p.Fixed, Mismatch: p.Mismatch}
-	if p.Kind != FollowUnique || len(p.Candidates) == 0 {
-		// **足せる手が無い**（変わっていない／読めない／決められない）。
-		a.State = s.State()
-		return a, nil
-	}
-
 	// ⚠️ **先端を見ていたなら付いていく**（`tail -f` と同じ）。
 	// 戻って読んでいるなら**動かさない**（`mergeReloadLocked` と同じ約束）。
+	// ⚠️ **判定は繰り返しに入る前の 1 回だけ** —— 自分で足した手で先端が動くので、
+	// 中で見ると**2 手目以降は必ず「先端ではない」**になる。
 	s.mu.Lock()
 	atTip := s.study != nil && s.study.CurrentID() == mainTipID(s.study)
 	s.mu.Unlock()
 
-	moves := p.Candidates[0].Moves
-	applied, err := s.FollowApply(moves, p.Rev, atTip)
-	if err != nil {
-		return a, err
+	for i := 0; i < followCatchUp; i++ {
+		p, e := s.followProbe(board, cost, cost != nil, rotated)
+		if e != nil {
+			if a.Applied {
+				// 途中まで足せているなら、それは成果。**捨てない。**
+				break
+			}
+			return FollowAuto{}, e
+		}
+		if !a.Applied {
+			// **1 周目の下見がこの周の「結果」**（見送った理由もここから出る）。
+			a = FollowAuto{Kind: p.Kind, Reason: p.Reason, Guess: p.Guess,
+				Fit: p.Fit, Fixed: p.Fixed, Mismatch: p.Mismatch}
+		}
+		if p.Kind != FollowUnique || len(p.Candidates) == 0 {
+			// **足せる手が無い**（変わっていない／読めない／決められない）。
+			// ⚠️ **2 手目以降なら、これが「追いつき切った」の正常な終わり方。**
+			break
+		}
+		moves := p.Candidates[0].Moves
+		applied, aerr := s.FollowApply(moves, p.Rev, atTip)
+		if aerr != nil {
+			if a.Applied {
+				break
+			}
+			return a, aerr
+		}
+		a.Applied = true
+		a.Moves = append(a.Moves, moves...)
+		a.Text = append(a.Text, p.Candidates[0].Text...)
+		a.Added += applied.Added
+		// ⚠️ **推測が 1 つでも混じったら印を付ける**（`Node.Guess` は手ごとに付く）。
+		a.Guess = a.Guess || p.Guess
+		a.Fit, a.Fixed, a.Mismatch = p.Fit, p.Fixed, p.Mismatch
+		a.Note, a.State = applied.Note, applied.State
 	}
-	a.Applied, a.Moves, a.Added = true, moves, applied.Added
-	a.Text = p.Candidates[0].Text
-	a.Note, a.State = applied.Note, applied.State
+	if !a.Applied {
+		a.State = s.State()
+	}
+	if a.Added > 1 {
+		s.logger.Info("1 枚から追いつきました", "moves", a.Moves, "guess", a.Guess)
+	}
 	return a, nil
 }
+
+// followCatchUp は**1 枚の画像から足す手数の上限**。
+//
+// ⚠️ **上限を置くこと** —— `followProbe` が毎回「足せる」と言い続ける状況
+// （費用表が壊れている等）で**無限に手が生える**のを防ぐ。
+// 12 手あれば、認識 2 秒 × 早指しでも十分に追いつく。
+const followCatchUp = 12
 
 // FollowAuto は 1 手ぶんの追従の結果。
 type FollowAuto struct {
