@@ -514,10 +514,32 @@ func (s *StudyService) FollowAuto(boardSFEN string, cellConfidence []float64) (a
 			a = FollowAuto{Kind: p.Kind, Reason: p.Reason, Guess: p.Guess,
 				Fit: p.Fit, Fixed: p.Fixed, Mismatch: p.Mismatch}
 		}
-		if p.Kind != FollowUnique || len(p.Candidates) == 0 {
-			// **足せる手が無い**（変わっていない／読めない／決められない）。
+		if len(p.Candidates) == 0 || (p.Kind != FollowUnique && p.Kind != FollowChoices) {
+			// **足せる手が無い**（変わっていない／読めない／繋がらない）。
 			// ⚠️ **2 手目以降なら、これが「追いつき切った」の正常な終わり方。**
 			break
+		}
+		// ⚠️ **順番が決まらなくても、行き先が決まっているなら進む**
+		// （2026-09-15 に実機で踏んだ）。**追従には聞く相手が居ない。**
+		//
+		// **実機の症状**: 1 周で繋げられないと、そのぶん遅れが開き、次の周はもっと
+		// 繋がらなくなる —— **1 回の見送りが雪崩になって、そこから永久に戻らない**
+		// （4 手目で止まって 90 手まで無反応）。
+		//
+		// ⚠️ **順番が入れ替わっても行き着く局面は同じ**（それが transposition の
+		// 定義）。**解析は 1 文字も変わらない**ので、失うのは棋譜の手順の並びだけ。
+		// ⚠️ **だから必ず推測の印を付けること**（`Node.Guess` → 橙の丸）——
+		// **`TODO.md`「本譜のロック」が守りたいのは「嘘を実際に現れた指し手として
+		// 残さない」こと**で、印が付いていればそれは守られている。
+		// ⚠️ **並べきれないとき（`More`）は進まない** —— 候補として出せないなら
+		// 行き先も確かめられていない。
+		// ⚠️ **手で繋ぐ側（`FollowProbe`）は今までどおり人に聞く** ——
+		// **人が居るのに黙って選ぶ理由は無い。**
+		if p.Kind == FollowChoices {
+			if p.More {
+				break
+			}
+			a.Guess = true
 		}
 		moves := p.Candidates[0].Moves
 		applied, aerr := s.FollowApply(moves, p.Rev, atTip)

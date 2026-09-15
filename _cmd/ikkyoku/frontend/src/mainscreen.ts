@@ -2787,6 +2787,10 @@ ${st.turnLabel}${n}`;
       return false;
     }
     followLost += 1;
+    // ⚠️ **繋げなかった周の画像を残す**（2026-09-15。上限つき）。
+    // **採用した画像だけでは、止まった原因が分からない** —— 実機で 4 手目から
+    // 90 手ぶん止まったとき、**止まった瞬間の証拠だけが残っていなかった。**
+    void CaptureService.SaveFollowMiss(followWaiting, got.kind ?? "miss");
     if (followLost >= followLostLimit) {
       sidePane.setStatus(
         `本譜に繋がらない状態が続いています（${got.reason || got.kind}）。` +

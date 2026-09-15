@@ -128,6 +128,15 @@ type CaptureService struct {
 	// ⚠️ **撮った時点ではまだ「その手を決めた画像」かどうか分からない** ——
 	// 決めるのは解析タブ側（`FollowAuto`）なので、**答えが返るまで持っておく**。
 	lastQuiet image.Image
+	// followMisses は**繋げなかった周を残した枚数**（2026-09-15）。
+	//
+	// ⚠️ **見送りを全部残さない方針の例外。** 1 秒ごとの空振りは残さないが、
+	// **「繋ごうとして繋げなかった」周だけは残す** —— 実機で追従が止まったとき、
+	// **止まった瞬間の画像が無いせいで原因が分からなかった**（採用した画像しか
+	// 残していないので、**壊れた場面の証拠だけが消える**という一番まずい形）。
+	// ⚠️ **上限を置くこと**（`followMissMax`）—— 追いつけない状態は何十分も続くので、
+	// 上限が無いとディスクが埋まる。**知りたいのは崩れ始めの数枚**。
+	followMisses int
 
 	// clickThrough は設定「枠の内側で後ろの画面を操作する」（`ikkyoku.Config.ClickThrough`）。
 	clickThrough bool
@@ -909,7 +918,7 @@ func (s *CaptureService) startFollowDir() string {
 		}
 	}
 	s.mu.Lock()
-	s.followDir = dir
+	s.followDir, s.followMisses = dir, 0
 	s.mu.Unlock()
 	return dir
 }
@@ -937,6 +946,56 @@ func (s *CaptureService) SaveFollowFrame(number int, moves []string, guess bool)
 		return ""
 	}
 	return path
+}
+
+// followMissMax は**繋げなかった周を残す枚数の上限**。
+//
+// ⚠️ **知りたいのは崩れ始めの数枚**（そこから先は同じ状態が続くだけ）。
+const followMissMax = 12
+
+// SaveFollowMiss は**繋げなかった周**の画像を残す（2026-09-15）。
+//
+// ⚠️ **採用した画像だけでは原因が分からない。** 実機で追従が 4 手目から
+// 90 手ぶん止まったとき、**止まった瞬間の画像が 1 枚も残っていなかった**ので、
+// 「認識が外したのか」「順番が決まらなかったのか」を切り分けられなかった。
+//
+// ⚠️ **上限を超えたら黙って捨てること**（設計原則3）。追いつけない状態は
+// 何十分も続くので、全部残すとディスクが埋まる。
+func (s *CaptureService) SaveFollowMiss(number int, kind string) string {
+	s.mu.Lock()
+	dir, img, n := s.followDir, s.lastQuiet, s.followMisses
+	if dir != "" && img != nil && n < followMissMax {
+		s.followMisses = n + 1
+	}
+	s.mu.Unlock()
+	if dir == "" || img == nil || n >= followMissMax {
+		return ""
+	}
+	name := followMissName(number, kind, n)
+	path, err := ikkyoku.SavePNGAs(img, dir, name)
+	if err != nil {
+		s.logger.Warn("繋げなかった画像を残せません", "name", name, "error", err)
+		return ""
+	}
+	s.logger.Info("繋げなかった周を残しました", "name", name)
+	return path
+}
+
+// followMissName は「x042-choices-1.png」のような名前を組み立てる。
+//
+// ⚠️ **頭に x を付けること** —— 採用した画像（`042-7g7f.png`）と並ぶので、
+// **どれが成立した手でどれが失敗かが名前で分かる**必要がある。
+// ⚠️ **連番を付けること** —— 同じ手数で何周も失敗するので、
+// 付けないと**崩れ始めの 1 枚が後の周に上書きされる**（一番見たい 1 枚が消える）。
+func followMissName(number int, kind string, seq int) string {
+	if number < 0 {
+		number = 0
+	}
+	k := strings.Map(safeNameRune, kind)
+	if k == "" {
+		k = "miss"
+	}
+	return fmt.Sprintf("x%03d-%s-%d.png", number, k, seq+1)
 }
 
 // followFrameName は「042-7g7f-guess.png」のような名前を組み立てる。
@@ -980,7 +1039,7 @@ func (s *CaptureService) ClearBoardAnchor() {
 	// ⚠️ **録画も畳むこと。** 次に「追う」を押したら**別の対局**かもしれないので、
 	// 前の回の続きに書き足すと**1 つのディレクトリに 2 局が混ざる**。
 	s.boardAnchor, s.quietOutcome = recognize.Signature{}, ""
-	s.followDir, s.lastQuiet = "", nil
+	s.followDir, s.lastQuiet, s.followMisses = "", nil, 0
 	s.mu.Unlock()
 }
 

@@ -38,3 +38,27 @@ func TestFollowFrameName(t *testing.T) {
 		})
 	}
 }
+
+// ⚠️ **繋げなかった周の名前**。採用した画像と並ぶので、**名前で区別が付くこと**と、
+// **同じ手数で何周も失敗しても上書きされないこと**が要点。
+func TestFollowMissName(t *testing.T) {
+	tests := []struct {
+		number int
+		kind   string
+		seq    int
+		want   string
+	}{
+		{42, "choices", 0, "x042-choices-1.png"},
+		{42, "choices", 1, "x042-choices-2.png"},
+		{7, "unreachable", 0, "x007-unreachable-1.png"},
+		// 種類が読めなくても名前は成り立つこと。
+		{5, "", 0, "x005-miss-1.png"},
+		{5, "../evil", 0, "x005-evil-1.png"},
+	}
+	for _, tt := range tests {
+		if got := followMissName(tt.number, tt.kind, tt.seq); got != tt.want {
+			t.Errorf("followMissName(%d, %q, %d) = %q, want %q",
+				tt.number, tt.kind, tt.seq, got, tt.want)
+		}
+	}
+}
