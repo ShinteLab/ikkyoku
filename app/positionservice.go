@@ -573,6 +573,55 @@ func (s *PositionService) followCost() (*position.CellCost, bool) {
 	return c, true
 }
 
+// followFrame は**撮った 1 枚から追従用の盤と費用表を作る**（2026-09-15）。
+//
+// ⚠️ **訂正タブの状態を一切変えないこと。** 以前は追従の 1 周ごとに `Load` を
+// 呼んでいたので、**人が訂正タブで作業していると 1 秒ごとに中継の盤で
+// 上書きされた**（実機で踏んだ —— 学習データを登録しようとして消えた）。
+// **訂正タブは人の作業場であって、追従の一時バッファではない。**
+//
+// ⚠️ **目線（`nearWhite`）だけは見る。** あれは**人が決めた設定**であって
+// 局面ではない —— 撮った画像が後手目線なら、追従でも同じだけ回す必要がある。
+//
+// ⚠️ **`humanEditCost` は出てこない**（`followCost` との違い）。ここには
+// **人が直したマスという概念が無い**（誰も触っていない 1 枚なので）。
+// 人が直した盤で繋ぐのは訂正タブの「本譜に繋ぐ」＝ `followCost` の側。
+func (s *PositionService) followFrame(boardSFEN string, conf []float64) (*position.Board, *position.CellCost, bool, error) {
+	b, err := position.FromSFEN(boardSFEN)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	grid := confGrid(conf)
+
+	s.mu.Lock()
+	rotate := s.nearWhite
+	s.mu.Unlock()
+
+	var cost *position.CellCost
+	if grid != nil {
+		c := &position.CellCost{}
+		for r := 0; r < 9; r++ {
+			for f := 0; f < 9; f++ {
+				// ⚠️ **0 のマスを作らないこと**（`minCellCost` と同じ理由） ——
+				// 確信度 0 のマスをただで覆せると、予算という歯止めが効かなくなる。
+				v := grid[r][f]
+				if v < minCellCost {
+					v = minCellCost
+				}
+				c[r][f] = v
+			}
+		}
+		cost = c
+	}
+	if rotate {
+		b = b.Rotate180()
+		if cost != nil {
+			cost = cost.Rotate180()
+		}
+	}
+	return b, cost, rotate, nil
+}
+
 // cellEdited はそのマスが読み込んだときから変わっているか（＝人が直したか）。
 func cellEdited(cur, origin *position.Board, rank, file int) bool {
 	a, err1 := cur.At(rank, file)

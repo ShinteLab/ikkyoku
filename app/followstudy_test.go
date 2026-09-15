@@ -48,11 +48,11 @@ func evenConf(v float64) []float64 {
 	return out
 }
 
-// shot は「初期局面から n 手進んだ盤面を撮った」状態を訂正タブに作る。
+// boardAfter は「初期局面から n 手進んだ盤面」の SFEN を作る（＝撮った 1 枚）。
 //
-// ⚠️ **手番も駒台も設定しない** —— 撮った直後はどちらも未決なのが普通で、
+// ⚠️ **手番も駒台も付かない** —— 撮った直後はどちらも未決なのが普通で、
 // **そのままで繋がること自体が要件**（`position.Connect` が経路から決める）。
-func shot(t *testing.T, pos *PositionService, moves ...string) {
+func boardAfter(t *testing.T, moves ...string) string {
 	t.Helper()
 	p, err := position.FromFullSFEN(hirateBoard + " b - 1")
 	if err != nil {
@@ -63,7 +63,16 @@ func shot(t *testing.T, pos *PositionService, moves ...string) {
 			t.Fatalf("ApplyMove(%q): %v", m, err)
 		}
 	}
-	if _, err := pos.Load(p.BoardSFEN(), nil); err != nil {
+	return p.BoardSFEN()
+}
+
+// shot は撮った盤面を**訂正タブ**に置く（手で繋ぐ側＝`FollowProbe` の入口）。
+//
+// ⚠️ **追従（`FollowAuto`）はここを通らない** —— あちらは撮った 1 枚を直に受け取る。
+// **訂正タブは人の作業場**なので、1 秒ごとに上書きしてはいけない（実機で踏んだ）。
+func shot(t *testing.T, pos *PositionService, moves ...string) {
+	t.Helper()
+	if _, err := pos.Load(boardAfter(t, moves...), nil); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 }
@@ -465,11 +474,10 @@ func TestFollowProbeDoesNotGuessWhenUnclear(t *testing.T) {
 // **「訂正を挟むかどうか」をこちらが決めない**のが要点。繋がるなら聞かずに繋ぎ、
 // 足せる手が無いときだけ黙って見送る。**判断するのは人で、そのために戻れる。**
 func TestFollowAutoAdvances(t *testing.T) {
-	s, pos := following(t)
-	shotWith(t, pos, "lnsgkgsnl/1r5b1/2ppppppp/9/4p4/2P6/PP1PPPPPP/1B5R1/LNSGKGSNL",
+	s, _ := following(t)
+	// ⚠️ **訂正タブに置かないこと** —— 追従は撮った 1 枚を直に受け取る。
+	a, err := s.FollowAuto("lnsgkgsnl/1r5b1/2ppppppp/9/4p4/2P6/PP1PPPPPP/1B5R1/LNSGKGSNL",
 		evenConf(0.5))
-
-	a, err := s.FollowAuto()
 	if err != nil {
 		t.Fatalf("FollowAuto: %v", err)
 	}
@@ -494,7 +502,7 @@ func TestFollowAutoAdvances(t *testing.T) {
 //
 // 中継が進むたびに引き剥がされると、**検討そのものができない**。
 func TestFollowAutoKeepsPositionWhenBrowsing(t *testing.T) {
-	s, pos := following(t)
+	s, _ := following(t)
 	if _, err := s.Play("7g7f"); err != nil {
 		t.Fatalf("Play: %v", err)
 	}
@@ -505,9 +513,7 @@ func TestFollowAutoKeepsPositionWhenBrowsing(t *testing.T) {
 	if _, err := s.GoTo(1); err != nil {
 		t.Fatalf("GoTo: %v", err)
 	}
-	shot(t, pos, "7g7f", "3c3d", "2g2f")
-
-	a, err := s.FollowAuto()
+	a, err := s.FollowAuto(boardAfter(t, "7g7f", "3c3d", "2g2f"), nil)
 	if err != nil {
 		t.Fatalf("FollowAuto: %v", err)
 	}
@@ -534,10 +540,9 @@ func TestFollowAutoSkipsQuietly(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			s, pos := following(t)
+			s, _ := following(t)
 			before := s.State().Rev
-			shotWith(t, pos, c.board, c.conf)
-			a, err := s.FollowAuto()
+			a, err := s.FollowAuto(c.board, c.conf)
 			if err != nil {
 				t.Fatalf("FollowAuto: %v（見送りは失敗にしない）", err)
 			}
@@ -629,11 +634,73 @@ func TestFollowProbeSameDespiteNoise(t *testing.T) {
 		t.Fatalf("Kind = %q, want %q（%s）", got.Kind, FollowSame, got.Reason)
 	}
 	// 追従でも手が増えないこと。
-	a, err := s.FollowAuto()
+	a, err := s.FollowAuto("lnsgkgsnl/1r5b1/2ppppppp/9/4p4/9/PPPPPPPPP/1B5R1/LNSGKGSNL",
+		evenConf(0.5))
 	if err != nil {
 		t.Fatalf("FollowAuto: %v", err)
 	}
 	if a.Applied {
 		t.Fatalf("動いていないのに手を足しました: %+v", a)
+	}
+}
+
+// ⚠️ **追従が訂正タブを触らないこと**（2026-09-15 に実機で踏んだ）。
+//
+// **実機の症状**: 中継を追っているあいだに、その日の盤面を `suteme` に登録しようと
+// 撮って訂正していたら、**1 秒ごとに中継の盤で上書きされて作業にならなかった。**
+//
+// 原因は**追従が訂正タブを一時バッファとして使っていた**こと（1 周ごとに
+// `PositionService.Load` を呼んでいた）。⚠️ **訂正タブは人の作業場**であって、
+// 機械が書き込んでよい場所ではない（⚠️ **CLAUDE.md の「訂正タブと解析タブは
+// 別の局面を持っている」を、追従が破っていた**）。
+//
+// ⚠️ **禁止事項で塞がないこと** —— 中継を観ながら学習データを作るのは
+// **正当な使い方**（訂正結果を学習に回すのは 2026-08-07 の決定）。
+func TestFollowAutoDoesNotTouchEditor(t *testing.T) {
+	s, pos := following(t)
+
+	// **人が訂正タブで別の盤を直している最中。**
+	mine := "9/9/9/9/9/9/9/9/4K4"
+	if _, err := pos.Load(mine, nil); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	before := pos.State()
+
+	a, err := s.FollowAuto(boardAfter(t, "7g7f"), evenConf(0.9))
+	if err != nil {
+		t.Fatalf("FollowAuto: %v", err)
+	}
+	// 追従そのものは働いていること（触らないだけで、動かないのでは意味が無い）。
+	if !a.Applied || a.Added != 1 {
+		t.Fatalf("追従が進んでいません: %+v", a)
+	}
+
+	after := pos.State()
+	if after.BoardSFEN != before.BoardSFEN {
+		t.Errorf("訂正タブの盤が書き換わりました: %q → %q", before.BoardSFEN, after.BoardSFEN)
+	}
+	// ⚠️ **学習へ送るラベルも変わっていないこと** —— ここが書き換わると、
+	// **画素と一致しないラベルを suteme へ送る**ことになる（一番たちが悪い）。
+	if after.LabelSFEN != before.LabelSFEN {
+		t.Errorf("学習ラベルが書き換わりました: %q → %q", before.LabelSFEN, after.LabelSFEN)
+	}
+}
+
+// ⚠️ **手で繋ぐ側（`FollowProbe`）は今までどおり訂正タブを読むこと。**
+//
+// **2 つは別の口。** 追従は「撮った 1 枚を直に受け取る」、
+// 訂正タブの「本譜に繋ぐ」は「**人が直した盤**を繋ぐ」——
+// だからあちらだけが `humanEditCost`（人が直したマスは覆さない）を持つ。
+func TestFollowProbeStillReadsEditor(t *testing.T) {
+	s, pos := following(t)
+	shot(t, pos, "7g7f")
+
+	got, err := s.FollowProbe()
+	if err != nil {
+		t.Fatalf("FollowProbe: %v", err)
+	}
+	if got.Kind != FollowUnique || len(got.Candidates) != 1 ||
+		len(got.Candidates[0].Moves) != 1 || got.Candidates[0].Moves[0] != "7g7f" {
+		t.Fatalf("訂正タブの盤から繋がっていません: %+v", got)
 	}
 }

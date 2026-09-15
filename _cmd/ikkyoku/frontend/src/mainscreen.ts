@@ -74,7 +74,6 @@ import {
   AnalyzeService,
   FontService,
   KifuService,
-  PositionService,
   SettingsService,
   StudyService,
   TrainingService,
@@ -2741,8 +2740,14 @@ ${st.turnLabel}${n}`;
       publishFollow(followNote("待機中（別の盤）"));
       return;
     }
-    await PositionService.Load(shot.sfen, cellConfidence(shot.debug) ?? null);
-    const got = await StudyService.FollowAuto();
+    // ⚠️ **訂正タブへ流さないこと**（2026-09-15 に実機で踏んだ）。
+    // 以前はここで `PositionService.Load` を呼んでいたので、
+    // **人が訂正タブで作業していると 1 秒ごとに中継の盤で上書きされた**
+    // （学習データを登録しようとして消えた）。**訂正タブは人の作業場。**
+    //
+    // ⚠️ **禁止事項で塞がないこと** —— 中継を観ながら学習データを作るのは
+    // **正当な使い方**（訂正結果を学習に回すのは 2026-08-07 の決定）。
+    const got = await StudyService.FollowAuto(shot.sfen, cellConfidence(shot.debug) ?? null);
     showStudy(got.state);
     if (got.applied) {
       const moves = got.text?.join(" ") || got.moves?.join(" ") || "";

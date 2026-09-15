@@ -150,6 +150,24 @@ func (s *StudyService) FollowProbe() (FollowProbe, error) {
 	if p == nil {
 		return FollowProbe{}, fmt.Errorf("まだ局面がありません")
 	}
+	// ⚠️ **修復は認識を通った盤のときだけ**（手合割・詰将棋では費用表が無い）。
+	// 人が並べた盤を機械が覆す理由は無いので、そちらは厳密一致のまま。
+	cost, fromImage := s.src.followCost()
+	return s.followProbe(p.Board, cost, fromImage, rotated)
+}
+
+// followProbe は下見の本体。**盤と費用表をもらうだけで、どこから来たかを知らない。**
+//
+// ⚠️ **訂正タブを読むのは呼び出し側**（`FollowProbe`）。⚠️ **追従（`FollowAuto`）
+// からは訂正タブを通さないこと**（2026-09-15 に実機で踏んだ）——
+// 以前は 1 周ごとに `PositionService.Load` を呼んでいたので、
+// **人が訂正タブで作業していると 1 秒ごとに中継の盤で上書きされた。**
+//
+// fromImage は**推測してよいか**（人が並べた盤を機械が推測で直す理由は無い）。
+func (s *StudyService) followProbe(board *position.Board, cost *position.CellCost, fromImage, rotated bool) (FollowProbe, error) {
+	if board == nil {
+		return FollowProbe{}, fmt.Errorf("まだ局面がありません")
+	}
 
 	s.mu.Lock()
 	if s.study == nil {
@@ -164,12 +182,8 @@ func (s *StudyService) FollowProbe() (FollowProbe, error) {
 	rev, main, rootSfen := s.rev, s.study.MainLine(), rootSFEN(s.study)
 	s.mu.Unlock()
 
-	// ⚠️ **修復は認識を通った盤のときだけ**（手合割・詰将棋では費用表が無い）。
-	// 人が並べた盤を機械が覆す理由は無いので、そちらは厳密一致のまま。
-	// ⚠️ **`fromImage` が「推測してよいか」の唯一の判断。** 人が並べた盤
-	// （手合割・詰将棋）を機械が推測で直す理由は無い。
+	// ⚠️ **`fromImage` が「推測してよいか」の唯一の判断。**
 	opt := position.ConnectOptions{}
-	cost, fromImage := s.src.followCost()
 	if fromImage {
 		opt.Cost, opt.Tolerance = cost, position.DefaultTolerance
 	}
@@ -187,7 +201,7 @@ func (s *StudyService) FollowProbe() (FollowProbe, error) {
 	// 1 位になる。`Connect` に残るのは**2 手以上飛んだとき**の仕事だけ。
 	var ranked position.RankResult
 	if fromImage {
-		got, rerr := position.Rank(from, p.Board, opt)
+		got, rerr := position.Rank(from, board, opt)
 		if rerr == nil && len(got.Candidates) > 0 {
 			ranked = got
 			top := got.Candidates[0]
@@ -233,7 +247,7 @@ func (s *StudyService) FollowProbe() (FollowProbe, error) {
 	// （CM を挟んで飛んだとき）。⚠️ **時間がかかるのはこちらだけ。**
 	ctx, cancel := context.WithTimeout(context.Background(), followTimeout)
 	defer cancel()
-	r, err := position.Connect(ctx, from, p.Board, opt)
+	r, err := position.Connect(ctx, from, board, opt)
 	if err != nil {
 		return FollowProbe{}, err
 	}
@@ -457,8 +471,18 @@ func (s *StudyService) fallbackFollow(ranked position.RankResult, r position.Con
 //
 // ⚠️ **見ている場所は「先端を見ていたときだけ」動かす。** 戻って検討している
 // 最中に飛ばされると、**中継が進むたびに読んでいた枝から引き剥がされる**。
-func (s *StudyService) FollowAuto() (a FollowAuto, err error) {
-	p, e := s.FollowProbe()
+func (s *StudyService) FollowAuto(boardSFEN string, cellConfidence []float64) (a FollowAuto, err error) {
+	// ⚠️ **訂正タブを通さないこと**（2026-09-15 に実機で踏んだ）。
+	// 以前は呼び出し側が毎周 `PositionService.Load` を呼んでいたので、
+	// **人が訂正タブで作業していると 1 秒ごとに中継の盤で上書きされた**
+	// （学習データを登録しようとして消えた）。**訂正タブは人の作業場。**
+	board, cost, rotated, e := s.src.followFrame(boardSFEN, cellConfidence)
+	if e != nil {
+		return FollowAuto{}, e
+	}
+	// ⚠️ **修復してよいのは費用表があるときだけ**（`followCost` と同じ約束）。
+	// 確信度が無ければ**どのマスを覆してよいかの根拠が無い**ので、厳密一致に倒す。
+	p, e := s.followProbe(board, cost, cost != nil, rotated)
 	if e != nil {
 		return FollowAuto{}, e
 	}
