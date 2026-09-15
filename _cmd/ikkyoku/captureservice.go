@@ -137,6 +137,12 @@ type CaptureService struct {
 	// ⚠️ **上限を置くこと**（`followMissMax`）—— 追いつけない状態は何十分も続くので、
 	// 上限が無いとディスクが埋まる。**知りたいのは崩れ始めの数枚**。
 	followMisses int
+	// lastMissKind は直近に残した「繋がらなかった理由」。
+	//
+	// ⚠️ **変わり目だけ残すため**（2026-09-15）。同じ状態は何十周も続くので、
+	// 毎周残すとディスクが埋まるうえ**同じ絵が並ぶだけで読めない**。
+	// **知りたいのは「何が起きて止まったか」**なので、種類が変わった 1 枚でよい。
+	lastMissKind string
 
 	// clickThrough は設定「枠の内側で後ろの画面を操作する」（`ikkyoku.Config.ClickThrough`）。
 	clickThrough bool
@@ -918,7 +924,7 @@ func (s *CaptureService) startFollowDir() string {
 		}
 	}
 	s.mu.Lock()
-	s.followDir, s.followMisses = dir, 0
+	s.followDir, s.followMisses, s.lastMissKind = dir, 0, ""
 	s.mu.Unlock()
 	return dir
 }
@@ -939,6 +945,12 @@ func (s *CaptureService) SaveFollowFrame(number int, moves []string, guess bool)
 	if dir == "" || img == nil {
 		return ""
 	}
+	// ⚠️ **足せたら数え直すこと。** 残したいのは**崩れ始め**なので、
+	// 追いついているあいだに使い切っていては意味が無い。
+	s.mu.Lock()
+	s.followMisses, s.lastMissKind = 0, ""
+	s.mu.Unlock()
+
 	name := followFrameName(number, moves, guess)
 	path, err := ikkyoku.SavePNGAs(img, dir, name)
 	if err != nil {
@@ -964,11 +976,15 @@ const followMissMax = 12
 func (s *CaptureService) SaveFollowMiss(number int, kind string) string {
 	s.mu.Lock()
 	dir, img, n := s.followDir, s.lastQuiet, s.followMisses
-	if dir != "" && img != nil && n < followMissMax {
-		s.followMisses = n + 1
+	// ⚠️ **同じ理由が続いているあいだは残さない**（変わり目だけ）。
+	// 「別の盤」も「変わっていない」も何十周も続くので、毎周残すと
+	// **同じ絵で上限を使い切り、そのあとの本当の変わり目が残らない。**
+	same := kind == s.lastMissKind
+	if dir != "" && img != nil && n < followMissMax && !same {
+		s.followMisses, s.lastMissKind = n+1, kind
 	}
 	s.mu.Unlock()
-	if dir == "" || img == nil || n >= followMissMax {
+	if dir == "" || img == nil || n >= followMissMax || same {
 		return ""
 	}
 	name := followMissName(number, kind, n)
@@ -1039,7 +1055,7 @@ func (s *CaptureService) ClearBoardAnchor() {
 	// ⚠️ **録画も畳むこと。** 次に「追う」を押したら**別の対局**かもしれないので、
 	// 前の回の続きに書き足すと**1 つのディレクトリに 2 局が混ざる**。
 	s.boardAnchor, s.quietOutcome = recognize.Signature{}, ""
-	s.followDir, s.lastQuiet, s.followMisses = "", nil, 0
+	s.followDir, s.lastQuiet, s.followMisses, s.lastMissKind = "", nil, 0, ""
 	s.mu.Unlock()
 }
 

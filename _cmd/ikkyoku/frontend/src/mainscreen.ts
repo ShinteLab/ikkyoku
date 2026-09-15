@@ -2733,6 +2733,7 @@ ${st.turnLabel}${n}`;
     const shot = await CaptureService.CaptureQuiet();
     if (!shot.sfen) {
       // 盤が取れなかった（枠に盤が映っていない）。**黙って次へ。**
+      void CaptureService.SaveFollowMiss(followWaiting, "noboard");
       publishFollow(followNote("待機中（盤が映っていません）"));
       return false;
     }
@@ -2743,6 +2744,7 @@ ${st.turnLabel}${n}`;
     if (shot.offBoard) {
       // ⚠️ **止めないこと。** 大盤はすぐ本物へ戻るので、**待てばよい**。
       sidePane.setStatus(`別の盤が映っています（${shot.offBoardReason}）。待っています`);
+      void CaptureService.SaveFollowMiss(followWaiting, "offboard");
       publishFollow(followNote("待機中（別の盤）"));
       return false;
     }
@@ -2782,6 +2784,11 @@ ${st.turnLabel}${n}`;
     // ⚠️ **「変わっていない」は迷子ではない**（長考中は毎周これ）。
     // 数えるのは**繋ごうとして繋がらなかった周**だけ。
     if (got.kind === "same" || got.kind === "unreadable") {
+      // ⚠️ **ここも残すこと**（2026-09-15 に盲点だった）。「変わっていない」は
+      // 長考中の正常な状態だが、**認識が外して『変わっていない』に見えている**
+      // ときも同じ顔をする —— 実機で**1 手目から動かないのに証拠が 1 枚も
+      // 残らなかった**。⚠️ **残すのは変わり目だけ**（Go 側が間引く）。
+      void CaptureService.SaveFollowMiss(followWaiting, got.kind);
       followLost = 0;
       publishFollow(followNote("追跡中"));
       return false;
