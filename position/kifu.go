@@ -91,6 +91,15 @@ func FromKIF(text string) (*Study, KIFLoad, error) {
 		}
 		load.Loaded++
 	}
+	// **棋譜に終局が書いてあれば、そこが対局の終わり**（2026-09-16）。
+	// ここから先に並べた手は**対局の手ではなく検討**（中継で言う「投了図以下」）。
+	//
+	// ⚠️ **最後まで読めたときだけ立てること。** 途中で止まったなら、
+	// **そこは対局の終わりではない**（読めなかっただけ）。立てると
+	// 棋譜の途中に「対局の終わり」の印が出る。
+	if doc.EndMark() != "" && load.Loaded == load.Total {
+		study.SetRecordEnd(study.CurrentID())
+	}
 	return study, load, nil
 }
 

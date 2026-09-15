@@ -39,6 +39,11 @@ type StudySnapshot struct {
 	Nodes []NodeSnapshot `json:"nodes"`
 	// Current は控えた時点で見ていた節点（0 は根）。
 	Current int `json:"current"`
+	// End は**実際の対局が終わった節点**（0 なら分かっていない。2026-09-16）。
+	//
+	// ⚠️ **落とさないこと。** 落とすと、開き直したときに**投了図以下の印が消える**
+	// （棋譜から読み直す口が無いので、二度と戻らない）。
+	End int `json:"end,omitempty"`
 	// NextID は次に配る id。
 	//
 	// ⚠️ **消した id を使い回さないために持つ。** 最大の id + 1 で済ませると、
@@ -84,6 +89,7 @@ func (s *Study) Snapshot() (StudySnapshot, error) {
 		MateProblem: s.root.MateProblem,
 		Nodes:       []NodeSnapshot{},
 		Current:     s.cur.id,
+		End:         s.end,
 		NextID:      s.nextID,
 	}
 	// ⚠️ **前順（親が先・兄弟は順番どおり）で並べること。** 復元は
@@ -173,6 +179,8 @@ func RestoreStudy(snap StudySnapshot) (*Study, error) {
 		s.nextID = snap.NextID
 	}
 
+	// ⚠️ **知らない節点なら忘れる**（`SetRecordEnd` が見る）。
+	s.SetRecordEnd(snap.End)
 	cur, ok := s.index[snap.Current]
 	if !ok {
 		cur = s.top

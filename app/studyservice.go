@@ -582,7 +582,19 @@ func (s *StudyService) mergeReloadLocked(next *position.Study) position.GraftRes
 	// （十字キーの下か手順リスト）。**「今の局面が見たい」を勝手に決めない**
 	// ——どこを見ているかはユーザーが選んだ状態で、取り直しはあくまで
 	// **URL の側を正にする**操作。
-	return s.study.Graft(next.MainLine())
+	got := s.study.Graft(next.MainLine())
+	// **終局まで載ったなら、そこが対局の終わり**（2026-09-16）。
+	//
+	// ⚠️ **据え直した側の id は使えない**（別の木の番号）。本譜の先端が
+	// そのまま対局の終わりなので、こちらの木で引き直す。
+	// ⚠️ **終わっていなければ触らないこと** —— 中継は 1 手進むたびにここを
+	// 通るので、**毎回 0 に戻すと投了図以下の印が出たり消えたりする。**
+	if next.RecordEnd() != 0 {
+		if id, _, err := s.study.MainTip(); err == nil {
+			s.study.SetRecordEnd(id)
+		}
+	}
+	return got
 }
 
 // currentGameID は今の検討が結んでいる棚の棋譜 id（結んでいなければ空）。
