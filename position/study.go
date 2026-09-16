@@ -408,11 +408,47 @@ func (s *Study) Line() []int {
 	for i := len(up) - 1; i >= 0; i-- {
 		out = append(out, up[i])
 	}
+	// ⚠️ **対局が終わったところで止めること**（2026-09-16 に実機で指摘されて直した）。
+	// 以前は `kids[0]` をどこまでも辿っていたので、**投了図以下を並べると
+	// 経路がそこまで伸びていた** —— 90 手目から生やした枝（2 番目の子）は
+	// 経路に入らないのに、**投了図以下だけ入る**という食い違いになる
+	// （木の中で何番目の子かだけで扱いが変わっていた）。
+	//
+	// ⚠️ **`mainNext` は使わないこと** —— あちらは `variation` でも止まるが、
+	// **候補手の列（`AddLine`）はそれが付いていても経路として伸びる**
+	// （続きが他に無いのだからそれが今の経路で、連続解析もそこを辿る）。
+	// **止まってよいのは「対局が終わった」ときだけ。**
 	for n := s.cur; len(n.kids) > 0; {
+		if s.end != 0 && n.id == s.end {
+			break
+		}
 		n = n.kids[0]
 		out = append(out, n.id)
 	}
 	return out
+}
+
+// mainNext は**本譜として辿ってよい続き**を返す（**終わりなら nil**）。
+//
+// **「ここで本譜が終わる」の判断をここ 1 か所に寄せてある。** `Line` も
+// `MainLine` も `MainTip` もこれを通るので、**3 つの答えが食い違わない。**
+//
+// 終わるのは 2 通り:
+//
+//  1. 続きが `variation` —— 人が「ここから先は検討だ」と言った
+//  2. そこで対局が終わっている（`end`）—— **投了図以下**
+//
+// ⚠️ **`Line` はこれを使わない。** あちらは**候補手の列（`variation`）でも
+// 伸びる**（続きが他に無いのだからそれが今の経路）。**本譜かどうかを聞いている
+// のはこちらだけ** —— 棚へ書き出す KIF と、中継の繋ぎ先（`MainTip`）。
+func (s *Study) mainNext(n *treeNode) *treeNode {
+	if len(n.kids) == 0 || n.kids[0].variation {
+		return nil
+	}
+	if s.end != 0 && n.id == s.end {
+		return nil
+	}
+	return n.kids[0]
 }
 
 // Fork は今の経路が**どこで分かれたか**と、**分かれなかったほうの経路**を返す。
@@ -534,14 +570,16 @@ func (s *Study) SetRecordEnd(id int) {
 // **棋譜の取り直し（`Graft`）の突き合わせ相手。** 枝に居ても本譜が返る。
 func (s *Study) MainLine() []string {
 	out := []string{}
-	for n := s.top; len(n.kids) > 0; {
-		// ⚠️ **「分岐にする」で下げた手から先は本譜ではない**（2026-08-14）。
-		// ここで止めないと、**自分の検討が本譜として扱われる**
-		// （棋譜の取り直しで「最後の手を見ていたか」の判定にも使う）。
-		if n.kids[0].variation {
+	// ⚠️ **止まる条件は `mainNext` の 1 か所**（「分岐にする」で下げた手と、
+	// **対局が終わったところ**）。ここで止めないと**自分の検討が本譜として
+	// 扱われる** —— 棚へ書き出す KIF に投了図以下が対局の手として載るし、
+	// 中継の繋ぎ先（`MainTip`）も対局の終わりより先を指す。
+	for n := s.top; ; {
+		k := s.mainNext(n)
+		if k == nil {
 			break
 		}
-		n = n.kids[0]
+		n = k
 		out = append(out, n.usi)
 	}
 	return out
@@ -558,8 +596,12 @@ func (s *Study) MainLine() []string {
 // 本譜ではないので、**先端もそこまで戻る**（`Graft` と同じ見え方になる）。
 func (s *Study) MainTip() (int, *Position, error) {
 	n := s.top
-	for len(n.kids) > 0 && !n.kids[0].variation {
-		n = n.kids[0]
+	for {
+		k := s.mainNext(n)
+		if k == nil {
+			break
+		}
+		n = k
 	}
 	p, err := s.positionAt(n)
 	if err != nil {

@@ -5,6 +5,15 @@ import (
 	"testing"
 )
 
+// finishedKIF は**投了まで入った**棋譜（対局の終わりが分かる）。
+var finishedKIF = strings.Join([]string{
+	"手合割：平手",
+	"手数----指手---------消費時間--",
+	"   1 ７六歩(77)",
+	"   2 ３四歩(33)",
+	"   3 投了",
+}, "\n")
+
 // 投了図以下にも印が出ること（2026-09-16。実機で足りなかった）。
 //
 // ⚠️ **本譜の投了位置から詰みまで並べるのは中継を観ながら普通にやること。**
@@ -122,5 +131,91 @@ func TestStudySessionKeepsRecordEnd(t *testing.T) {
 	}
 	if g := back.Evals(); len(g.Branches) != 1 || g.Branches[0] != 2 {
 		t.Errorf("開き直すと投了図以下の印が消えています: %+v", g.Branches)
+	}
+}
+
+
+// 横軸の「全て」が**対局の終わりで止まること**（2026-09-16。実機で指摘された）。
+//
+// ⚠️ **90 手目から生やした枝は経路に入らないのに、投了図以下だけ入る**という
+// 食い違いになっていた（木の中で**何番目の子か**だけで扱いが変わっていた）。
+// **どちらも「本譜ではない手順」**なので揃える。
+func TestEvalGraphAxisStopsAtRecordEnd(t *testing.T) {
+	s := adopted(t)
+	if _, err := s.LoadKifu(finishedKIF); err != nil {
+		t.Fatalf("LoadKifu: %v", err)
+	}
+	// 投了図（2 手目）から並べる。
+	if _, err := s.GoTo(2); err != nil {
+		t.Fatalf("GoTo: %v", err)
+	}
+	if _, err := s.Play("2g2f"); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	// **投了図以下を見ているあいだは、そこまで伸びる**（点が画面の外に出ては困る）。
+	if g := s.Evals(); g.Last != 3 {
+		t.Fatalf("投了図以下を見ているのに横軸が伸びません: last=%d", g.Last)
+	}
+	// **本譜へ戻ると対局の終わりで止まる**（枝へ戻ったときと同じ振る舞い）。
+	if _, err := s.GoTo(2); err != nil {
+		t.Fatalf("GoTo: %v", err)
+	}
+	g := s.Evals()
+	if g.Last != 2 {
+		t.Errorf("本譜に戻っても投了図以下まで出ています: last=%d, want 2", g.Last)
+	}
+	// ⚠️ **印は出たままであること** —— 「その先に何かある」は見えていてほしい。
+	if len(g.Branches) != 1 || g.Branches[0] != 2 {
+		t.Errorf("投了図の印が消えています: %+v", g.Branches)
+	}
+}
+
+// 途中から生やした枝は**今までどおり**経路に入らないこと（比較の相手）。
+func TestEvalGraphAxisIgnoresSideBranch(t *testing.T) {
+	s := adopted(t)
+	for _, m := range []string{"7g7f", "3c3d", "2g2f"} {
+		if _, err := s.Play(m); err != nil {
+			t.Fatalf("Play(%s): %v", m, err)
+		}
+	}
+	// 1 手目から別の手を生やして本譜へ戻る。
+	if _, err := s.GoTo(1); err != nil {
+		t.Fatalf("GoTo: %v", err)
+	}
+	if _, err := s.Play("8c8d"); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	if _, err := s.GoTo(3); err != nil {
+		t.Fatalf("GoTo: %v", err)
+	}
+	if g := s.Evals(); g.Last != 3 {
+		t.Errorf("枝のぶんまで横軸が伸びています: last=%d, want 3", g.Last)
+	}
+}
+
+// ⚠️ **投了図以下を棚の棋譜に書かないこと**（2026-09-16）。
+//
+// **これが一番まずい穴だった** —— 本譜として扱われていたので、棚へ登録すると
+// **検討の手が対局の手として棋譜に載っていた**（「嘘の棋譜が棚に入る」）。
+func TestStudyExportKIFStopsAtRecordEnd(t *testing.T) {
+	s := adopted(t)
+	if _, err := s.LoadKifu(finishedKIF); err != nil {
+		t.Fatalf("LoadKifu: %v", err)
+	}
+	if _, err := s.GoTo(2); err != nil {
+		t.Fatalf("GoTo: %v", err)
+	}
+	if _, err := s.Play("2g2f"); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	got, err := s.exportKIF()
+	if err != nil {
+		t.Fatalf("exportKIF: %v", err)
+	}
+	if !strings.Contains(got, "３四歩") {
+		t.Fatalf("本譜が出ていません:\n%s", got)
+	}
+	if strings.Contains(got, "２六歩") {
+		t.Errorf("投了図以下が対局の手として載っています:\n%s", got)
 	}
 }
