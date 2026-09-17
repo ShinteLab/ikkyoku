@@ -171,6 +171,11 @@ type CaptureService struct {
 	gateDirty bool
 	// gateMoving は変化が続いた周の数（`gateMovingMax` の保険用）。
 	gateMoving int
+	// detectMisses は**盤の有無のふるい**で見送り続けた周の数（`detectMissMax`）。
+	//
+	// ⚠️ **数えているのは「弱い判断で落とした」周。** 検出だけを根拠に
+	// 落とし続けると**黙って何も起きない**ので、**続いたら 1 枚は読んで確かめる。**
+	detectMisses int
 	// gateShots / gateReads は撮った枚数と認識した枚数。
 	//
 	// ⚠️ **測るために持っている。** ふるいがどれくらい効いたかは**実機の中継で
@@ -861,6 +866,23 @@ func (s *CaptureService) CaptureQuiet() (CaptureResult, error) {
 		s.noteQuiet(result)
 		return result, nil
 	}
+	// ⚠️ **盤の有無だけなら安い**（2026-09-18）。**大盤（解説用）が映っている
+	// あいだは画素が動き続ける**ので、上のふるいは素通りする ——
+	// そこを 2.1 秒かけて読んでから捨てていた。
+	//
+	// ⚠️ **ここで落としても `OffBoard` として返すこと**（`Skipped` にしない）——
+	// 受ける側から見れば**「別の盤が映っている」に変わりは無い**ので、
+	// 安くなっただけで画面の振る舞いを変えない。
+	if kind, why := s.detectGate(img, region); kind != "" {
+		// **盤が見つからない**ときは SFEN が空のまま（＝ 今までどおり
+		// 「盤が映っていません」）。**別の盤**のときだけ `OffBoard` を立てる。
+		if kind == detectOff {
+			result.OffBoard, result.OffBoardReason = true, why
+		}
+		s.noteQuiet(result)
+		return result, nil
+	}
+	s.noteRead()
 	// ⚠️ **認識に失敗しても成功として返す**（設計原則3）。呼び出し側は
 	// 盤面が空なら見送るだけで、**追従そのものは続く。**
 	board, err := recognize.FromImage(img)
@@ -947,9 +969,11 @@ func (s *CaptureService) gate(img image.Image) string {
 	anchor, prev := s.boardAnchor, s.gateFrame
 	s.gateFrame = img
 
+	// ⚠️ **ここで数えないこと**（2026-09-18）。この先に**盤の有無のふるい**
+	// （`detectGate`）があり、そこでも落ちる。**数えるのは実際に認識した 1 枚だけ**
+	// （`noteRead`）で、そうでないと省いた割合が実態より悪く見える。
 	read := func() string {
 		s.gateDirty, s.gateMoving = false, 0
-		s.gateReads++
 		return ""
 	}
 	if anchor.Board.Dx() <= 0 || prev == nil {
@@ -973,12 +997,94 @@ func (s *CaptureService) gate(img image.Image) string {
 	return read() // 変化したあと静止した ＝ 読むならこの 1 枚
 }
 
+// detectMissMax は**盤の有無のふるいで見送り続けてよい周の数**。
+//
+// ⚠️ **保険を外さないこと。** 検出だけでは判断の材料が少なく、
+// **こちらだけで落とし続けると「黙って何も起きない」**になる
+// （この追従で何度もやった壊れ方）。**見送りが続いたら 1 枚は必ず読む。**
+const detectMissMax = 8
+
+// detectGate は**81 マスの推論に入る前に、盤の有無だけで落とす**（2026-09-18）。
+//
+// **大盤（解説用）が映っているあいだ、画素は動き続ける**ので画素差分のふるいは
+// 素通りする。そこを 2.1 秒かけて読んでから「別の盤」と捨てていた ——
+// **盤の矩形を探すだけなら 0.15 秒程度**（認識 2.1 秒のうち検出は 15%）なので、
+// **矩形がマスタと合わないなら推論に入らない。**
+//
+// ⚠️ **`suteme` に矩形を渡す案とは別物**（あちらは**却下済み**。録画中に画面の
+// 大きさが変わったときの振る舞いが難しくなる）。**こちらは渡さない**
+// —— 自分で探して、自分の持っているマスタと突き合わせるだけ。
+//
+// ⚠️ **見つからなかったときに落とさないこと。** `DetectRegion` は
+// `suteme.Recognize` と違って**画像全体へのフォールバックを持たない**ので、
+// **枠を盤にぴったり合わせている人ほど厳しく出る**おそれがある。
+// **判断できないときは読むほうへ倒す**（このふるい全体の作法と同じ）。
+//
+// 戻り値は**落とす種類**（空なら読む）と理由。
+//
+// ⚠️ **「盤が見つからない」と「別の盤」を分けること。** ユーザがすることが違う
+// （待つ / 枠を直す）し、**画面にも別の顔で出る**。
+func (s *CaptureService) detectGate(img image.Image, region ikkyoku.Region) (string, string) {
+	s.mu.Lock()
+	anchor, moved := s.boardAnchor, s.anchorRegion != region
+	s.mu.Unlock()
+	// ⚠️ **枠を動かしたら通すこと。** マスタは**画像の中の座標**なので、
+	// 枠が動けば盤は同じでも必ず食い違う —— ここで落とすと
+	// **マスタを取り直す後段（`CaptureQuiet`）に永久に辿り着かない**
+	// （2026-09-15 に「枠をずらしたら死ぬ」を踏んだのと同じ形）。
+	if anchor.Board.Dx() <= 0 || moved {
+		return "", ""
+	}
+
+	got, err := recognize.DetectRegion(img)
+	if err != nil {
+		// **盤が見つからない**（CM・解説・寄り）。⚠️ **ここは弱い判断**なので、
+		// 見送り続けずに時々は読む（`detectMissMax`）。
+		return s.detectMiss(detectNone, "")
+	}
+	sig := recognize.Signature{Frame: img.Bounds(), Board: got.Rect}
+	if same, why := anchor.Matches(sig); !same {
+		return s.detectMiss(detectOff, why)
+	}
+	s.mu.Lock()
+	s.detectMisses = 0
+	s.mu.Unlock()
+	return "", ""
+}
+
+// 盤の有無のふるいが落とした種類。
+const (
+	// detectNone は**盤が見つからない**（CM・解説・寄り）。
+	detectNone = "none"
+	// detectOff は**追っている盤ではない**（大盤など）。
+	detectOff = "off"
+)
+
+// detectMiss は見送りを数え、**続きすぎたら通す**（保険）。
+func (s *CaptureService) detectMiss(kind, why string) (string, string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.detectMisses++
+	if s.detectMisses >= detectMissMax {
+		s.detectMisses = 0
+		return "", "" // 落とし続けない（読んで確かめる）
+	}
+	return kind, why
+}
+
+// noteRead は**実際に認識した 1 枚**を数える。
+func (s *CaptureService) noteRead() {
+	s.mu.Lock()
+	s.gateReads++
+	s.mu.Unlock()
+}
+
 // resetGate はふるいを白紙に戻す（追跡の始まりと終わり）。
 //
 // ⚠️ **枚数も 0 に戻すこと** —— 数えているのは**この回の追跡**で、
 // 前の対局と混ぜると何を測ったのか分からなくなる。
 func (s *CaptureService) resetGate() {
-	s.gateFrame, s.gateDirty, s.gateMoving = nil, false, 0
+	s.gateFrame, s.gateDirty, s.gateMoving, s.detectMisses = nil, false, 0, 0
 	s.gateShots, s.gateReads = 0, 0
 }
 
@@ -998,10 +1104,13 @@ func (s *CaptureService) noteQuiet(r CaptureResult) {
 		if r.Skipped == gateSkipMoving {
 			msg = "動いているので止まるのを待っています（追跡）"
 		}
-	case r.SFEN == "":
-		kind, msg = "none", "盤が映っていません（追跡・見送り）"
+	// ⚠️ **`OffBoard` を先に見ること**（2026-09-18）。盤の有無のふるいで落ちた周は
+	// **読んでいないので SFEN が空**で、順番が逆だと**別の盤を「盤が映っていません」**
+	// と言う（**原因が違うのに同じ顔で出る**、この追従で何度もやった壊れ方）。
 	case r.OffBoard:
 		kind, msg = "off", "別の盤が映っています（追跡・見送り）"
+	case r.SFEN == "":
+		kind, msg = "none", "盤が映っていません（追跡・見送り）"
 	}
 	s.mu.Lock()
 	changed := s.quietOutcome != kind

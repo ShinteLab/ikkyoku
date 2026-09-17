@@ -16,6 +16,7 @@ import (
 	"image/color"
 	"testing"
 
+	"github.com/ShinteLab/ikkyoku"
 	"github.com/ShinteLab/ikkyoku/recognize"
 )
 
@@ -70,9 +71,6 @@ func TestGateSkipsUnchanged(t *testing.T) {
 			t.Fatalf("変わっていないのに %q（認識を呼んでいます）", got)
 		}
 	}
-	if s.gateReads != 1 {
-		t.Fatalf("認識した枚数が %d（1 枚目だけのはず）", s.gateReads)
-	}
 	if s.gateShots != 4 {
 		t.Fatalf("撮った枚数が %d（4 のはず）", s.gateShots)
 	}
@@ -116,5 +114,63 @@ func TestResetGate(t *testing.T) {
 	s.resetGate()
 	if s.gateShots != 0 || s.gateReads != 0 || s.gateFrame != nil || s.gateDirty {
 		t.Fatalf("白紙に戻っていません: shots=%d reads=%d dirty=%v", s.gateShots, s.gateReads, s.gateDirty)
+	}
+}
+
+// ---- 盤の有無のふるい（`detectGate`。2026-09-18）--------------------------
+//
+// ⚠️ **実際の検出そのものはここでは見ない**（`suteme` の仕事で、合成画像で
+// 通っても実機の中継とは別物）。ここが守るのは**通す側の約束** ——
+// **判断できないときは読むほうへ倒すこと**と、**落とし続けないこと**。
+
+// ⚠️ **追う盤が決まっていなければ通すこと。**
+func TestDetectGatePassesWithoutAnchor(t *testing.T) {
+	s := &CaptureService{}
+	if kind, _ := s.detectGate(gateFrame(), ikkyoku.Region{X: 1, Y: 2, Width: 3, Height: 4}); kind != "" {
+		t.Fatalf("追う盤が決まっていないのに落としました: %q", kind)
+	}
+}
+
+// ⚠️ **枠を動かしたら通すこと**（2026-09-15 の「枠をずらしたら死ぬ」と同じ形）。
+// マスタは**画像の中の座標**なので、枠が動けば盤は同じでも必ず食い違う ——
+// ここで落とすと**マスタを取り直す後段に永久に辿り着かない**。
+func TestDetectGatePassesWhenFrameMoved(t *testing.T) {
+	s := gateService()
+	s.anchorRegion = ikkyoku.Region{X: 10, Y: 10, Width: 400, Height: 300}
+	moved := ikkyoku.Region{X: 40, Y: 10, Width: 400, Height: 300}
+	if kind, _ := s.detectGate(gateFrame(), moved); kind != "" {
+		t.Fatalf("枠を動かしたのに落としました: %q", kind)
+	}
+}
+
+// ⚠️ **落とし続けないこと。** 検出だけでは判断の材料が少ないので、
+// **見送りが続いたら 1 枚は読んで確かめる**（黙って何も起きない状態を作らない）。
+func TestDetectMissGivesUp(t *testing.T) {
+	s := gateService()
+	for i := 1; i < detectMissMax; i++ {
+		kind, why := s.detectMiss(detectOff, "盤の大きさが違います")
+		if kind != detectOff || why == "" {
+			t.Fatalf("%d 周目で %q / %q（まだ落とすはず）", i, kind, why)
+		}
+	}
+	if kind, _ := s.detectMiss(detectOff, "盤の大きさが違います"); kind != "" {
+		t.Fatalf("上限まで見送ったのに %q（永久に読まない壊れ方）", kind)
+	}
+	if s.detectMisses != 0 {
+		t.Fatalf("数え直していません: %d", s.detectMisses)
+	}
+}
+
+// ⚠️ **数えるのは実際に認識した 1 枚だけ**（`gate` が「読む」と返した枚数ではない）。
+// 盤の有無のふるいでも落ちるので、混ぜると**省いた割合が実態より悪く見える**。
+func TestNoteReadCountsOnlyRecognized(t *testing.T) {
+	s := gateService()
+	s.gate(gateFrame()) // 読むと決めた（まだ数えない）
+	if s.gateReads != 0 {
+		t.Fatalf("gate が数えています: %d", s.gateReads)
+	}
+	s.noteRead()
+	if s.gateReads != 1 {
+		t.Fatalf("認識した枚数が %d", s.gateReads)
 	}
 }

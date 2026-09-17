@@ -2754,12 +2754,9 @@ ${st.turnLabel}${n}`;
       publishFollow(followNote("追跡中"));
       return false;
     }
-    if (!shot.sfen) {
-      // 盤が取れなかった（枠に盤が映っていない）。**黙って次へ。**
-      void CaptureService.SaveFollowMiss(followWaiting, "noboard");
-      publishFollow(followNote("待機中（盤が映っていません）"));
-      return false;
-    }
+    // ⚠️ **別の盤を先に見ること**（2026-09-18）。盤の有無のふるいで落ちた周は
+    // **読んでいないので SFEN が空**で、順番が逆だと
+    // **大盤が映っているのに「盤が映っていません」**と出る。
     // ⚠️ **追っている盤でなければ見送る**（2026-09-15）。中継には**大盤**
     // （解説用）が映り、あちらは**将棋の局面としては矛盾しない**ので
     // 盤面だけでは弾けない —— 解説が本譜から 1 手の変化を並べていたら、
@@ -2769,6 +2766,12 @@ ${st.turnLabel}${n}`;
       sidePane.setStatus(`別の盤が映っています（${shot.offBoardReason}）。待っています`);
       void CaptureService.SaveFollowMiss(followWaiting, "offboard");
       publishFollow(followNote("待機中（別の盤）"));
+      return false;
+    }
+    if (!shot.sfen) {
+      // 盤が取れなかった（枠に盤が映っていない）。**黙って次へ。**
+      void CaptureService.SaveFollowMiss(followWaiting, "noboard");
+      publishFollow(followNote("待機中（盤が映っていません）"));
       return false;
     }
     // ⚠️ **訂正タブへ流さないこと**（2026-09-15 に実機で踏んだ）。
