@@ -2650,7 +2650,19 @@ ${st.turnLabel}${n}`;
   //
   // ⚠️ **繰り返しがフロントにあるのは連続解析と同じ形。** ただし**こちらは
   // 局面を動かさない**（動かすかは `FollowAuto` が「先端を見ていたか」で決める）。
-  const followTickMs = 1200;
+  // ⚠️ **「撮る間隔」と「認識する間隔」は別**（2026-09-18）。**認識は 2.1 秒**だが、
+  // **撮って前の 1 枚と比べるだけなら数ミリ秒**（Go 側の画素差分のふるい）。
+  // だから**周期はふるいに合わせて短くする** —— 手が指されてから認識を始めるまでの
+  // 遅れがそのまま縮み、**1 手あたり 1 秒ぶん速くなる**。
+  //
+  // ⚠️ **0 に近づけないこと** —— 撮るのも画面の更新も只ではない。
+  const followTickMs = 250;
+  // followStallMs は**1 周が返ってこないと見なす**時間（見張り用）。
+  //
+  // ⚠️ **`followTickMs` の倍数で書かないこと**（2026-09-18 に分けた）。
+  // **認識する周だけ 2 秒以上かかる**ので、撮る間隔を基準にすると
+  // **認識しているだけの周を「死んだ」と見なして二重に回す。**
+  const followStallMs = 15000;
   let followOn = false;
   let followTimer: number | undefined;
   // ⚠️ **最後に 1 周を終えた時刻**（2026-09-15）。**これが「動いている証明」**で、
@@ -2701,13 +2713,13 @@ ${st.turnLabel}${n}`;
       // **止まっていたら自力で立て直す**。⚠️ **これは保険であって設計ではない** ——
       // 予約の出口を 1 か所にしてあるのが本体（`followSchedule`）。
       followWatch = window.setInterval(() => {
-        if (!followOn || Date.now() - followTickAt < followTickMs * 5) {
+        if (!followOn || Date.now() - followTickAt < followStallMs) {
           return;
         }
         console.warn("[follow] 1 周が返ってこないので立て直します");
         followTickAt = Date.now();
         void followTick();
-      }, followTickMs * 2);
+      }, followStallMs / 3);
     }
     publishFollow(on ? followNote("追跡中") : "");
   };
@@ -2731,6 +2743,17 @@ ${st.turnLabel}${n}`;
   // **「1 周やる」と「回し続ける」を同じ関数に混ぜない。**
   const followOnce = async (): Promise<boolean> => {
     const shot = await CaptureService.CaptureQuiet();
+    // ⚠️ **読まなかった周は何もしない**（2026-09-18）。Go 側のふるいが
+    // **変わっていない / まだ動いている**と判断したときで、
+    // **長考中はほとんどの周がこれ**（認識 2.1 秒を丸々省いている）。
+    //
+    // ⚠️ **見送りとして数えないこと**。`followLost` も録画も
+    // **「読んだけれど繋がらなかった」のためのもの**で、
+    // 読んでいない周を混ぜると**長考のたびに「見失っています」になる**。
+    if (shot.skipped) {
+      publishFollow(followNote("追跡中"));
+      return false;
+    }
     if (!shot.sfen) {
       // 盤が取れなかった（枠に盤が映っていない）。**黙って次へ。**
       void CaptureService.SaveFollowMiss(followWaiting, "noboard");

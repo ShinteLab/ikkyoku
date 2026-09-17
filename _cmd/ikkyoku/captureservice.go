@@ -151,6 +151,33 @@ type CaptureService struct {
 	// **知りたいのは「何が起きて止まったか」**なので、種類が変わった 1 枚でよい。
 	lastMissKind string
 
+	// ---- 画素差分のふるい（2026-09-18）--------------------------------------
+	//
+	// ⚠️ **認識 1 枚 2.1 秒**が追従の速さを決めている。**ikkyoku 側で 1 枚を
+	// 速くする手は無い**（重いのは 81 マスの推論で、それは `suteme` の話）ので、
+	// できるのは**読む枚数を減らすこと**だけ。長考中も CM 中も画素は動いていない
+	// ので、**前の 1 枚と変わっていなければ認識を呼ばない。**
+	//
+	// ⚠️ **状態はここに置く**（`ikkyoku.FrameDiff` は測るだけ）。追従の状態は
+	// 既にここに集まっている（マスタ・録画）ので、**もう 1 か所に散らさない。**
+
+	// gateFrame は前の周に撮った 1 枚（比べる相手）。
+	gateFrame image.Image
+	// gateDirty は「変化を見たが、まだ認識していない」。
+	//
+	// ⚠️ **変化した周ではなく、その次の「止まった」周で認識すること**（静止判定）。
+	// 中継には**棋士の手が映り込む**ので、動いている最中の 1 枚を読むと
+	// **2.1 秒かけてゴミを取る**（駒が隠れた盤が「繋がらない」で捨てられる）。
+	gateDirty bool
+	// gateMoving は変化が続いた周の数（`gateMovingMax` の保険用）。
+	gateMoving int
+	// gateShots / gateReads は撮った枚数と認識した枚数。
+	//
+	// ⚠️ **測るために持っている。** ふるいがどれくらい効いたかは**実機の中継で
+	// しか分からない**ので、追跡を止めたときにログへ出す（当て推量の定数を
+	// あとで実測で詰めるための材料）。
+	gateShots, gateReads int
+
 	// clickThrough は設定「枠の内側で後ろの画面を操作する」（`ikkyoku.Config.ClickThrough`）。
 	clickThrough bool
 	// clickStop は素通しの見張り（watchCursor）を止めるチャネル。
@@ -733,6 +760,15 @@ type CaptureResult struct {
 	OffBoard bool `json:"offBoard"`
 	// OffBoardReason はその理由（同じ盤なら空）。
 	OffBoardReason string `json:"offBoardReason"`
+
+	// Skipped は**認識を省いた**理由（省いていなければ空。2026-09-18）。
+	//
+	// `unchanged`（前の 1 枚と変わっていない）/ `moving`（まだ動いている）。
+	//
+	// ⚠️ **「盤が映っていない」（SFEN が空）と混ぜないこと。** あちらは
+	// **2.1 秒かけて読んだうえで盤が無かった**で、こちらは**読んでいない**。
+	// 呼ぶ側は**黙って次の周へ行くだけ**（見送りとして数えない・録画も残さない）。
+	Skipped string `json:"skipped"`
 	// RecognizeError は「撮れたが認識できなかった」ときの理由。
 	// キャプチャ自体の失敗はこれではなく Capture のエラーで表す。
 	RecognizeError string `json:"recognizeError"`
@@ -818,6 +854,13 @@ func (s *CaptureService) CaptureQuiet() (CaptureResult, error) {
 		Width: b.Dx(), Height: b.Dy(), Source: ImageSourceScreen,
 		Warnings: []string{}, HandTotal: map[string]int{},
 	}
+	// ⚠️ **読まずに済むなら読まない**（2026-09-18）。認識は 2.1 秒かかるので、
+	// **変わっていない 1 枚に払うと、そのぶんだけ次の手に気づくのが遅れる。**
+	if skip := s.gate(img); skip != "" {
+		result.Skipped = skip
+		s.noteQuiet(result)
+		return result, nil
+	}
 	// ⚠️ **認識に失敗しても成功として返す**（設計原則3）。呼び出し側は
 	// 盤面が空なら見送るだけで、**追従そのものは続く。**
 	board, err := recognize.FromImage(img)
@@ -864,6 +907,81 @@ func (s *CaptureService) CaptureQuiet() (CaptureResult, error) {
 	return result, nil
 }
 
+// ふるいの判断（2026-09-18）。⚠️ **どれも実測で決めた数ではない。**
+// 実機の中継で当たり具合を見て詰めること（追跡を止めたときに枚数を出している）。
+const (
+	// gateChangedRatio は「変化した」と見なす点の割合。
+	//
+	// **1 マスは盤の 1/81 ≈ 1.2%** で、指し手は動いた先と元の 2 マスが変わる。
+	// ⚠️ **上げすぎないこと** —— **ふるいで落とした手は二度と戻らない**
+	// （認識を 1 枚余分に読むほうがずっと軽い）。
+	gateChangedRatio = 0.0015
+	// gateMovingMax は静止を待つ周の上限。
+	//
+	// ⚠️ **待ち続けないための保険。** 盤の矩形の中に**動き続けるもの**
+	// （寄りのカメラ・盤上に重なるテロップ）が入ると、静止判定だけでは
+	// **永久に認識しない**という壊れ方をする。**止まらなくても、いずれ読む。**
+	gateMovingMax = 8
+
+	// 省いた理由（`CaptureResult.Skipped`）。
+	gateSkipUnchanged = "unchanged"
+	gateSkipMoving    = "moving"
+)
+
+// gate は**この 1 枚を認識するか**を決める（空なら認識する）。
+//
+// ⚠️ **判断できないときは認識するほうへ倒すこと**（追う盤が決まっていない・
+// 比べる相手が無い・大きさが違う）。**見落とすより 1 枚余分に読むほうが軽い。**
+//
+// ⚠️ **比べるのは盤の矩形の中だけ**（マスタが持っている）。画面全体で比べると、
+// **消費時間の秒読みやテロップで毎周「変化あり」になり、ふるいが素通しになる。**
+//
+// ⚠️ **枠を動かしたときはここでは直さない。** 動かしている最中は画素が動くので
+// `moving` が続き、`gateMovingMax` で認識に落ちて、そこでマスタが取り直される
+// （`CaptureQuiet` の後段）。**同じ仕事を 2 か所でしない。**
+func (s *CaptureService) gate(img image.Image) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.gateShots++
+	anchor, prev := s.boardAnchor, s.gateFrame
+	s.gateFrame = img
+
+	read := func() string {
+		s.gateDirty, s.gateMoving = false, 0
+		s.gateReads++
+		return ""
+	}
+	if anchor.Board.Dx() <= 0 || prev == nil {
+		return read()
+	}
+	ratio, ok := ikkyoku.FrameDiff(prev, img, anchor.Board)
+	if !ok {
+		return read()
+	}
+	if ratio >= gateChangedRatio {
+		s.gateDirty = true
+		s.gateMoving++
+		if s.gateMoving < gateMovingMax {
+			return gateSkipMoving
+		}
+		return read() // 止まらないので、待つのをやめて読む
+	}
+	if !s.gateDirty {
+		return gateSkipUnchanged
+	}
+	return read() // 変化したあと静止した ＝ 読むならこの 1 枚
+}
+
+// resetGate はふるいを白紙に戻す（追跡の始まりと終わり）。
+//
+// ⚠️ **枚数も 0 に戻すこと** —— 数えているのは**この回の追跡**で、
+// 前の対局と混ぜると何を測ったのか分からなくなる。
+func (s *CaptureService) resetGate() {
+	s.gateFrame, s.gateDirty, s.gateMoving = nil, false, 0
+	s.gateShots, s.gateReads = 0, 0
+}
+
 // noteQuiet は**結果の種類が変わったときだけ**ログに出す。
 //
 // ⚠️ **毎回出さないこと**（1 秒ごとに回るので読めなくなる）。
@@ -872,6 +990,14 @@ func (s *CaptureService) CaptureQuiet() (CaptureResult, error) {
 func (s *CaptureService) noteQuiet(r CaptureResult) {
 	kind, msg := "board", "盤を見つけました（追跡）"
 	switch {
+	// ⚠️ **読んでいない周を「盤が映っていません」と言わないこと**（2026-09-18）。
+	// **原因が全く違うのに同じ顔で出る**のが、この追従で何度もやった壊れ方
+	// （`TODO.md` 4 の ③）。省いたのは**変わっていないから**で、正常そのもの。
+	case r.Skipped != "":
+		kind, msg = "skip:"+r.Skipped, "変わっていないので認識を省いています（追跡）"
+		if r.Skipped == gateSkipMoving {
+			msg = "動いているので止まるのを待っています（追跡）"
+		}
 	case r.SFEN == "":
 		kind, msg = "none", "盤が映っていません（追跡・見送り）"
 	case r.OffBoard:
@@ -897,6 +1023,9 @@ func (s *CaptureService) noteQuiet(r CaptureResult) {
 func (s *CaptureService) AnchorBoard() (CaptureResult, error) {
 	s.mu.Lock()
 	s.boardAnchor, s.anchorRegion, s.quietOutcome = recognize.Signature{}, ikkyoku.Region{}, ""
+	// ⚠️ **ふるいも白紙に戻すこと**（2026-09-18）。この 1 枚は
+	// **これから追う盤を決めるための 1 枚**なので、**必ず読む**。
+	s.resetGate()
 	s.mu.Unlock()
 
 	r, err := s.CaptureQuiet()
@@ -1079,7 +1208,16 @@ func (s *CaptureService) ClearBoardAnchor() {
 	// 前の回の続きに書き足すと**1 つのディレクトリに 2 局が混ざる**。
 	s.boardAnchor, s.anchorRegion, s.quietOutcome = recognize.Signature{}, ikkyoku.Region{}, ""
 	s.followDir, s.lastQuiet, s.followMisses, s.lastMissKind = "", nil, 0, ""
+	// ⚠️ **ふるいがどれくらい効いたかを出す**（2026-09-18）。定数（変化のしきい値・
+	// 待つ周の上限・撮る間隔）は**どれも当て推量**なので、
+	// **実機の中継で詰めるための材料**が要る。
+	shots, reads := s.gateShots, s.gateReads
+	s.resetGate()
 	s.mu.Unlock()
+	if shots > 0 {
+		s.logger.Info("追跡を止めました", "撮った枚数", shots, "認識した枚数", reads,
+			"省いた割合", fmt.Sprintf("%.0f%%", 100*float64(shots-reads)/float64(shots)))
+	}
 }
 
 // OpenImage は画像ファイルを選んで、撮った 1 枚と同じ経路に載せる（入力タブの
