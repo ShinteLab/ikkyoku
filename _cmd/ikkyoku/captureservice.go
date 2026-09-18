@@ -171,6 +171,17 @@ type CaptureService struct {
 	gateDirty bool
 	// gateMoving は変化が続いた周の数（`gateMovingMax` の保険用）。
 	gateMoving int
+	// gateSkipped は**「変わっていない」で省き続けた周の数**（`gateSkipMax` の保険用）。
+	//
+	// ⚠️ **これが無いと、ふるいが外したときに永久に止まる**（2026-09-18 に
+	// 実機で踏んだ。**指したのに「変わっていません」と出続けた**）。
+	// **しきい値をどう詰めても、外したら動かない作りにはしないこと。**
+	gateSkipped int
+	// gateMaxSkip は省いた周で見た**いちばん大きかった差**。
+	//
+	// ⚠️ **しきい値を実測で詰めるために要る。** 「しきい値を超えられなかった
+	// 最大値」が分かれば、**どれだけ足りなかったのか**が数字で読める。
+	gateMaxSkip float64
 	// detectMisses は**盤の有無のふるい**で見送り続けた周の数（`detectMissMax`）。
 	//
 	// ⚠️ **数えているのは「弱い判断で落とした」周。** 検出だけを根拠に
@@ -944,6 +955,19 @@ const (
 	// （寄りのカメラ・盤上に重なるテロップ）が入ると、静止判定だけでは
 	// **永久に認識しない**という壊れ方をする。**止まらなくても、いずれ読む。**
 	gateMovingMax = 8
+	// gateSkipMax は**「変わっていない」で省き続けてよい周の数**（約 10 秒）。
+	//
+	// ⚠️ **これを外さないこと**（2026-09-18 に実機で踏んで足した）。
+	// **指したのに「変わっていません」と出続けて、1 手も進まなかった** ——
+	// 盤の駒と地色は明るさが近いので、**ふるいが外すことが実際にある。**
+	//
+	// ⚠️ **しきい値を詰めることで代えないこと。** どんな数にしても
+	// **外したら永久に止まる**という作りのほうが問題で、
+	// これは**外しても 10 秒で戻る**ことを保証する側。
+	//
+	// ⚠️ **長考中の無駄にはならない。** 10 秒に 1 枚 2.1 秒を払うだけで、
+	// **省く前（毎周 2.1 秒）とは桁が違う。**
+	gateSkipMax = 40
 
 	// 省いた理由（`CaptureResult.Skipped`）。
 	gateSkipUnchanged = "unchanged"
@@ -974,6 +998,7 @@ func (s *CaptureService) gate(img image.Image) string {
 	// （`noteRead`）で、そうでないと省いた割合が実態より悪く見える。
 	read := func() string {
 		s.gateDirty, s.gateMoving = false, 0
+		s.gateSkipped, s.gateMaxSkip = 0, 0
 		return ""
 	}
 	if anchor.Board.Dx() <= 0 || prev == nil {
@@ -992,7 +1017,22 @@ func (s *CaptureService) gate(img image.Image) string {
 		return read() // 止まらないので、待つのをやめて読む
 	}
 	if !s.gateDirty {
-		return gateSkipUnchanged
+		s.gateSkipped++
+		if ratio > s.gateMaxSkip {
+			s.gateMaxSkip = ratio
+		}
+		if s.gateSkipped < gateSkipMax {
+			return gateSkipUnchanged
+		}
+		// ⚠️ **ここが「黙って止まらない」ための保険**（2026-09-18）。
+		// **ふるいが外していても、いずれ読む。**
+		if s.logger != nil {
+			s.logger.Info("変化が無いまま続いたので 1 枚読みます（ふるいの取りこぼしの確認）",
+				"省いた周", s.gateSkipped,
+				"いちばん大きかった差", fmt.Sprintf("%.5f", s.gateMaxSkip),
+				"しきい値", gateChangedRatio)
+		}
+		return read()
 	}
 	return read() // 変化したあと静止した ＝ 読むならこの 1 枚
 }
@@ -1085,6 +1125,7 @@ func (s *CaptureService) noteRead() {
 // 前の対局と混ぜると何を測ったのか分からなくなる。
 func (s *CaptureService) resetGate() {
 	s.gateFrame, s.gateDirty, s.gateMoving, s.detectMisses = nil, false, 0, 0
+	s.gateSkipped, s.gateMaxSkip = 0, 0
 	s.gateShots, s.gateReads = 0, 0
 }
 

@@ -106,6 +106,28 @@ func TestGateReadsWhenNeverStill(t *testing.T) {
 	}
 }
 
+// ⚠️ **省き続けたら読むこと**（2026-09-18 に実機で踏んで足した）。
+//
+// **指したのに「変わっていません」と出続けて 1 手も進まなかった。**
+// 駒と盤の地色は明るさが近いので、**ふるいが外すことが実際にある** ——
+// **しきい値をどう詰めても、外したら永久に止まる作りにしないこと。**
+func TestGateReadsWhenSkippedTooLong(t *testing.T) {
+	s := gateService()
+	s.gate(gateFrame())
+	for i := 1; i < gateSkipMax; i++ {
+		if got := s.gate(gateFrame()); got != gateSkipUnchanged {
+			t.Fatalf("%d 周目で %q（まだ省くはず）", i, got)
+		}
+	}
+	if got := s.gate(gateFrame()); got != "" {
+		t.Fatalf("省き続けたのに %q（ふるいが外したら二度と読まない）", got)
+	}
+	// 読んだら数え直すこと（次の 10 秒がまた始まる）。
+	if s.gateSkipped != 0 {
+		t.Fatalf("数え直していません: %d", s.gateSkipped)
+	}
+}
+
 // ⚠️ **枚数は追跡ごとに 0 から。** 前の対局と混ぜると何を測ったのか分からない。
 func TestResetGate(t *testing.T) {
 	s := gateService()
