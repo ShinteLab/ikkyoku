@@ -2534,6 +2534,17 @@ ${st.turnLabel}${n}`;
         selectTab(studyTab);
         const note = got.note ? ` ${got.note}` : "";
         sidePane.setStatus(`${got.added}手つなぎました（${moves.join(" ")}）${fixedNote()}${note}`);
+        // ⚠️ **決まった手の画像を残す**（2026-09-18）。**追従と揃えるためのもの** ——
+        // 実機で**6九歩打と読んだが正しくは6九桂打**という誤認識が出たとき、
+        // **手で繋いだぶんだけ証拠が 1 枚も残っていなかった。**
+        //
+        // ⚠️ **手数は足したあとの `followWaiting` から逆算すること**（`showStudy` が先に走る）。
+        // ⚠️ **待たないこと**（`void`）—— 残せなくても繋ぐのは成立する（設計原則 3）。
+        void CaptureService.SaveConnectFrame(
+          Math.max(followWaiting - moves.length, 0),
+          moves,
+          (probe.fixed ?? []).length > 0,
+        );
       } catch (err) {
         fail(String(err instanceof Error ? err.message : err));
       }

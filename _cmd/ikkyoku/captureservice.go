@@ -135,6 +135,12 @@ type CaptureService struct {
 	// ⚠️ **撮った時点ではまだ「その手を決めた画像」かどうか分からない** ——
 	// 決めるのは解析タブ側（`FollowAuto`）なので、**答えが返るまで持っておく**。
 	lastQuiet image.Image
+	// lastShot は**直近に手で撮った（読み込んだ）1 枚**。
+	//
+	// ⚠️ **`lastQuiet`（追従が黙って撮る 1 枚）とは別物。** 混ぜると、
+	// **追従が回っているあいだに手で繋ぐと中継のフレームが残る**
+	// （人が見ていたのは訂正タブの盤なのに、証拠だけ別の画像になる）。
+	lastShot image.Image
 	// followMisses は**繋げなかった周を残した枚数**（2026-09-15）。
 	//
 	// ⚠️ **見送りを全部残さない方針の例外。** 1 秒ごとの空振りは残さないが、
@@ -1262,6 +1268,56 @@ func (s *CaptureService) SaveFollowFrame(number int, moves []string, guess bool)
 	return path
 }
 
+// SaveConnectFrame は**手で繋いで決まった手**を、その画像ごと残す（2026-09-18）。
+//
+// ⚠️ **追従の録画と揃えるためのもの。** 決まった手の根拠が画像で残っていないと、
+// **「なぜその駒になったのか」を後から確かめられない**（実機で
+// **6九歩打と読んだが正しくは6九桂打**という誤認識が出て、**手で繋いだぶんだけ
+// 証拠が無かった**）。
+//
+// ⚠️ **置き場所は追従とは別**（`<captures>/connect/<日付>/`）。あちらは
+// **1 局を 1 つのディレクトリに揃える**ためのもので、手で繋ぐのは散発的に起きる
+// —— 混ぜると**どちらの経路で決まった手か**が読めなくなる。
+//
+// ⚠️ **認識を覆したかを名前に入れること**（`-fixed`）。**後から見たいのはそちら。**
+//
+// ⚠️ **エラーを返さないこと**（設計原則3）。残せなくても繋ぐのは成立する。
+func (s *CaptureService) SaveConnectFrame(number int, moves []string, fixed bool) string {
+	s.mu.Lock()
+	img := s.lastShot
+	s.mu.Unlock()
+	if img == nil || len(moves) == 0 {
+		return ""
+	}
+	base, err := ikkyoku.DefaultOutDir()
+	if err != nil {
+		s.logger.Warn("繋いだ手の画像を残せません", "error", err)
+		return ""
+	}
+	dir := filepath.Join(base, "connect", time.Now().Format("20060102"))
+	name := connectFrameName(number, moves, fixed)
+	path, err := ikkyoku.SavePNGAs(img, dir, name)
+	if err != nil {
+		s.logger.Warn("繋いだ手の画像を残せません", "name", name, "error", err)
+		return ""
+	}
+	s.logger.Info("繋いだ手の画像を残しました", "path", path, "moves", strings.Join(moves, " "))
+	return path
+}
+
+// connectFrameName は `042-6i6h_...[-fixed].png`。
+//
+// ⚠️ **手数は 0 詰め 3 桁**（追従と同じ。並びが手順の順になる）。
+// ⚠️ **同じ手数で 2 回繋ぐことがある**ので、**上書きしないよう時刻を足す** ——
+// 手で繋ぐのは**やり直しが普通**（繋いで、違うと思って戻して、撮り直す）。
+func connectFrameName(number int, moves []string, fixed bool) string {
+	name := strings.TrimSuffix(followFrameName(number, moves, false), ".png")
+	if fixed {
+		name += "-fixed"
+	}
+	return name + "-" + time.Now().Format("150405") + ".png"
+}
+
 // followMissMax は**繋げなかった周を残す枚数の上限**。
 //
 // ⚠️ **知りたいのは崩れ始めの数枚**（そこから先は同じ状態が続くだけ）。
@@ -1455,6 +1511,14 @@ func (s *CaptureService) deliver(img image.Image, path, source string) CaptureRe
 	} else {
 		thumb = "data:image/png;base64," + base64.StdEncoding.EncodeToString(buf.Bytes())
 	}
+
+	// ⚠️ **手で撮った 1 枚も控えておくこと**（2026-09-18）。訂正タブの
+	// **「本譜に繋ぐ」で決まった手**を、その画像ごと残すため（`SaveConnectFrame`）。
+	// **決まった手の根拠が画像で残っていないと、誤認識を追えない** ——
+	// 追従では残していたのに、**手で繋いだときだけ残っていなかった**（実機で出た）。
+	s.mu.Lock()
+	s.lastShot = img
+	s.mu.Unlock()
 
 	b := img.Bounds()
 	result := CaptureResult{
