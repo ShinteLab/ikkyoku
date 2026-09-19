@@ -1,4 +1,4 @@
-# CLAUDE.md
+# AGENTS.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -84,18 +84,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **「本譜のロック」**（KIF は普遍の記録なので消せてはいけない、という話）。
 **手順まわりを触るときは先に読むこと。**
 
-### この CLAUDE.md の外に置いてあるもの
+### この AGENTS.md の外に置いてあるもの
 
 **このファイルは「構想と、Phase ごとの決定」だけを持つ。** **コードを触るときの制約は
-そのパッケージの CLAUDE.md**、**手順はスキル**、**記録は `_docs/`**（2026-09-09 に
+そのパッケージの AGENTS.md**、**手順はスキル**、**記録は `_docs/`**（2026-09-09 に
 分けた。それまで 1 枚に 6,183 行あった）。
 
 ⚠️ **どこに何を書くかの基準はこれ。迷ったらこの 3 分類に当てること:**
 
 | | 何を置くか | どう読まれるか |
 |---|---|---|
-| **CLAUDE.md（このファイル）** | 構想・設計原則・**Phase ごとの「なぜそう決めたか」**・依存の向き | いつも |
-| **パッケージの CLAUDE.md** | **「⚠️ …しないこと」** —— 破ると壊れる制約 | そのディレクトリを触ったとき |
+| **AGENTS.md（このファイル）** | 構想・設計原則・**Phase ごとの「なぜそう決めたか」**・依存の向き | いつも |
+| **パッケージの AGENTS.md** | **「⚠️ …しないこと」** —— 破ると壊れる制約 | そのディレクトリを触ったとき |
 | **スキル** | **手順**（ビルドする・実機で確かめる） | その作業を始めたとき |
 | **`_docs/`** | **記録**（もう判断は済んでいる調査・経緯） | 掘るときだけ |
 
@@ -105,8 +105,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | スキル **`ikkyoku-verify`** | **実機で何を押すか**（未検証チェックリスト・確認済みの記録・確かめ方） | 実装が終わって実機で触るとき |
 | スキル **`ikkyoku-handicap-mate`** | **手合割（駒落ち）と詰将棋の全体像**（3 通りの解釈・4 つの入口・側の呼び名）と**詰将棋エンジンを繋ぐ手順**、⚠️ **どのエンジンが何を返すかの実測**（`references/engines.md`） | 駒落ち・詰将棋・詰み探索を触るとき |
 | スキル `wails3` | Wails3 全般。⚠️ **alpha2.117 前提なので beta.16 と食い違う** | Wails の API で詰まったとき |
-| **各パッケージの `CLAUDE.md`** | **そのコードを触るときの制約**（`recognize` / `position` / `analyze` / `app` / `guide` / `piecefont` / `training` / `legal` / `usi` / `_cmd/ikkyoku`）。**テストが何の歯止めか**も、それぞれの「テスト」節 | そのディレクトリを触るとき（自動で読まれる） |
-| `_cmd/ikkyoku/frontend/src/CLAUDE.md` | **画面（フロント）の地図と、崩さないこと 12 箇条** | フロントを触るとき（自動で読まれる） |
+| **各パッケージの `AGENTS.md`** | **そのコードを触るときの制約**（`recognize` / `position` / `analyze` / `app` / `guide` / `piecefont` / `training` / `legal` / `usi` / `_cmd/ikkyoku`）。**テストが何の歯止めか**も、それぞれの「テスト」節 | そのディレクトリを触るとき（自動で読まれる） |
+| `_cmd/ikkyoku/frontend/src/AGENTS.md` | **画面（フロント）の地図と、崩さないこと 12 箇条** | フロントを触るとき（自動で読まれる） |
 | `_docs/ui/*.md` | **画面の作りの全部**（寸法・訂正・手順と分岐・解析の面・評価値グラフ・切り離し・タブ） | 上の表が指したとき |
 | `_docs/phase0-capture.md` | Phase 0 の検証（なぜ Chrome 拡張をやめたか）の全文 | まず要らない（結論は下の「経緯」） |
 | `_docs/blackscreen.md` | 「メイン画面が真っ黒になる」の調査ログ | **次に黒くなったとき** |
@@ -127,7 +127,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 精度は学習データを育てて上げていく。`Result.Warnings()` がそのまま
 「どれくらい外しているか」の指標になっている。
 
-### 認識の継ぎ目 — **詳細は `recognize/CLAUDE.md`**
+### 認識の継ぎ目 — **詳細は `recognize/AGENTS.md`**
 
 `recognize` パッケージが `suteme.Recognize` を呼び、`Board` にまとめる。
 ⚠️ **認識器はここに書かない**（suteme の責務）。⚠️ **Phase 3 の局面矯正層も
@@ -141,7 +141,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - ⚠️ **`suteme` の型を包み直さない**（`recognize.Option` / `recognize.Debug` は
   型エイリアス）。同じ形の型を定義し直すと、変換のぶんだけ嘘が入る余地が増える
 
-`recognize/CLAUDE.md` にあるのは: **使う API と既定のまま呼ぶ理由** /
+`recognize/AGENTS.md` にあるのは: **使う API と既定のまま呼ぶ理由** /
 ⚠️ **学習データの置き場所**（駒種推論器と**盤の縁の帯の判定器**の 2 つ。片方だけ
 配線して事故った）/ ⚠️ **認識器の読み込み元は 3 通り**（焼き込み / ディレクトリ /
 既定探索。`auto` を焼き込み優先にしないこと）/ **焼き込みのビルド手順** /
@@ -150,7 +150,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### ikkyoku 側の実装（済み）
 
 **撮る → 認識する → 訂正へ渡す、の間にある約束。** 画面の作りは
-`_cmd/ikkyoku/frontend/src/CLAUDE.md` から `_docs/ui/*.md` を引く。
+`_cmd/ikkyoku/frontend/src/AGENTS.md` から `_docs/ui/*.md` を引く。
 
 #### ⚠️ 撮ることと認識することを分ける（**イベントは 2 段**。2026-08-18）
 
@@ -240,7 +240,7 @@ DB が開けていなくても貼り付けと URL の読み込みは今までど
   カードに積んで「更新」で取り直し、仮の一覧で再起動後も追う。
   ⚠️ **これを別の入力欄に戻さないこと**（行き先が違うだけで、入れるものは同じ URL）
 
-**行き先ごとの制約は `app/CLAUDE.md`**（`StudyService` が持つ）:
+**行き先ごとの制約は `app/AGENTS.md`**（`StudyService` が持つ）:
 **URL から取る**（文字コードの判別・HTML から .kif を辿る・再読み込み）/
 **新しく対局を始める**（手合割 → 初期局面）/ **手合割の対局か**（駒落ち・詰将棋。
 ⚠️ **画像の無い局面が訂正タブに入る唯一の口**）/ **訂正タブ ⇄ 解析タブの継ぎ目**
@@ -268,7 +268,7 @@ DB が開けていなくても貼り付けと URL の読み込みは今までど
 そこだけを通す経路がこれ。⚠️ **焼いた字を書き出す口を作らないこと**（ディスクにも残さない）。
 
 **一覧の作り方・登録（複数・使うのは 1 つ）・色と濃さ・王/玉と馬/左馬は
-`piecefont/CLAUDE.md` と `app/CLAUDE.md`**（`FontService`）。
+`piecefont/AGENTS.md` と `app/AGENTS.md`**（`FontService`）。
 
 ### 棋譜データベース（棚）— **kicho をライブラリとして使う**（2026-09-04）
 
@@ -297,7 +297,7 @@ ikkyoku から使えないと**ユーザが ikkyoku と kicho の 2 つを立ち
   （読売の Nuxt ペイロード）。**同じプロセス**で盤面キャプチャもエンジンも動く
 
 **崩してはいけない線引き 8 つ・DTO・制限時間・DB の場所・二系統・棋譜タブ・
-中継から取得・仮の一覧（`watches`）は `app/CLAUDE.md`。**
+中継から取得・仮の一覧（`watches`）は `app/AGENTS.md`。**
 
 ### Phase 6: 中継を追う（**手で繋ぐところまで入っている**。2026-09-14）
 
@@ -331,11 +331,11 @@ ikkyoku から使えないと**ユーザが ikkyoku と kicho の 2 つを立ち
 解析する」の隣）。⚠️ **2 つは正反対の操作**（根ごと入れ替える / 先へ足す）なので
 **入れ替えないこと。**
 
-- **制約は `position/CLAUDE.md`**（⚠️ 一意でなければ `Moves` は空 /
+- **制約は `position/AGENTS.md`**（⚠️ 一意でなければ `Moves` は空 /
   ⚠️ **`MaxWaste` を外さないこと** —— 外すと**相手が往復して戻る手順**で
   ほとんどの盤面が「繋がって」しまい、認識の誤りを落とす働きが消える /
   `StopBudget` と `StopUnreachable` は別物 / ⚠️ **手番が逆でも「繋がらない」とは
-  限らない**）と **`app/CLAUDE.md`**（`FollowProbe` / `FollowApply`）
+  限らない**）と **`app/AGENTS.md`**（`FollowProbe` / `FollowApply`）
 - **画面の作りは `_docs/ui/editor.md`**（出口が 2 つになった）
 
 **これから**（決めたことだけ。**実装は入っていない**）:
@@ -540,7 +540,7 @@ ikkyoku から使えないと**ユーザが ikkyoku と kicho の 2 つを立ち
 - **画面に見えていない駒を知識で補った訂正は送らない**（テロップで盤が隠れている等）。
   ラベルが画素と一致しなくなる。これも自動送信にしない理由
 
-**実装と規約は `training/CLAUDE.md`**（`POST /api/register` の形・
+**実装と規約は `training/AGENTS.md`**（`POST /api/register` の形・
 ⚠️ **送る SFEN で持ち駒を落とさない**（`LabelSFEN`）・
 ⚠️ **ループバックからは「登録受付: 無効」でも送れる**・
 ⚠️ **送る SFEN は「手前が先手」の規約に従う**・
@@ -548,7 +548,7 @@ ikkyoku から使えないと**ユーザが ikkyoku と kicho の 2 つを立ち
 
 ### 想定される躓き
 
-**認識の精度・学習データの育て方・実盤とCG盤の難易度差は `recognize/CLAUDE.md`。**
+**認識の精度・学習データの育て方・実盤とCG盤の難易度差は `recognize/AGENTS.md`。**
 ⚠️ **精度が出なくても Phase 2 の失敗ではない。「今どれくらいか」が分かれば成功。**
 
 ## Phase 3/5: 局面を扱う層（`position`）— **着手済み。UI はこれから**
@@ -565,7 +565,7 @@ ikkyoku から使えないと**ユーザが ikkyoku と kicho の 2 つを立ち
 **画像を一切持たない「とある局面」**。境界は「`recognize` が返した盤面を受け取ったら、
 そこから先は画像を参照しない」。**`position` の型に画像やその座標系を持たせないこと。**
 
-**型と不変条件は `position/CLAUDE.md`**（⚠️ `HandsFixed` を落とさない / `Cell` の
+**型と不変条件は `position/AGENTS.md`**（⚠️ `HandsFixed` を落とさない / `Cell` の
 ゼロ値が空マス / 駒台の未決を片側に寄せない / `SFEN` と `LabelSFEN` の使い分け /
 `Study` の枝の規則 / `Rotate180` / 手数と手番）。
 
@@ -577,7 +577,7 @@ ikkyoku から使えないと**ユーザが ikkyoku と kicho の 2 つを立ち
 （`position.Inventory()` がその 1 行ぶん）。
 
 ⚠️ **訂正タブに居ること自体が訂正モード**（トグルは無い。タブが意味の境界）。
-**画面の作りは `_docs/ui/editor.md`**、**訂正 → 解析の継ぎ目は `app/CLAUDE.md`**
+**画面の作りは `_docs/ui/editor.md`**、**訂正 → 解析の継ぎ目は `app/AGENTS.md`**
 （`Adopt` の 1 か所だけ）。
 
 #### ⚠️ 詰将棋のような「正常でない局面」も確定できること
@@ -646,7 +646,7 @@ ikkyoku から使えないと**ユーザが ikkyoku と kicho の 2 つを立ち
   ⚠️ **攻方の玉を隅に仮置きすれば解ける**（10ms で `score mate 1`）**が、採らない** ——
   詰将棋では玉方が余り駒を全部持っているので、**玉方が攻方の玉に王手をかけて
   手番を稼げてしまい、長手数では解が変わる**。別の問題を解いて「解けました」と
-  出すのが一番たちが悪い。詳しくは `analyze/CLAUDE.md`
+  出すのが一番たちが悪い。詳しくは `analyze/AGENTS.md`
 - **長手数は詰み探索（`go mate`）で解く**（2026-09-12 に入れた。解析の行の「詰み」）。
   **詰将棋エンジンを別に登録して、そちらへ投げる**（`AnalyzeService.SolveMate` →
   `analyze.Session.Mate` → `core/usi/client.Session.Mate`）。
@@ -691,8 +691,8 @@ B は直らない（盤の絵を裏から見るだけなので、SFEN は 1 文�
   **`LabelSFEN`（suteme へ送るラベル）も撮った向きのまま** —— 学習ラベルは
   画素と一致していなければならない
 - ⚠️ **手番とは独立**（「手番がどちらか」「目線がどちらか」の 2 つの事実）
-- **詳しくは `app/CLAUDE.md`**（`SetViewpoint` / `SeenTurn` / 駒台の見出し）と
-  `position/CLAUDE.md`（`Rotate180`）
+- **詳しくは `app/AGENTS.md`**（`SetViewpoint` / `SeenTurn` / 駒台の見出し）と
+  `position/AGENTS.md`（`Rotate180`）
 
 #### 表示の反転では解けない
 
@@ -726,8 +726,8 @@ B は直らない（盤の絵を裏から見るだけなので、SFEN は 1 文�
 - ⚠️ **回す場所は `adoptPosition`（訂正 → 解析の境界）**。「エンジンに渡す直前」まで
   引っ張ると、**解析タブの盤・手順・棋譜・評価値が全部ひっくり返ったまま**になる
 - **手数と手番は互いを縛る**（平手なら手数が奇数 = 先手番）。⚠️ **SFEN の手数と棋譜の
-  手数は 1 つずれる** —— 詳しくは `position/CLAUDE.md`
-- エンジン側の要求は `analyze/CLAUDE.md`
+  手数は 1 つずれる** —— 詳しくは `position/AGENTS.md`
+- エンジン側の要求は `analyze/AGENTS.md`
 
 ### 永続化は前提にしない（メモリのみ＋クラッシュ対策の自動保存）
 
@@ -826,7 +826,7 @@ JSON で、**交換形式にしないこと**。上の「木を `core/kifu` の�
 **まだ 1 手も指していない検討は普通にある**ので、断ると**自分で書いた棋譜を
 自分で開けない**。
 
-**制約は `core/CLAUDE.md`（盤面図の節）と `app/CLAUDE.md`。**
+**制約は `core/CLAUDE.md`（盤面図の節）と `app/AGENTS.md`。**
 
 ## Phase 4: エンジン接続（**USI クライアント方式**。2026-08-08）
 
@@ -859,9 +859,9 @@ Step 3  ikkyoku ──os/exec──> prokishi.exe                 ※同じ欄�
 
 | 参照 | 中身 |
 |---|---|
-| `analyze/CLAUDE.md` | **案 B の決定・層の分け方・崩さないこと**（`lowerbound` を捨てる / MultiPV の順序 / 先手視点 / `usinewgame` / `go infinite`）・**接続の寿命**・読み筋の日本語表記・勝率の式 |
-| `app/CLAUDE.md` | **エンジンの登録と option**（設定タブ）・`AnalyzeService`（複数同時・イベント） |
-| `usi/CLAUDE.md` | **Step 1 の足場**（同一プロセスの `engine` を `io.Pipe` で繋ぐ。Step 2 で消える） |
+| `analyze/AGENTS.md` | **案 B の決定・層の分け方・崩さないこと**（`lowerbound` を捨てる / MultiPV の順序 / 先手視点 / `usinewgame` / `go infinite`）・**接続の寿命**・読み筋の日本語表記・勝率の式 |
+| `app/AGENTS.md` | **エンジンの登録と option**（設定タブ）・`AnalyzeService`（複数同時・イベント） |
+| `usi/AGENTS.md` | **Step 1 の足場**（同一プロセスの `engine` を `io.Pipe` で繋ぐ。Step 2 で消える） |
 
 ### 解析タブの表示 — **盤が主役。解析のものは全部「盤の右の列」**（2026-08-12）
 
@@ -896,12 +896,12 @@ StudyService ──> position.Study ──> position.Position.ApplyMove   手を
                        └────────> ikkyoku/legal.Moves ──> engine  合法かどうかを言う
 ```
 
-- ⚠️ **局面が変わったら `study:changed` を出す**（`app/CLAUDE.md`）。別ウィンドウとの
+- ⚠️ **局面が変わったら `study:changed` を出す**（`app/AGENTS.md`）。別ウィンドウとの
   連動の土台で、**変えたのに出し忘れるとそこだけ更新されない**
 - ⚠️ **解析には「根 + 手順」を渡す**（`position sfen <根> moves ...`）。組み立て直した
-  1 つの SFEN にすると千日手と連続王手が判定できない。詳しくは `analyze/CLAUDE.md`
+  1 つの SFEN にすると千日手と連続王手が判定できない。詳しくは `analyze/AGENTS.md`
 - ⚠️ **合法性の判定は `ikkyoku/legal` だけ。** `position.ApplyMove` は合法性を見ない
-  （分けてあるので `position` が engine を知らずに済む）。詳しくは `position/CLAUDE.md`
+  （分けてあるので `position` が engine を知らずに済む）。詳しくは `position/AGENTS.md`
 
 #### エンジンに指し継がせる（**入っている**。2026-09-14）
 
@@ -926,7 +926,7 @@ StudyService ──> position.Study ──> position.Position.ApplyMove   手を
 - ⚠️ **千日手で止めること** —— 同じエンジンが**両方の手番を指す**ので、
   連続解析と違って**自然な終わりが無い**
 - **画面の作りと止まるところは `_docs/ui/study-pane.md`、手を足す 3 つの口の
-  使い分けは `position/CLAUDE.md`**
+  使い分けは `position/AGENTS.md`**
 
 #### これから（手を進める UI の続き）
 
@@ -970,13 +970,13 @@ StudyService ──> position.Study ──> position.Position.ApplyMove   手を
   「詰将棋のような『正常でない局面』も確定できること」の節を読むこと）
 - **実機のエンジン（やねうら王・水匠）で通す。** 経路はテストで通っているが、
   **実物では確かめていない**（評価関数の読み込み待ち・独自の option・終了の作法）
-- ~~**エンジンを切り替えて比べる。**~~ **入れた**（2026-08-11。`app/CLAUDE.md` の「エンジンの登録」）。
+- ~~**エンジンを切り替えて比べる。**~~ **入れた**（2026-08-11。`app/AGENTS.md` の「エンジンの登録」）。
   登録は一覧で、「解析に使う」を付けたものが同時に走る。**評価値を先手視点に固定して
   あるのがここでも効く** —— エンジンが違っても符号の意味が変わらないので並べて読める。
   **残っているのは「どこが食い違っているか」を目立たせる表示**（今は素朴に縦に並べる
   だけ）で、**合成はしないこと**（平均も多数決も取らない。設計思想の側の話）
 - ~~**エンジンの option を画面から設定する。**~~ **入れた**（2026-08-15。
-  `app/CLAUDE.md` の「エンジンの option を画面から設定する」）。「接続を確認」で宣言を控え、
+  `app/AGENTS.md` の「エンジンの option を画面から設定する」）。「接続を確認」で宣言を控え、
   型どおりの入力欄を出す。**残っているのは button を押せるようにすること**で、
   それには**繋がっているエンジン**が要る（今は解析タブに居るあいだしか生きていない）
 
@@ -1087,7 +1087,7 @@ kicho の `.\check-consumers.ps1` が見る（⚠️ **`go.work` は replace よ
 
 ## ファイル構成
 
-⚠️ **各パッケージには CLAUDE.md がある**（`recognize` / `position` / `analyze` /
+⚠️ **各パッケージには AGENTS.md がある**（`recognize` / `position` / `analyze` /
 `app` / `guide` / `piecefont` / `training` / `legal` / `usi` / `_cmd/ikkyoku` /
 `_cmd/ikkyoku/frontend/src`）。**そこを触るときの制約はそちらが持つ。**
 ここは「どのファイルが何をするか」の索引だけ。
@@ -1125,7 +1125,7 @@ kicho の `.\check-consumers.ps1` が見る（⚠️ **`go.work` は replace よ
 
 `_cmd/ikkyoku/` に置いてある。**ここに置くのは「Wails の口が要るもの」だけ** ——
 Service は `ikkyoku/app`、枠の幾何は `ikkyoku/guide`、画面は
-`_cmd/ikkyoku/frontend/src/CLAUDE.md`。**現状 `ikkyoku` は「ルートパッケージ
+`_cmd/ikkyoku/frontend/src/AGENTS.md`。**現状 `ikkyoku` は「ルートパッケージ
 （ライブラリ）＋この GUI アプリ」の 2 つだけで、CLI は無い。**
 
 **ウィンドウは 5 枚**（枠 / メイン画面 / 評価値グラフ / 候補手 / 手順）。**起動すると
@@ -1135,17 +1135,17 @@ Service は `ikkyoku/app`、枠の幾何は `ikkyoku/guide`、画面は
 
 | 参照 | 中身 |
 |---|---|
-| `_cmd/ikkyoku/CLAUDE.md` | **ウィンドウ 5 枚・Frameless・透過・素通し・キャプチャ領域の物理ピクセル・Win32 直呼び・ウィンドウ状態の永続化・ホットキー** |
-| `guide/CLAUDE.md` | **ガイド枠の自動フィット**（余白 0.3・「半分の周期」の誤検出・実測） |
-| `_cmd/ikkyoku/frontend/src/CLAUDE.md` | 画面（そこから `_docs/ui/*.md`） |
+| `_cmd/ikkyoku/AGENTS.md` | **ウィンドウ 5 枚・Frameless・透過・素通し・キャプチャ領域の物理ピクセル・Win32 直呼び・ウィンドウ状態の永続化・ホットキー** |
+| `guide/AGENTS.md` | **ガイド枠の自動フィット**（余白 0.3・「半分の周期」の誤検出・実測） |
+| `_cmd/ikkyoku/frontend/src/AGENTS.md` | 画面（そこから `_docs/ui/*.md`） |
 
 ⚠️ **Wails のバージョンは手元の CLI に追従している**（2026-09-08 時点で
 `v3.0.0-beta.16`）。**スキル `wails3` は alpha2.117 前提なので食い違う** ——
-実際に確かめた差分は `_cmd/ikkyoku/CLAUDE.md` に書いてある。
+実際に確かめた差分は `_cmd/ikkyoku/AGENTS.md` に書いてある。
 
 ### 実機での確認 — **スキル `ikkyoku-verify`**
 
-**手順とチェックリストはスキルへ移した**（2026-09-09。CLAUDE.md に 772 行あった）。
+**手順とチェックリストはスキルへ移した**（2026-09-09。AGENTS.md に 772 行あった）。
 実機で触るときだけ引くもので、**普段 context に載せる必要が無い**。
 
 | 置き場所 | 中身 |
@@ -1158,7 +1158,7 @@ Service は `ikkyoku/app`、枠の幾何は `ikkyoku/guide`、画面は
   **「触ってみて大丈夫だった」を根拠にしない**ための歯止めでもある
 - ⚠️ **確かめたら消すのではなく `verified.md` へ移す** —— 何を確かめたのかが
   残っていないと、同じところを何度も見ることになる
-- ⚠️ **チェックリストを CLAUDE.md に戻さないこと。** 読む場面が実機確認のときだけなのに、
+- ⚠️ **チェックリストを AGENTS.md に戻さないこと。** 読む場面が実機確認のときだけなのに、
   **実装のたびに増える**ので放っておくと元の 772 行に戻る
 
 ### コマンド — **スキル `ikkyoku-build`**
@@ -1178,7 +1178,7 @@ Service は `ikkyoku/app`、枠の幾何は `ikkyoku/guide`、画面は
   goroutine を起動し、`RegisterHotKey` のメッセージループを回す。呼び出し側
   （このツール）が追加でスレッド管理をする必要はない（現状 GUI 側のホットキー登録は
   Wails 標準の `app.GlobalShortcut` を使っており、この仕組み自体は直接は呼んでいない。
-  `_cmd/ikkyoku/CLAUDE.md` の「ホットキー」を参照）
+  `_cmd/ikkyoku/AGENTS.md` の「ホットキー」を参照）
 
 ## よく使うコマンド — **スキル `ikkyoku-build`**
 
@@ -1240,7 +1240,7 @@ go test ./...
   `<shogi-board>` の語彙そのままであることも見ている）
 - `hotkey_test.go` — `ParseHotkey` の文字列パース
 
-**パッケージごとのテストは、それぞれの CLAUDE.md の「テスト」節に移した**
+**パッケージごとのテストは、それぞれの AGENTS.md の「テスト」節に移した**
 （2026-09-09）: `recognize` / `position` / `analyze` / `app` / `guide` /
 `legal` / `piecefont` / `training` / `usi` / `_cmd/ikkyoku`。
 ⚠️ **テストの意図は対象パッケージの隣にあるのが自然** —— 1 か所に集めていたせいで
@@ -1249,11 +1249,11 @@ go test ./...
 ## 開発上の約束
 
 親ディレクトリの `../CLAUDE.md` に準じる。実装は Sonnet サブエージェントに委譲し、
-メイン側は計画・指示・レビューに徹する運用。ドキュメント（README.md / CLAUDE.md）は
+メイン側は計画・指示・レビューに徹する運用。ドキュメント（README.md / AGENTS.md）は
 日本語で書く。コード中のコメントも日本語。
 
-⚠️ **書き足すときは、上の「この CLAUDE.md の外に置いてあるもの」の 3 分類に当てること。**
-**制約（「⚠️ …しないこと」）はそのパッケージの CLAUDE.md へ** —— ここに積むと、
+⚠️ **書き足すときは、上の「この AGENTS.md の外に置いてあるもの」の 3 分類に当てること。**
+**制約（「⚠️ …しないこと」）はそのパッケージの AGENTS.md へ** —— ここに積むと、
 また 1 枚で 6,000 行になる（2026-09-09 に 4 段階で分けた）。
 ⚠️ **同じ事実を 2 か所に書かないこと。** 親に置くのはポインタだけで、
 写すと片方だけ古くなる（実際に段 2 で 4 か所やって段 3 で直した）。

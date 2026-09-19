@@ -571,7 +571,7 @@ func (s *StudyService) FollowAuto(boardSFEN string, cellConfidence []float64) (a
 		// ⚠️ **平手の初期局面は上下対称なので、盤を見ても目線が逆だと分からない。**
 		// **最初の 1 手が指されて初めて分かる**ので、ここが唯一の検出の機会。
 		//
-		// ⚠️ **黙って回さないこと**（`CLAUDE.md` の「取り込みの向き」）——
+		// ⚠️ **黙って回さないこと**（`AGENTS.md` の「取り込みの向き」）——
 		// 盤の向きは**局面の解釈そのもの**で、手順の並びとは重みが違う。
 		// **人に言うところまで**にする。
 		a.Flipped, a.FlipMove = s.looksFlipped(board, cost, rotated)

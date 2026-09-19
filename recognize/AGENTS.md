@@ -1,4 +1,4 @@
-# recognize の CLAUDE.md
+# recognize の AGENTS.md
 
 **画像 → 盤面。`suteme` を呼ぶだけの層。** ⚠️ **認識器をここに書かない**（suteme の責務）。
 ⚠️ **Phase 3 の局面矯正層もここに入れない** —— あちらは**画像を一切持たない**層

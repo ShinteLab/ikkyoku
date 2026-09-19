@@ -1,4 +1,4 @@
-# analyze の CLAUDE.md
+# analyze の AGENTS.md
 
 **確定した局面 → 評価値**（Phase 4）。⚠️ **ikkyoku は将棋 UI（USI クライアント）であって、
 `engine` の利用者ではない。** クライアント本体は `core/usi/client`（ここに書かない）。
@@ -26,7 +26,7 @@
   持たせると、盤を裏から眺めただけで局面が回る（あるいはその逆）
 
 
-**案 B（USI クライアント方式）に決めた理由と Step の切り方は `CLAUDE.md` の Phase 4。**
+**案 B（USI クライアント方式）に決めた理由と Step の切り方は `AGENTS.md` の Phase 4。**
 
 ## 層の分け方
 
@@ -266,7 +266,7 @@
 「同じ駒が他からも行けたか」を見ないと決まらないので**盤全体**が要る。
 
 - **変換は `core/kifu`**（`NewNotation` / `FormatMoves`）。ikkyoku には書かない
-  ——将棋の**仕様**は core に一本化する、の一例。注意点は core の CLAUDE.md にまとめてある
+  ——将棋の**仕様**は core に一本化する、の一例。注意点は core の AGENTS.md にまとめてある
 - **組み立てるのは `analyze`**（`accumulator.moveText`）。解析した局面の SFEN を持って
   いるのがここだけなので。⚠️ **フロントに移さないこと** ——盤が要る変換なので、
   フロントには材料が無い

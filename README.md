@@ -34,7 +34,7 @@ ABEMA でも YouTube でもキャプチャボードでも同じ経路で扱え�
 検討ツールとして実用になるかは繋ぐエンジンの棋力で決まるので、**棋力の問題を
 設定の問題にする**（やねうら王・水匠などをそのまま繋げる）。
 
-設計原則と各 Phase の詳細は [`CLAUDE.md`](CLAUDE.md) を参照。
+設計原則と各 Phase の詳細は [`AGENTS.md`](AGENTS.md) を参照。
 ワークスペース（`ShinteLab/shinte`）に並べている場合は、図と検討経緯を含む全文が
 [`../TODO.md`](../TODO.md) にある。
 
@@ -119,7 +119,7 @@ sqlite と goja（読売の Nuxt ペイロードを評価する JS エンジン�
 `golang.design/x/hotkey` は現状ルートパッケージの `ParseHotkey` / `DefaultHotkey`
 （文字列パースと既定値）だけに使っている。GUI アプリ自体のホットキー登録は
 Wails 標準の `app.GlobalShortcut` を使っており、この節のライブラリを直接呼んではいない
-（詳細は `ikkyoku/CLAUDE.md` の「ホットキー」節を参照）。
+（詳細は `ikkyoku/AGENTS.md` の「ホットキー」節を参照）。
 
 ## GUI アプリ（Wails3）
 
@@ -169,7 +169,7 @@ wails3 dev                       # 開発モード
 ```
 
 `wails3 build` で `bin\ikkyoku.exe` が生成される。詳細な設計判断は
-`ikkyoku/CLAUDE.md` の「GUI アプリ(Wails3)」節を参照。
+`ikkyoku/AGENTS.md` の「GUI アプリ(Wails3)」節を参照。
 
 ## コード構成
 
@@ -194,4 +194,4 @@ wails3 dev                       # 開発モード
 
 ## 開発上の約束
 
-`../CLAUDE.md` 全体の方針に加え、このディレクトリ固有の制約は `CLAUDE.md` を参照。
+`../CLAUDE.md` 全体の方針に加え、このディレクトリ固有の制約は `AGENTS.md` を参照。

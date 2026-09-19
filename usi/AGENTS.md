@@ -1,4 +1,4 @@
-# usi の CLAUDE.md
+# usi の AGENTS.md
 
 **Step 1 の足場だけ。** 同一プロセスの `engine` を `io.Pipe` で USI として繋ぐ。
 ⚠️ **クライアント本体は `core/usi/client`**（ここに書かない）。**Step 2 で消える。**

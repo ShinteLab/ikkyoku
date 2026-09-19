@@ -1,11 +1,11 @@
-# legal の CLAUDE.md
+# legal の AGENTS.md
 
 **合法手生成のラッパ。`engine` を呼ぶのはここだけ。** 状態を持たない（局面 1 つに答える）。
 ⚠️ **解析をここ経由に戻さないこと**（あちらは USI。棋力の問題を設定の問題にした意味が消える）。
 
 ## 何が書いてあるか
 
-**この層の制約は `position/CLAUDE.md` の「Go 側の層」にある**（`position.Study` と
+**この層の制約は `position/AGENTS.md` の「Go 側の層」にある**（`position.Study` と
 セットで読むもの）。要点だけ:
 
 - ⚠️ **`legal.Moves` は panic を握る。** 訂正 UI は不正な局面も確定できるので、

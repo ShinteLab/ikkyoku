@@ -67,7 +67,7 @@ type RecognizerStatus struct {
 
 // CaptureService は Wails にバインドする、GUI からのキャプチャ操作。
 // ロジックは持たず、ikkyoku ルートパッケージ(Capture / SavePNG / DefaultOutDir)を
-// 呼ぶだけに徹する(ikkyoku/CLAUDE.md: 将棋のロジックを書かない、状態を持たない)。
+// 呼ぶだけに徹する(ikkyoku/AGENTS.md: 将棋のロジックを書かない、状態を持たない)。
 type CaptureService struct {
 	app *application.App
 	// wins は枠とメイン画面。**キャプチャ領域は枠のクライアント矩形そのもの**なので、
@@ -1992,7 +1992,7 @@ func (s *CaptureService) maskWindows(img image.Image, disp ikkyoku.Region) {
 // CopyImage は保存済みの PNG をクリップボードへ入れる。デバッグタブから呼ばれる。
 //
 // **撮った画像をメモリに抱えず、保存したファイルを読み直す。** 1 回のキャプチャは
-// 他のキャプチャと独立という方針(ikkyoku/CLAUDE.md)に沿って「直近の画像」を
+// 他のキャプチャと独立という方針(ikkyoku/AGENTS.md)に沿って「直近の画像」を
 // 持たずに済むし、後から一覧を作ってどの 1 枚でもコピーできるようにするときも
 // そのまま使える。読み直しの費用は数 MB の PNG のデコード 1 回だけ。
 //

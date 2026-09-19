@@ -1,4 +1,4 @@
-# training の CLAUDE.md
+# training の AGENTS.md
 
 **訂正した局面を `suteme` の学習用サーバへ登録するクライアント。**
 ⚠️ **サンプルの作り方を書かない**（81 マスの切り出しは向こうの `samplesFromRegion`）——

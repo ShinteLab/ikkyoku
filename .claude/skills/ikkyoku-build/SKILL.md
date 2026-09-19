@@ -99,7 +99,7 @@ task build:embed        # model:copy + wails3 のビルド（EXTRA_TAGS=embedmod
   配布ビルドの前に `go test -tags embedmodel ./recognize/` で
   **実際に認識器として組み立てられること**を確かめる
 
-詳しくは `recognize/CLAUDE.md` の「認識器の読み込み元は 3 通り」。
+詳しくは `recognize/AGENTS.md` の「認識器の読み込み元は 3 通り」。
 
 - `Taskfile.yml` の `includes` から `ios` / `android` を外してある（デスクトップ専用なので。`build/ios`・`build/android`・`build/docker` も削除済み）
 
@@ -130,7 +130,7 @@ New-Item -ItemType Junction -Path (Join-Path $w 'kicho')  -Target 'D:\Go\Project
 ## ⚠️ モジュールが 2 つあることの落とし穴
 
 **`go mod tidy` の後に require 行が消えていないか確認すること**と、**kicho が相対 replace で引く依存を 2 つの go.mod 両方に書くこと** ——
-どちらも `CLAUDE.md` の「モジュール / 位置づけ」に理由ごと書いてある。
+どちらも `AGENTS.md` の「モジュール / 位置づけ」に理由ごと書いてある。
 
 ## PureGo を維持する
 
@@ -144,4 +144,4 @@ New-Item -ItemType Junction -Path (Join-Path $w 'kicho')  -Target 'D:\Go\Project
 |---|---|
 | スキル `ikkyoku-verify` | ビルドしたあと**実機で何を押すか** |
 | スキル `wails3` | Wails3 全般。⚠️ **alpha2.117 前提なので beta.16 と食い違う** |
-| `_cmd/ikkyoku/CLAUDE.md` | ウィンドウ・Frameless・Win32 まわりの制約 |
+| `_cmd/ikkyoku/AGENTS.md` | ウィンドウ・Frameless・Win32 まわりの制約 |

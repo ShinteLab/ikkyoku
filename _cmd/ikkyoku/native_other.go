@@ -11,7 +11,7 @@ import (
 // Windows 以外のスタブ。**ビルドが壊れないようにするためだけ**にある。
 //
 // 実装は `native_windows.go`（Win32 の直呼び）。⚠️ **ここに実装を足さないこと** ——
-// このアプリは Windows 専用（ikkyoku/CLAUDE.md）で、他 OS では
+// このアプリは Windows 専用（ikkyoku/AGENTS.md）で、他 OS では
 // **呼ばれたらエラーを返すだけ**という約束にしてある。設定は保存できるが何も起きない。
 
 // physicalRect はスクリーン座標系・物理ピクセルでの矩形。

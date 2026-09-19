@@ -1,7 +1,7 @@
-# frontend/src の CLAUDE.md
+# frontend/src の AGENTS.md
 
 **ここは画面（フロント）だけ。** アプリの構想・Go 側の責務・設計原則は
-リポジトリ直下の `CLAUDE.md` を読むこと。
+リポジトリ直下の `AGENTS.md` を読むこと。
 
 **UI は素の DOM 操作で書く（React でアプリを組まない）。** ⚠️ **アイコンのためだけに
 `react` / `react-dom` が入っている**（`icon.ts` が `renderToStaticMarkup` で SVG 文字列に
@@ -23,9 +23,9 @@
 | `evalgraph.ts` / `evalgraphpane.ts` | **`_docs/ui/evalgraph.md`** |
 | `graphscreen.ts` / `studyscreen.ts` | **`_docs/ui/detach.md`** |
 | `veildrag.ts` | **`_docs/ui/study-pane.md`**（連続解析の幕の節） |
-| `frame.ts` / `main.ts` | `_docs/ui/screens.md` + 親 `CLAUDE.md` の「透過と Frameless」 |
+| `frame.ts` / `main.ts` | `_docs/ui/screens.md` + 親 `AGENTS.md` の「透過と Frameless」 |
 | `hint.ts`（設定の説明の吹き出し） | `_docs/ui/screens.md`（設定タブの節） |
-| `fetchcards.ts` / `library.ts` | 親 `CLAUDE.md` の「棋譜データベース（棚）」 |
+| `fetchcards.ts` / `library.ts` | 親 `AGENTS.md` の「棋譜データベース（棚）」 |
 
 （パスはリポジトリ直下から。`_docs/ui/` はここから見ると `../../../../_docs/ui/`）
 

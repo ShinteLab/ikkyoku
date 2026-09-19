@@ -1,4 +1,4 @@
-# piecefont の CLAUDE.md
+# piecefont の AGENTS.md
 
 **端末に入っているフォントから駒の字を焼く**（設定タブの「駒の字」）。
 ⚠️ **TTF を組み立てるコードはここに書かない**（`core/shogifont`）—— 字形の生成は

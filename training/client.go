@@ -11,7 +11,7 @@
 // SFEN を送る。規約を外れた SFEN を登録すると、suteme の向き正規化
 // （`samplesFromRegion` の `if !black { Rotate180 }`）がその 1 件だけ逆に働き、
 // **同じ駒種に上下反転した 2 群ができる**。機械には検出できないので送信側が守る。
-// ikkyoku は取り込みでも訂正でも盤を反転しない（CLAUDE.md「視点」の節）ので、
+// ikkyoku は取り込みでも訂正でも盤を反転しない（AGENTS.md「視点」の節）ので、
 // **普通に使っている限りこの規約は自然に守られる。**
 package training
 

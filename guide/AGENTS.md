@@ -1,4 +1,4 @@
-# guide の CLAUDE.md
+# guide の AGENTS.md
 
 **ガイド枠の寸法と幾何。** 自動フィットの余白・ずれの許容・枠の座標計算。
 **ウィンドウにも Wails にも依存しない**（HWND を触るのは `_cmd`）。

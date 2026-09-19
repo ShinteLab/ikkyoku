@@ -1,7 +1,7 @@
-# _cmd/ikkyoku の CLAUDE.md
+# _cmd/ikkyoku の AGENTS.md
 
 **Wails3 GUI アプリ。ここに置くのは「Wails の口が要るもの」だけ。**
-Service は `ikkyoku/app`、枠の幾何は `ikkyoku/guide`、画面は `frontend/src/CLAUDE.md`。
+Service は `ikkyoku/app`、枠の幾何は `ikkyoku/guide`、画面は `frontend/src/AGENTS.md`。
 ⚠️ **残っているのは main・`CaptureService`・ウィンドウ／Win32 まわりだけ。**
 
 ## GUI アプリ(Wails3)
@@ -55,7 +55,7 @@ CLI は無い。**
 | `window.go` | ウィンドウの位置・サイズ。**永続化**（`app-window.json`・既定値・画面内へのクランプ）と**追跡**（動くたびに記録。⚠️ **終了時には `Position()` を読めない**）の 2 つ。⚠️ **5 枚ぶん**（枠・メイン画面・**評価値グラフ**・**候補手**・**手順**）。⚠️ **古いファイルには `graph` / `side` / `moves` が無い**ので既定に倒すこと（倒さないと大きさ 0 の窓が出る） |
 | `native_windows.go` | **Win32 の直呼び**（`golang.org/x/sys/windows` の LazyProc。**cgo を使わないための層**）。①ウィンドウの矩形 ②枠の素通し（`WS_EX_TRANSPARENT`）とカーソル ③画像を CF_DIB でクリップボードへ。⚠️ **ここに判断を書かないこと** —— 付け外しの判断は `captureservice.go` の `watchCursor`、寸法は `ikkyoku/guide` |
 | `native_other.go` | 上のスタブ（Windows 以外）。**呼ばれたらエラーを返すだけ。** ⚠️ **関数を足したら両方に足すこと** |
-| `frontend/src/*.ts` | **画面。⚠️ 一覧と制約は `_cmd/ikkyoku/frontend/src/CLAUDE.md`**（そこから `_docs/ui/*.md` を引く） |
+| `frontend/src/*.ts` | **画面。⚠️ 一覧と制約は `_cmd/ikkyoku/frontend/src/AGENTS.md`**（そこから `_docs/ui/*.md` を引く） |
 
 `app/` のファイル（**Wails の口が要らない Service**。2026-09-04 に `_cmd` から移した）:
 
@@ -279,7 +279,7 @@ CLI は無い。**
   ⚠️ **省いた周を見送りとして数えないこと**（`CaptureResult.Skipped`）——
   `followLost` も録画も「読んだのに繋がらなかった」ためのもので、混ぜると
   **長考のたびに「見失っています」と出る**。なぜそうしたかは ikkyoku の
-  `CLAUDE.md`「読まずに済ませる」
+  `AGENTS.md`「読まずに済ませる」
   ⚠️ **省き続けたら読むこと**（`gateSkipMax` ＝ 約 10 秒。**実機で踏んだ** ——
   **指したのに「変わっていません」と出続けて 1 手も進まなかった**）。
   **しきい値を詰めることで代えない** —— どんな数にしても**外したら永久に止まる**

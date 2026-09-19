@@ -1,4 +1,4 @@
-# position の CLAUDE.md
+# position の AGENTS.md
 
 **「とある局面」を扱う層。画像を知らない。** 局面矯正（Phase 3）と検討ツリー（Phase 5）。
 ⚠️ **検証は `core/sfen`・合法性は `ikkyoku/legal`・KIF と指し手の変換は `core/kifu`** ——
@@ -212,7 +212,7 @@
   **実際の中継で当たり具合を見て調整すること**
 
 **費用**: `Rank` 1 回が **約 29µs**（`BenchmarkRank`）。撮るたびに走らせてよい。
-⚠️ **追従では `Connect` より先にこちらを回す**（`app/CLAUDE.md`）——
+⚠️ **追従では `Connect` より先にこちらを回す**（`app/AGENTS.md`）——
 0 手・1 手はここで片が付くので、**深い探索に入るのは 2 手以上飛んだときだけ**。
 
 ### 本譜の先端（`Study.MainTip`）
