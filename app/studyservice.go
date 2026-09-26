@@ -1177,6 +1177,11 @@ func (s *StudyService) Evals() EvalGraph {
 	g.First = base
 	g.Ply = s.study.Ply()
 	g.Number = base + s.study.Ply()
+	if ply := s.study.Ply(); ply > 0 && ply < len(line) {
+		if n, found := s.nodeLocked(line[ply]); found {
+			g.Move = n.Text
+		}
+	}
 	// ⚠️ **右端は「今辿っている 1 本」の終わり**（木全体の最大手数ではない）。
 	g.Last = base + len(line) - 1
 	// **枝に居るなら、分かれなかったほうの線も薄く出す**（2026-08-13）。

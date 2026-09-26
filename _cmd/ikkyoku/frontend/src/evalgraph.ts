@@ -774,9 +774,20 @@ export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
 
   // 触っている手数の中身を 1 行で出す。**ツールチップだけにしない**
   // （点の上にぴったり乗せないと出ないので、線を目で追いながらは読めない）。
+  //
+  // **触っていないときは「今見ている手」を出す**（2026-09-26。「○手目 ▲８四飛」）。
+  // 縦線だけでは**それが何手目なのかが読めない**（目盛りは飛び飛び）。
+  // ⚠️ **評価値は付けない** —— ホバーの読み上げと見分けが付かなくなるうえ、
+  // 評価値はすぐ上の候補手の一覧に出ている。
+  // ⚠️ **手の表記は `graph.move` から取る**（点から引かない。解析していない手でも出す）。
   const showReadout = (n: number | null) => {
-    if (n === null || !graph) {
+    // 局面が無い（`ids` が空）ときは何も出さない。
+    if (!graph || (graph.ids ?? []).length === 0) {
       readout.textContent = "";
+      return;
+    }
+    if (n === null) {
+      readout.textContent = graph.move ? `${graph.number}手目 ${graph.move}` : "開始局面";
       return;
     }
     const parts: string[] = [`${n}手目`];

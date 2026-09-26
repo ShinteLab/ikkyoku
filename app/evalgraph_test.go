@@ -373,3 +373,34 @@ func TestEvalGraphMarksBranches(t *testing.T) {
 		t.Errorf("経路に無い分かれ道の印が出ています: %+v", g.Branches)
 	}
 }
+
+// 今見ている手の表記が、**解析していなくても**出ること（2026-09-26）。
+//
+// グラフの読み上げ欄に「何手目の何を見ているか」を出すためのもの。
+// ⚠️ **点から引くと、まだ解析していない手では空になる。**
+func TestEvalGraphCurrentMoveWithoutPoints(t *testing.T) {
+	s := adopted(t)
+	if g := s.Evals(); g.Move != "" {
+		t.Errorf("開始局面なのに手の表記があります: %q", g.Move)
+	}
+	if _, err := s.Play("7g7f"); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	if _, err := s.Play("3c3d"); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	g := s.Evals()
+	if len(g.Series) != 0 {
+		t.Fatalf("解析していないのに点があります: %+v", g.Series)
+	}
+	if g.Number != 2 || g.Move != "△３四歩" {
+		t.Errorf("今見ている手 = %d %q, want 2 △３四歩", g.Number, g.Move)
+	}
+	// 戻ったらその手の表記になること。
+	if _, err := s.GoTo(g.IDs[1]); err != nil {
+		t.Fatalf("GoTo: %v", err)
+	}
+	if g := s.Evals(); g.Number != 1 || g.Move != "▲７六歩" {
+		t.Errorf("戻った先の手 = %d %q, want 1 ▲７六歩", g.Number, g.Move)
+	}
+}
