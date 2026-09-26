@@ -62,6 +62,14 @@ export interface SidePaneHandle {
   cancelBatch(): void;
   // stepping は連続解析が走っているか（**キー操作を横取りしないため**）。
   stepping(): boolean;
+  // dropCurrent は Delete キーで**今見ている手から下を消す**（2026-09-26。
+  // 中身は `MoveListHandle.dropCurrent`）。
+  //
+  // ⚠️ **この窓が手順を出していなければ何もしない**（`setParts`）。手順を
+  // 切り離しているとドック側のリストは隠れたまま生きているので、そちらで
+  // 確認を出すと**見えない行の位置にダイアログが出る**。Delete を受けるのは
+  // **手順が見えている窓**だけ。⚠️ **連続解析中も何もしない**（局面を取り合う）。
+  dropCurrent(): void;
   // setActive は「この面が今使われているか」（2026-09-08）。
   //
   // ⚠️ **切り離すと、ドック側のペインは隠れたまま生き続ける。** そのままだと
@@ -2088,6 +2096,12 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
     stepping() {
       // ⚠️ **別の窓が回していても「走っている」**（十字キーを横取りさせない）。
       return batchBusy();
+    },
+    dropCurrent() {
+      if (!showMoves || batchBusy()) {
+        return;
+      }
+      moveListUI.dropCurrent();
     },
     setActive(on: boolean) {
       if (active === on) {

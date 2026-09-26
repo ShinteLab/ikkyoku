@@ -376,6 +376,13 @@ export interface EvalGraphOptions {
   // ⚠️ **保存を待たずに描き替えること**（押した手応えが要る）。保存に失敗しても
   // 画面はその軸のままでよい —— 次の起動で戻るだけで、今見えているものは正しい。
   onMode?(mode: EvalMode): void;
+  // canStep は ← / → で手を動かしてよいか（2026-09-26）。**無ければ常に動かす。**
+  //
+  // ⚠️ **連続解析の最中は false を返すこと**（あちらが 1 手ずつ局面を動かしている
+  // ので、横から動かすと局面を取り合う。幕はポインタしか塞げない）。
+  // **何を見て決めるかは窓ごとに違う**（ドックなら解析の列、切り離した窓なら幕）
+  // ので、ここでは決めない。
+  canStep?(): boolean;
 }
 
 export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
@@ -398,6 +405,8 @@ export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
   const svg = document.createElementNS(NS, "svg");
   svg.setAttribute("class", "eval-graph-svg");
   host.appendChild(svg);
+  // ← / → を受けるためにフォーカスを取れるようにする（下の keydown）。
+  host.tabIndex = 0;
 
   let graph: EvalGraph | null = null;
   // 今ホバーしている手数（null なら離れている）。**画面だけの状態。**
@@ -837,6 +846,9 @@ export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
     // ⚠️ **既定の選択（テキストのドラッグ）を止める。** 止めないと、
     // 横に引いたときに見出しごと青く反転して掴んでいる範囲が見えなくなる。
     ev.preventDefault();
+    // ⚠️ **フォーカスは自分で入れること。** mousedown の既定の動作を止めているので、
+    // 押しただけではフォーカスが移らず、**続けて ← / → を押しても効かない**。
+    host.focus({ preventScroll: true });
     dragA = n;
     dragB = n;
     dragX = ev.clientX;
@@ -879,6 +891,40 @@ export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
   // ⚠️ **離すのは箱の外のこともある**ので window で受ける（host だけだと、
   // 端まで引いて離したときに掴んだままになる）。
   window.addEventListener("mouseup", finishDrag);
+
+  // ← / → で 1 手戻す/進める（2026-09-26）。**グラフにフォーカスがあるときだけ**
+  // （押すとフォーカスが入る）。横軸が手数なので、**押した向きがそのまま手順の前後。**
+  //
+  // ⚠️ **ページ全体では拾わないこと**（盤の ↑ / ↓ とはそこが違う）。左右キーは
+  // **縦のスプリットバー**が幅を変えるのに使っており、欄の中でもカーソル移動に使う。
+  //
+  // ⚠️ **辿るのは `ids`（今の経路）の上**で、行き先は `seek` と同じく id で渡す
+  // （手数から作らない。枝に居ても**その枝の中だけ**を動く ——盤の ↑ / ↓ と同じ）。
+  // ⚠️ **ここで動かせるのは盤の無い切り離した窓でも同じ**なので、盤の側に頼まない。
+  host.addEventListener("keydown", (ev) => {
+    const delta = ev.key === "ArrowLeft" ? -1 : ev.key === "ArrowRight" ? 1 : 0;
+    if (!delta || ev.ctrlKey || ev.altKey || ev.metaKey || ev.shiftKey) {
+      return;
+    }
+    // ⚠️ **既定の動作は止める**（押しても動かせない場面でも、箱が横に流れないように）。
+    ev.preventDefault();
+    if (!graph || opts.canStep?.() === false) {
+      return;
+    }
+    const ids = graph.ids ?? [];
+    const ply = (graph.ply ?? 0) + delta;
+    const id = ids[ply];
+    // ⚠️ **端では何もしない**（回り込ませない。↑ / ↓ と同じ）。
+    if (ply < 0 || id === undefined) {
+      return;
+    }
+    // ⚠️ **縦線は先に動かしておく。** 点の取り直しは `study:changed` のあとに
+    // 非同期で届くので、待つと**続けて押したときに同じ手へ 2 度行く**（進まない）。
+    // 届けば Go の値で描き直されるので、食い違いは残らない。
+    graph = { ...graph, ply, number: (graph.first ?? 0) + ply };
+    draw();
+    onSeek(id);
+  });
 
   all.addEventListener("change", () => {
     syncFields();

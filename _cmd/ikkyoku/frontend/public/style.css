@@ -2826,6 +2826,16 @@ html.is-graph #app {
   cursor: pointer;
 }
 
+/* 押すとフォーカスが入り、← / → で 1 手ずつ動かせる（2026-09-26）。
+   ⚠️ **:focus-visible にしないこと** —— フォーカスはマウスで押して入るので、
+   それだと出ない。**キーがどこへ行くのか**が見えていないと、← / → を押して
+   何が動くのか分からない。⚠️ **outline は内側へ**（外側は margin 5px しか無く、
+   畳んだ状態の見出しと重なる）。 */
+.eval-graph:focus {
+  outline: 1px solid #6ad3ff;
+  outline-offset: -1px;
+}
+
 .eval-graph-svg {
   width: 100%;
   height: 100%;

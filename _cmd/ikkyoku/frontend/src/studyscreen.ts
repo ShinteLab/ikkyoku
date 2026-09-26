@@ -234,6 +234,25 @@ export function mountStudyScreen(root: HTMLElement, part: StudyScreenPart = "ana
       pane.cancelBatch();
     }
   });
+  // Delete で**今見ている手から下を消す**（2026-09-26。メイン画面の `studyStep` と
+  // 同じ操作）。⚠️ **手順の窓でだけ効く** —— 候補手の窓には手順が無いので、
+  // `pane.dropCurrent` が何もしない（`setParts`）。
+  // ⚠️ **止める相手はメイン画面と揃えること**（幕・ダイアログ・欄の中・修飾キー）。
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Delete" || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) {
+      return;
+    }
+    if (!veil.hidden || document.querySelector(".popup-menu")) {
+      return;
+    }
+    const el = e.target as HTMLElement | null;
+    const tag = el?.tagName ?? "";
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el?.isContentEditable) {
+      return;
+    }
+    e.preventDefault();
+    pane.dropCurrent();
+  });
 
   // ---- 連動 ---------------------------------------------------------------
   //

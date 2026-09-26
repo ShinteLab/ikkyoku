@@ -25,6 +25,14 @@ export interface MoveListHandle {
   // ⚠️ **畳むのは足した手だけ** —— 他の候補まで畳み直すと、開いて読んでいる
   //最中に別の候補を足したときに**読んでいたほうが黙って閉じる**。
   foldAdded(id: number): void;
+  // dropCurrent は**今見ている手から下を消す**（Delete キー。2026-09-26）。
+  // 右クリック →「以降の手を削除」と同じ操作で、**消えるのが 1 手なら聞かずに消し、
+  // 2 手以上なら確認を出す**（`dropAt`）。
+  //
+  // ⚠️ **相手は「今見ている手」**（光っている行）。手のボタンは押すと描き直されて
+  // フォーカスが外れるので、**フォーカスのある行**では決められない。
+  // 消すと親へ戻るので、**最後の手で押し続ければ 1 手ずつ短くなる。**
+  dropCurrent(): void;
 }
 
 export interface MoveListOptions {
@@ -267,7 +275,7 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
         // 局面を根にすると、この 2 つは 40 ずれる。**渡すのは m.id。**
         chip(String((state.first ?? 0) + m.number), m.text || m.usi, m.id,
           `${m.usi} までの局面に戻ります` +
-            (m.main ? "" : "（枝）") + "（右クリックでこの手から下を消します）",
+            (m.main ? "" : "（枝）") + "（右クリックでメニュー。Delete キーで今見ている手から下を消します）",
           {
             depth: m.depth, main: m.main, parent: m.parent, fork: isFork(m),
             sources: m.sources ?? [], hand: m.hand ?? false, guess: m.guess ?? false,
@@ -291,9 +299,12 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
   // 聞く。右クリックは誤爆しやすいのに、いきなり赤いボタンが指の下に出ると
   // **その勢いで押せてしまう**。候補手の右クリック（「手順を追加」）とも形が揃う。
   //
-  // ⚠️ **聞くほうを省かないこと。** 消えるのは**1 手ではなく、そこから下の全部**
-  // （解析結果も一緒に消える）。**メニューは「何をするか」、確認は「何が消えるか」**で
-  // 役割が違う。
+  // ⚠️ **2 手以上消えるときは聞くほうを省かないこと。** 消えるのは**1 手ではなく、
+  // そこから下の全部**（解析結果も一緒に消える）。**メニューは「何をするか」、
+  // 確認は「何が消えるか」**で役割が違う。
+  // ⚠️ **消えるのが 1 手だけなら聞かない**（2026-09-26）。「何が消えるか」は
+  // 押した手そのもので、確認が言うことが何も無い。末尾から 1 手ずつ削る
+  // （Delete の連打）たびに聞かれると使えない。判断は `dropAt` の 1 か所。
   // ⚠️ **聞いているあいだ、消える範囲を赤く光らせる**（`.is-doomed`）——
   // 「その手以下が消える」は文字で言うより見せたほうが早い。
   // ⚠️ **光らせるのは確認のときだけ**（メニューの段では光らせない）。
@@ -347,13 +358,45 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
     });
   };
 
+  // countDrop はその手を消したときに消える手数（**その手 + 子孫**。ぶら下がった
+  // 枝も全部）。⚠️ **字下げでは数えられない**ので、親を辿って数える
+  // （markDoomed と同じ理由）。
+  const countDrop = (id: number): number => {
+    const parent = new Map<number, number>();
+    for (const n of state?.nodes ?? []) {
+      parent.set(n.id, n.parent);
+    }
+    return (state?.nodes ?? []).filter((n) => {
+      for (let x = n.id; x > 0; x = parent.get(x) ?? -1) {
+        if (x === id) {
+          return true;
+        }
+      }
+      return false;
+    }).length;
+  };
+
+  // dropAt はその手から下を消す。**1 手だけなら聞かずに消し、2 手以上なら確認を出す。**
+  //
+  // ⚠️ **右クリックのメニューと Delete キーの両方がここを通る。** 聞くかどうかの
+  // 判断を 2 か所に書くと、片方だけ黙って消すようになる。
+  const dropAt = (x: number, y: number, id: number, label: string) => {
+    const count = countDrop(id);
+    if (count <= 1) {
+      closeAsk();
+      void run(() => StudyService.DropFrom(id));
+      return;
+    }
+    askDrop(x, y, id, label, count);
+  };
+
   // askMoveMenu は手を右クリックしたときのメニュー。
   //
-  // ⚠️ **ここでは何も起きない**（消すほうは押すと確認が出る）。
+  // ⚠️ **ここでは何も起きない**（消すほうは、2 手以上なら押すと確認が出る）。
   // ⚠️ **`danger` にしないこと** —— 赤くするのは「押したら消える」ボタンだけで、
   // メニューの段で赤いと**確認が出ることに気づかず身構える**。
   const askMoveMenu = (
-    x: number, y: number, id: number, label: string, count: number,
+    x: number, y: number, id: number, label: string,
     o: { main: boolean; chosen: boolean; canPromote: boolean },
   ) => {
     closeAsk();
@@ -380,7 +423,7 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
     }
     items.push({
       label: "以降の手を削除",
-      onPick: () => askDrop(x, y, id, label, count),
+      onPick: () => dropAt(x, y, id, label),
     });
     ask = openPopup(x, y, { label: "手順", items });
   };
@@ -398,25 +441,11 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
     if (id < 1 || !state?.loaded) {
       return;
     }
-    // ⚠️ **消えるのは「その手 + 子孫」**（ぶら下がった枝も全部）。字下げでは
-    // 数えられないので、親を辿って数える（markDoomed と同じ理由）。
-    const parent = new Map<number, number>();
-    for (const n of state.nodes ?? []) {
-      parent.set(n.id, n.parent);
-    }
-    const count = (state.nodes ?? []).filter((n) => {
-      for (let x = n.id; x > 0; x = parent.get(x) ?? -1) {
-        if (x === id) {
-          return true;
-        }
-      }
-      return false;
-    }).length;
     const label = chip.querySelector<HTMLElement>(".move-text")?.textContent ?? "この手";
     // どの項目を出すかは**その手の印**で決まる（本譜か・本線に選んだか・選べるか）。
     // ⚠️ **判定は Go 側**（`Node`）。フロントで木の形を読み直さないこと。
     const me = (state.nodes ?? []).find((n) => n.id === id);
-    askMoveMenu(e.clientX, e.clientY, id, label, count, {
+    askMoveMenu(e.clientX, e.clientY, id, label, {
       main: !!me?.main,
       chosen: !!me?.chosen,
       canPromote: !!me?.canPromote,
@@ -451,6 +480,20 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
       // **畳めばその 1 手だけが残って「＋」が付く**（`hasBranch` / `hidden`）。
       collapsed.add(id);
       renderMoves();
+    },
+    dropCurrent() {
+      const id = state?.currentId ?? 0;
+      // 「開始局面」は手ではないので消せない（右クリックと同じ）。
+      if (!state?.loaded || id < 1) {
+        return;
+      }
+      const chip = movesPanel.querySelector<HTMLElement>(`.move-chip[data-id="${id}"]`);
+      const label = chip?.querySelector<HTMLElement>(".move-text")?.textContent ?? "この手";
+      // 確認はその手の行の下に出す（右クリックならカーソルの位置だが、キーには無い）。
+      // ⚠️ **行が見えないときはリストの左上**（今見ている手は畳んでも道筋が開くので
+      // 普通は見えている）。
+      const r = (chip ?? movesPanel).getBoundingClientRect();
+      dropAt(r.left + 16, r.bottom, id, label);
     },
   };
 }

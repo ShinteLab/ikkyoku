@@ -65,7 +65,7 @@ export function mountGraphScreen(root: HTMLElement) {
                 title="ドックに戻す: 評価値グラフをメイン画面の中へ戻します（窓を閉じても同じです）"></button>
       </div>
       <div id="eval-graph" class="eval-graph"
-           title="押すとその局面に戻ります（手順は消えません）。横にドラッグするとその範囲に絞ります"></div>
+           title="押すとその局面に戻ります（手順は消えません）。横にドラッグするとその範囲に絞ります。押したあとは ← / → で 1 手ずつ動かせます"></div>
       <!-- 連続解析のあいだ被せる幕。⚠️ **この窓にも要る**（2026-09-09 に踏んだ）——
            ⚠️ template literal の中なので、コメントにバッククォートを使わないこと
            （文字列がそこで切れる）。
@@ -128,6 +128,9 @@ export function mountGraphScreen(root: HTMLElement) {
         }
       })();
     },
+    // ← / → で手を動かしてよいか（2026-09-26）。⚠️ **この窓は状態を持たない**ので、
+    // 連続解析が走っているかは**幕が出ているか**で見る（`study:busy` が出し入れする）。
+    canStep: () => veil.hidden && !document.querySelector(".popup-menu"),
   });
 
   // ⚠️ **取り直す口は 1 本にまとめること**（色と点がばらばらに更新されると、

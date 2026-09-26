@@ -1116,7 +1116,7 @@ export function mountMainScreen(root: HTMLElement): void {
                     aria-label="評価値グラフを切り離す"></button>
           </div>
           <div id="eval-graph" class="eval-graph"
-               title="押すとその局面に戻ります（手順は消えません）。横にドラッグするとその範囲に絞ります"></div>
+               title="押すとその局面に戻ります（手順は消えません）。横にドラッグするとその範囲に絞ります。押したあとは ← / → で 1 手ずつ動かせます"></div>
         </div>
         <!-- 連続解析のあいだ被せる幕（2026-08-14）。**触れなくするのが目的。**
              連続解析は 1 手ずつ局面を動かしながら走るので、その最中に盤や
@@ -2946,9 +2946,19 @@ ${st.turnLabel}${n}`;
   // ⚠️ **どこを押していても効く**（リストにフォーカスを当てさせない）。手を辿る
   // ときに見ているのは**盤**なので、先にリストを掴ませるのは 1 手多い。
   // そのぶん**横取りしてはいけない相手**を並べて外してある（下記）。
+  //
+  // ⚠️ **Delete キー（2026-09-26）もここで受ける** —— 今見ている手から下を消す
+  // （手順リストの右クリック →「以降の手を削除」と同じ。**1 手だけなら聞かずに
+  // 消し、2 手以上なら確認が出る**。判断は `movelist.ts` の `dropAt`）。
+  // ⚠️ **手順リストにフォーカスがあるときだけ、にはしない。** 手のボタンは押すと
+  // 描き直されてフォーカスが外れるので、それでは**押した直後に効かない**。
+  // 止める相手は ↑ / ↓ と同じ（欄の中の Delete は文字を消す操作）。
+  // ⚠️ **手順を切り離しているときはあちらの窓が受ける**（`sidePane.dropCurrent` が
+  // 「この窓に手順が出ているか」を見て何もしない）。
   const studyStep = (e: KeyboardEvent) => {
+    const drop = e.key === "Delete";
     const delta = e.key === "ArrowUp" ? -1 : e.key === "ArrowDown" ? 1 : 0;
-    if (!delta) {
+    if (!delta && !drop) {
       return;
     }
     // ⚠️ **解析タブに居るときだけ。** 訂正タブにも盤があるので、
@@ -2985,6 +2995,10 @@ ${st.turnLabel}${n}`;
     }
     // ⚠️ **ここまで来たら既定の動作は止める**（パネルが縦にスクロールする）。
     e.preventDefault();
+    if (drop) {
+      sidePane.dropCurrent();
+      return;
+    }
     studyBoardUI.step(delta);
   };
   document.addEventListener("keydown", studyStep);
@@ -3100,6 +3114,9 @@ ${st.turnLabel}${n}`;
     onMode: (m) => {
       void SettingsService.SetEvalGraphAxis(m).catch(() => {});
     },
+    // ← / → で手を動かしてよいか（2026-09-26）。**止める条件は ↑ / ↓ と同じ**
+    // （連続解析の最中・小さなダイアログが出ているあいだ。`studyStep`）。
+    canStep: () => !sidePane.stepping() && !document.querySelector(".popup-menu"),
   });
 
   // ⚠️ **取り直しの実装は `evalgraphpane.ts` に移した**（2026-09-08）。
