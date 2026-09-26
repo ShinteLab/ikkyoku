@@ -41,6 +41,7 @@ const MIN_SEARCH_LENGTH = 3;
 const SOURCE_LABELS: Record<string, string> = {
   yomiuri: "読売（竜王戦）",
   shogilive: "将棋連盟 中継",
+  shogidb2: "将棋DB2",
   url: "URL から取り込み",
   paste: "貼り付け",
 };
