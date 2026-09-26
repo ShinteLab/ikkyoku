@@ -1578,6 +1578,8 @@ export function mountMainScreen(root: HTMLElement): void {
     // ⚠️ **設定は変わらない** —— Go 側がやるのは `Show`/`Hide` だけで、
     // 「切り離しているか」はそのまま（**タブに戻れば同じ形で出し直す**）。
     void CaptureService.SetStudyTabActive(target === studyTab);
+    // 棋譜の自動更新は解析タブに居るあいだだけ刻む（**切り離していても呼ぶ**）。
+    sidePane.setTabShown(target === studyTab);
     for (const { tab, panel } of tabs) {
       const active = tab === target;
       tab.classList.toggle("is-active", active);
@@ -3070,6 +3072,9 @@ ${st.turnLabel}${n}`;
   });
   // ⚠️ **幕の出口はここ**（幕は下を全部塞ぐので、側の列の「停止」も押せない）。
   batchVeilCancel.addEventListener("click", () => sidePane.cancelBatch());
+  // メイン画面は入力タブで始まる（解析タブを開くまで棋譜の自動更新を刻まない）。
+  sidePane.setTabShown(false);
+
   // ⚠️ **別の窓の幕からも止められること**（`study:cancel`）。評価値グラフの窓には
   // 「停止」も手順も無いので、**出口がここに繋がっていないと窓を閉じるしかない。**
   // ⚠️ **持ち主だけが応じること** —— 切り離しているあいだ連続解析を持っているのは

@@ -216,6 +216,9 @@ func (s *StudyService) applySessionLocked(rec StudyRecord, study *position.Study
 	s.study = study
 	s.game = rec.Game
 	s.sourceURL = rec.SourceURL
+	// ⚠️ **自動更新は控えから戻さない**（その場かぎり。開き直すたびに外へ取りに
+	// 行き始めると、中継を追っていない日でも通信が走る）。
+	s.kifuFollow = false
 	s.gameID = rec.GameID
 	s.session = rec.ID
 	// ⚠️ **点の手数と指し手は木から引き直す**（控えには入っていない）。

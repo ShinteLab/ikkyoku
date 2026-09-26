@@ -4222,6 +4222,21 @@ html.is-graph #app {
   background: #3a3d47;
 }
 
+/* 入切のあるアイコンボタンが「入」のとき（2026-09-26。棋譜の自動更新）。
+   ⚠️ **絵は変わらないので、今どちらなのかはこの色だけが伝える。**
+   薄い差にしないこと —— 読めないと、押すまでどちらか分からない
+   （枠を出すトグル `.toolbar-btn[aria-pressed]` と同じ色にしてある）。 */
+.icon-btn[aria-pressed="true"] {
+  color: #8fbcff;
+  background: #1d2735;
+  border-color: #2f4a6b;
+}
+
+.icon-btn[aria-pressed="true"]:hover:not(:disabled) {
+  color: #cfe2ff;
+  background: #26364b;
+}
+
 /* 取り直しの最中。**押せないことが見て分かる程度には落とす**
    （中継が重いと数秒かかる）。 */
 .icon-btn:disabled {

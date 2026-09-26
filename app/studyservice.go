@@ -87,6 +87,16 @@ type StudyService struct {
 	// ⚠️ **根を入れ替えたら捨てること**（`sourceURL` と同じ）。撮った局面にも
 	// 新規対局にも棚の行は無いので、残っていると**別の対局の控えを上書きする**。
 	gameID string
+	// kifuFollow は**取得元の URL を自動で取り直しているか**（2026-09-26）。
+	//
+	// ⚠️ **持っているのは入切だけ。** 取り直す間隔を刻むのはフロントの持ち主の窓
+	// （連続解析が走っているかを知っているのがそちらだけなので）。ここに置くのは
+	// **どの窓でも同じ入切が見える**ようにするため（`StudyState.KifuFollow`）。
+	//
+	// ⚠️ **`sourceURL` を捨てるところでは必ず一緒に切ること** —— 残ると、
+	// 取り直す先が無いのに「自動更新中」と出る。⚠️ **設定ファイルにも控えにも
+	// 持たない**（その場かぎり。再起動や前の検討を開き直したら切れている）。
+	kifuFollow bool
 	// rev は状態の版（**変えるたびに 1 つ進む**。2026-09-08）。
 	//
 	// **どの窓がどこまで描いたかを揃えるための番号。** `study:changed` は
@@ -183,6 +193,11 @@ type StudyState struct {
 	//
 	// ⚠️ **id を画面に出すためのものではない**（人が読む値ではない）。
 	GameID string `json:"gameId"`
+	// KifuFollow は**取得元の URL を自動で取り直しているか**（2026-09-26）。
+	//
+	// ⚠️ **どの窓でも同じ入切を見せるための口。** 取り直す間隔を刻むのは
+	// フロントの持ち主の窓（`FollowKifu` を呼ぶ）。`SourceURL` が空なら必ず偽。
+	KifuFollow bool `json:"kifuFollow"`
 
 	// RootSFEN は根の局面（採ったときの局面）。**エンジンに渡すのはこれ + Played。**
 	RootSFEN string `json:"rootSfen"`
@@ -271,6 +286,7 @@ func (s *StudyService) Adopt() (st StudyState, err error) {
 	s.game = position.Game{}
 	// **取得元も捨てる**（撮った局面に取得元は無い）。
 	s.sourceURL = ""
+	s.kifuFollow = false
 	// **棚の行も捨てる**（撮った局面は棚のどの棋譜でもない）。
 	s.gameID = ""
 	// **評価値グラフも捨てる。** 別の局面から始まる別の手順なので、前の折れ線を
@@ -294,6 +310,12 @@ type KifuLoad struct {
 	// ⚠️ **これはエラーではない。** 途中で止まっても、そこまでの手順は正しいので
 	// 解析できる（設計原則3）。**フロントで空でないことをエラー扱いしないこと。**
 	Note string `json:"note"`
+	// Added は取り直しで**本譜に増えた手の数**（`ReloadKifu` / `FollowKifu` だけが埋める）。
+	//
+	// 自動更新で**手が来たかどうか**を知らせるのに使う（来ていないときは黙る）。
+	Added int `json:"added"`
+	// Followed は自動更新で**先端へ付いていったか**（`FollowKifu` だけが立てる）。
+	Followed bool `json:"followed"`
 }
 
 // LoadKifu は KIF テキストを読んで解析タブの根と手順にする。
@@ -356,6 +378,8 @@ func (s *StudyService) loadKifuFrom(text, sourceURL, gameID string) (load KifuLo
 	s.game = k.Game
 	// **取得元が分かっている入口だけが埋める**（貼り付けは空）。
 	s.sourceURL = strings.TrimSpace(sourceURL)
+	// ⚠️ **読み込んだだけでは追わない**（自動更新は人が入れるもの）。
+	s.kifuFollow = false
 	// **棚から開いた入口だけが埋める**（貼り付けも URL の取得だけも空）。
 	s.gameID = strings.TrimSpace(gameID)
 	s.newSessionLocked()
@@ -445,7 +469,56 @@ func (s *StudyService) LoadKifuURL(rawURL string) (KifuLoad, error) {
 // ⚠️ **食い違いが無ければ `dropAfter` を呼ばないこと。** あれは世代（epoch）を
 // 進めるので、**走っている解析の途中経過が捨てられる**（1 手進むたびに
 // 再読み込みする使い方では、毎回それが起きる）。
-func (s *StudyService) ReloadKifu() (load KifuLoad, err error) {
+func (s *StudyService) ReloadKifu() (KifuLoad, error) {
+	return s.reloadKifu(false)
+}
+
+// FollowKifu は**自動更新の 1 回ぶん**（2026-09-26）。取り直しは `ReloadKifu` と
+// 同じで、違うのは**本譜の先端を見ていたなら、伸びた先の先端へ付いていく**ことだけ
+// （`tail -f` と同じ。中継を画像で追う `FollowAuto` と同じ約束）。
+//
+// ⚠️ **先端を見ていないなら動かさない。** 戻って検討している最中に飛ばされると、
+// **中継が進むたびに読んでいた枝から引き剥がされる**（`TODO.md`「本譜のロック」の
+// 「今見ている場所を勝手に動かさない」）。
+//
+// ⚠️ **`advance` を偽にして呼ぶのは連続解析が走っているとき**（フロントが決める）。
+// あちらが局面を 1 手ずつ動かしているので、横から動かすと**解析を打ち切り合う**。
+// 取り直すだけなら見ている位置は動かないので、手順は伸ばしておく。
+//
+// ⚠️ **終局まで載ったら自動更新を切る**（投了のあとは伸びない。サーバを叩き続けない）。
+func (s *StudyService) FollowKifu(advance bool) (KifuLoad, error) {
+	return s.reloadKifu(advance)
+}
+
+// SetKifuFollow は自動更新の入切（2026-09-26。手順の見出しの自動更新のアイコン）。
+//
+// ⚠️ **ここは入切を覚えるだけで、取りに行かない。** 刻むのはフロント
+// （`FollowKifu` を呼ぶ）。⚠️ **URL から読んでいない局面では入れられない**
+// （取り直す先が無い）。
+func (s *StudyService) SetKifuFollow(on bool) (st StudyState, err error) {
+	// ⚠️ **`publish` はロックの外で走らせること**（`defer` は LIFO）。
+	// **切り離した窓のアイコンもこれで揃う。**
+	defer func() { s.publish(st, err) }()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if on && (s.study == nil || s.sourceURL == "") {
+		return s.state(), fmt.Errorf("この局面は URL から読み込んだものではないので、自動更新できません")
+	}
+	if s.kifuFollow == on {
+		return s.state(), nil
+	}
+	s.kifuFollow = on
+	s.logger.Info("棋譜の自動更新", "on", on, "url", s.sourceURL)
+	// ⚠️ **`changed` ではなく版だけ進める** —— 控え（`markDirty`）に書く中身は
+	// 何も変わっていない。版を進めないと、`study:changed` を受けた窓が
+	// 「既に描いた版」として捨てる。
+	s.rev++
+	return s.state(), nil
+}
+
+// reloadKifu は `ReloadKifu` と `FollowKifu` の本体。
+func (s *StudyService) reloadKifu(advance bool) (load KifuLoad, err error) {
 	// ⚠️ **`publish` はロックの外で走らせること**（`defer` は LIFO なので、
 	// ここで登録しておけば `s.mu.Unlock()` の**後**に走る）。
 	defer func() { s.publish(load.State, err) }()
@@ -476,14 +549,44 @@ func (s *StudyService) ReloadKifu() (load KifuLoad, err error) {
 	}
 
 	s.mu.Lock()
+	// ⚠️ **取りに行っているあいだに別の局面へ入れ替わっていたら据えないこと**
+	// （2026-09-26）。取得は数秒かかり、**自動更新は人が見ていないところで
+	// 走る** —— 撮った局面を採った直後に古い取得が返ってくると、根が違うので
+	// `mergeReloadLocked` が**木ごと入れ替えて、採った局面を消す。**
+	if s.sourceURL != url {
+		st := s.state()
+		s.mu.Unlock()
+		return KifuLoad{State: st},
+			fmt.Errorf("取り直しているあいだに別の局面に入れ替わったので、取り直した棋譜は使いませんでした")
+	}
+	// **先端を見ていたか**は据え直す前に見る（据え直すと先端が動く）。
+	// ⚠️ **取りに行く前ではなく、ここで見ること** —— 取っているあいだに
+	// 人が手順を押していたら、そちらが今の意思。
+	atTip := s.study != nil && s.study.CurrentID() == mainTipID(s.study)
 	graft := s.mergeReloadLocked(study)
 	s.game = k.Game
+	followed := false
+	if advance && s.kifuFollow && atTip && graft.Added > 0 {
+		if id, _, e := s.study.MainTip(); e == nil && s.study.GoTo(id) == nil {
+			followed = true
+		}
+	}
+	stopped := false
+	if s.kifuFollow && s.study.RecordEnd() != 0 {
+		// **終局まで載った。** これ以上伸びないので追うのをやめる。
+		s.kifuFollow = false
+		stopped = true
+	}
 	st := s.changed()
 	s.mu.Unlock()
 
 	summary := kifuSummary(k) + fmt.Sprintf("（%s）", got.Encoding)
 	note := k.Note
-	for _, msg := range []string{graft.Note, reloadNote(graft)} {
+	var stopNote string
+	if stopped {
+		stopNote = "終局まで載ったので自動更新を止めました"
+	}
+	for _, msg := range []string{graft.Note, reloadNote(graft), stopNote} {
 		if msg == "" {
 			continue
 		}
@@ -494,8 +597,10 @@ func (s *StudyService) ReloadKifu() (load KifuLoad, err error) {
 		}
 	}
 	s.logger.Info("棋譜を取り直しました", "url", got.URL, "moves", k.Loaded,
-		"kept", graft.Kept, "added", graft.Added, "movedAt", graft.MovedAt)
-	return KifuLoad{State: st, Summary: summary, Note: note}, nil
+		"kept", graft.Kept, "added", graft.Added, "movedAt", graft.MovedAt,
+		"auto", advance, "followed", followed)
+	return KifuLoad{State: st, Summary: summary, Note: note,
+		Added: graft.Added, Followed: followed}, nil
 }
 
 // graftKifu は手元の KIF を**今の木に据え直す**（棚から前の検討を開いたとき）。
@@ -672,6 +777,7 @@ func (s *StudyService) NewGame(handicap string) (load KifuLoad, err error) {
 	s.game = position.Game{Handicap: name}
 	// **取り直す先も無い。**
 	s.sourceURL = ""
+	s.kifuFollow = false
 	s.gameID = ""
 	s.newSessionLocked()
 	st := s.changed()
@@ -954,6 +1060,7 @@ func (s *StudyService) Clear() (st StudyState) {
 	s.study = nil
 	s.game = position.Game{}
 	s.sourceURL = ""
+	s.kifuFollow = false
 	s.gameID = ""
 	s.newSessionLocked()
 	return s.changed()
@@ -1249,6 +1356,7 @@ func (s *StudyService) state() StudyState {
 		Handicap:   handicapLabel(s.game.Handicap),
 		SourceURL:  s.sourceURL,
 		GameID:     s.gameID,
+		KifuFollow: s.kifuFollow,
 		Rev:        s.rev,
 	}
 }
