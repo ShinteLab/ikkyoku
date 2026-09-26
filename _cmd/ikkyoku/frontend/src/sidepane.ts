@@ -58,6 +58,8 @@ export interface SidePaneHandle {
   reveal(): void;
   // 解析タブが開いているか（**切り離していても呼ぶ**。棋譜の自動更新を刻むかに効く）。
   setTabShown(on: boolean): void;
+  // 棋譜の自動更新の間隔（分。**設定から**。画面に欄は無い）。
+  setKifuFollowMinutes(minutes: number): void;
   // release は解析を止める（面を離れる / 窓を閉じるとき）。
   release(): void;
   // cancelBatch は連続解析をやめる（**幕の中の出口から呼ばれる**）。
@@ -1981,9 +1983,12 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
   // （`TODO.md`「本譜のロック」の「中継が進むたびに勝手にエンジンが起きる」）。
   // 戻ってきたらすぐ 1 回取り直すので、そのあいだの手は取りこぼさない。
 
-  // 取り直す間隔。⚠️ **秒単位で叩かないこと** —— 相手は将棋連盟などの中継
-  // サーバで、こちらは 1 人の観戦者（1 手に数分かかる対局が普通）。
-  const KIFU_FOLLOW_MS = 30_000;
+  // 取り直す間隔（分）。⚠️ **値は設定から押し込まれる**（`setKifuFollowMinutes`。
+  // 解決は Go の `Config.KifuFollowInterval`、既定 5 分）。**ここに既定を
+  // 書かないこと** —— 0 のあいだ（設定がまだ届いていない）は刻まない。
+  // ⚠️ **画面に分数の欄を置かない**（設定ファイルを手で書くだけ）。
+  let followMinutes = 0;
+  const followMs = () => followMinutes * 60_000;
   // Go 側の入切（`StudyState.kifuFollow`）の写し。**書き換えるのは `render` だけ。**
   let followOn = false;
   // 解析タブが開いているか（`setTabShown`）。**切り離した窓は `active` が兼ねる**
@@ -2008,7 +2013,7 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
     }
     followBusy = true;
     // ⚠️ **取っているあいだは再読み込みのアイコンを回す**（押した取り直しと同じ見た目）。
-    // 30 秒ごとに回ることが「追っている」の手応えにもなる。二重に押させない役も兼ねる。
+    // 回ることが「追っている」の手応えにもなる。二重に押させない役も兼ねる。
     studyReload.disabled = true;
     try {
       // ⚠️ **連続解析（と自動で指し継ぐ）の最中は付いていかない。** あちらが局面を
@@ -2016,7 +2021,7 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
       // 手順は伸ばしておく（取り直すだけなら見ている位置は動かない）。
       const got = await StudyService.FollowKifu(!runActive());
       onState(got.state);
-      // ⚠️ **手が来ていなければ黙ること**（30 秒ごとに通るので、毎回出すと
+      // ⚠️ **手が来ていなければ黙ること**（定期的に通るので、毎回出すと
       // 他の操作の理由を押し流す）。**来たとき・断りがあるときだけ出す。**
       if (got.added > 0 || got.note) {
         const parts: string[] = [];
@@ -2035,7 +2040,7 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
       // 理由を出して**次の回も試す**（中継サーバが一時的に落ちるのは普通にある）。
       showFollowNote(
         `自動更新: 取り直せませんでした（${String(err instanceof Error ? err.message : err)}）。` +
-          `${KIFU_FOLLOW_MS / 1000}秒後にもう一度試します`,
+          `${followMinutes}分後にもう一度試します`,
         true,
       );
     } finally {
@@ -2044,12 +2049,24 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
     }
   };
 
+  // paintFollow はアイコンの入切と説明を描く（**入切と間隔のどちらが変わっても呼ぶ**）。
+  const paintFollow = () => {
+    kifuFollowBtn.setAttribute("aria-pressed", String(followOn));
+    // ⚠️ **アイコンだけなので title を空にしないこと。** 押すと何が起きるかを言う。
+    kifuFollowBtn.title = followOn
+      ? `自動更新中: ${followMinutes}分ごとに取り直し、最新手を見ているときは` +
+        `新しい手へ付いていきます（押すと止めます）`
+      : `棋譜を自動更新: ${followMinutes}分ごとに取り直し、最新手を見ていれば` +
+        `新しい手へ付いていきます（終局したら止まります）`;
+    kifuFollowBtn.setAttribute("aria-label", followOn ? "棋譜の自動更新を止める" : "棋譜を自動更新");
+  };
+
   // syncFollow は刻むかどうかを今の状態に合わせる。**出入りは全部ここを通す。**
-  // ⚠️ **始めた瞬間に 1 回取り直す**（入れた直後・タブに戻った直後に 30 秒待たせない）。
+  // ⚠️ **始めた瞬間に 1 回取り直す**（入れた直後・タブに戻った直後に間隔ぶん待たせない）。
   const syncFollow = () => {
-    const want = followOn && active && shown && studyLoaded;
+    const want = followOn && active && shown && studyLoaded && followMinutes > 0;
     if (want && !followTimer) {
-      followTimer = window.setInterval(() => void followTick(), KIFU_FOLLOW_MS);
+      followTimer = window.setInterval(() => void followTick(), followMs());
       void followTick();
     } else if (!want && followTimer) {
       window.clearInterval(followTimer);
@@ -2139,14 +2156,7 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
       // 自動更新も同じ条件（取り直す先が無ければ追いようがない）。
       kifuFollowBtn.hidden = !loaded || src === "";
       followOn = loaded && src !== "" && !!next?.kifuFollow;
-      kifuFollowBtn.setAttribute("aria-pressed", String(followOn));
-      // ⚠️ **アイコンだけなので title を空にしないこと。** 押すと何が起きるかを言う。
-      kifuFollowBtn.title = followOn
-        ? `自動更新中: ${KIFU_FOLLOW_MS / 1000}秒ごとに取り直し、最新手を見ているときは` +
-          `新しい手へ付いていきます（押すと止めます）`
-        : `棋譜を自動更新: ${KIFU_FOLLOW_MS / 1000}秒ごとに取り直し、最新手を見ていれば` +
-          `新しい手へ付いていきます（終局したら止まります）`;
-      kifuFollowBtn.setAttribute("aria-label", followOn ? "棋譜の自動更新を止める" : "棋譜を自動更新");
+      paintFollow();
       // ⚠️ **既に棚と結んでいるなら出さない**（2026-09-16）。通すと同じ対局が
       // 棚に 2 件並び、しかも控えが新しいほうに移るので前の行から開けなくなる。
       studyShelve.hidden = !loaded || (next?.gameId ?? "") !== "";
@@ -2220,6 +2230,20 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
       // **解析タブに来たら（連続モードなら）そのまま解析を始める。**
       // まだ解析していない局面のときだけ動く（止めた解析を勝手に起こし直さない）。
       autoAnalyze();
+    },
+    setKifuFollowMinutes(minutes: number) {
+      if (minutes === followMinutes) {
+        return;
+      }
+      followMinutes = minutes;
+      paintFollow();
+      // ⚠️ **刻んでいる最中に変わったら刻み直す**（前の間隔のまま残さない）。
+      // 刻み直すと 1 回取り直すが、設定を変えたときだけなので構わない。
+      if (followTimer) {
+        window.clearInterval(followTimer);
+        followTimer = 0;
+      }
+      syncFollow();
     },
     setTabShown(on: boolean) {
       // ⚠️ **自動更新は解析タブに居るあいだだけ刻む**（入切は残す）。見ていない

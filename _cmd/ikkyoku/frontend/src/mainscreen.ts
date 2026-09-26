@@ -5352,6 +5352,8 @@ ${st.turnLabel}${n}`;
     engines: EngineSettings[] | null;
     engineColors: EngineColorOption[] | null;
     analyzeSeconds: number;
+    // 棋譜の自動更新の間隔（分。**解決済み**。設定タブには出さない）。
+    kifuFollowMinutes: number;
     ponanzaConstant: number;
     sutemeSource: string;
     sutemeDataDir: string;
@@ -5401,6 +5403,8 @@ ${st.turnLabel}${n}`;
     // ⚠️ **側の列へは押し込むこと**（色・名前・候補手の本数・考える秒数）。
     // **設定が唯一の出所**で、既定色の解決も Go 側が済ませてある。
     sidePane.setEngines(s.engines ?? [], s.engineColors ?? [], s.analyzeSeconds);
+    // 棋譜の自動更新の間隔（設定ファイルだけで決まる。既定の解決は Go 側）。
+    sidePane.setKifuFollowMinutes(s.kifuFollowMinutes);
     showEngineList(s.engines ?? []);
     // 既定値の解決は Go 側(training パッケージ)が済ませて返す。**フロントに
     // 既定値を書かないこと**(2 か所に持つと、既定を変えたときに食い違う)。

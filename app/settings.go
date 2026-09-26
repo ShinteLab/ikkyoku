@@ -90,6 +90,11 @@ type AppSettings struct {
 	// ⚠️ **フロントに既定値を書かないこと** —— training の Host/Port と同じで、
 	// 2 か所に持つと既定を変えたときに食い違う。
 	PonanzaConstant float64 `json:"ponanzaConstant"`
+	// KifuFollowMinutes は棋譜の自動更新の間隔（分。**解決済み**）。
+	//
+	// ⚠️ **設定タブには出さない**（設定ファイルを手で書くだけ）。側の列が
+	// タイマーを刻むのに使う。
+	KifuFollowMinutes int `json:"kifuFollowMinutes"`
 	// SutemeSource は認識器の読み込み元（`ikkyoku.SutemeSourceAuto` / `Dir` / `Embed`）。
 	//
 	// **正規化済みで返る**（空は "auto"）。⚠️ **フロントで「空なら auto」を
@@ -398,6 +403,7 @@ func (s *SettingsService) settings() AppSettings {
 		EngineColors:      ikkyoku.EngineColors,
 		AnalyzeSeconds:    s.cfg.ThinkSeconds(),
 		PonanzaConstant:   analyze.PonanzaConstantOr(s.cfg.PonanzaConstant),
+		KifuFollowMinutes: s.cfg.KifuFollowInterval(),
 
 		SutemeSource:         s.cfg.SutemeSourceOr(),
 		SutemeDataDir:        s.cfg.SutemeDataDir,

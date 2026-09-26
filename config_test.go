@@ -761,3 +761,24 @@ func TestConfigStudyDir(t *testing.T) {
 		t.Errorf("棚と同じ場所を指しています: studies=%q db=%q", def, db)
 	}
 }
+
+// 棋譜の自動更新の間隔（2026-09-26）。**画面には出さず設定ファイルで書くだけ**なので、
+// 書いていない・壊れている値は既定（5 分）に倒すこと。
+func TestConfigKifuFollowInterval(t *testing.T) {
+	for _, tt := range []struct {
+		minutes, want int
+	}{
+		{0, DefaultKifuFollowMinutes},
+		{-3, DefaultKifuFollowMinutes},
+		{1, 1},
+		{10, 10},
+	} {
+		c := Config{KifuFollowMinutes: tt.minutes}
+		if got := c.KifuFollowInterval(); got != tt.want {
+			t.Errorf("KifuFollowInterval(%d) = %d, want %d", tt.minutes, got, tt.want)
+		}
+	}
+	if DefaultKifuFollowMinutes != 5 {
+		t.Errorf("既定が 5 分ではありません: %d", DefaultKifuFollowMinutes)
+	}
+}

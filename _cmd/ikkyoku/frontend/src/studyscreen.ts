@@ -166,6 +166,7 @@ export function mountStudyScreen(root: HTMLElement, part: StudyScreenPart = "ana
     // 描き直しは向こうに任せる（こちらは自分の写しを入れ直すだけ）。
     onSettings: (s) => {
       pane.setEngines(s.engines ?? [], s.engineColors ?? [], s.analyzeSeconds);
+      pane.setKifuFollowMinutes(s.kifuFollowMinutes);
       tell("settings:changed", null);
     },
   });
@@ -273,6 +274,7 @@ export function mountStudyScreen(root: HTMLElement, part: StudyScreenPart = "ana
       try {
         const s = await SettingsService.Settings();
         pane.setEngines(s.engines ?? [], s.engineColors ?? [], s.analyzeSeconds);
+        pane.setKifuFollowMinutes(s.kifuFollowMinutes);
         // ⚠️ **起動直後の形は設定から読むこと。** Go 側は起動時にも
         // `side:detached` / `moves:detached` を出すが、**その時点でこの窓は
         // まだ購読していない**（グラフの窓で踏んだのと同じ罠）。

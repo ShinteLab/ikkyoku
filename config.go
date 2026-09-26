@@ -192,6 +192,14 @@ type Config struct {
 	// 「手数 × 秒数」がそのまま所要時間になるので、**選び直しを毎回やらせない。**
 	AnalyzeSeconds *int `json:"analyzeSeconds,omitempty"`
 
+	// KifuFollowMinutes は棋譜の自動更新で**何分ごとに取り直すか**（2026-09-26）。
+	//
+	// ⚠️ **画面には出していない**（設定ファイルを手で書くだけ）。自動更新の
+	// アイコンの近くに分数の欄を増やさない、という判断（手順の見出しの行は
+	// 既に混んでいる）。**0（未設定）と負の値は既定**（解決は
+	// `Config.KifuFollowInterval` の 1 か所。**ここに既定値を書かないこと**）。
+	KifuFollowMinutes int `json:"kifuFollowMinutes,omitempty"`
+
 	// PonanzaConstant は評価値を勝率に直すときの定数（解析タブの勝率バー）。
 	//
 	//	勝率(先手) = 1 / (1 + exp(-評価値 / この値))
@@ -778,6 +786,23 @@ func (c Config) ThinkSeconds() int {
 		return 0
 	}
 	return *c.AnalyzeSeconds
+}
+
+// DefaultKifuFollowMinutes は棋譜の自動更新の間隔の既定（分）。
+//
+// ⚠️ **短くしないこと。** 相手は将棋連盟などの中継サーバで、こちらは 1 人の
+// 観戦者。1 手に数分かかる対局が普通なので、数分おきで追いつける
+// （2026-09-26 に 30 秒から 5 分へ）。
+const DefaultKifuFollowMinutes = 5
+
+// KifuFollowInterval は棋譜の自動更新の間隔（分）を返す。
+//
+// ⚠️ **「未設定なら既定」の解決はここ 1 か所。** フロントに書かないこと。
+func (c Config) KifuFollowInterval() int {
+	if c.KifuFollowMinutes <= 0 {
+		return DefaultKifuFollowMinutes
+	}
+	return c.KifuFollowMinutes
 }
 
 // MultiPVOption は候補手の本数を決める USI option の名前。
