@@ -98,6 +98,11 @@ type StudyRecord struct {
 	Game position.Game `json:"game"`
 	// SourceURL は棋譜の取得元（**URL から読んだときだけ**）。
 	SourceURL string `json:"sourceUrl,omitempty"`
+	// SourceKey は**出どころの鍵**（2026-09-26。`studykey.go`）。
+	//
+	// **棚に入っていない検討を同じ棋譜に結び直す手掛かり**（中継カードの
+	// 開き直し・保存、貼り付けの登録）。⚠️ **空が普通**（撮った局面・新規対局）。
+	SourceKey string `json:"sourceKey,omitempty"`
 	// Evals は評価値の点（木の全部）。**どのエンジンだったかは `EngineID` で引く。**
 	Evals []StudyEvalSeries `json:"evals"`
 }
@@ -159,6 +164,7 @@ func (s *StudyService) sessionRecord() (StudyRecord, bool) {
 		GameID:    s.gameID,
 		Game:      game,
 		SourceURL: s.sourceURL,
+		SourceKey: s.sourceKey,
 		Evals:     s.evals.all(),
 	}, true
 }
@@ -216,6 +222,7 @@ func (s *StudyService) applySessionLocked(rec StudyRecord, study *position.Study
 	s.study = study
 	s.game = rec.Game
 	s.sourceURL = rec.SourceURL
+	s.sourceKey = rec.SourceKey
 	// ⚠️ **自動更新は控えから戻さない**（その場かぎり。開き直すたびに外へ取りに
 	// 行き始めると、中継を追っていない日でも通信が走る）。
 	s.kifuFollow = false

@@ -97,6 +97,13 @@ type StudyService struct {
 	// 取り直す先が無いのに「自動更新中」と出る。⚠️ **設定ファイルにも控えにも
 	// 持たない**（その場かぎり。再起動や前の検討を開き直したら切れている）。
 	kifuFollow bool
+	// sourceKey は**この検討の出どころの鍵**（2026-09-26。`studykey.go`）。
+	//
+	// 中継カードなら取得元、貼り付けなら本文のハッシュ。**棚に入っていない検討を、
+	// あとから同じ棋譜に結び直す**ための手掛かりで、控えに一緒に書く。
+	// ⚠️ **`sourceURL` を捨てるところでは一緒に捨てること**（撮った局面にも
+	// 新規対局にも出どころは無い。残ると**別の棋譜の控えと結ばれる**）。
+	sourceKey string
 	// rev は状態の版（**変えるたびに 1 つ進む**。2026-09-08）。
 	//
 	// **どの窓がどこまで描いたかを揃えるための番号。** `study:changed` は
@@ -126,6 +133,12 @@ type StudyService struct {
 	// （3 秒）のあいだに入れ替えると、**直前までの手と評価値が前のセッションから
 	// 落ちる**。⚠️ **nil でも動くこと**（設計原則3）。
 	save func()
+	// resume は**出どころの鍵が同じ控え**を今の検討と入れ替える口（`StudyStore` が入れる。
+	// 2026-09-26。`studykey.go`）。戻せなければ false。
+	//
+	// ⚠️ **nil でも動くこと**（設計原則3）。無ければ棋譜を普通に読み込むだけ。
+	// ⚠️ **ロックを持ったまま呼ばないこと**（向こうが `adoptSession` でロックを取る）。
+	resume func(key string) (StudyState, bool)
 	// evals は手順の 1 手ごとの評価値（評価値グラフ。2026-08-12）。
 	//
 	// ⚠️ **置き場所がここなのは、記録が手順に紐づくから。** 節点を消す操作
@@ -187,9 +200,11 @@ type StudyState struct {
 	SourceURL string `json:"sourceUrl"`
 	// GameID は棚（`kicho`）の棋譜 id（**棚と結んでいるときだけ**。2026-09-16）。
 	//
-	// **「棚に登録する」を出すかどうかの鍵**（結んでいるなら出さない —— 通すと
-	// 同じ対局が棚に 2 件並ぶ）。⚠️ **空が普通**（撮った 1 局面・貼り付け・
-	// URL から取っただけ）。
+	// **棋譜タブのどの行とこの検討が結ばれているか。** 棋譜タブから開いたとき・
+	// 同じ出どころの棋譜を棋譜タブに入れたとき（`linkStudy`）に付く。
+	// ⚠️ **空が普通**（撮った 1 局面・貼り付け・URL から取っただけ）。
+	// （2026-09-26 まで「棚に登録する」のアイコンの出し分けに使っていた。今は画面の
+	// 出し分けには使っていない）
 	//
 	// ⚠️ **id を画面に出すためのものではない**（人が読む値ではない）。
 	GameID string `json:"gameId"`
@@ -287,6 +302,7 @@ func (s *StudyService) Adopt() (st StudyState, err error) {
 	// **取得元も捨てる**（撮った局面に取得元は無い）。
 	s.sourceURL = ""
 	s.kifuFollow = false
+	s.sourceKey = ""
 	// **棚の行も捨てる**（撮った局面は棚のどの棋譜でもない）。
 	s.gameID = ""
 	// **評価値グラフも捨てる。** 別の局面から始まる別の手順なので、前の折れ線を
@@ -336,8 +352,68 @@ type KifuLoad struct {
 // 進める」の条件から外れる）。中継を追うなら**一度最終手を見ておくこと**で、
 // これは「見ている位置を保つ」という取り直しの規約どおり。
 func (s *StudyService) LoadKifu(text string) (KifuLoad, error) {
+	// ⚠️ **同じ本文を前にも解析していたら、その続きから開く**（2026-09-26）。
+	// 鍵は本文のハッシュで、**棋譜タブに登録したときに結び直す手掛かり**にもなる。
+	key := pasteKeyOf(text)
+	if load, ok := s.resumeByKey(key, text); ok {
+		return load, nil
+	}
 	// ⚠️ **貼り付けには取り直す先も棚の行も無い**ので、どちらも空。
-	return s.loadKifuFrom(text, "", "")
+	return s.loadKifuFrom(text, "", "", key)
+}
+
+// resumeByKey は**出どころの鍵が同じ控え**があれば、それを開いてから棋譜を据え直す
+// （2026-09-26。中継カードの「解析する」と貼り付けの「解析する」）。
+//
+// **中継は数時間かけて完成し、そのあいだに別の棋譜を解析するのが普通。**
+// 控えは起動時に一番新しいものしか戻らないので、これが無いと開き直すたびに
+// **解析がゼロから**になる（追いつくまで数分かかる）。
+//
+// ⚠️ **据え直しは `graftKifu`**（棋譜タブから開くときと同じ規約：枝と評価値を
+// 捨てない・見ている位置を動かさない・本譜が入れ替わったら断る）。
+// ⚠️ **据え直せなくても開けたことは成功**（設計原則3）。
+func (s *StudyService) resumeByKey(key, text string) (KifuLoad, bool) {
+	s.mu.Lock()
+	resume := s.resume
+	s.mu.Unlock()
+	if resume == nil || key == "" {
+		return KifuLoad{}, false
+	}
+	st, ok := resume(key)
+	if !ok {
+		return KifuLoad{}, false
+	}
+	load, err := s.graftKifu(text)
+	if err != nil {
+		s.logger.Warn("前の検討に棋譜を据え直せませんでした", "key", key, "error", err)
+		return KifuLoad{State: st, Summary: "前の検討の続きを開きました",
+			Note: "棋譜は読めませんでした"}, true
+	}
+	load.Summary = "前の検討の続きを開きました：" + load.Summary
+	return load, true
+}
+
+// linkGame は**出どころの鍵が同じなら**、今の検討に棚の棋譜 id を結ぶ（2026-09-26）。
+// 結んだなら true。
+//
+// ⚠️ **既に結んでいるなら触らない**（別の行へ移すと、前の行から開けなくなる）。
+// ⚠️ **ロックの外で publish すること**（切り離した窓にも伝わる）。
+func (s *StudyService) linkGame(key, gameID string) bool {
+	if key == "" || gameID == "" {
+		return false
+	}
+	s.mu.Lock()
+	if s.study == nil || s.sourceKey != key || s.gameID != "" {
+		s.mu.Unlock()
+		return false
+	}
+	s.gameID = gameID
+	// ⚠️ **`changed()` を通すこと** —— 控えを書き直させる（`markDirty`）。
+	st := s.changed()
+	s.mu.Unlock()
+	s.publish(st, nil)
+	s.logger.Info("今の検討を棋譜タブの棋譜に結びました", "gameId", gameID)
+	return true
 }
 
 // loadKifuFrom は KIF テキストを読み込んで、**取得元の URL も一緒に覚える**。
@@ -352,7 +428,7 @@ func (s *StudyService) LoadKifu(text string) (KifuLoad, error) {
 // 「今の手順がどこから来たか」が実際の取得元と食い違いうる。
 // gameID は棚（`kicho`）の棋譜 id。**棚から開いた入口だけが埋める**
 // （控えをこの棋譜に紐づける鍵。2026-09-16）。
-func (s *StudyService) loadKifuFrom(text, sourceURL, gameID string) (load KifuLoad, err error) {
+func (s *StudyService) loadKifuFrom(text, sourceURL, gameID, key string) (load KifuLoad, err error) {
 	// ⚠️ **`publish` はロックの外で走らせること**（`defer` は LIFO なので、
 	// ここで登録しておけば `s.mu.Unlock()` の**後**に走る）。
 	defer func() { s.publish(load.State, err) }()
@@ -382,6 +458,8 @@ func (s *StudyService) loadKifuFrom(text, sourceURL, gameID string) (load KifuLo
 	s.kifuFollow = false
 	// **棚から開いた入口だけが埋める**（貼り付けも URL の取得だけも空）。
 	s.gameID = strings.TrimSpace(gameID)
+	// **出どころの鍵**（控えを同じ棋譜に結び直す手掛かり。`studykey.go`）。
+	s.sourceKey = key
 	s.newSessionLocked()
 	st := s.changed()
 	s.mu.Unlock()
@@ -436,7 +514,7 @@ func (s *StudyService) LoadKifuURL(rawURL string) (KifuLoad, error) {
 	s.logger.Info("棋譜を取得しました", "url", got.URL, "encoding", got.Encoding, "bytes", len(got.Text))
 
 	// ⚠️ **棚の行は無い**（URL から取っただけで棚には入っていない）。
-	load, err := s.loadKifuFrom(got.Text, got.URL, "")
+	load, err := s.loadKifuFrom(got.Text, got.URL, "", "")
 	if err != nil {
 		return load, err
 	}
@@ -712,6 +790,14 @@ func (s *StudyService) currentGameID() string {
 	return s.gameID
 }
 
+// currentSession は今の検討の控えの id（**控えの書き直しが今の検討とぶつからないか**
+// を見るため。公開しない）。
+func (s *StudyService) currentSession() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.session
+}
+
 // mainTipID は本譜の先端の節点（組み立てられなければ根）。**画面へ出す用。**
 func mainTipID(st *position.Study) int {
 	id, _, err := st.MainTip()
@@ -778,6 +864,7 @@ func (s *StudyService) NewGame(handicap string) (load KifuLoad, err error) {
 	// **取り直す先も無い。**
 	s.sourceURL = ""
 	s.kifuFollow = false
+	s.sourceKey = ""
 	s.gameID = ""
 	s.newSessionLocked()
 	st := s.changed()
@@ -1061,6 +1148,7 @@ func (s *StudyService) Clear() (st StudyState) {
 	s.game = position.Game{}
 	s.sourceURL = ""
 	s.kifuFollow = false
+	s.sourceKey = ""
 	s.gameID = ""
 	s.newSessionLocked()
 	return s.changed()

@@ -591,7 +591,19 @@ func (s *KifuService) SendToStudyGame(d GameDetail) (KifuLoad, error) {
 	// ⚠️ **棚の id も渡す**（2026-09-16）。**控えをこの棋譜に紐づける鍵**で、
 	// 次に同じ棋譜を開いたときに前の検討が戻るのはこれがあるから。
 	// **棚に入っていない棋譜（取得しただけ）は空**（`d.ID` が無い）。
-	return s.study.loadKifuFrom(d.KIF, kicho.RefetchableURL(d.Source, d.SourceURL), d.ID)
+	// ⚠️ **前にこの棋譜を解析していたら、その続きから開く**（2026-09-26）。
+	// 鍵は取得元（`source` / `source_id`）なので、**棚に保存していない中継カード
+	// でも引ける** —— 中継は数時間かけて完成し、そのあいだに別の棋譜を解析する
+	// のが普通なので、開き直すたびにゼロからだと追いつくまで数分かかる。
+	key := sourceKeyOf(d.Source, d.SourceID)
+	if load, ok := s.study.resumeByKey(key, d.KIF); ok {
+		// 棋譜タブの行から来たなら、ここで結んでおく（次からは id で引ける）。
+		if d.ID != "" && s.study.linkGame(key, d.ID) {
+			load.State = s.study.State()
+		}
+		return load, nil
+	}
+	return s.study.loadKifuFrom(d.KIF, kicho.RefetchableURL(d.Source, d.SourceURL), d.ID, key)
 }
 
 // Fetch は URL（か棋譜 ID）から棋譜を取得する（**保存はしない**）。
@@ -653,7 +665,21 @@ func (s *KifuService) Save(d GameDetail) (GameSummary, error) {
 	if err != nil {
 		return GameSummary{}, describeKifuError(err)
 	}
+	// ⚠️ **このカードで積んだ解析を結ぶ**（2026-09-26）。終局してから保存するのが
+	// 普通なので、**保存より前の解析**を棋譜タブから開けるようにするのはここ。
+	s.linkStudy(sourceKeyOf(rec.Source, rec.SourceID), rec.ID)
 	return toSummary(rec), nil
+}
+
+// linkStudy は棋譜タブに入れた棋譜に、**同じ出どころの検討を結ぶ**（2026-09-26）。
+//
+// ⚠️ **結べなくても保存は成功のまま**（検討が無いのが普通。設計原則3）。
+func (s *KifuService) linkStudy(key, gameID string) {
+	if s.Store != nil {
+		s.Store.LinkGame(key, gameID)
+		return
+	}
+	s.study.linkGame(key, gameID)
 }
 
 // PreviewKIF は KIF テキストを解析して内容を返す（**保存はしない**）。
@@ -685,6 +711,10 @@ func (s *KifuService) ImportKIF(text string) (GameSummary, error) {
 	if err != nil {
 		return GameSummary{}, describeKifuError(err)
 	}
+	// ⚠️ **貼り付けて解析していたなら、その解析を結ぶ**（2026-09-26）。鍵は本文の
+	// ハッシュ（`StudyService.LoadKifu` と同じ作り方）なので、**解析してから
+	// 登録しても**棋譜タブの「解析する」で続きが開く。
+	s.linkStudy(pasteKeyOf(text), rec.ID)
 	return toSummary(rec), nil
 }
 
@@ -732,6 +762,8 @@ func (s *KifuService) ImportURL(rawURL string) (GameSummary, error) {
 	if err != nil {
 		return GameSummary{}, describeKifuError(err)
 	}
+	// 中継カードの「保存」と同じ（取得元が同じなら同じ鍵）。
+	s.linkStudy(sourceKeyOf(rec.Source, rec.SourceID), rec.ID)
 	return toSummary(rec), nil
 }
 
@@ -872,6 +904,14 @@ func (s *KifuService) UnwatchAll() (int, error) {
 }
 
 // SaveStudy は**今の検討を棚に登録する**（2026-09-16。Step 3）。
+//
+// ⚠️ **画面からは呼んでいない**（2026-09-26 に手順の見出しの「棋譜に登録」を外した）。
+// **棋譜タブに入れるのは終局してから**という使い方で、しかも「再読み込み」の隣に
+// あって押し間違える。代わりに**棋譜タブに入れたときに同じ出どころの検討を結ぶ**
+// （`linkStudy`。中継カードの「保存」・貼り付けの「棋譜に登録する」）。
+// ⚠️ **残してあるのは、撮った局面から始めた検討を棚に入れる口がこれしか無いから**
+// （盤面図つきの KIF を書き出す `exportKIF` もこれ専用）。画面に戻すなら、
+// **手順の見出しの行には置かないこと。**
 //
 // **撮った 1 局面から始めた検討にも「棚のどの棋譜か」を持たせるための口。**
 // 入れれば `GameID` が付き、次からは棋譜タブから前の検討の続きを開ける

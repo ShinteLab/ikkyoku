@@ -298,7 +298,7 @@ func TestStudySessionDropsPointsWithoutNode(t *testing.T) {
 func loaded(t *testing.T, s *StudyService, gameID string) {
 	t.Helper()
 	const kif = "手合割：平手\n手数----指手---------消費時間--\n   1 ７六歩(77)\n   2 ３四歩(33)\n"
-	if _, err := s.loadKifuFrom(kif, "", gameID); err != nil {
+	if _, err := s.loadKifuFrom(kif, "", gameID, ""); err != nil {
 		t.Fatalf("loadKifuFrom: %v", err)
 	}
 }

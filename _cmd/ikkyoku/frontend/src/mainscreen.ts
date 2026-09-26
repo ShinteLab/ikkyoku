@@ -505,7 +505,9 @@ export function mountMainScreen(root: HTMLElement): void {
             手順は盤の右に並ぶので、押せばその局面まで戻れます。
             <strong>訂正タブは通りません</strong>（棋譜の局面は初期局面と手順で決まるため）。
             <strong>「棋譜に登録する」を押すと棋譜タブに残ります</strong>
-            （解析するだけでは残りません）。
+            （解析するだけでは残りません）。解析したあとに登録しても、
+            <strong>その解析は棋譜タブの「解析する」から続きを開けます</strong>。
+            同じ棋譜をもう一度貼って「解析する」を押したときも続きから開きます。
             URL から取り込むときは<strong>下の「棋譜の URL から」</strong>です。
           </span>
           <textarea id="kifu-text" class="kifu-text" spellcheck="false"

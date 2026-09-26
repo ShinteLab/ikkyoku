@@ -63,6 +63,11 @@ type StudyStore struct {
 	// ⚠️ **棚に入っていない検討は載らない**（`GameID` が空）。**それが普通**で、
 	// 棚に入っているほうが特別。
 	games map[string]string
+	// keys は出どころの鍵 → 一番新しい控えのファイル名（2026-09-26。`studykey.go`）。
+	//
+	// **棚に入っていない検討を引くための索引**（中継カードの開き直し・保存、
+	// 貼り付けの登録）。⚠️ **撮った局面・新規対局は載らない**（鍵が無い）。
+	keys map[string]string
 	// indexed は索引を組んだか（**一度だけ全部読む**）。
 	indexed bool
 }
@@ -89,6 +94,8 @@ func (t *StudyStore) Start() {
 	// ⚠️ **今すぐ書かせる口も差すこと。** セッションを入れ替える前にこれを
 	// 通さないと、**間引きの幅（3 秒）のぶんが前のセッションから落ちる。**
 	t.svc.save = t.flush
+	// 出どころの鍵が同じ控えを開く口（2026-09-26）。
+	t.svc.resume = t.RestoreKey
 	t.svc.mu.Unlock()
 	go t.loop()
 }
@@ -171,7 +178,7 @@ func (t *StudyStore) flush() {
 		return
 	}
 	t.last = body
-	t.remember(rec.GameID, rec.ID)
+	t.remember(rec.GameID, rec.SourceKey, rec.ID)
 	t.prune()
 }
 
@@ -276,6 +283,7 @@ func (t *StudyStore) index() {
 	}
 	t.indexed = true
 	t.games = map[string]string{}
+	t.keys = map[string]string{}
 	names, err := t.list()
 	if err != nil {
 		t.logger.Warn("控えの索引を作れませんでした", "dir", t.dir, "error", err)
@@ -288,26 +296,37 @@ func (t *StudyStore) index() {
 		if err != nil {
 			continue
 		}
-		// ⚠️ **`gameId` だけ読めればよい**（木も評価値も要らない）。
+		// ⚠️ **`gameId` と鍵だけ読めればよい**（木も評価値も要らない）。
 		var head struct {
-			GameID string `json:"gameId"`
+			GameID    string `json:"gameId"`
+			SourceKey string `json:"sourceKey"`
 		}
-		if err := json.Unmarshal(body, &head); err != nil || head.GameID == "" {
+		if err := json.Unmarshal(body, &head); err != nil {
 			continue
 		}
-		t.games[head.GameID] = n
+		if head.GameID != "" {
+			t.games[head.GameID] = n
+		}
+		if head.SourceKey != "" {
+			t.keys[head.SourceKey] = n
+		}
 	}
 }
 
 // remember は索引を更新する（書いたとき）。
-func (t *StudyStore) remember(gameID, sessionID string) {
-	if gameID == "" {
+func (t *StudyStore) remember(gameID, key, sessionID string) {
+	if gameID == "" && key == "" {
 		return
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.index()
-	t.games[gameID] = sessionID + ".json"
+	if gameID != "" {
+		t.games[gameID] = sessionID + ".json"
+	}
+	if key != "" {
+		t.keys[key] = sessionID + ".json"
+	}
 }
 
 // RestoreGame は棚の棋譜に紐づく控えを開く（**棋譜タブの「解析する」**）。
@@ -322,9 +341,31 @@ func (t *StudyStore) RestoreGame(gameID string) (StudyState, bool) {
 	if gameID == "" {
 		return StudyState{}, false
 	}
+	return t.restoreIndexed(func() string { return t.games[gameID] }, "gameId", gameID)
+}
+
+// RestoreKey は**出どころの鍵が同じ控え**を開く（2026-09-26。`studykey.go`）。
+//
+// **中継カードの「解析する」と貼り付けの「解析する」が引く。** 棚に入れる前でも
+// 同じ棋譜なら前の検討の続きから開ける（中継は数時間かけて完成し、そのあいだに
+// 別の棋譜を解析するのが普通なので）。⚠️ **戻せなくてもエラーにしないこと**
+// （`RestoreGame` と同じ。呼び出し側は普通に読み込むへ落ちる）。
+func (t *StudyStore) RestoreKey(key string) (StudyState, bool) {
+	if key == "" {
+		return StudyState{}, false
+	}
+	return t.restoreIndexed(func() string { return t.keys[key] }, "key", key)
+}
+
+// restoreIndexed は索引で引いた控えを開いて、今の検討と入れ替える。
+func (t *StudyStore) restoreIndexed(lookup func() string, what, value string) (StudyState, bool) {
+	// ⚠️ **引く前に今の検討を書かせること**（2026-09-26）。今開いている検討を
+	// もう一度開く（中継カードの「解析する」を押し直す）と、**間引きの幅（3 秒）
+	// だけ古い控えを読んで、それで今の検討を上書きする**ことになる。
+	t.svc.saveNow()
 	t.mu.Lock()
 	t.index()
-	name := t.games[gameID]
+	name := lookup()
 	t.mu.Unlock()
 	if name == "" {
 		return StudyState{}, false
@@ -350,6 +391,65 @@ func (t *StudyStore) RestoreGame(gameID string) (StudyState, bool) {
 	if b, err := json.Marshal(rec); err == nil {
 		t.last = b
 	}
-	t.logger.Info("この棋譜の前の検討を開きました", "gameId", gameID, "path", path)
+	t.logger.Info("この棋譜の前の検討を開きました", what, value, "path", path)
 	return st, true
+}
+
+// LinkGame は**出どころの鍵が同じ控え**に棚の棋譜 id を書き足す（2026-09-26）。
+//
+// **棋譜タブに入れたときに呼ぶ**（中継カードの「保存」・URL / 貼り付けの登録）。
+// これで**棋譜タブの「解析する」からその検討の続きが開く** —— 終局してから
+// 保存するのが普通なので、**保存より前に積んだ解析を結ぶ道**がここ。
+//
+// **今の検討が相手なら今の検討に結ぶ**（控えは次の書き込みで追随する）。
+// そうでなければ一番新しい控えのファイルを書き直す。
+// ⚠️ **既に別の棋譜と結んでいる控えは触らない**（移すと前の行から開けなくなる）。
+// ⚠️ **結べなくても失敗にしない**（保存そのものは済んでいる。設計原則3）。
+func (t *StudyStore) LinkGame(key, gameID string) {
+	if key == "" || gameID == "" {
+		return
+	}
+	if t.svc.linkGame(key, gameID) {
+		// ⚠️ **すぐ書かせること** —— 書かないと索引に載らず、直後に棋譜タブから
+		// 開いても続きが出ない（間引きの幅のあいだ）。
+		t.svc.saveNow()
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.index()
+	name := t.keys[key]
+	if name == "" {
+		return
+	}
+	path := filepath.Join(t.dir, name)
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.logger.Warn("控えが読めませんでした", "path", path, "error", err)
+		return
+	}
+	var rec StudyRecord
+	if err := json.Unmarshal(body, &rec); err != nil {
+		t.logger.Warn("控えが読めませんでした", "path", path, "error", err)
+		return
+	}
+	if rec.GameID != "" {
+		return
+	}
+	// ⚠️ **今開いている検討のファイルは書き直さないこと**（そちらは `linkGame` の
+	// 担当。ここで書くと、次の自動保存が古い中身で上書きし合う）。
+	if rec.ID == t.svc.currentSession() {
+		return
+	}
+	rec.GameID = gameID
+	out, err := json.Marshal(rec)
+	if err != nil {
+		return
+	}
+	if err := t.write(rec.ID, out); err != nil {
+		t.logger.Warn("控えに棋譜を結べませんでした", "path", path, "error", err)
+		return
+	}
+	t.games[gameID] = name
+	t.logger.Info("前の検討を棋譜タブの棋譜に結びました", "gameId", gameID, "path", path)
 }
