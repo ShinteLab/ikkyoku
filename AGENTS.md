@@ -99,10 +99,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | **スキル** | **手順**（ビルドする・実機で確かめる） | その作業を始めたとき |
 | **`_docs/`** | **記録**（もう判断は済んでいる調査・経緯） | 掘るときだけ |
 
+⚠️ **スキルの実体は `_docs/skills/<名前>/`**（2026-09-26 に `.claude/skills/` から移した）。
+**リポジトリに `.claude` を置かない** —— 置くと Claude で使う前提になる。中身は
+ただの Markdown（`SKILL.md` + `references/`）なので**どのエージェントでも人でも読める**。
+Claude Code でスキルとして使いたい人は、各自の `.claude/skills/<名前>` から
+`_docs/skills/<名前>` へジャンクション（またはシンボリックリンク）を張る。
+⚠️ **編集するのは `_docs/skills/` の側**（git で管理しているのはそちらだけ）。
+
 | 置き場所 | 中身 | 引くとき |
 |---|---|---|
-| スキル **`ikkyoku-build`** | **ビルド・bindings の生成・配布ビルド（焼き込み）・worktree のジャンクション** | ビルドが通らないとき / 配るとき |
-| スキル **`ikkyoku-verify`** | **実機で何を押すか**（未検証チェックリスト・確認済みの記録・確かめ方） | 実装が終わって実機で触るとき |
+| スキル **`ikkyoku-build`**（`_docs/skills/`） | **ビルド・bindings の生成・配布ビルド（焼き込み）・worktree のジャンクション** | ビルドが通らないとき / 配るとき |
+| スキル **`ikkyoku-verify`**（`_docs/skills/`） | **実機で何を押すか**（未検証チェックリスト・確認済みの記録・確かめ方） | 実装が終わって実機で触るとき |
 | スキル **`ikkyoku-handicap-mate`** | **手合割（駒落ち）と詰将棋の全体像**（3 通りの解釈・4 つの入口・側の呼び名）と**詰将棋エンジンを繋ぐ手順**、⚠️ **どのエンジンが何を返すかの実測**（`references/engines.md`） | 駒落ち・詰将棋・詰み探索を触るとき |
 | スキル `wails3` | Wails3 全般。⚠️ **alpha2.117 前提なので beta.16 と食い違う** | Wails の API で詰まったとき |
 | **各パッケージの `AGENTS.md`** | **そのコードを触るときの制約**（`recognize` / `position` / `analyze` / `app` / `guide` / `piecefont` / `training` / `legal` / `usi` / `_cmd/ikkyoku`）。**テストが何の歯止めか**も、それぞれの「テスト」節 | そのディレクトリを触るとき（自動で読まれる） |
@@ -1180,7 +1187,7 @@ Service は `ikkyoku/app`、枠の幾何は `ikkyoku/guide`、画面は
 
 | 置き場所 | 中身 |
 |---|---|
-| `.claude/skills/ikkyoku-verify/SKILL.md` | 確認の手法（何をどう見るか）と進め方 |
+| `_docs/skills/ikkyoku-verify/SKILL.md` | 確認の手法（何をどう見るか）と進め方 |
 | 同 `references/checklist.md` | **まだ未検証**（型とビルドは通ったが実機で押していないもの） |
 | 同 `references/verified.md` | 実機で確認済みのこと（根拠として引ける記録） |
 
