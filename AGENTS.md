@@ -104,6 +104,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ただの Markdown（`SKILL.md` + `references/`）なので**どのエージェントでも人でも読める**。
 Claude Code でスキルとして使いたい人は、各自の `.claude/skills/<名前>` から
 `_docs/skills/<名前>` へジャンクション（またはシンボリックリンク）を張る。
+**ただし worktree の `.claude/skills` には張らない**（Claude Desktop のセッション削除がリンクの先を消す。
+詳細は `_docs/skills/README.md`）。
 ⚠️ **編集するのは `_docs/skills/` の側**（git で管理しているのはそちらだけ）。
 
 | 置き場所 | 中身 | 引くとき |

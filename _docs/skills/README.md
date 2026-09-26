@@ -16,4 +16,8 @@
   New-Item -ItemType Junction -Path .claude\skills\ikkyoku-verify -Target (Resolve-Path _docs\skills\ikkyoku-verify)
   ```
 
-- ⚠️ **編集するのはここ**（git で管理しているのはこちらだけ）
+- ⚠️ **worktree（`.claude/worktrees/<名前>/`）の `.claude/skills` にはジャンクションを張らない。**
+  Claude Desktop はセッション削除のとき worktree を使い回し用に片付け、メイン側 `.claude` と同じパスを
+  worktree 側で消す。そこがジャンクションだと**先の実体が消える**（2026-09-26 に実際に起きた）。
+  worktree にはメイン側の `.claude/skills` が**コピー**で入るので、それを使う
+- ⚠️ **編集するのはここ**（git で管理しているのはこちらだけ。worktree の `.claude/skills` はコピーなので、編集してもブランチに載らない）
