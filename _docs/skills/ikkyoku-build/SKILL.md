@@ -129,8 +129,34 @@ New-Item -ItemType Junction -Path (Join-Path $w 'kicho')  -Target 'D:\Go\Project
 
 ## ⚠️ モジュールが 2 つあることの落とし穴
 
-**`go mod tidy` の後に require 行が消えていないか確認すること**と、**kicho が相対 replace で引く依存を 2 つの go.mod 両方に書くこと** ——
-どちらも `AGENTS.md` の「モジュール / 位置づけ」に理由ごと書いてある。
+ルート（`github.com/ShinteLab/ikkyoku`）と `_cmd/ikkyoku`（Wails アプリ）は別の go.mod。
+ワークスペースに並んでいる状態では、どちらも `replace` の相対パスで兄弟を引く:
+
+```
+go.mod                    replace .../suteme => ../suteme,       .../core => ../core,       .../engine => ../engine
+                                  .../kicho  => ../kicho
+_cmd/ikkyoku/go.mod       replace .../suteme => ../../../suteme, .../core => ../../../core, .../engine => ../../../engine
+                                  .../kicho  => ../../../kicho
+```
+
+- **`_cmd/ikkyoku` にも同じ replace が要る。** path 置換されたモジュール自身の replace は
+  無視される（`ikkyoku` を `../../` で参照している以上、`ikkyoku/go.mod` の replace は効かない）
+- ⚠️ **kicho が相対 replace で引く依存（今は `core`）も、2 つの go.mod 両方に要る。**
+  Go はメインモジュール以外の replace を読まないので、kicho に依存が増えるたびに書き足す。
+  取りこぼしは kicho の `.\check-consumers.ps1` が見る（⚠️ `go.work` は replace より
+  優先されるので、ビルドが通っても取りこぼしは検出できない）
+- ⚠️ **kicho の公開 API を変えたら kicho 側で `.\check-consumers.ps1` を流すこと** ——
+  kicho で `go build ./...` を通しても ikkyoku はコンパイルされない
+  （2026-09-07 に向こうが `Store()` を閉じて公開 API を `Library` に集めた）
+- ⚠️ **`kicho` はルートモジュールが使う**（`app/kifuservice.go`）ので、**go.mod は 2 つとも require する**
+- ⚠️ **`go mod tidy` の後は require 行が消えていないか確認すること。** `_cmd` 配下は
+  `go build ./...` の走査対象外なので、そこだけが必要とする依存は消される。
+  今は該当が無い（ルートパッケージ自体が `screenshot` と `hotkey` を使っている）。
+  **`_cmd` 専用の依存を足すときに効く**
+- ⚠️ **`golang.org/x/image` の `// indirect` を外さないこと**（`core/shogifont` 経由で、
+  `piecefont` が直に import しているわけではない）
+- **exe の大きさ**: `go build` だけの素の exe が **36.9MB**（kicho 以前は 19.2MB。
+  sqlite と goja が効いている）
 
 ## PureGo を維持する
 
