@@ -35,13 +35,13 @@ ABEMA でも YouTube でもキャプチャボードでも同じ経路で扱え�
 設定の問題にする**（やねうら王・水匠などをそのまま繋げる）。
 
 設計原則と各 Phase の詳細は [`AGENTS.md`](AGENTS.md) を参照。
-ワークスペース（`ShinteLab/shinte`）に並べている場合は、図と検討経緯を含む全文が
-[`../TODO.md`](../TODO.md) にある。
+ワークスペース（`ShinteLab/shinte`）に並べている場合は、構想の概要と進み具合が
+[`../TODO.md`](../TODO.md) にある。まだ手を付けていない項目は [`TODO.md`](TODO.md)。
 
 ## なぜ Chrome 拡張ではなくネイティブなのか（経緯）
 
 最初のプロトタイプは Chrome 拡張（MV3）だった（検証コードは Phase 0 完了後に削除済み。
-結果は `../TODO.md` 冒頭の「Phase 0 の検証結果」の表に記録してある）。要点だけ書くと以下の通り。
+結果は [`_docs/phase0-capture.md`](_docs/phase0-capture.md) の表に記録してある）。要点だけ書くと以下の通り。
 
 - ABEMA は盤面データを通信でも DOM でも流していない（映像に焼き込んで配信している）
 - `<video>` → canvas の `drawImage`、および `chrome.tabs.captureVisibleTab` はどちらも
