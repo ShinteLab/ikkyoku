@@ -180,7 +180,7 @@ ikkyoku が自分で描く駒     --piece-features-black/white  style.css が当
 - ⚠️ **ブラウザの HTML/SVG でしか効かない**（Canvas 2D と Go の `x/image/font` は
   GSUB を解釈しない）。**そこで玉・左馬が要るようになったら**、フォントには字も
   同梱してあるので `玉`(U+7389) / **U+E000**（左馬。私用領域）を直接描く
-  （`core/CLAUDE.md` の「異体字と反転字」）。⚠️ **U+E000 はこのフォントが勝手に
+  （`core/shogifont/AGENTS.md` の「異体字と反転字」）。⚠️ **U+E000 はこのフォントが勝手に
   決めた位置**なので、駒フォントを当てた要素の中でしか使えない
 
 ## テスト（`go test ./...`）

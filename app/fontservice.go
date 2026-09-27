@@ -101,7 +101,7 @@ type FontState struct {
 // PieceStyle は「王/玉」「馬/左馬」を**画面にそのまま当てられる形**にしたもの。
 //
 // 切り替えの中身は**駒フォントの stylistic set**（`ss01` = 王→玉 /
-// `ss02` = 馬→左馬。`core/CLAUDE.md`）。⚠️ **`K` と `k` はフォント上で同じグリフ**
+// `ss02` = 馬→左馬。`core/shogifont/AGENTS.md`）。⚠️ **`K` と `k` はフォント上で同じグリフ**
 // なので、盤全体にまとめて当てると先後を分けられない。そのため:
 //
 //	盤（<shogi-board>）        … `gyoku` / `hidari-uma` 属性。駒 1 つずつに当ててくれる

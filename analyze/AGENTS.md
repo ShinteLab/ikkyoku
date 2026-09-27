@@ -266,7 +266,7 @@
 「同じ駒が他からも行けたか」を見ないと決まらないので**盤全体**が要る。
 
 - **変換は `core/kifu`**（`NewNotation` / `FormatMoves`）。ikkyoku には書かない
-  ——将棋の**仕様**は core に一本化する、の一例。注意点は core の AGENTS.md にまとめてある
+  ——将棋の**仕様**は core に一本化する、の一例。注意点は `core/kifu/AGENTS.md` にまとめてある
 - **組み立てるのは `analyze`**（`accumulator.moveText`）。解析した局面の SFEN を持って
   いるのがここだけなので。⚠️ **フロントに移さないこと** ——盤が要る変換なので、
   フロントには材料が無い
