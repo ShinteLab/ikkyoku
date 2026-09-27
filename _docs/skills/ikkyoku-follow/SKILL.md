@@ -110,7 +110,7 @@ description: ikkyoku（一局）の「中継を追う」（Phase 6 の追従）�
 | 場所 | 何の制約か |
 |---|---|
 | `position/AGENTS.md` | `Connect`（一意でなければ `Moves` は空・`MaxWaste` を外さない・手番が逆でも繋がることがある） |
-| `app/AGENTS.md` | `FollowProbe` / `FollowApply` / `FollowAuto`（推測の印・先端を見ていたときだけ動かす・訂正タブを通さない・`Flipped`） |
+| `_docs/app-follow.md` | `FollowProbe` / `FollowApply` / `FollowAuto`（推測の印・先端を見ていたときだけ動かす・訂正タブを通さない・`Flipped`） |
 | `_cmd/ikkyoku/AGENTS.md` | 枠の札・1 周の予約・ふるい（`gate` / `detectGate`）・録画 |
 | `TODO.md` 3・4 | 目線を先に決めさせる話・追従の作りの見直し（未決） |
 | スキル `ikkyoku-verify` | 実機で確かめ済みのこと・まだのこと |

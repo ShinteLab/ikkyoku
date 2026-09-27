@@ -104,7 +104,7 @@ cd D:/ShogiEngine/KomoringHeights
 | 場所 | 何の制約か |
 |---|---|
 | `position/AGENTS.md` | `HandsFixed` / `MateProblem` / `Clone` で写す / 警告の出し分け |
-| `app/AGENTS.md` | 入口ごとの約束・`SetHandsFixed` / `SetMateProblem` / `SolveMate` / エンジンの 2 軸 |
+| `_docs/app-handicap-mate.md` / `_docs/app-engines.md` | 入口ごとの約束・`SetHandsFixed` / `SetMateProblem` / `SolveMate` / エンジンの 2 軸 |
 | `analyze/AGENTS.md` | `ensurePlayable` と `ensureMateTarget` の違い・`Session.Mate`・実測 |
 | `_docs/ui/editor.md` | 訂正タブの画面（チェックの置き場所・枠の見出し・呼び名） |
 | `_docs/ui/study-pane.md` | 解析タブの画面（「詰み」ボタン・候補として出す・本線にする） |
