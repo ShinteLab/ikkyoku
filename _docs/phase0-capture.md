@@ -1,6 +1,6 @@
 # Phase 0: なぜ Chrome 拡張ではなくネイティブなのか
 
-**ここは検証の全文。** 結論の要約は `AGENTS.md` の「経緯」にある。
+**ここは検証の全文。** 結論の要約は `design-capture.md` の「経緯」にある。
 
 **もともとは Chrome 拡張だった。** Phase 0 の検証で ABEMA が Widevine DRM により
 `<video>` の画素を保護しており、Chrome 自身のキャプチャ API（`captureVisibleTab` /

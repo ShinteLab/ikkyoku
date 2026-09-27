@@ -25,7 +25,7 @@
 | `veildrag.ts` | **`_docs/ui/study-pane.md`**（連続解析の幕の節） |
 | `frame.ts` / `main.ts` | `_docs/ui/screens.md` + 親 `AGENTS.md` の「透過と Frameless」 |
 | `hint.ts`（設定の説明の吹き出し） | `_docs/ui/screens.md`（設定タブの節） |
-| `fetchcards.ts` / `library.ts` | 親 `AGENTS.md` の「棋譜データベース（棚）」 |
+| `fetchcards.ts` / `library.ts` | `_docs/app-shelf.md`（理由は `_docs/design-capture.md` の「棋譜データベース（棚）」） |
 
 （パスはリポジトリ直下から。`_docs/ui/` はここから見ると `../../../../_docs/ui/`）
 

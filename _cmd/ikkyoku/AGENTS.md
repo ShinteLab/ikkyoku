@@ -577,6 +577,10 @@ Frameless にすると移動もリサイズも OS 任せでなくなる。
 
 ### ホットキー
 
+Windows の `golang.design/x/hotkey` は内部で `runtime.LockOSThread()` した専用の goroutine で
+`RegisterHotKey` のメッセージループを回すので、**呼び出し側がスレッド管理をする必要は無い**
+（ただし今の GUI は下記のとおり Wails の `app.GlobalShortcut` を使っており、これは直接呼んでいない）。
+
 ⚠️ **画面には出していない**（2026-08-10）。登録はしてあるが、`Alt+S` という文字列を
 UI のどこにも書かない。理由は 2 つ:
 

@@ -53,6 +53,9 @@ npm run build      # 上の 2 つ + vite build
 ### ⚠️ `frontend/bindings/` は生成物で、git に入っていない
 
 **クローン直後・worktree を作った直後は存在しない**（`.gitignore` 済み）。
+⚠️ **`bindings/ikkyoku/` と `bindings/github.com/ShinteLab/ikkyoku/` は別物** —— 前者は
+`_cmd/ikkyoku`（package main。今は `CaptureService` だけ）、後者はルートモジュールの
+各パッケージ（`app` / `guide` / `position` / …）。
 **`npm run build` や `tsc` を打つ前に一度生成すること。**
 
 忘れると `Cannot find module '../bindings/...'`（TS2307）が延々と出る。

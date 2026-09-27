@@ -169,7 +169,7 @@ wails3 dev                       # 開発モード
 ```
 
 `wails3 build` で `bin\ikkyoku.exe` が生成される。詳細な設計判断は
-`ikkyoku/AGENTS.md` の「GUI アプリ(Wails3)」節を参照。
+`_cmd/ikkyoku/AGENTS.md` を参照。
 
 ## コード構成
 
