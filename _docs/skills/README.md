@@ -6,6 +6,7 @@
 |---|---|
 | `ikkyoku-build/` | ビルド・bindings の生成・配布ビルド（焼き込み）・worktree のジャンクション |
 | `ikkyoku-verify/` | 実機で何を押すか（`references/checklist.md` = 未検証 / `references/verified.md` = 確認済み） |
+| `ikkyoku-handicap-mate/` | 手合割（駒落ち）と詰将棋の全体像・詰将棋エンジンを繋ぐ手順（`references/engines.md` = どのエンジンが何を返すかの実測） |
 
 - **ただの Markdown**（`SKILL.md` + `references/`）。どのコーディングエージェントでも、人が読んでもよい
 - ⚠️ **リポジトリに `.claude/` を置かない**（Claude で使う前提になるため。`.gitignore` で無視している）
