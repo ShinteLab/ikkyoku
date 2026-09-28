@@ -5,7 +5,7 @@
 
 ## 何が書いてあるか
 
-**この層の制約は `position/AGENTS.md` の「Go 側の層」にある**（`position.Study` と
+**この層の制約は `_docs/position-study.md` の「Go 側の層」にある**（`position.Study` と
 セットで読むもの）。要点だけ:
 
 - ⚠️ **`legal.Moves` は panic を握る。** 訂正 UI は不正な局面も確定できるので、

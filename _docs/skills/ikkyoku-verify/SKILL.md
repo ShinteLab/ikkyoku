@@ -72,7 +72,7 @@ Start-Process .\bin\ikkyoku.exe
 
 - **心拍**（`DiagService.Heartbeat`。5 秒ごと）。⚠️ **メイン画面が真っ黒になったら、
   何かを押す前にこれを見る** —— 続いているか止まっているかで手当てが変わる
-  （`AGENTS.md` の「メイン画面が真っ黒になって触れなくなる」）
+  （`_docs/cmd-windows.md` の「メイン画面が真っ黒になって触れなくなる」）
 - **ウィンドウの表示状態**（`registerVisibilityLog`）は debug なので既定では出ない。
   追うときだけ Level を上げる
 - **同梱エンジンは USI の送受信を全部 `slog.Info` に出す**ので、解析すると info が流れる

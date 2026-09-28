@@ -34,6 +34,21 @@
 ⚠️ **書き足すときも同じ置き場所に。** ここ（`app/AGENTS.md`）に積むと、また 1 枚で
 読めない長さに戻る。**ここに足してよいのは「どの Service を触っても効く」制約だけ。**
 
+## ファイル
+
+| `app/` のファイル | 役割 |
+|---|---|
+| `settings.go` | 設定(`config.json`)の読み書きを担う Service。起動時に読んで配る役でもある。**エンジンの登録一覧**（追加・削除・名前・「解析に使う」・参照ダイアログ）もここ。⚠️ **ダイアログそのものは持たない** —— `PickFile`（`app.FilePicker`）を`_cmd/ikkyoku/dialog.go` が差し込む。⚠️ **エンジンの option の値**（`SetEngineOption` / `ResetEngineOptions`）もここだが、**宣言を控えるのは `AnalyzeService.CheckEngine`**（繋がないと分からないため）。**棋譜データベースの場所**（`SetKifuDBPath` / `BrowseKifuDB`）もここだが、⚠️ **開くのは `KifuService`**（フック 1 本で繋いである。SettingsService は棚を持たない） |
+| `positionservice.go` | **訂正タブ**の局面を持つ Service。自由編集（未決・不正でよい）。操作のたびに `EditState` を丸ごと返す。⚠️ **撮った盤の目線**（`SetViewpoint`）もここ —— 盤は 1 マスも動かさず、**解析へ渡すときに回す**（`adoptPosition`）。⚠️ **手番は「対局としての先後」で出し入れし、中では「見た目の手番」で持つ**（翻訳はこのファイルの中だけ。`SeenTurn` は駒台の ▲/△ 用） |
+| `studyservice.go` | **解析タブ**の局面を持つ Service。訂正タブから**写しを採る**（`Adopt`）か、**棋譜を読み込む**（`LoadKifu` / `LoadKifuURL`）か、**新しく対局を始める**（`NewGame`）。**URL から読んだものは取り直せる**（`ReloadKifu`。⚠️ **食い違ったところから先だけを差し替え、それより前の評価値は残す**。判断は `mergeReloadLocked` の 1 か所）。⚠️ **後ろの 2 つは訂正タブを経由しない入口**（どちらも局面が既に確定しているため）。⚠️ **PositionService とは別の局面**で、繋がるのは `Adopt` の 1 か所だけ。**手順は `position.Study`**（`Play`/`AddLine`/`GoTo`/`DropFrom`。**木**）。解析には**根 + 手順**を渡す（`analyzeTarget`）。⚠️ **変えたら `study:changed` を出す**（2026-09-08。別ウィンドウとの連動の土台。**失敗したときは出さない**・**ロックの外で出す**・**`StudyState.Rev` で古いイベントを弾く**） |
+| `evalgraph.go` | **評価値グラフの記録**（`EvalPoint`/`EvalSeries`/`EvalGraph` と `evalStore`）。⚠️ **鍵は手順ツリーの節点 id**（手数ではない。枝があると同じ手数が何本もある）。⚠️ **エンジンごとに別の折れ線**（合成しない）。**持ち主は `StudyService`** —— 記録は局面ではなく**手順**に紐づくので、捨てる判断は手順を持っている側にしか書けない |
+| `kifuservice.go` | **棋譜データベース（棚）**の Service（`Status` / `List` / `Search` / `Count` / `Get` / `Delete` / `Fetch` / `Refresh` / `Save` / `ImportKIF` / `ImportURL` / `SendToStudy` / `SendToStudyGame`）＋**仮の一覧**（`Watches` / `Watch` / `Unwatch` / `UnwatchAll`。⚠️ **棋譜本文は持たない** —— 覚えるのは「どのサイトのどの棋譜か」だけ。⚠️ **`WatchEntry` を別に持つこと**（`GameDetail` で返すと「取れている」ように見える）。⚠️ **既に無いものを外すのは失敗にしない**）。**中身は `kicho.Library` を呼ぶだけ**で、取得も保存も検索もあちらの実装。⚠️ **棚が開けていなくてもアプリは動く**（`library()` が理由を返すだけ。設計原則3）。⚠️ **ServerService は移していない**（ikkyoku は HTTP サーバを持たない）。⚠️ **取り直せる URL かの判断は `RefetchableURL`（kicho 側）**（読売は .kif を置いていないので渡さない）。⚠️ **エラーは sentinel で見分けて ikkyoku 側の直し方を足す**（`describeKifuError` / `describeOpenError`。**kicho の文言を書き写さない**） |
+| `trainingservice.go` | 訂正した局面を suteme へ登録する Service（`Status` / `Send`）。**状態を持たない**（送るものはフロントが渡す） |
+| `fontservice.go` | **駒の字**の Service（`State` / `Scan` / `Preview` / `Add` / `Use` / `Remove` / `Rename` / **`SetGyoku` / `SetHidariUma`**）。返すのは **family 名と data URL、それに当てる `font-feature-settings` まで**で、画面に当てるのはフロント（`--shogi-font` と `--piece-features-*`）。⚠️ **焼いた TTF はディスクに残さない**（元フォントを入れ替えたのに古い字で描く事故が起きる）。⚠️ **玉の先後の判定を呼び出し側に書かせない**（`pieceStyle`。盤と自前の駒で別々に書くと「盤は玉なのに掴むと王」になる） |
+| `analyzeservice.go` | 確定した局面を解析する Service（`Start` / `Stop` / `State` / `CheckEngine`）。**順位 1 の評価値を `StudyService.recordEval` に渡す**（評価値グラフ。⚠️ **記録先の判断はしない** —— 手順を持っていないので、捨てた枝かどうかを確かめようがない）。**局面は持たない**（`StudyService` から読む。⚠️ **`PositionService` を見ないこと**）。⚠️ **登録した「解析に使う」エンジンを同時に走らせる**（1 エンジン 1 プロセス）。途中経過はイベント（**`engineId` つき**）。⚠️ **発火の口は持たない** ——`Emit`（`app.EventEmitter`）を `main.go` が差し込む |
+| `diagservice.go` | **フロントが生きているかの計測**（心拍・例外の中継）。局面にもキャプチャにも関与しない。「メイン画面が真っ黒になる」現象を切り分けるためのもの（`_docs/cmd-windows.md`） |
+| `kifufetch.go` | **URL から棋譜を取ってくる**（`fetchKIF`）。文字コードの判別・HTML から .kif を辿る・上限つきの読み取りは全部 `kicho/scrape`。⚠️ **`kicho.Library` を経由しない** —— URL から棋譜を読むのは棚に依らない操作（設計原則3） |
+
 ## 訂正タブ ⇄ 解析タブの継ぎ目
 
 - **訂正タブに居ること自体が訂正モード。** トグルは廃した（`editor.ts` の

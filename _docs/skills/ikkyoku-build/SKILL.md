@@ -173,4 +173,4 @@ _cmd/ikkyoku/go.mod       replace .../suteme => ../../../suteme, .../core => ../
 |---|---|
 | スキル `ikkyoku-verify` | ビルドしたあと**実機で何を押すか** |
 | スキル `wails3` | Wails3 全般。⚠️ **alpha2.117 前提なので beta.16 と食い違う** |
-| `_cmd/ikkyoku/AGENTS.md` | ウィンドウ・Frameless・Win32 まわりの制約 |
+| `_cmd/ikkyoku/AGENTS.md`（索引）→ `_docs/cmd-windows.md` / `_docs/cmd-frame.md` | ウィンドウ・Frameless・Win32 まわりの制約 |

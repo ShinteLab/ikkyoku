@@ -42,7 +42,7 @@
 - **速さの壁は認識 1 枚 2.1 秒**（81 マスの推論。縮めるのは `suteme` の話）。ikkyoku に
   できるのは **1 枚から取れるだけ取る**ことと、**ふるいで読む枚数を減らす**ことだけ
 
-**制約は `position/AGENTS.md`（`Connect`）・`_docs/app-follow.md`（`FollowProbe` / `FollowAuto`）・
-`_cmd/ikkyoku/AGENTS.md`（ふるい・録画・枠の札）。実機での調整とデバッグ（症状から引く表・
+**制約は `_docs/position-connect.md`（`Connect`）・`_docs/app-follow.md`（`FollowProbe` / `FollowAuto`）・
+`_docs/cmd-capture.md`（ふるい・録画・枠の札）。実機での調整とデバッグ（症状から引く表・
 録画とログの読み方・定数の詰め方・実測）はスキル `ikkyoku-follow`。**
 ⚠️ **足す前に `TODO.md`「4. 追従の作りを見直す」を読むこと**（今の作りは継ぎ接ぎ）。

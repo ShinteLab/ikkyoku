@@ -507,7 +507,7 @@ func (s *PositionService) SetHand(piece int, black bool, n int) (EditState, erro
 // 話で、こちらは未決のままの局面も普通に持ち続ける（訂正の途中は未決で当たり前）。
 //
 // ⚠️ **回すのはここだけ。** 撮った局面も、訂正中の盤も、suteme へ送るラベルも
-// 画像の向きのまま置いておく（AGENTS.md「反転するのはエンジンへ渡す境界だけ」）。
+// 画像の向きのまま置いておく（`_docs/design-position.md` の「視点」）。
 func (s *PositionService) adoptPosition() (*position.Position, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
