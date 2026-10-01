@@ -5758,8 +5758,15 @@ html.is-graph #app {
 }
 
 .library-table .is-num {
+  /* ⚠️ **幅を持たせること**（2026-10-02）。棋戦名の列が `width: 100%` で残りを
+     全部取るので、ほかの列は中身の最小幅まで縮む。手数を数値だけにしたら
+     **見出しの「手数」が 1 文字ずつ折り返して縦書きになった**（`nowrap` も付ける）。
+     4.5em は「未 999」が収まる幅。⚠️ **`min-width` ではなく `width`** ——
+     表のセルの `min-width` は当てにならず、自動レイアウトでは `width` が下限として効く。 */
+  width: 4.5em;
   text-align: right;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 /* 終局していない棋譜の印（2026-10-02）。一覧の手数は数値だけで、
