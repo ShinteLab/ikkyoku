@@ -99,7 +99,7 @@ export function mountLibrary(
   const hint = root.querySelector<HTMLElement>("#library-hint")!;
   const status = root.querySelector<HTMLParagraphElement>("#library-status")!;
   const rows = root.querySelector<HTMLTableSectionElement>("#library-rows")!;
-  // 詳細はモーダル（2026-09-12）。**開く口は棋戦名のリンクだけ。**
+  // 詳細はモーダル（2026-09-12）。**開く口は「表示」ボタンだけ**（棋戦名のリンクは解析の口）。
   const modal = root.querySelector<HTMLDialogElement>("#library-modal")!;
   const modalTitle = root.querySelector<HTMLElement>("#library-modal-title")!;
   const modalClose = root.querySelector<HTMLButtonElement>("#library-modal-close")!;

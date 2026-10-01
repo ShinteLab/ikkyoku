@@ -671,7 +671,8 @@ export function mountMainScreen(root: HTMLElement): void {
              ⚠️ **KIF の本文は出さない** —— 150 手を流しても読む場面が無く、
              詳細だけで画面が埋まっていた。**代わりに「KIF をコピー」**を置いて、
              原本が要るときは他のツールへ持っていってもらう。
-             ⚠️ **開く口は棋戦名のリンク**（「表示」ボタンは廃止）。 -->
+             ⚠️ **開く口は「表示」ボタン**（2026-09-14 に棋戦名のリンクが解析の口になった）。
+             棋戦名・備考を直すのもここ（2026-10-02）。 -->
         <dialog id="library-modal" class="library-modal">
           <div class="library-head">
             <span id="library-modal-title" class="field-label"></span>
