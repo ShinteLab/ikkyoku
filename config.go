@@ -145,6 +145,18 @@ type Config struct {
 	// **この項目を知らない設定ファイルは今までどおり評価値で開く。**
 	EvalGraphAxis string `json:"evalGraphAxis,omitempty"`
 
+	// Theme は画面の配色（2026-10-02）。
+	//
+	//	"dark"   … ダーク（**既定**。ライトを足す前からの配色そのまま）
+	//	"light"  … ライト
+	//	"system" … OS の設定に合わせる（解決するのはフロント。OS の設定は
+	//	           WebView の `prefers-color-scheme` でしか読めないため）
+	//
+	// ⚠️ **知らない値はダークに倒す**（`NormalizeTheme`）。空も同じなので、
+	// **この項目を知らない設定ファイルは今までどおりダークで開く。**
+	// ⚠️ **盤と駒の色は変えない**（`<shogi-board>` が同じ色で描く。配色は盤の外だけ）。
+	Theme string `json:"theme,omitempty"`
+
 	// HideWinRateBar は解析タブの**勝率バー（評価値バー）を隠しているか**
 	// （2026-09-10）。切り替えるのは**解析タブの黒地の右クリック**（盤と駒台の上では
 	// 掴んだ駒を離す操作が先に居るので出さない）。
@@ -480,6 +492,49 @@ func NormalizeEvalAxis(v string) string {
 		return v
 	default:
 		return EvalAxisEval
+	}
+}
+
+// 画面の配色（`Config.Theme`）。
+//
+// ⚠️ **"dark" / "light" はフロントの `<html data-theme>` と同じ綴りにすること**
+// （`theme.ts`・`style.css`）。設定に入る文字列なので、片方だけ変えると
+// **保存された配色が読めなくなって既定に戻る。**
+const (
+	// ThemeDark はダーク（既定）。
+	ThemeDark = "dark"
+	// ThemeLight はライト。
+	ThemeLight = "light"
+	// ThemeSystem は OS の設定に合わせる。
+	ThemeSystem = "system"
+)
+
+// ThemeOption は配色の選択肢 1 つ（画面に出す）。
+type ThemeOption struct {
+	Value string `json:"value"`
+	Label string `json:"label"`
+}
+
+// ThemeOptions は選べる配色の一覧。
+//
+// ⚠️ **フロントにこの表を書かないこと**（`GyokuOptions` と同じ）。
+var ThemeOptions = []ThemeOption{
+	{Value: ThemeDark, Label: "ダーク"},
+	{Value: ThemeLight, Label: "ライト"},
+	{Value: ThemeSystem, Label: "OS の設定に合わせる"},
+}
+
+// NormalizeTheme は配色の指定を**知っている値に倒す**（既定はダーク）。
+//
+// ⚠️ **倒す先をライトや "system" にしないこと。** 打ち間違いや将来の版で
+// 書かれた値を読んだときに**画面の色が勝手に変わる**。ダークは
+// ライトを足す前からの配色で、**何も選んでいない人が見ていた画面**。
+func NormalizeTheme(v string) string {
+	switch v {
+	case ThemeLight, ThemeSystem:
+		return v
+	default:
+		return ThemeDark
 	}
 }
 

@@ -67,6 +67,15 @@ type AppSettings struct {
 	// HidePlayerNames は解析タブの**対局者名を隠しているか**（2026-09-10）。
 	// ⚠️ **勝率バーとは別の設定**（帯だけ消して名前は残す使い方が普通）。
 	HidePlayerNames bool `json:"hidePlayerNames"`
+	// Theme は画面の配色（2026-10-02。"dark" / "light" / "system"。**既定は "dark"**）。
+	//
+	// ⚠️ **解決済みの値が返る**（`ikkyoku.NormalizeTheme`）。ただし "system" は
+	// "system" のまま返す —— OS の設定は WebView からしか読めないので、
+	// **ライトかダークかを決めるのはフロント**（`theme.ts`）。
+	// ⚠️ **切り離した窓も枠も起動時にここを読む**（どの窓も同じ配色で始める）。
+	Theme string `json:"theme"`
+	// Themes は選べる配色の一覧（**フロントに表を書かせない**）。
+	Themes []ikkyoku.ThemeOption `json:"themes"`
 	// Training は訂正した局面を suteme へ登録する設定。
 	Training TrainingSettings `json:"training"`
 	// Engines は登録した USI エンジンの一覧（登録順）。
@@ -398,6 +407,8 @@ func (s *SettingsService) settings() AppSettings {
 		EvalGraphAxis:     ikkyoku.NormalizeEvalAxis(s.cfg.EvalGraphAxis),
 		HideWinRateBar:    s.cfg.HideWinRateBar,
 		HidePlayerNames:   s.cfg.HidePlayerNames,
+		Theme:             ikkyoku.NormalizeTheme(s.cfg.Theme),
+		Themes:            ikkyoku.ThemeOptions,
 		Training:          trainingSettings(s.cfg.Training),
 		Engines:           engines,
 		EngineColors:      ikkyoku.EngineColors,
@@ -1228,6 +1239,21 @@ func (s *SettingsService) SetHidePlayerNames(v bool) (AppSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.save(func(cfg *ikkyoku.Config) { cfg.HidePlayerNames = v })
+}
+
+// SetTheme は画面の配色を切り替えて保存する（2026-10-02）。
+//
+// ⚠️ **効かせるのは画面だけ**（`On...` の呼び戻しは持たない）。ほかの窓へ
+// 知らせるのはフロント（`theme:changed`）—— 縦軸と同じく、Go 側が持つのは
+// 「次の起動でどれで始めるか」だけ。
+//
+// ⚠️ **知らない値はダークに倒す**（`ikkyoku.NormalizeTheme`）。エラーにしない
+// のは、**配色が読めないことで他の設定の保存まで止める理由が無い**から。
+func (s *SettingsService) SetTheme(v string) (AppSettings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	theme := ikkyoku.NormalizeTheme(v)
+	return s.save(func(cfg *ikkyoku.Config) { cfg.Theme = theme })
 }
 
 // SetSutemeSource は認識器の読み込み元を切り替えて保存し、**その場で読み直す。**

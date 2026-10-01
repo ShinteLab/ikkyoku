@@ -29,6 +29,7 @@ import { mountFrame } from "./frame";
 import { mountGraphScreen } from "./graphscreen";
 import { mountMainScreen } from "./mainscreen";
 import { mountStudyScreen } from "./studyscreen";
+import { mountTheme } from "./theme";
 
 const params = new URLSearchParams(window.location.search);
 const windowName = params.get("window") ?? "main";
@@ -83,6 +84,9 @@ window.addEventListener("unhandledrejection", (e) => {
     reason?.stack ?? "",
   );
 });
+
+// 配色（2026-10-02）。**どの窓でも同じ**なので、出し分けの前に一度だけ。
+mountTheme();
 
 if (windowName === "frame") {
   document.title = "ikkyoku";

@@ -9,7 +9,7 @@
    近い明るさになり、**入っている値に見える**（実際「名前の欄が編集できない」と
    誤解された。2026-09-08）。本文（#f2f3f5）より明らかに落とす。 */
 ::placeholder {
-  color: #6f7789;
+  color: var(--text-placeholder);
   opacity: 1; /* Firefox は既定で薄くするので、色をこちらで決め切る。 */
 }
 
@@ -97,6 +97,275 @@
   --eval-graph-pad: max(0px, 20px - var(--eval-graph-h));
 }
 
+/* ---- 配色（テーマ） ------------------------------------------------------
+   **色はすべてここのトークンを通す**（2026-10-02 にライトテーマを足したとき、
+   直書きされていた色を全部ここへ寄せた）。`:root` がダーク（今までの配色そのまま）、
+   `:root[data-theme="light"]` がライト。どちらにするかは `<html data-theme>` で、
+   入れるのは `theme.ts`（設定 `theme` を読む。"system" は OS に合わせて解決する）。
+
+   ⚠️ **色を直書きしないこと。** 新しい色が要るときは**両方のブロックに**足す ——
+   片方だけだと、もう片方のテーマで**トークンが未定義になって色が消える**
+   （CSS はそれでも黙って動く）。
+   ⚠️ **ダークの値は直書きだったころの色と 1 対 1**（似た色でもまとめていない）。
+   まとめると、見た目を変えるつもりの無いダークの画面が少しずつ変わる。
+   ⚠️ **テーマに関係なく同じ色にするもの**はトークンにしていない —— 盤と駒
+   （`#f3c877` / `#5a3b1a` / `#1a1a1a`。`<shogi-board>` が同じ色で描く）・
+   勝率バーの赤と青・手番のマーク・盤に重ねる矢印と暗幕・取り込み枠の赤線と
+   認識結果の重ね描き（中継の画面の上に描く）・枠の「撮る」ボタン（赤）と窓の閉じるボタン。 */
+:root {
+  /* 面 */
+  --bg: #1b1d23;
+  --surface: #23262e;
+  --surface-2: #2a2d36;
+  --surface-3: #2c303a;
+  --surface-raised: #2b2f38;
+  --surface-sunk: #1b1e25;
+  --surface-card: #1f2229;
+  --surface-picker: #1e2129;
+  --surface-hover: #2e313a;
+  --row-hover: #22252c;
+  --select-bg: #262b36;
+  --veil-btn-hover: #343a47;
+  --disabled-bg: #1c1e25;
+  --toggle-on-bg: #333a49;
+  --warn-flash-bg: #4a3a1c;
+  /* 線 */
+  --line: #3a3d47;
+  --line-2: #3a3f4b;
+  --line-soft: #2f323b;
+  --line-tab: #333844;
+  --line-toolbar: #222;
+  --line-hint: #454a57;
+  --line-sep: #2f333d;
+  --line-strong: #3a4353;
+  --line-select: #4a5570;
+  --line-disabled: #32353e;
+  --line-hover: #4a4e5a;
+  --line-swatch-hover: #7c8496;
+  --line-missing: #6a5a33;
+  --thead-shadow: #343945;
+  /* スクロールバー */
+  --scroll-track: #262a33;
+  --scroll-track-line: #31353f;
+  --scroll-thumb: #5b6172;
+  --scroll-thumb-hover: #767d8f;
+  /* 文字 */
+  --text: #f2f3f5;
+  --text-title: #e6e8ee;
+  --text-table: #dfe3ea;
+  --text-bubble: #d7dcea;
+  --text-2: #c9ccd3;
+  --text-2b: #c7cbd4;
+  --text-2c: #c8cdd8;
+  --text-hover: #cfd6e6;
+  --text-dim: #9aa6c0;
+  --text-dim-2: #8d98b0;
+  --text-dim-3: #8b93a3;
+  --text-branch: #9aa4b8;
+  --text-source: #9aa3b2;
+  --text-check: #9aa0ac;
+  --text-toggle: #8a92a4;
+  --text-fold: #7f8aa3;
+  --text-ref: #7f8798;
+  --text-muted: #6f7787;
+  --text-placeholder: #6f7789;
+  --text-turn: #6b7284;
+  --text-path: #6f7995;
+  --text-toggle-on: #eaf0ff;
+  --text-on-accent: #0f1115;
+  --on-accent-sep: rgba(15, 17, 21, 0.35);
+  /* 強調（青） */
+  --accent: #5ea0ff;
+  --pressed-ink: #8fbcff;
+  --pressed-bg: #1d2735;
+  --pressed-line: #2f4a6b;
+  --pressed-ink-hover: #cfe2ff;
+  --pressed-bg-hover: #26364b;
+  --active-ink: #d7e3ff;
+  --active-bg: #2b3446;
+  --primary-line: #4a7fd0;
+  --primary-bg: #27354b;
+  --primary-bg-hover: #2f4260;
+  --link: #8fc0ff;
+  --link-hover: #b6d6ff;
+  /* 情報（水色）・注意・危険・成功・分岐 */
+  --info: #6ad3ff;
+  --info-ink: #9fe3ff;
+  --warn: #ffc46b;
+  --warn-2: #e0a44a;
+  --warn-ink: #d9a441;
+  --hint-ink: #d8b46a;
+  --danger: #ff7a7a;
+  --danger-ink: #ff9b9b;
+  --danger-ink-2: #ff8d8d;
+  --danger-line: #ff5a5a;
+  --danger-bg: #2e2326;
+  --danger-bg-hover: #7a2f2f;
+  --line-danger: #6d3535;
+  --line-danger-hover: #a04747;
+  --success: #8fdc9b;
+  --success-2: #7ee0a0;
+  --branch: #9b8cff;
+  /* 枠のツールバー */
+  --frame-danger-ink: #ffb4b4;
+  --frame-danger-hover-bg: #7a2b2b;
+  --follow-ink: #ffd9d6;
+  --follow-bg: #6b2f2b;
+  --follow-bg-hover: #7d3832;
+  /* 評価値グラフ・勝率バー・手順の印 */
+  --eval-tick: #7d859a;
+  --eval-grid: #2f343e;
+  --eval-axis: #3b4150;
+  --eval-axis-zero: #5a6170;
+  --eval-axis-minor: #31363f;
+  --eval-band: #2b3039;
+  --winrate-empty: #454956;
+  --mark-hand: #000;
+  /* 影・幕 */
+  --shadow-45: rgba(0, 0, 0, 0.45);
+  --shadow-50: rgba(0, 0, 0, 0.5);
+  --shadow-55: rgb(0 0 0 / 55%);
+  --backdrop: rgb(0 0 0 / 45%);
+  --veil: rgba(15, 17, 21, 0.25);
+  /* アルファ違いをまとめる 3 つ組（`rgb(var(--accent-rgb) / 0.1)` のように使う） */
+  --accent-rgb: 94 160 255;
+  --danger-rgb: 255 90 90;
+  --info-rgb: 106 211 255;
+  /* 1 か所でしか使わない例外 */
+  --text-strong: #ffffff;
+  --danger-ink-hover: #fff;
+  --flash-bg: #ffffff;
+  --flash-ink: #1b1d23;
+  --control-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  /* 面 */
+  --bg: #f3f4f7;
+  --surface: #ffffff;
+  --surface-2: #e9ecf1;
+  --surface-3: #e6e9ef;
+  --surface-raised: #eceff4;
+  --surface-sunk: #f8f9fb;
+  --surface-card: #ffffff;
+  --surface-picker: #fbfbfd;
+  --surface-hover: #e6e9ef;
+  --row-hover: #eef2f8;
+  --select-bg: #e4ecfa;
+  --veil-btn-hover: #d9dee6;
+  --disabled-bg: #eef0f3;
+  --toggle-on-bg: #d8e4f8;
+  --warn-flash-bg: #fbe3b5;
+  /* 線 */
+  --line: #cbd0d9;
+  --line-2: #c6ccd6;
+  --line-soft: #d9dde4;
+  --line-tab: #c3c9d4;
+  --line-toolbar: #d4d8df;
+  --line-hint: #aab1be;
+  --line-sep: #e0e3e9;
+  --line-strong: #c0c8d5;
+  --line-select: #9fb4da;
+  --line-disabled: #d8dce3;
+  --line-hover: #a3aab7;
+  --line-swatch-hover: #8c93a1;
+  --line-missing: #b69a55;
+  --thead-shadow: #d5d9e0;
+  /* スクロールバー */
+  --scroll-track: #eceef2;
+  --scroll-track-line: #dde0e6;
+  --scroll-thumb: #b5bbc6;
+  --scroll-thumb-hover: #9198a6;
+  /* 文字 */
+  --text: #1d2129;
+  --text-title: #1f2430;
+  --text-table: #262b35;
+  --text-bubble: #2a303b;
+  --text-2: #3d4452;
+  --text-2b: #3f4654;
+  --text-2c: #3b4250;
+  --text-hover: #2c3442;
+  --text-dim: #576173;
+  --text-dim-2: #5f6a7e;
+  --text-dim-3: #636c7b;
+  --text-branch: #5c6678;
+  --text-source: #5f6979;
+  --text-check: #606977;
+  --text-toggle: #626b7c;
+  --text-fold: #687286;
+  --text-ref: #6b7382;
+  --text-muted: #707887;
+  --text-placeholder: #9ca3af;
+  --text-turn: #7a8190;
+  --text-path: #66708a;
+  --text-toggle-on: #173b75;
+  --text-on-accent: #ffffff;
+  --on-accent-sep: rgba(255, 255, 255, 0.45);
+  /* 強調（青） */
+  --accent: #1f6fd1;
+  --pressed-ink: #1a5fb4;
+  --pressed-bg: #e2ecfb;
+  --pressed-line: #9dbbe6;
+  --pressed-ink-hover: #134a8e;
+  --pressed-bg-hover: #d3e3f8;
+  --active-ink: #1a4f9c;
+  --active-bg: #dde7f7;
+  --primary-line: #3b74c9;
+  --primary-bg: #e1ebfa;
+  --primary-bg-hover: #cfdff6;
+  --link: #1a64c8;
+  --link-hover: #0f4c9c;
+  /* 情報（水色）・注意・危険・成功・分岐 */
+  --info: #0a87bf;
+  --info-ink: #0a6f9c;
+  --warn: #b26a00;
+  --warn-2: #c98516;
+  --warn-ink: #94660f;
+  --hint-ink: #87631a;
+  --danger: #c62828;
+  --danger-ink: #b3261e;
+  --danger-ink-2: #c0392b;
+  --danger-line: #d64545;
+  --danger-bg: #fdeeee;
+  --danger-bg-hover: #f8d6d6;
+  --line-danger: #e2b1b1;
+  --line-danger-hover: #cf7373;
+  --success: #2e8b47;
+  --success-2: #23874a;
+  --branch: #6a54d8;
+  /* 枠のツールバー */
+  --frame-danger-ink: #c0392b;
+  --frame-danger-hover-bg: #d64545;
+  --follow-ink: #a1281f;
+  --follow-bg: #fde0dc;
+  --follow-bg-hover: #fbcdc6;
+  /* 評価値グラフ・勝率バー・手順の印 */
+  --eval-tick: #8a91a0;
+  --eval-grid: #e2e5ea;
+  --eval-axis: #c6cbd4;
+  --eval-axis-zero: #8d94a2;
+  --eval-axis-minor: #e8eaee;
+  --eval-band: #eef0f4;
+  --winrate-empty: #c9ced6;
+  --mark-hand: #b5bbc6;
+  /* 影・幕 */
+  --shadow-45: rgba(20, 30, 50, 0.18);
+  --shadow-50: rgba(20, 30, 50, 0.2);
+  --shadow-55: rgb(20 30 50 / 22%);
+  --backdrop: rgb(20 30 50 / 25%);
+  --veil: rgba(243, 244, 247, 0.45);
+  /* アルファ違いをまとめる 3 つ組（`rgb(var(--accent-rgb) / 0.1)` のように使う） */
+  --accent-rgb: 31 111 209;
+  --danger-rgb: 214 69 69;
+  --info-rgb: 10 135 191;
+  /* 1 か所でしか使わない例外 */
+  --text-strong: #000000;
+  --danger-ink-hover: #8f1f1f;
+  --flash-bg: #1d2129;
+  --flash-ink: #ffffff;
+  --control-scheme: light;
+}
+
 html,
 body {
   margin: 0;
@@ -140,13 +409,13 @@ body {
 /* レール。**面より一段明るくして、動かせる範囲が見えるようにする。**
    左右（横バーなら上下）に細い境目を置いて、面との切れ目も出す。 */
 *::-webkit-scrollbar-track {
-  background: #262a33;
-  border-left: 1px solid #31353f;
+  background: var(--scroll-track);
+  border-left: 1px solid var(--scroll-track-line);
 }
 
 *::-webkit-scrollbar-track:horizontal {
   border-left: none;
-  border-top: 1px solid #31353f;
+  border-top: 1px solid var(--scroll-track-line);
 }
 
 /* つまみ。**角を丸めず、レールいっぱいに塗る**（平べったく）。
@@ -154,16 +423,16 @@ body {
    レール #262a33 に対してつまみは十分明るくしておくこと（近づけると、
    どこが掴めるのか分からない状態に戻る）。 */
 *::-webkit-scrollbar-thumb {
-  background: #5b6172;
+  background: var(--scroll-thumb);
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background: #767d8f;
+  background: var(--scroll-thumb-hover);
 }
 
 /* 縦と横が交わる角。**レールと同じ色**（透明にすると、そこだけ面の色が抜ける）。 */
 *::-webkit-scrollbar-corner {
-  background: #262a33;
+  background: var(--scroll-track);
 }
 
 /* 端の矢印ボタン。 */
@@ -207,8 +476,8 @@ html.is-frame #app {
   align-items: center;
   gap: 8px;
   padding: 0 4px;
-  background: #1b1d23;
-  color: #f2f3f5;
+  background: var(--bg);
+  color: var(--text);
   font-size: 12px;
   user-select: none;
   -webkit-user-select: none;
@@ -226,11 +495,11 @@ html.is-frame #app {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  color: #9aa6c0;
+  color: var(--text-dim);
 }
 
 .frame-title.is-error {
-  color: #ff7a7a;
+  color: var(--danger);
 }
 
 .frame-actions {
@@ -257,11 +526,11 @@ html.is-frame #app {
   flex-direction: column;
   min-width: 132px;
   padding: 4px;
-  background: #1b1d23;
-  border: 1px solid #3a3d47;
+  background: var(--bg);
+  border: 1px solid var(--line);
   border-radius: 0 0 6px 6px;
   border-top: none;
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 6px 16px var(--shadow-45);
   /* ツールバーから継承する移動ハンドルの指定は届かないが、念のため明示しておく
      (メニューをドラッグして枠が動くと、キャプチャ領域が動いたことになる)。 */
   --wails-draggable: no-drag;
@@ -275,7 +544,7 @@ html.is-frame #app {
 .frame-menu-sep {
   height: 1px;
   margin: 4px 2px;
-  background: #3a3d47;
+  background: var(--line);
 }
 
 /* メニューの項目。横幅いっぱい・左寄せで、ボタンらしさは hover まで出さない。 */
@@ -291,15 +560,15 @@ html.is-frame #app {
   padding: 3px 10px;
   font-size: 12px;
   line-height: 1.4;
-  color: #f2f3f5;
-  background: #2a2d36;
+  color: var(--text);
+  background: var(--surface-2);
   border: none;
   border-radius: 5px;
   cursor: pointer;
 }
 
 .frame-btn:hover {
-  background: #3a3d47;
+  background: var(--line);
 }
 
 /* アイコンだけのボタン(react-icons)。SVG は width/height="1em"・色は currentColor の
@@ -319,12 +588,12 @@ html.is-frame #app {
 /* 追跡中のボタン（2026-09-15）。⚠️ **押せる状態が色で読めること** ——
    アイコンだけなので、入っているかどうかはこれでしか分からない。 */
 .frame-btn.is-active {
-  color: #ffd9d6;
-  background: #6b2f2b;
+  color: var(--follow-ink);
+  background: var(--follow-bg);
 }
 
 .frame-btn.is-active:hover {
-  background: #7d3832;
+  background: var(--follow-bg-hover);
 }
 
 /* 追跡が 1 周するたびに打つ（2026-09-15）。⚠️ **`infinite` にしないこと** ——
@@ -341,8 +610,8 @@ html.is-frame #app {
     background: #ff4d4d;
   }
   100% {
-    color: #ffd9d6;
-    background: #6b2f2b;
+    color: var(--follow-ink);
+    background: var(--follow-bg);
   }
 }
 
@@ -366,12 +635,12 @@ html.is-frame #app {
 /* 押すとアプリが終わる項目。押し間違いが取り返しにくいので色で区別する
    (メニューを開かないと押せない位置にあるのと合わせて二重の歯止め)。 */
 .frame-btn.is-danger {
-  color: #ffb4b4;
+  color: var(--frame-danger-ink);
 }
 
 .frame-btn.is-danger:hover {
   color: #ffffff;
-  background: #7a2b2b;
+  background: var(--frame-danger-hover-bg);
 }
 
 .frame-btn:disabled {
@@ -463,12 +732,12 @@ html.is-frame #app {
 
 @keyframes frame-flash-toolbar {
   0% {
-    background: #ffffff;
-    color: #1b1d23;
+    background: var(--flash-bg);
+    color: var(--flash-ink);
   }
   100% {
-    background: #1b1d23;
-    color: #f2f3f5;
+    background: var(--bg);
+    color: var(--text);
   }
 }
 
@@ -519,10 +788,10 @@ html.is-frame #app {
 @keyframes toolbar-warn {
   0%,
   100% {
-    background: #1b1d23;
+    background: var(--bg);
   }
   50% {
-    background: #4a3a1c;
+    background: var(--warn-flash-bg);
   }
 }
 
@@ -531,7 +800,7 @@ html.is-frame #app {
 }
 
 .frame-toolbar.is-warn .frame-title {
-  color: #ffc46b;
+  color: var(--warn);
 }
 
 /* 寸法の取得に失敗したときだけ、ツールバーにエラーを表示するための高さを与える。
@@ -548,8 +817,8 @@ html.is-frame.is-layout-error .frame-toolbar {
    解析タブの盤が縦に大きくなる**(--board-size は 100vh から引いて決まる)。 */
 html.is-main,
 html.is-main body {
-  background: #1b1d23;
-  color: #f2f3f5;
+  background: var(--bg);
+  color: var(--text);
 }
 
 /* Frameless なのでウィンドウ全体がクライアント領域。**ページごとスクロールさせない**
@@ -581,7 +850,7 @@ html.is-main #app {
   gap: 10px;
   /* タイトルバーと中身の境目。**線 1 本だけ**にしてあるのは、ここに厚みを持たせると
      そのぶん盤が縮むため（--board-size の 82px はこの 1px を含む誤差の内）。 */
-  border-bottom: 1px solid #222;
+  border-bottom: 1px solid var(--line-toolbar);
   /* ⚠️ **ウィンドウの移動ハンドル。** これが無いと Frameless の窓を動かせない。
      押せるもの(.tabs / .win-controls)は no-drag に戻すこと —— 戻し忘れると
      ドラッグ扱いになってクリックが効かなくなる(枠の .frame-actions と同じ話)。
@@ -609,9 +878,9 @@ html.is-main #app {
 .toolbar-btn {
   padding: 4px 12px;
   font-size: 12px;
-  color: #9aa6c0;
-  background: #23262e;
-  border: 1px solid #3a3d47;
+  color: var(--text-dim);
+  background: var(--surface);
+  border: 1px solid var(--line);
   border-radius: 6px;
   cursor: pointer;
 }
@@ -629,22 +898,22 @@ html.is-main #app {
 }
 
 .toolbar-btn:hover {
-  color: #f2f3f5;
-  background: #3a3d47;
+  color: var(--text);
+  background: var(--line);
 }
 
 /* 枠が出ている状態。**押すと隠れる**(トグル)。
    ⚠️ **絵は変わらないので、今どちらなのかはこの色だけが伝える。**
    薄い差にしないこと —— 読めないと、押すまでどちらなのか分からない。 */
 .toolbar-btn[aria-pressed="true"] {
-  color: #8fbcff;
-  background: #1d2735;
-  border-color: #2f4a6b;
+  color: var(--pressed-ink);
+  background: var(--pressed-bg);
+  border-color: var(--pressed-line);
 }
 
 .toolbar-btn[aria-pressed="true"]:hover {
-  color: #cfe2ff;
-  background: #26364b;
+  color: var(--pressed-ink-hover);
+  background: var(--pressed-bg-hover);
 }
 
 /* ---- ウィンドウ操作(Frameless の代償) ------------------------------------
@@ -666,15 +935,15 @@ html.is-main #app {
   justify-content: center;
   padding-top: 8px;
   font-size: 20px;
-  color: #9aa6c0;
+  color: var(--text-dim);
   background: transparent;
   border: none;
   cursor: pointer;
 }
 
 .win-btn:hover {
-  color: #f2f3f5;
-  background: #3a3d47;
+  color: var(--text);
+  background: var(--line);
 }
 
 /* ✕ だけ赤くする。押すとアプリが終わるので、隣の 2 つと同じ見た目にしない。 */
@@ -719,8 +988,8 @@ html.is-main #app {
   /*padding: 8px 14px;*/
   padding: 4px 13px 6px;
   font-size: 16px;
-  color: #9aa6c0;
-  background: #23262e;
+  color: var(--text-dim);
+  background: var(--surface);
   border: none;
   border-radius: 6px 6px 0 0;
   cursor: pointer;
@@ -730,8 +999,8 @@ html.is-main #app {
 /* ⚠️ **選択中（#1b1d23）とは逆向きに動かすこと** —— 暗くすると、
    指しているだけのタブが選択中に見える。選択中は後のルールが勝つので変わらない。 */
 .tab:hover {
-  color: #f2f3f5;
-  background: #2e313a;
+  color: var(--text);
+  background: var(--surface-hover);
 }
 
 /* 選択中。**パネルと同じ地色**にし、**下の境界線をこの 1 枚ぶんだけ切る**
@@ -741,11 +1010,11 @@ html.is-main #app {
    padding を削り、下へ 1px 伸ばしたぶん padding-bottom を足してある。
    崩すと**タブを切り替えるたびに行の中で文字が動く**。 */
 .tab.is-active {
-  color: #f2f3f5;
-  background: #1b1d23;
+  color: var(--text);
+  background: var(--bg);
   /* 地色が周りと同じなので、**枠線が無いと 1 枚ぶんの形が見えない**。
      下だけは引かない（そこが「面と繋がっている」ところ）。 */
-  border: 1px solid #333844;
+  border: 1px solid var(--line-tab);
   border-bottom: none;
   padding: 4px 13px 6px;
   margin-bottom: -10px;
@@ -763,11 +1032,11 @@ html.is-main #app {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #ffc46b;
+  background: var(--warn);
 }
 
 .tab.has-error::after {
-  background: #ff7a7a;
+  background: var(--danger);
 }
 
 /* パネル。hidden は JS 側で付け外しする(display の指定と競合しないよう
@@ -1048,7 +1317,7 @@ html.is-main #app {
 
 .setting-title {
   font-size: 13px;
-  color: #e6e8ee;
+  color: var(--text-title);
 }
 
 /* 何が起きるかを 1 行で添える。起動時に枠が勝手に動く設定なので、
@@ -1056,13 +1325,13 @@ html.is-main #app {
 .setting-note {
   font-size: 11.5px;
   line-height: 1.5;
-  color: #9aa6c0;
+  color: var(--text-dim);
 }
 
 .setting-path {
   margin: 0;
   font-size: 11.5px;
-  color: #9aa6c0;
+  color: var(--text-dim);
   word-break: break-all;
 }
 
@@ -1074,7 +1343,7 @@ html.is-main #app {
   gap: 8px;
   align-self: stretch;
   padding-top: 10px;
-  border-top: 1px solid #2a2d36;
+  border-top: 1px solid var(--surface-2);
 }
 
 /* 設定ファイルの場所（2026-09-12）。**設定の項目ではない**（触るものが無い）ので、
@@ -1093,7 +1362,7 @@ html.is-main #app {
   padding: 0;
   font: inherit;
   font-size: 11px;
-  color: #6f7995;
+  color: var(--text-path);
   text-align: right;
   word-break: break-all;
   background: none;
@@ -1102,7 +1371,7 @@ html.is-main #app {
 }
 
 .path-btn:hover:not(:disabled) {
-  color: #9aa6c0;
+  color: var(--text-dim);
   text-decoration: underline;
 }
 
@@ -1111,7 +1380,7 @@ html.is-main #app {
 }
 
 .path-btn.is-copied {
-  color: #7ee0a0;
+  color: var(--success-2);
   text-decoration: none;
 }
 
@@ -1159,17 +1428,17 @@ html.is-main #app {
   font-size: 9.5px;
   font-weight: 700;
   line-height: 1;
-  color: #8d98b0;
+  color: var(--text-dim-2);
   vertical-align: 1px;
-  border: 1px solid #454a57;
+  border: 1px solid var(--line-hint);
   border-radius: 50%;
 }
 
 [data-hint]:hover .hint-mark,
 .setting:hover .hint-mark,
 .setting-fold-head:hover .hint-mark {
-  color: #cfd6e6;
-  border-color: #6ad3ff;
+  color: var(--text-hover);
+  border-color: var(--info);
 }
 
 /* 説明の吹き出し。⚠️ **`position: fixed` で body に置く**（`hint.ts` が座標を書く）
@@ -1182,11 +1451,11 @@ html.is-main #app {
   padding: 8px 10px;
   font-size: 11.5px;
   line-height: 1.6;
-  color: #d7dcea;
-  background: #1b1e25;
-  border: 1px solid #3a3f4b;
+  color: var(--text-bubble);
+  background: var(--surface-sunk);
+  border: 1px solid var(--line-2);
   border-radius: 6px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 8px 24px var(--shadow-45);
   /* ⚠️ **触れないようにする。** 吹き出しの上にカーソルが乗ると
      項目から出たことになり、出たり消えたりを繰り返す。 */
   pointer-events: none;
@@ -1202,16 +1471,16 @@ html.is-main #app {
 .hint-bubble .hint-para + .hint-para {
   margin-top: 7px;
   padding-top: 7px;
-  border-top: 1px solid #2f333d;
+  border-top: 1px solid var(--line-sep);
 }
 
 .hint-bubble strong {
-  color: #f2f3f5;
+  color: var(--text);
 }
 
 .hint-bubble code {
   font-size: 11px;
-  color: #9fe3ff;
+  color: var(--info-ink);
 }
 
 /* 設定の区切り（2026-09-12）。**足した順ではなく、関わりでまとめる。**
@@ -1231,8 +1500,8 @@ html.is-main #app {
   font-size: 11.5px;
   font-weight: 600;
   letter-spacing: 0.06em;
-  color: #8d98b0;
-  border-top: 1px solid #3a3f4b;
+  color: var(--text-dim-2);
+  border-top: 1px solid var(--line-2);
 }
 
 .setting-section:first-child {
@@ -1247,7 +1516,7 @@ html.is-main #app {
   margin: 0;
   font-size: 11.5px;
   line-height: 1.5;
-  color: #9aa6c0;
+  color: var(--text-dim);
 }
 
 /* タブの一番上の項目は区切り線を引かない（上に何も無いので線が浮く）。 */
@@ -1304,7 +1573,7 @@ html.is-main #app {
   top: 0.35em;
   border-style: solid;
   border-width: 4px 0 4px 5px;
-  border-color: transparent transparent transparent #9aa6c0;
+  border-color: transparent transparent transparent var(--text-dim);
   transition: transform 0.12s ease;
 }
 
@@ -1313,7 +1582,7 @@ html.is-main #app {
 }
 
 .setting-fold-head:hover .setting-title {
-  color: #ffffff;
+  color: var(--text-strong);
 }
 
 /* 中身は見出し（summary）の本文と同じ字下げに揃える。⚠️ **他の区切りは
@@ -1329,7 +1598,7 @@ html.is-main #app {
    summary の中は押すと開閉するので、ボタンを入れると意図と違う動きになる。 */
 .setting-fold-sum {
   font-size: 11.5px;
-  color: #7f8aa3;
+  color: var(--text-fold);
 }
 
 /* 接続先の入力欄。トグルの本文に揃えてぶら下げる(チェックボックスぶんの字下げ)。 */
@@ -1350,15 +1619,15 @@ html.is-main #app {
 .setting-fields input {
   padding: 5px 8px;
   font-size: 12.5px;
-  color: #f2f3f5;
-  background: #23262e;
-  border: 1px solid #3a3d47;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
   border-radius: 5px;
 }
 
 .setting-fields input:focus {
   outline: none;
-  border-color: #6ad3ff;
+  border-color: var(--info);
 }
 
 /* 認識器の読み込み元の選択（2026-08-27）。**input と同じ見た目に揃える** ——
@@ -1366,15 +1635,15 @@ html.is-main #app {
 .setting-fields select {
   padding: 5px 8px;
   font-size: 12.5px;
-  color: #f2f3f5;
-  background: #23262e;
-  border: 1px solid #3a3d47;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
   border-radius: 5px;
 }
 
 .setting-fields select:focus {
   outline: none;
-  border-color: #6ad3ff;
+  border-color: var(--info);
 }
 
 /* チェックボックスを持たない設定の見出し（`.setting` はチェックボックスと
@@ -1415,8 +1684,8 @@ html.is-main #app {
   align-items: center;
   gap: 6px 8px;
   padding: 6px 8px;
-  background: #23262e;
-  border: 1px solid #2f323b;
+  background: var(--surface);
+  border: 1px solid var(--line-soft);
   border-radius: 6px;
 }
 
@@ -1443,16 +1712,16 @@ html.is-main #app {
   height: 12px;
   padding: 0;
   font-size: 11px;
-  color: #9aa6c0;
-  background: #2b2f38;
-  border: 1px solid #3a3d47;
+  color: var(--text-dim);
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
   border-radius: 3px;
   cursor: pointer;
 }
 
 .engine-move:hover:not(:disabled) {
-  color: #f2f3f5;
-  background: #3a3d47;
+  color: var(--text);
+  background: var(--line);
 }
 
 /* 端の行。⚠️ **押しても何も起きないボタンを出さない**ための無効化なので、
@@ -1467,22 +1736,22 @@ html.is-main #app {
   align-items: center;
   gap: 5px;
   font-size: 12px;
-  color: #c9ccd3;
+  color: var(--text-2);
   white-space: nowrap;
 }
 
 .engine-row input[type="text"] {
   padding: 4px 7px;
   font-size: 12.5px;
-  color: #f2f3f5;
-  background: #1b1e25;
-  border: 1px solid #3a3d47;
+  color: var(--text);
+  background: var(--surface-sunk);
+  border: 1px solid var(--line);
   border-radius: 5px;
 }
 
 .engine-row input[type="text"]:focus {
   outline: none;
-  border-color: #6ad3ff;
+  border-color: var(--info);
 }
 
 /* 名前は短く、パスは長い。パスに行の残りを全部使わせる。 */
@@ -1504,7 +1773,7 @@ html.is-main #app {
 }
 
 .engine-note.is-error {
-  color: #ff8d8d;
+  color: var(--danger-ink-2);
 }
 
 /* 駒の字（設定タブ。2026-08-16）。**端末に入っているフォントから焼いた駒の字。**
@@ -1521,8 +1790,8 @@ html.is-main #app {
 /* 選んでいる行。⚠️ **ラジオだけでは分かりにくい**（行が縦に積まれるので、
    どれに丸が付いているかを目で追うことになる）。 */
 .font-row.is-selected {
-  border-color: #4a5570;
-  background: #262b36;
+  border-color: var(--line-select);
+  background: var(--select-bg);
 }
 
 .font-row-head {
@@ -1534,7 +1803,7 @@ html.is-main #app {
 
 .font-row-name {
   font-size: 13px;
-  color: #f2f3f5;
+  color: var(--text);
 }
 
 /* 名前の欄。⚠️ **既定の名前は placeholder に出す**（value に入れると、
@@ -1550,7 +1819,7 @@ html.is-main #app {
   gap: 4px 10px;
   padding-left: 22px;
   font-size: 11px;
-  color: #9aa6c0;
+  color: var(--text-dim);
 }
 
 .font-row-file {
@@ -1580,8 +1849,8 @@ html.is-main #app {
   gap: 8px;
   margin-left: 22px;
   padding: 8px;
-  background: #1e2129;
-  border: 1px solid #2f323b;
+  background: var(--surface-picker);
+  border: 1px solid var(--line-soft);
   border-radius: 6px;
 }
 
@@ -1621,7 +1890,7 @@ html.is-main #app {
 .ink-value {
   min-width: 34px;
   font-size: 12px;
-  color: #9aa6c0;
+  color: var(--text-dim);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1669,12 +1938,12 @@ html.is-main #app {
   gap: 4px 10px;
   padding: 4px 6px;
   font-size: 12px;
-  color: #c9ccd3;
+  color: var(--text-2);
   border-radius: 4px;
 }
 
 .font-choice:hover {
-  background: #262b36;
+  background: var(--select-bg);
 }
 
 /* ⚠️ **駒の字が足りないフォントも一覧に出す**（消すと、探しているのか
@@ -1684,12 +1953,12 @@ html.is-main #app {
 }
 
 .font-choice.is-empty {
-  color: #9aa6c0;
+  color: var(--text-dim);
 }
 
 .font-choice-name {
   flex: 0 1 auto;
-  color: #f2f3f5;
+  color: var(--text);
 }
 
 .font-choice-meta {
@@ -1697,14 +1966,14 @@ html.is-main #app {
   min-width: 0;
   overflow: hidden;
   font-size: 11px;
-  color: #9aa6c0;
+  color: var(--text-dim);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
 .font-choice-why {
   font-size: 11px;
-  color: #d9a441;
+  color: var(--warn-ink);
 }
 
 .font-choice-actions {
@@ -1720,7 +1989,7 @@ html.is-main #app {
    畳んだままでも既定のままかどうかは分かる）。 */
 .engine-options {
   flex: 1 0 100%;
-  border-top: 1px dashed #3a3d47;
+  border-top: 1px dashed var(--line);
   padding-top: 5px;
 }
 
@@ -1729,7 +1998,7 @@ html.is-main #app {
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: #c9ccd3;
+  color: var(--text-2);
   cursor: pointer;
   user-select: none;
 }
@@ -1744,8 +2013,8 @@ html.is-main #app {
   overflow-y: auto;
   margin-top: 6px;
   padding: 6px 8px;
-  background: #1b1e25;
-  border: 1px solid #2f323b;
+  background: var(--surface-sunk);
+  border: 1px solid var(--line-soft);
   border-radius: 5px;
 }
 
@@ -1762,7 +2031,7 @@ html.is-main #app {
   flex: 0 0 190px;
   min-width: 0;
   font-size: 12px;
-  color: #9aa6c0;
+  color: var(--text-dim);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1771,7 +2040,7 @@ html.is-main #app {
 /* 既定から変えた項目は名前を明るくする。**一覧の中で「自分が触ったもの」が
    一目で分かること**が、設定を戻すときの手掛かりになる。 */
 .engine-option.is-custom > .engine-option-name {
-  color: #f2f3f5;
+  color: var(--text);
   font-weight: 600;
 }
 
@@ -1780,15 +2049,15 @@ html.is-main #app {
   min-width: 0;
   padding: 3px 6px;
   font-size: 12.5px;
-  color: #f2f3f5;
-  background: #23262e;
-  border: 1px solid #3a3d47;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
   border-radius: 4px;
 }
 
 .engine-option-input:focus {
   outline: none;
-  border-color: #6ad3ff;
+  border-color: var(--info);
 }
 
 /* チェックボックスだけは箱の見た目を持たない（枠を付けると二重に見える）。 */
@@ -1803,16 +2072,16 @@ html.is-main #app {
   flex: 0 0 auto;
   padding: 2px 7px;
   font-size: 11px;
-  color: #9aa6c0;
-  background: #2b2f38;
-  border: 1px solid #3a3d47;
+  color: var(--text-dim);
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
   border-radius: 4px;
   cursor: pointer;
 }
 
 .engine-option-reset:hover {
-  color: #f2f3f5;
-  background: #3a3d47;
+  color: var(--text);
+  background: var(--line);
 }
 
 .engine-options-reset {
@@ -1877,7 +2146,7 @@ html.is-main #app {
      **font-size を上げるときは 34px を超えないか確かめること。** */
   font-size: 24px;
   line-height: 1.2;
-  color: #9aa6c0;
+  color: var(--text-dim);
 }
 
 .player-name[hidden] {
@@ -1978,11 +2247,11 @@ html.is-main #app {
 /* まだ結果が届いていないとき。**50% と書かない** ——「互角」と「まだ分からない」は
    別物なので、色を落とすだけにする。 */
 .winrate-bar.is-empty .winrate-track {
-  background: #3a3d47;
+  background: var(--line);
 }
 
 .winrate-bar.is-empty .winrate-white {
-  background: #454956;
+  background: var(--winrate-empty);
 }
 
 .winrate-bar.is-empty .winrate-mid {
@@ -2057,7 +2326,7 @@ html.is-main #app {
   flex-direction: column;
   gap: 2px;
   padding: 4px 6px;
-  background: #23262e;
+  background: var(--surface);
   border-radius: 6px;
 }
 
@@ -2084,18 +2353,18 @@ html.is-main #app {
   width: 11px;
   height: 11px;
   padding: 0;
-  border: 1px solid #3a3d47;
+  border: 1px solid var(--line);
   border-radius: 50%;
   background: #b8c0d0;
   cursor: pointer;
 }
 
 .analyze-engine-color:hover {
-  border-color: #7c8496;
+  border-color: var(--line-swatch-hover);
 }
 
 .analyze-engine-color:focus-visible {
-  outline: 2px solid #f2f3f5;
+  outline: 2px solid var(--text);
   outline-offset: 1px;
 }
 
@@ -2110,7 +2379,7 @@ html.is-main #app {
   max-width: var(--analyze-name-w);
   font-size: 12.5px;
   font-weight: 600;
-  color: #9aa6c0;
+  color: var(--text-dim);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2132,15 +2401,15 @@ html.is-main #app {
   padding: 0 2px;
   font-size: 11px;
   line-height: 1;
-  color: #9aa6c0;
-  background: #23262e;
-  border: 1px solid #3a3d47;
+  color: var(--text-dim);
+  background: var(--surface);
+  border: 1px solid var(--line);
   border-radius: 4px;
   cursor: pointer;
 }
 
 .analyze-engine-multipv:hover {
-  color: #f2f3f5;
+  color: var(--text);
 }
 
 /* 「全て」（2026-08-15）。**見出しの主役はエンジン名**なので、
@@ -2156,20 +2425,20 @@ html.is-main #app {
   gap: 3px;
   font-size: 10.5px;
   line-height: 1;
-  color: #6f7787;
+  color: var(--text-muted);
   white-space: nowrap;
   cursor: pointer;
 }
 
 .analyze-engine-all:hover {
-  color: #9aa6c0;
+  color: var(--text-dim);
 }
 
 .analyze-engine-all-input {
   width: 11px;
   height: 11px;
   margin: 0;
-  accent-color: #6ad3ff;
+  accent-color: var(--info);
   cursor: pointer;
 }
 
@@ -2232,7 +2501,7 @@ html.is-main #app {
   align-items: center;
   gap: 4px;
   font-size: 12.5px;
-  color: #c8cdd8;
+  color: var(--text-2c);
   cursor: pointer;
   user-select: none;
 }
@@ -2242,9 +2511,9 @@ html.is-main #app {
 .analyze-time select {
   padding: 4px 6px;
   font-size: 12.5px;
-  color: #f2f3f5;
-  background: #23262e;
-  border: 1px solid #3a3d47;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
   border-radius: 5px;
 }
 
@@ -2288,15 +2557,15 @@ html.is-main #app {
 }
 
 .analyze-line:hover {
-  border-color: #3a4353;
+  border-color: var(--line-strong);
 }
 
 /* 選んでいる候補手（**枝にする相手**）。
    ⚠️ **左の縁で示すこと。** 行全体を強く塗ると、評価値の青/橙（どちらが良いか）が
    読みにくくなる —— あちらは形勢そのものなので潰さない。 */
 .analyze-line.is-selected {
-  background: rgba(94, 160, 255, 0.14);
-  border-color: #5ea0ff;
+  background: rgb(var(--accent-rgb) / 0.14);
+  border-color: var(--accent);
 }
 
 /* 次の 1 手。**評価値と同じ大きさで出す**（読むのはほぼ「この評価値が付いているのは
@@ -2314,7 +2583,7 @@ html.is-main #app {
   text-align: center;
   font-size: var(--analyze-main-size);
   font-weight: 600;
-  color: #f2f3f5;
+  color: var(--text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2335,7 +2604,7 @@ html.is-main #app {
   min-width: 0;
   font-size: 13px;
   font-family: "Consolas", "Menlo", monospace;
-  color: #c9ccd3;
+  color: var(--text-2);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2351,15 +2620,15 @@ html.is-main #app {
   font-variant-numeric: tabular-nums;
   width: var(--analyze-score-w);
   text-align: right;
-  color: #c9ccd3;
+  color: var(--text-2);
 }
 
 .analyze-score.is-black {
-  color: #6ad3ff;
+  color: var(--info);
 }
 
 .analyze-score.is-white {
-  color: #ffc46b;
+  color: var(--warn);
 }
 
 /* 評価値グラフ（解析タブ。2026-08-12）。**手順の 1 手ごとの最善手の評価値。**
@@ -2421,7 +2690,7 @@ html.is-main #app {
   top: 50%;
   transform: translateY(-50%);
   height: 6px;
-  background: #23262e;
+  background: var(--surface);
   /* ⚠️ **ここは「戻り」の速さ。** 点くほうは :hover 側で上書きしている（下記）。
      離したらすぐ消えるのが要点で、**遅いのは点くときだけ**。 */
   transition: background-color 0.15s ease-out;
@@ -2551,9 +2820,9 @@ html.is-main #app {
   padding: 0;
   /* react-icons は 1em / currentColor。 */
   font-size: 11px;
-  color: #9aa6c0;
-  background: #23262e;
-  border: 1px solid #3a3d47;
+  color: var(--text-dim);
+  background: var(--surface);
+  border: 1px solid var(--line);
   border-radius: 4px;
   cursor: pointer;
 }
@@ -2565,8 +2834,8 @@ html.is-main #app {
 }
 
 .split-toggle:hover {
-  color: #f2f3f5;
-  border-color: #5ea0ff;
+  color: var(--text);
+  border-color: var(--accent);
 }
 
 /* ⚠️ **目立たせるのはここだけ**（ホバー・掴んでいるあいだ・キーボードの
@@ -2581,7 +2850,7 @@ html.is-main #app {
    今どこを掴んでいるのか分からなくなる。 */
 .split-bar:hover::after,
 .split-bar:focus-visible::after {
-  background: #5ea0ff;
+  background: var(--accent);
   transition: background-color 0.5s ease-in;
 }
 
@@ -2591,7 +2860,7 @@ html.is-main #app {
    ⚠️ **pointer capture を取っているとバーの外へ出ても掴んだままなので、
    :hover では代用できない。** */
 .split-bar.is-dragging::after {
-  background: #5ea0ff;
+  background: var(--accent);
   transition: background-color 0s;
 }
 
@@ -2605,6 +2874,17 @@ html.is-study,
 html.is-study body,
 html.is-study #app {
   height: 100%;
+}
+
+/* 切り離した窓の地と文字の色（2026-10-02）。⚠️ **メイン画面（`html.is-main`）と
+   同じ地にすること** —— 書いていないと WebView の既定（白地・黒字）になり、
+   中の部品だけがテーマの色で浮く。 */
+html.is-study,
+html.is-study body,
+html.is-graph,
+html.is-graph body {
+  background: var(--bg);
+  color: var(--text);
 }
 
 .study-screen {
@@ -2694,9 +2974,9 @@ html.is-graph #app {
 .eval-graph-num {
   padding: 2px 6px;
   font-size: 12.5px;
-  color: #f2f3f5;
-  background: #23262e;
-  border: 1px solid #3a3d47;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
   border-radius: 5px;
 }
 
@@ -2722,7 +3002,7 @@ html.is-graph #app {
 .eval-graph-mode {
   display: flex;
   flex: 0 0 auto;
-  border: 1px solid #3a3f4b;
+  border: 1px solid var(--line-2);
   border-radius: 5px;
   overflow: hidden;
 }
@@ -2730,8 +3010,8 @@ html.is-graph #app {
 .eval-graph-mode button {
   padding: 1px 8px;
   border: 0;
-  background: #23262e;
-  color: #8a92a4;
+  background: var(--surface);
+  color: var(--text-toggle);
   font-size: 11.5px;
   line-height: 18px;
   letter-spacing: 0.04em;
@@ -2739,17 +3019,17 @@ html.is-graph #app {
 }
 
 .eval-graph-mode button + button {
-  border-left: 1px solid #3a3f4b;
+  border-left: 1px solid var(--line-2);
 }
 
 .eval-graph-mode button:hover {
-  color: #cfd6e6;
+  color: var(--text-hover);
 }
 
 /* 今見ている軸。⚠️ **色だけに頼らないこと**（aria-pressed も付けてある）。 */
 .eval-graph-mode button.is-on {
-  background: #333a49;
-  color: #eaf0ff;
+  background: var(--toggle-on-bg);
+  color: var(--text-toggle-on);
 }
 
 .eval-graph-all {
@@ -2758,7 +3038,7 @@ html.is-graph #app {
   gap: 4px;
   flex: 0 0 auto;
   font-size: 12.5px;
-  color: #cfd6e6;
+  color: var(--text-hover);
   user-select: none;
   cursor: pointer;
 }
@@ -2785,15 +3065,15 @@ html.is-graph #app {
 /* 「全て」のあいだ。**読めるが触れない**ことが見て分かる濃さにする
    （消してしまうと、そこに数字があること自体に気づけない）。 */
 .eval-graph-num:disabled {
-  color: #9aa6c0;
-  background: #1c1e25;
-  border-color: #32353e;
+  color: var(--text-dim);
+  background: var(--disabled-bg);
+  border-color: var(--line-disabled);
   cursor: default;
 }
 
 .eval-graph-dash {
   font-size: 12.5px;
-  color: #9aa6c0;
+  color: var(--text-dim);
 }
 
 /* 触った位置の読み上げ。**行の高さを動かさないこと**（1 行に収めて溢れは省く）。 */
@@ -2820,7 +3100,7 @@ html.is-graph #app {
   margin: 0 5px 5px;
   /* ⚠️ **高さ 0（畳んだ状態）でも中の SVG が食み出さないこと。** */
   overflow: hidden;
-  background: #23262e;
+  background: var(--surface);
   border-radius: 6px;
   /* 押すとその局面へ戻る（手順のチップと同じ操作）。 */
   cursor: pointer;
@@ -2832,7 +3112,7 @@ html.is-graph #app {
    何が動くのか分からない。⚠️ **outline は内側へ**（外側は margin 5px しか無く、
    畳んだ状態の見出しと重なる）。 */
 .eval-graph:focus {
-  outline: 1px solid #6ad3ff;
+  outline: 1px solid var(--info);
   outline-offset: -1px;
 }
 
@@ -2846,7 +3126,7 @@ html.is-graph #app {
 .eval-axis {
   /* 2026-09-13 に #343843 から上げた。**畳んである側の帯（.eval-band）の上でも
      読めること** —— 帯より暗いと、そこだけ目盛りが消えたように見える。 */
-  stroke: #3b4150;
+  stroke: var(--eval-axis);
   stroke-width: 1;
 }
 
@@ -2855,7 +3135,7 @@ html.is-graph #app {
    100 単位の細い線が沈んで**見えなくなる**（実際にそうなった）。
    ⚠️ **薄くすること** —— 主役は折れ線。はっきり塗ると折れ線より目立つ。 */
 .eval-band {
-  fill: #2b3039;
+  fill: var(--eval-band);
 }
 
 /* 破断記号（二重斜線）。**「軸がここで切れている」を一語で言う**印刷物の作法。
@@ -2863,13 +3143,13 @@ html.is-graph #app {
    ⚠️ **目盛りの文字と同じ明るさにすること** —— これは読ませる印で、
    地の模様ではない。 */
 .eval-break {
-  stroke: #7d859a;
+  stroke: var(--eval-tick);
   stroke-width: 1.2;
   stroke-linecap: round;
 }
 
 .eval-axis.is-zero {
-  stroke: #5a6170;
+  stroke: var(--eval-axis-zero);
 }
 
 /* 細かい刻み（2026-09-13。圧縮の軸の 100 単位）。⚠️ **太い目盛りより暗くすること**
@@ -2880,19 +3160,19 @@ html.is-graph #app {
      100 単位で読むための線）なので、縦の補助線（.eval-grid）よりは明るくする。
      ⚠️ **太い目盛り（.eval-axis）より暗いままにすること** —— 明暗が逆転すると
      どれが折れ点なのか読めない。 */
-  stroke: #31363f;
+  stroke: var(--eval-axis-minor);
 }
 
 .eval-grid {
   /* 2026-09-13 に #2b2f38 から上げた。**畳んである側の帯（.eval-band）の上でも
      途切れて見えないこと** —— 帯と同じ明るさだと、縦線がそこだけ消えて
      破線のように見える。 */
-  stroke: #2f343e;
+  stroke: var(--eval-grid);
   stroke-width: 1;
 }
 
 .eval-tick {
-  fill: #7d859a;
+  fill: var(--eval-tick);
   font-size: 9px;
 }
 
@@ -2904,13 +3184,13 @@ html.is-graph #app {
    文字を横切るので、縁取りが無いと読めない。**背景色（.eval-graph）と同じ色に
    すること** —— 違うと文字の周りだけ色が浮く。 */
 .eval-tick.is-axis {
-  stroke: #23262e;
+  stroke: var(--surface);
   stroke-width: 3px;
   paint-order: stroke;
 }
 
 .eval-empty {
-  fill: #7d859a;
+  fill: var(--eval-tick);
   font-size: 12px;
 }
 
@@ -2934,7 +3214,7 @@ html.is-graph #app {
 
 /* 枝が分かれた手。⚠️ **「今見ている手」の線（eval-cursor）とは別の見た目に**。 */
 .eval-fork {
-  stroke: #9b8cff;
+  stroke: var(--branch);
   stroke-width: 1;
   stroke-dasharray: 2 3;
 }
@@ -2943,7 +3223,7 @@ html.is-graph #app {
    ⚠️ **縦の補助線（.eval-grid）と同じ明るさにすること** —— これは地の罫線で、
    読ませるのは中の印のほう。 */
 .eval-gutter {
-  stroke: #2f343e;
+  stroke: var(--eval-grid);
   stroke-width: 1;
 }
 
@@ -2953,14 +3233,14 @@ html.is-graph #app {
    形と場所は役割** —— 実線・欄外なのがこちら。
    ⚠️ **本数でも解析済みかでも見た目を変えないこと**（印は在るか無いかだけ）。 */
 .eval-branch {
-  stroke: #9b8cff;
+  stroke: var(--branch);
   stroke-width: 2;
   stroke-linecap: butt;
 }
 
 .eval-fork-tag {
   font-size: 9px;
-  fill: #9b8cff;
+  fill: var(--branch);
 }
 
 .eval-legend {
@@ -2970,7 +3250,7 @@ html.is-graph #app {
 
 /* 凡例の「分岐前の手順」。薄い線と同じ扱いに見えること。 */
 .eval-legend.is-ref {
-  color: #7f8798;
+  color: var(--text-ref);
   opacity: 0.9;
 }
 
@@ -2995,20 +3275,20 @@ html.is-graph #app {
 
 /* 今見ている手。**どこを見ているかが分からないと折れ線と盤が結びつかない。** */
 .eval-cursor {
-  stroke: #6ad3ff;
+  stroke: var(--info);
   stroke-width: 1.5;
 }
 
 .eval-hover {
-  stroke: #7d859a;
+  stroke: var(--eval-tick);
   stroke-width: 1;
   stroke-dasharray: 3 3;
 }
 
 /* ドラッグで選んでいる範囲。**離す前に「どこからどこまでか」が見えること。** */
 .eval-select {
-  fill: rgba(106, 211, 255, 0.16);
-  stroke: #6ad3ff;
+  fill: rgb(var(--info-rgb) / 0.16);
+  stroke: var(--info);
   stroke-width: 1;
 }
 
@@ -3025,19 +3305,19 @@ html.is-graph #app {
 }
 
 .note.is-error {
-  color: #ff7a7a;
+  color: var(--danger);
 }
 
 /* 送る前に知らせる妥協点。エラーではないので赤にはしない。 */
 .note.is-caution {
-  color: #ffc46b;
+  color: var(--warn);
 }
 
 /* ⚠️ **両方付いたら赤を勝たせる**（詳細度が同じなので順番で決まる）。
    手順の行（.note.is-caution）は再読み込みの失敗も出すので、
    これが無いと**エラーが橙色**になり、注意書きと見分けが付かない。 */
 .note.is-caution.is-error {
-  color: #ff7a7a;
+  color: var(--danger);
 }
 
 /* 目線の行（2026-08-18）。**盤のすぐ下に 1 つだけ。**
@@ -3063,7 +3343,7 @@ html.is-graph #app {
 .debug-details {
   flex: 0 0 auto;
   min-width: 0;
-  border: 1px solid #2a2d36;
+  border: 1px solid var(--surface-2);
   border-radius: 6px;
 }
 
@@ -3071,17 +3351,17 @@ html.is-graph #app {
   position: relative;
   padding: 5px 10px;
   font-size: 12.5px;
-  color: #9aa6c0;
+  color: var(--text-dim);
   cursor: pointer;
   user-select: none;
 }
 
 .debug-details > summary:hover {
-  color: #f2f3f5;
+  color: var(--text);
 }
 
 .debug-details[open] > summary {
-  border-bottom: 1px solid #2a2d36;
+  border-bottom: 1px solid var(--surface-2);
 }
 
 /* 警告・エラーは畳んでいるあいだ見えないので、見出しに点を出して
@@ -3095,11 +3375,11 @@ html.is-graph #app {
   margin-left: 6px;
   vertical-align: middle;
   border-radius: 50%;
-  background: #ffc46b;
+  background: var(--warn);
 }
 
 .debug-details > summary.has-error::after {
-  background: #ff7a7a;
+  background: var(--danger);
 }
 
 .debug-body {
@@ -3122,7 +3402,7 @@ html.is-graph #app {
   flex-direction: column;
   align-items: flex-start;
   gap: 6px;
-  border-top: 1px solid #2a2d36;
+  border-top: 1px solid var(--surface-2);
   padding-top: 8px;
 }
 
@@ -3130,15 +3410,15 @@ html.is-graph #app {
   flex: 0 0 auto;
   padding: 6px 14px;
   font-size: 13px;
-  color: #f2f3f5;
-  background: #2a2d36;
+  color: var(--text);
+  background: var(--surface-2);
   border: none;
   border-radius: 6px;
   cursor: pointer;
 }
 
 .ghost-btn:hover {
-  background: #3a3d47;
+  background: var(--line);
 }
 
 .ghost-btn:disabled {
@@ -3160,18 +3440,18 @@ html.is-graph #app {
   min-width: 0;
   margin: 0;
   font-size: 11.5px;
-  color: #6f7787;
+  color: var(--text-muted);
   word-break: break-all;
 }
 
 .recognizer.is-error {
-  color: #ff7a7a;
+  color: var(--danger);
 }
 
 /* 盤の縁の判定データが無い状態。認識は動くので赤にはしないが、
    盤の位置が 1マス滑っても信頼度 100% で通るので黙って落とさない。 */
 .recognizer.is-warn {
-  color: #ffc46b;
+  color: var(--warn);
 }
 
 .status {
@@ -3179,16 +3459,16 @@ html.is-graph #app {
   margin: 0;
   font-size: 12.5px;
   line-height: 1.5;
-  color: #c7cbd4;
+  color: var(--text-2b);
   word-break: break-all;
 }
 
 .status.is-error {
-  color: #ff7a7a;
+  color: var(--danger);
 }
 
 .status.is-warn {
-  color: #ffc46b;
+  color: var(--warn);
 }
 
 /* 盤面。この画面の主役。SFEN から <shogi-board>(core/web)が SVG で描く。 */
@@ -3502,9 +3782,9 @@ html.is-graph #app {
   font-size: 13px;
   line-height: 17px;
   text-align: center;
-  color: #6b7284;
-  background: #23262e;
-  border: 1px solid #3a3d47;
+  color: var(--text-turn);
+  background: var(--surface);
+  border: 1px solid var(--line);
   border-radius: 9px;
 }
 
@@ -3601,11 +3881,11 @@ html.is-graph #app {
 .board-placeholder {
   margin: 0;
   font-size: 13px;
-  color: #6f7787;
+  color: var(--text-muted);
 }
 
 .board-placeholder.is-error {
-  color: #ff7a7a;
+  color: var(--danger);
 }
 
 .sfen-row,
@@ -3625,14 +3905,14 @@ html.is-graph #app {
 .field-label {
   flex: 0 0 auto;
   font-size: 11px;
-  color: #6f7787;
+  color: var(--text-muted);
   letter-spacing: 0.04em;
 }
 
 .sfen {
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 12px;
-  color: #c7cbd4;
+  color: var(--text-2b);
   word-break: break-all;
 }
 
@@ -3647,7 +3927,7 @@ html.is-graph #app {
 
 .hand {
   font-size: 13px;
-  color: #c7cbd4;
+  color: var(--text-2b);
 }
 
 /* 解析タブの SFEN。**盤の下**（2026-08-14。手順の列から戻した）。
@@ -3698,12 +3978,12 @@ html.is-graph #app {
 
 .note {
   font-size: 11px;
-  color: #6f7787;
+  color: var(--text-muted);
 }
 
 /* 検出の信頼度が低いとき。盤が映っていない画面を撮った疑いを色で出す。 */
 .note.is-low {
-  color: #ffc46b;
+  color: var(--warn);
 }
 
 /* 局面として成立していない点。「ここが怪しい」の提示にそのまま使える。 */
@@ -3713,7 +3993,7 @@ html.is-graph #app {
   padding-left: 18px;
   font-size: 12px;
   line-height: 1.6;
-  color: #ffc46b;
+  color: var(--warn);
 }
 
 /* ---- 訂正 UI(editor.ts) --------------------------------------------------
@@ -3750,13 +4030,13 @@ html.is-graph #app {
 }
 
 .edit-grid.is-active .edit-cell:hover {
-  border-color: rgba(94, 160, 255, 0.9);
-  background: rgba(94, 160, 255, 0.12);
+  border-color: rgb(var(--accent-rgb) / 0.9);
+  background: rgb(var(--accent-rgb) / 0.12);
 }
 
 .edit-cell.is-over {
-  border-color: #5ea0ff;
-  background: rgba(94, 160, 255, 0.28);
+  border-color: var(--accent);
+  background: rgb(var(--accent-rgb) / 0.28);
 }
 
 .edit-cell.is-dragging {
@@ -3781,7 +4061,7 @@ html.is-graph #app {
   white-space: nowrap;
   text-overflow: ellipsis;
   font-size: 11.5px;
-  color: #f2f3f5;
+  color: var(--text);
 }
 
 .frame-follow[hidden] {
@@ -3790,7 +4070,7 @@ html.is-graph #app {
 
 
 .edit-cell.is-mismatch {
-  border-color: #e0a44a;
+  border-color: var(--warn-2);
   background: rgba(224, 164, 74, 0.22);
 }
 
@@ -3862,14 +4142,14 @@ html.is-graph #app {
    border を持たせるとマスの外周 1px が絶対配置の子（下の暗幕）から漏れ、
    **暗くしたときに格子が明るい線として浮く**（しかも隣と重なって濃淡が出る）。 */
 .study-grid.is-active .study-cell.is-pickable:hover {
-  box-shadow: inset 0 0 0 1px rgba(94, 160, 255, 0.9);
-  background: rgba(94, 160, 255, 0.1);
+  box-shadow: inset 0 0 0 1px rgb(var(--accent-rgb) / 0.9);
+  background: rgb(var(--accent-rgb) / 0.1);
 }
 
 /* 掴んでいる駒。 */
 .study-cell.is-source {
-  box-shadow: inset 0 0 0 1px #5ea0ff;
-  background: rgba(94, 160, 255, 0.22);
+  box-shadow: inset 0 0 0 1px var(--accent);
+  background: rgb(var(--accent-rgb) / 0.22);
 }
 
 .study-cell.is-target {
@@ -3894,8 +4174,8 @@ html.is-graph #app {
 }
 
 .study-cell.is-target:hover {
-  background: rgba(94, 160, 255, 0.28);
-  box-shadow: inset 0 0 0 1px rgba(94, 160, 255, 0.9);
+  background: rgb(var(--accent-rgb) / 0.28);
+  box-shadow: inset 0 0 0 1px rgb(var(--accent-rgb) / 0.9);
 }
 
 /* ---- 候補手の重ね表示(2026-08-14) ----------------------------------------
@@ -3990,10 +4270,10 @@ html.is-graph #app {
   display: flex;
   gap: 4px;
   padding: 4px;
-  background: #23262e;
-  border: 1px solid #5ea0ff;
+  background: var(--surface);
+  border: 1px solid var(--accent);
   border-radius: 6px;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 6px 18px var(--shadow-50);
 }
 
 .popup-btn {
@@ -4002,35 +4282,35 @@ html.is-graph #app {
   gap: 8px;
   padding: 5px 12px;
   font-size: 13px;
-  color: #f2f3f5;
-  background: #2c303a;
-  border: 1px solid #3a3d47;
+  color: var(--text);
+  background: var(--surface-3);
+  border: 1px solid var(--line);
   border-radius: 4px;
   cursor: pointer;
   white-space: nowrap;
 }
 
 .popup-btn:hover {
-  border-color: #5ea0ff;
+  border-color: var(--accent);
 }
 
 /* 消す側のボタン。⚠️ **赤にすること**（元に戻せない操作で、消えるのは 1 手とは
    限らない）。⚠️ **初期フォーカスは当てない** —— 既定は「やめる」のほう。 */
 .popup-btn.is-danger {
-  color: #0f1115;
-  background: #ff7a7a;
-  border-color: #ff7a7a;
+  color: var(--text-on-accent);
+  background: var(--danger);
+  border-color: var(--danger);
 }
 
 /* 既定の選択肢（成る／手順を追加）。初期フォーカスもこちらに当てる。 */
 .popup-btn.is-primary {
-  color: #0f1115;
-  background: #5ea0ff;
-  border-color: #5ea0ff;
+  color: var(--text-on-accent);
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 .popup-btn:focus-visible {
-  outline: 2px solid #f2f3f5;
+  outline: 2px solid var(--text);
   outline-offset: 1px;
 }
 
@@ -4041,7 +4321,7 @@ html.is-graph #app {
   flex: 0 0 auto;
   width: 11px;
   text-align: center;
-  color: #5ea0ff;
+  color: var(--accent);
 }
 
 /* 色を選ばせるときの丸（折れ線の色）。⚠️ **色だけの行にしないこと** ——
@@ -4051,7 +4331,7 @@ html.is-graph #app {
   flex: 0 0 auto;
   width: 11px;
   height: 11px;
-  border: 1px solid #3a3d47;
+  border: 1px solid var(--line);
   border-radius: 50%;
 }
 
@@ -4202,9 +4482,9 @@ html.is-graph #app {
   height: 22px;
   padding: 0;
   font-size: 13px;
-  color: #9aa6c0;
+  color: var(--text-dim);
   background: none;
-  border: 1px solid #3a3d47;
+  border: 1px solid var(--line);
   border-radius: 5px;
   cursor: pointer;
 }
@@ -4218,8 +4498,8 @@ html.is-graph #app {
 }
 
 .icon-btn:hover:not(:disabled) {
-  color: #f2f3f5;
-  background: #3a3d47;
+  color: var(--text);
+  background: var(--line);
 }
 
 /* 入切のあるアイコンボタンが「入」のとき（2026-09-26。棋譜の自動更新）。
@@ -4227,14 +4507,14 @@ html.is-graph #app {
    薄い差にしないこと —— 読めないと、押すまでどちらか分からない
    （枠を出すトグル `.toolbar-btn[aria-pressed]` と同じ色にしてある）。 */
 .icon-btn[aria-pressed="true"] {
-  color: #8fbcff;
-  background: #1d2735;
-  border-color: #2f4a6b;
+  color: var(--pressed-ink);
+  background: var(--pressed-bg);
+  border-color: var(--pressed-line);
 }
 
 .icon-btn[aria-pressed="true"]:hover:not(:disabled) {
-  color: #cfe2ff;
-  background: #26364b;
+  color: var(--pressed-ink-hover);
+  background: var(--pressed-bg-hover);
 }
 
 /* 取り直しの最中。**押せないことが見て分かる程度には落とす**
@@ -4307,7 +4587,7 @@ html.is-graph #app {
 .move-row.is-fork {
   margin-top: 3px;
   padding-top: 3px;
-  border-top: 1px dashed #3a4353;
+  border-top: 1px dashed var(--line-strong);
 }
 
 /* 枝の開閉。⚠️ **枝が無い行でも場所は空けておく**（`is-empty`）——
@@ -4319,15 +4599,15 @@ html.is-graph #app {
   padding: 0;
   font-size: 11px;
   line-height: 1;
-  color: #c8cdd8;
-  background: #2c303a;
-  border: 1px solid #3a3d47;
+  color: var(--text-2c);
+  background: var(--surface-3);
+  border: 1px solid var(--line);
   border-radius: 3px;
   cursor: pointer;
 }
 
 .move-toggle:hover {
-  border-color: #5ea0ff;
+  border-color: var(--accent);
 }
 
 .move-toggle.is-empty {
@@ -4347,7 +4627,7 @@ html.is-graph #app {
   padding: 0;
   font-size: 12.5px;
   text-align: left;
-  color: #c8cdd8;
+  color: var(--text-2c);
   background: transparent;
   border: 1px solid transparent;
   border-radius: 4px;
@@ -4371,10 +4651,10 @@ html.is-graph #app {
      2.2em のままだと数字の入る幅が 8px 減り、**3 桁の手数が切れる**。 */
   width: calc(2.2em + 8px);
   padding: 4px;
-  border-right: 1px solid #3a4353;
+  border-right: 1px solid var(--line-strong);
   text-align: right;
   font-variant-numeric: tabular-nums;
-  color: #6f7787;
+  color: var(--text-muted);
 }
 
 /* ⚠️ **「開始局面」は手数が空**。空のままだと箱の高さが 0 になり、
@@ -4416,7 +4696,7 @@ html.is-graph #app {
    ⚠️ **色を明るくしないこと** —— エンジンの色と同じ強さで並ぶと、
    どれが「誰かが推した手」なのかが読み取りにくくなる。 */
 .move-source.is-hand {
-  background: #000;
+  background: var(--mark-hand);
 }
 
 /* 中継の画面から**推測で足した手**（2026-09-15）。
@@ -4426,12 +4706,12 @@ html.is-graph #app {
    ⚠️ **`.move-source` の後ろに置くこと** —— 前に書くと基底の background に
    上書きされて**印が出ない**（実際に一度そうなった）。 */
 .move-source.is-guess {
-  background: #e0a44a;
+  background: var(--warn-2);
 }
 
 .move-chip:hover {
-  border-color: #5ea0ff;
-  background: rgba(94, 160, 255, 0.1);
+  border-color: var(--accent);
+  background: rgb(var(--accent-rgb) / 0.1);
 }
 
 /* 枝（本譜ではない手）。⚠️ **見た目で分かること。** 同じ手数の手が何行も
@@ -4441,21 +4721,21 @@ html.is-graph #app {
    **行ごとに左右へ動き**、縦線としては読めなかった。区切りの線は
    **手数の右**（`.move-num`）に、枝かどうかと無関係に通してある。 */
 .move-chip.is-branch {
-  color: #9aa4b8;
+  color: var(--text-branch);
 }
 
 /* 今見ている局面。**戻って見ているときにどこに居るかが分からないと、
    進め直す先が決められない。** */
 .move-chip.is-current {
-  color: #0f1115;
-  background: #5ea0ff;
-  border-color: #5ea0ff;
+  color: var(--text-on-accent);
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 .move-chip.is-current .move-num {
-  color: #0f1115;
+  color: var(--text-on-accent);
   /* ⚠️ **地が青くなるので線も見え方を合わせる**（既定の暗い線は沈む）。 */
-  border-right-color: rgba(15, 17, 21, 0.35);
+  border-right-color: var(--on-accent-sep);
 }
 
 /* 右クリックで消そうとしている範囲（2026-08-13）。**押した手とその先の全部**が
@@ -4464,14 +4744,14 @@ html.is-graph #app {
    ⚠️ **`is-current` より後に書くこと** —— 今見ている手が消える範囲に入って
    いることは普通にあり、そのとき青いままだと消えないように見える。 */
 .move-chip.is-doomed {
-  color: #ff9b9b;
-  background: rgba(255, 90, 90, 0.14);
-  border-color: #ff5a5a;
+  color: var(--danger-ink);
+  background: rgb(var(--danger-rgb) / 0.14);
+  border-color: var(--danger-line);
 }
 
 .move-chip.is-doomed .move-num {
-  color: #ff9b9b;
-  border-right-color: rgba(255, 90, 90, 0.5);
+  color: var(--danger-ink);
+  border-right-color: rgb(var(--danger-rgb) / 0.5);
 }
 
 .editor {
@@ -4493,27 +4773,27 @@ html.is-graph #app {
 
 .edit-hint {
   font-size: 11.5px;
-  color: #6f7787;
+  color: var(--text-muted);
 }
 
 .ghost-btn.is-active {
-  color: #d7e3ff;
-  border-color: #5ea0ff;
-  background: #2b3446;
+  color: var(--active-ink);
+  border-color: var(--accent);
+  background: var(--active-bg);
 }
 
 /* 訂正タブの唯一の出口(「この局面を解析する」)。訂正中は他にもボタンが並ぶので、
    次に進む先だけは見分けが付くようにしておく。赤は「捨てる/危険」に使っているので
    青系。 */
 .ghost-btn.is-primary {
-  color: #d7e3ff;
-  border-color: #4a7fd0;
-  background: #27354b;
+  color: var(--active-ink);
+  border-color: var(--primary-line);
+  background: var(--primary-bg);
 }
 
 .ghost-btn.is-primary:hover:not(:disabled) {
-  border-color: #5ea0ff;
-  background: #2f4260;
+  border-color: var(--accent);
+  background: var(--primary-bg-hover);
 }
 
 .edit-body {
@@ -4538,9 +4818,9 @@ html.is-graph #app {
 .turn-btn {
   padding: 3px 10px;
   font-size: 12px;
-  color: #9aa6c0;
-  background: #23262e;
-  border: 1px solid #3a3d47;
+  color: var(--text-dim);
+  background: var(--surface);
+  border: 1px solid var(--line);
   cursor: pointer;
 }
 
@@ -4553,18 +4833,18 @@ html.is-graph #app {
 }
 
 .turn-btn.is-active {
-  color: #d7e3ff;
-  border-color: #5ea0ff;
-  background: #2b3446;
+  color: var(--active-ink);
+  border-color: var(--accent);
+  background: var(--active-bg);
 }
 
 .movenum {
   width: 72px;
   padding: 3px 6px;
   font-size: 12px;
-  color: #c7cbd4;
-  background: #23262e;
-  border: 1px solid #3a3d47;
+  color: var(--text-2b);
+  background: var(--surface);
+  border: 1px solid var(--line);
   border-radius: 5px;
 }
 
@@ -4582,7 +4862,7 @@ html.is-graph #app {
   flex: 1 1 auto;
   min-height: 0;
   padding: 4px;
-  border: 1px dashed #6a5a33;
+  border: 1px dashed var(--line-missing);
   border-radius: 6px;
 }
 
@@ -4603,7 +4883,7 @@ html.is-graph #app {
   flex: 0 0 auto;
   padding: 2px 0;
   font-size: 11px;
-  color: #9aa0ac;
+  color: var(--text-check);
   cursor: pointer;
   user-select: none;
 }
@@ -4612,14 +4892,14 @@ html.is-graph #app {
   width: 12px;
   height: 12px;
   margin: 0;
-  accent-color: #5ea0ff;
+  accent-color: var(--accent);
   cursor: pointer;
 }
 
 .missing-zone.is-over {
-  border-color: #5ea0ff;
+  border-color: var(--accent);
   border-style: solid;
-  background: rgba(94, 160, 255, 0.1);
+  background: rgb(var(--accent-rgb) / 0.1);
 }
 
 /* **縦 1 列に並べる。** 駒種は常に全部出ているので、位置が固定されて探さずに掴める。 */
@@ -4649,7 +4929,7 @@ html.is-graph #app {
   min-width: 1.2em;
   font-size: 16px;
   font-weight: 700;
-  color: #5ea0ff;
+  color: var(--accent);
   text-align: left;
 }
 
@@ -4683,8 +4963,8 @@ html.is-graph #app {
 .stock-chip.is-missing.is-armed {
   opacity: 1;
   border-style: solid;
-  border-color: #5ea0ff;
-  box-shadow: 0 0 0 2px rgba(94, 160, 255, 0.55);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgb(var(--accent-rgb) / 0.55);
 }
 
 .stock-chip {
@@ -4733,7 +5013,7 @@ html.is-graph #app {
   height: 100%;
   min-height: 120px;
   padding: 6px 4px;
-  border: 1px dashed #3a3d47;
+  border: 1px dashed var(--line);
   border-radius: 6px;
 }
 
@@ -4834,8 +5114,8 @@ html.is-graph #app {
   line-height: 15px;
   font-weight: 600;
   text-align: center;
-  color: #f2f3f5;
-  background: #23262e;
+  color: var(--text);
+  background: var(--surface);
   border: 1px solid #5a3b1a;
   border-radius: 8px;
 }
@@ -4846,21 +5126,21 @@ html.is-graph #app {
 
 /* 掴んでいる駒。盤の選択（.study-cell.is-source）と同じ見え方に揃える。 */
 .hand-zone.is-readonly .stock-chip.is-source {
-  outline: 2px solid #5ea0ff;
+  outline: 2px solid var(--accent);
   outline-offset: 1px;
-  box-shadow: 0 0 8px rgba(94, 160, 255, 0.7);
+  box-shadow: 0 0 8px rgb(var(--accent-rgb) / 0.7);
 }
 
 .hand-zone.is-over {
-  border-color: #5ea0ff;
+  border-color: var(--accent);
   border-style: solid;
-  background: rgba(94, 160, 255, 0.1);
+  background: rgb(var(--accent-rgb) / 0.1);
 }
 
 .hand-zone-label {
   flex: 0 0 auto;
   font-size: 11.5px;
-  color: #6f7787;
+  color: var(--text-muted);
 }
 
 /* **訂正タブの駒台は駒を枚数ぶん並べる**(数字で「歩5」と書かない)。1 枚ずつ掴んで
@@ -4891,7 +5171,7 @@ html.is-graph #app {
 /* 未決が残っているあいだは局面が確定しない(SFEN が組み上がらない)ので、
    盤面タブの駒台行でも色を変えて知らせる。 */
 .hand.is-unassigned {
-  color: #ffc46b;
+  color: var(--warn);
 }
 
 /* 盤面タブの上段。左に警告、右に「認識結果に戻す」。 */
@@ -4931,17 +5211,17 @@ html.is-graph #app {
   margin-left: auto;
   padding: 3px 10px;
   font-size: 12px;
-  color: #ff9b9b;
-  background: #2e2326;
-  border: 1px solid #6d3535;
+  color: var(--danger-ink);
+  background: var(--danger-bg);
+  border: 1px solid var(--line-danger);
   border-radius: 5px;
   cursor: pointer;
 }
 
 .danger-btn:hover {
-  color: #fff;
-  background: #7a2f2f;
-  border-color: #a04747;
+  color: var(--danger-ink-hover);
+  background: var(--danger-bg-hover);
+  border-color: var(--line-danger-hover);
 }
 
 .danger-btn[hidden] {
@@ -4977,9 +5257,9 @@ html.is-graph #app {
   padding: 2px 8px;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 11.5px;
-  color: #9aa6c0;
-  background: #23262e;
-  border: 1px solid #3a3d47;
+  color: var(--text-dim);
+  background: var(--surface);
+  border: 1px solid var(--line);
   border-radius: 5px;
   cursor: pointer;
 }
@@ -4989,14 +5269,14 @@ html.is-graph #app {
 }
 
 .path-btn:hover {
-  color: #f2f3f5;
-  border-color: #4a4e5a;
+  color: var(--text);
+  border-color: var(--line-hover);
 }
 
 /* コピーできたことの合図。表示は変えずに色だけ変える(mainscreen.ts の ⚠️ 参照)。 */
 .path-btn.is-copied {
-  color: #8fdc9b;
-  border-color: #8fdc9b;
+  color: var(--success);
+  border-color: var(--success);
 }
 
 /* 画像そのものをコピーするボタン。文字は持たない(ラベルは aria-label / title)。 */
@@ -5030,7 +5310,7 @@ html.is-graph #app {
   display: block;
   max-width: 100%;
   max-height: 360px;
-  border: 1px solid #3a3d47;
+  border: 1px solid var(--line);
   border-radius: 6px;
 }
 
@@ -5103,9 +5383,9 @@ html.is-graph #app {
   font-family: "Consolas", "Courier New", monospace;
   font-size: 12px;
   line-height: 1.5;
-  color: #f2f3f5;
-  background: #23262e;
-  border: 1px solid #3a3d47;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
   border-radius: 5px;
   resize: vertical;
   overflow: auto;
@@ -5114,7 +5394,7 @@ html.is-graph #app {
 
 .kifu-text:focus {
   outline: none;
-  border-color: #6ad3ff;
+  border-color: var(--info);
 }
 
 /* 棋譜の URL 欄。ボタンまで 1 行に収め、**入力欄だけが伸び縮みする**
@@ -5148,7 +5428,7 @@ html.is-graph #app {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(15, 17, 21, 0.25);
+  background: var(--veil);
 }
 
 /* ⚠️ **`display: flex` を上書きすること**（`[hidden]` だけでは消えない）。 */
@@ -5177,10 +5457,10 @@ html.is-graph #app {
   align-items: center;
   gap: 10px;
   padding: 16px 22px;
-  background: #23262e;
-  border: 1px solid #3a3d47;
+  background: var(--surface);
+  border: 1px solid var(--line);
   border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 8px 24px var(--shadow-50);
   cursor: move;
   user-select: none;
 }
@@ -5199,7 +5479,7 @@ html.is-graph #app {
 .veil-note {
   margin: 0;
   font-size: 13px;
-  color: #c8cdd8;
+  color: var(--text-2c);
 }
 
 /* ⚠️ **`cursor: pointer` を消さないこと**（箱は `move` なので、**ここだけが
@@ -5208,19 +5488,19 @@ html.is-graph #app {
 .veil-btn {
   padding: 7px 18px;
   font-size: 13px;
-  color: #f2f3f5;
-  background: #2c303a;
-  border: 1px solid #5ea0ff;
+  color: var(--text);
+  background: var(--surface-3);
+  border: 1px solid var(--accent);
   border-radius: 5px;
   cursor: pointer;
 }
 
 .veil-btn:hover {
-  background: #343a47;
+  background: var(--veil-btn-hover);
 }
 
 .veil-btn:focus-visible {
-  outline: 2px solid #f2f3f5;
+  outline: 2px solid var(--text);
   outline-offset: 1px;
 }
 
@@ -5258,7 +5538,7 @@ html.is-graph #app {
   overflow: hidden;
   font-size: 12px;
   line-height: 1.2;
-  color: #d8b46a;
+  color: var(--hint-ink);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -5278,14 +5558,14 @@ html.is-graph #app {
   min-width: 160px;
   padding: 6px 10px;
   font-size: 13px;
-  color: #f2f3f5;
-  background: #23262e;
-  border: 1px solid #3a3f4b;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line-2);
   border-radius: 6px;
 }
 
 .library-text:focus {
-  border-color: #5ea0ff;
+  border-color: var(--accent);
   outline: none;
 }
 
@@ -5299,11 +5579,11 @@ html.is-graph #app {
 .library-search input[type="date"] {
   padding: 5px 8px;
   font-size: 12.5px;
-  color: #f2f3f5;
-  background: #23262e;
-  border: 1px solid #3a3f4b;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line-2);
   border-radius: 6px;
-  color-scheme: dark;
+  color-scheme: var(--control-scheme);
 }
 
 .library-check {
@@ -5312,7 +5592,7 @@ html.is-graph #app {
   align-items: center;
   gap: 5px;
   font-size: 12.5px;
-  color: #c7cbd4;
+  color: var(--text-2b);
   cursor: pointer;
 }
 
@@ -5321,7 +5601,7 @@ html.is-graph #app {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  border: 1px solid #2c303a;
+  border: 1px solid var(--surface-3);
   border-radius: 6px;
 }
 
@@ -5353,10 +5633,10 @@ html.is-graph #app {
   padding: 10px 10px 12px;
   font-size: 12px;
   font-weight: 600;
-  color: #8b93a3;
+  color: var(--text-dim-3);
   text-align: left;
-  background: #23262e;
-  box-shadow: inset 0 -1px 0 #343945;
+  background: var(--surface);
+  box-shadow: inset 0 -1px 0 var(--thead-shadow);
 }
 
 /* ⚠️ **行の高さは揃えること**（先頭の行だけ広げない）。見出しは貼り付けてあるので、
@@ -5378,8 +5658,8 @@ html.is-graph #app {
 .library-table tbody td {
   padding: 8px 10px;
   vertical-align: bottom;
-  color: #dfe3ea;
-  border-bottom: 1px solid #23262e;
+  color: var(--text-table);
+  border-bottom: 1px solid var(--surface);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -5394,7 +5674,7 @@ html.is-graph #app {
 }
 
 .library-table tbody tr:hover td {
-  background: #22252c;
+  background: var(--row-hover);
 }
 
 /* 棋戦名のリンク。**解析タブへ送る口**（2026-09-14。それまでは詳細を開いていた）。
@@ -5406,7 +5686,7 @@ html.is-graph #app {
   padding: 0;
   overflow: hidden;
   font: inherit;
-  color: #8fc0ff;
+  color: var(--link);
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -5416,12 +5696,12 @@ html.is-graph #app {
 }
 
 .library-link:hover {
-  color: #b6d6ff;
+  color: var(--link-hover);
   text-decoration: underline;
 }
 
 .library-link:focus-visible {
-  outline: 2px solid #5ea0ff;
+  outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
 
@@ -5465,11 +5745,11 @@ html.is-graph #app {
   width: min(520px, calc(100vw - 48px));
   max-height: calc(100vh - 96px);
   padding: 12px 14px;
-  color: #dfe3ea;
-  background: #1f2229;
-  border: 1px solid #3a3f4b;
+  color: var(--text-table);
+  background: var(--surface-card);
+  border: 1px solid var(--line-2);
   border-radius: 8px;
-  box-shadow: 0 12px 32px rgb(0 0 0 / 55%);
+  box-shadow: 0 12px 32px var(--shadow-55);
 }
 
 .library-modal[open] {
@@ -5479,7 +5759,7 @@ html.is-graph #app {
 }
 
 .library-modal::backdrop {
-  background: rgb(0 0 0 / 45%);
+  background: var(--backdrop);
 }
 
 /* 一覧と同じで、縦に伸びるのは中身だけ（見出しと足は動かない）。 */
@@ -5498,8 +5778,8 @@ html.is-graph #app {
 /* コピーできたことの合図。**文字は変えずに色だけ**（path-btn と同じ流儀）——
    ラベルが伸び縮みするとボタンの幅が動いて、押した直後に隣がずれる。 */
 .library-modal-foot .ghost-btn.is-copied {
-  color: #8fdc9b;
-  border-color: #8fdc9b;
+  color: var(--success);
+  border-color: var(--success);
 }
 
 .library-meta {
@@ -5511,12 +5791,12 @@ html.is-graph #app {
 }
 
 .library-meta dt {
-  color: #8b93a3;
+  color: var(--text-dim-3);
 }
 
 .library-meta dd {
   margin: 0;
-  color: #dfe3ea;
+  color: var(--text-table);
   word-break: break-all;
 }
 
@@ -5539,8 +5819,8 @@ html.is-graph #app {
   flex-direction: column;
   gap: 6px;
   padding: 9px 11px;
-  background: #1f2229;
-  border: 1px solid #2c303a;
+  background: var(--surface-card);
+  border: 1px solid var(--surface-3);
   border-radius: 6px;
 }
 
@@ -5555,7 +5835,7 @@ html.is-graph #app {
   overflow: hidden;
   font-size: 13.5px;
   font-weight: 600;
-  color: #f2f3f5;
+  color: var(--text);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -5566,8 +5846,8 @@ html.is-graph #app {
   flex: 0 0 auto;
   padding: 1px 7px;
   font-size: 11px;
-  color: #9aa3b2;
-  background: #2a2d36;
+  color: var(--text-source);
+  background: var(--surface-2);
   border-radius: 999px;
 }
 
@@ -5590,7 +5870,7 @@ html.is-graph #app {
 
 .fetch-card details > summary {
   font-size: 12px;
-  color: #8b93a3;
+  color: var(--text-dim-3);
   cursor: pointer;
 }
 

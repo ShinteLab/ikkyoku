@@ -18,7 +18,7 @@
 //   解析   … **確定した局面**の面。評価値を出し、今後ここに手順と分岐ツリーが乗る
 //            (合法手だけを辿る)
 //   設定   … 設定。**関わりでまとめてある**(2026-09-12。撮る / 解析 / 駒の字 /
-//            棋譜データベース / 盤面認識(suteme))。⚠️ **足した順に積まないこと。**
+//            配色 / 棋譜データベース / 盤面認識(suteme))。⚠️ **足した順に積まないこと。**
 //            ⚠️ **畳むのは区切りの単位で、中でもう一度畳まない**(解析エンジンは
 //            「解析」の中の 1 項目)。⚠️ **見出し(.setting-section)は 2 つ以上を
 //            畳まずに並べるときだけ** —— 今は「撮る」だけ。
@@ -26,7 +26,7 @@
 //            **既定のままで動くものは下**。⚠️ **盤面認識をベース機能だからと上へ
 //            戻さないこと**(認識器の置き場所や学習データへの登録は相当な上級者の操作)。
 //            ⚠️ **認識器の読み込み元と「訂正盤面を suteme に登録する」を離さないこと**
-//            (相手が同じ suteme)。項目を足すときはこの 5 つのどれかに入れる。
+//            (相手が同じ suteme)。項目を足すときはこの 6 つのどれかに入れる。
 //            詳しくは `_docs/ui/screens.md`
 //
 // 「認識詳細情報」(訂正タブの中の折りたたみ。旧デバッグタブ)は
@@ -89,6 +89,7 @@ import { mountSidePane, type EngineScore } from "./sidepane";
 import { openPopup } from "./popup";
 import { attachHints, hideHint } from "./hint";
 import { mountStudyBoard } from "./study";
+import { applyTheme } from "./theme";
 import type { RecognizerStatus } from "../bindings/ikkyoku/models";
 import type {
   AppSettings,
@@ -1335,6 +1336,24 @@ export function mountMainScreen(root: HTMLElement): void {
             <!-- 探した場所。**目当てのフォントが出てこないときに、どこを見たのかが
                  分からないと打つ手が無い。** -->
             <p id="font-dirs" class="setting-path"></p>
+          </div>
+        </details>
+
+        <!-- 配色（2026-10-02）。**盤の外の色だけ**を切り替える（盤と駒の色は変えない）。
+
+             ⚠️ **項目が 1 つなので見出しは置かず、項目自身を畳む**（区切りの約束）。
+             ⚠️ **選択肢は Go 側が返す**（themes）。フロントに表を書かないこと。 -->
+        <details id="fold-theme" class="setting-group setting-fold">
+          <summary class="setting-fold-head">
+            <span class="setting-title">配色</span>
+            <span id="fold-theme-sum" class="setting-fold-sum"></span>
+          </summary>
+          <div class="setting-fields">
+            <label class="field">
+              <span class="field-label">テーマ</span>
+              <select id="theme-select"
+                      title="画面の配色。盤と駒の色は変わりません"></select>
+            </label>
           </div>
         </details>
 
@@ -4794,6 +4813,8 @@ ${st.turnLabel}${n}`;
   const kifuDBFold = root.querySelector<HTMLDetailsElement>("#fold-kifudb")!;
   const kifuDBFoldSum = root.querySelector<HTMLElement>("#fold-kifudb-sum")!;
   const settingsStatus = root.querySelector<HTMLParagraphElement>("#settings-status")!;
+  const themeSelect = root.querySelector<HTMLSelectElement>("#theme-select")!;
+  const themeFoldSum = root.querySelector<HTMLElement>("#fold-theme-sum")!;
   const settingsPath = root.querySelector<HTMLButtonElement>("#settings-path")!;
   // ⚠️ **クリップボードは Wails ランタイム**（`navigator.clipboard` は secure context
   // 前提で、カスタムスキーム配信のこの webview では当てにできない）。
@@ -5348,6 +5369,10 @@ ${st.turnLabel}${n}`;
     hideWinRateBar: boolean;
     // 対局者名を隠しているか（2026-09-10。⚠️ **帯とは別の設定**）。
     hidePlayerNames: boolean;
+    // 画面の配色（2026-10-02。"dark" / "light" / "system"）。⚠️ **既定の解決は Go 側**
+    // （`NormalizeTheme`）。"system" をどちらにするかだけは `theme.ts` が決める。
+    theme: string;
+    themes: { value: string; label: string }[] | null;
     path: string;
     training: { enabled: boolean; host: string; port: number; token: string; target: string };
     engines: EngineSettings[] | null;
@@ -5364,6 +5389,19 @@ ${st.turnLabel}${n}`;
   }) => {
     fitOnStartup.checked = s.fitOnStartup;
     clickThrough.checked = s.clickThrough;
+    // 配色。選択肢は Go 側が返したものをそのまま並べる（**フロントに表を書かない**）。
+    if (themeSelect.options.length !== (s.themes ?? []).length) {
+      themeSelect.replaceChildren();
+      for (const o of s.themes ?? []) {
+        const opt = document.createElement("option");
+        opt.value = o.value;
+        opt.textContent = o.label;
+        themeSelect.appendChild(opt);
+      }
+    }
+    themeSelect.value = s.theme;
+    themeFoldSum.textContent = themeSelect.selectedOptions[0]?.textContent ?? "";
+    applyTheme(s.theme);
     showSutemeSource(s);
     // ⚠️ **既定の解決は Go 側**（`Config.KifuDB`）。返ってきた場所をそのまま入れる。
     kifuDBPath.value = s.kifuDbPath;
@@ -5456,6 +5494,28 @@ ${st.turnLabel}${n}`;
       void saveTraining();
     });
   }
+
+  // 配色の保存（2026-10-02）。⚠️ **ほかの窓へは `theme:changed` で知らせる** ——
+  // 枠と切り離した窓も同じ配色にする（受け取るのは `theme.ts`）。
+  themeSelect.addEventListener("change", () => {
+    void (async () => {
+      settingsStatus.textContent = "";
+      settingsStatus.classList.remove("is-error");
+      try {
+        const st = await SettingsService.SetTheme(themeSelect.value);
+        showSettings(st);
+        await Events.Emit("theme:changed", st.theme);
+      } catch (err) {
+        settingsStatus.textContent = `設定を保存できませんでした: ${String(err)}`;
+        settingsStatus.classList.add("is-error");
+        try {
+          showSettings(await SettingsService.Settings());
+        } catch {
+          /* 読み直せないなら画面はそのまま。理由は上に出ている。 */
+        }
+      }
+    })();
+  });
 
   // 勝率の定数の保存。**空欄なら既定に戻す**（0 を渡すと Go 側が既定に倒す）。
   //

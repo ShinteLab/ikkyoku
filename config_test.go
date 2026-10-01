@@ -477,6 +477,47 @@ func TestConfigEvalAxisRoundTrip(t *testing.T) {
 	}
 }
 
+// TestNormalizeTheme は配色の指定の倒し方を固定する（2026-10-02）。
+//
+// ⚠️ **知らない値・空はダーク。** ライトを足す前の設定ファイルには項目が無いので、
+// ここが崩れると**更新しただけで画面の色が変わる**。
+func TestNormalizeTheme(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"", ThemeDark},
+		{ThemeDark, ThemeDark},
+		{ThemeLight, ThemeLight},
+		{ThemeSystem, ThemeSystem},
+		{"Light", ThemeDark},
+		{"あるはずのない配色", ThemeDark},
+	} {
+		if got := NormalizeTheme(tc.in); got != tc.want {
+			t.Errorf("NormalizeTheme(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+	// 選択肢の一覧は、どれも正規化して自分自身に戻ること（画面で選べるのに
+	// 保存すると別の値になる、を防ぐ）。
+	for _, o := range ThemeOptions {
+		if got := NormalizeTheme(o.Value); got != o.Value {
+			t.Errorf("ThemeOptions の %q が NormalizeTheme で %q になる", o.Value, got)
+		}
+	}
+}
+
+// TestConfigThemeRoundTrip は選んだ配色が保存されて戻ること（2026-10-02）。
+func TestConfigThemeRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := SaveConfig(path, Config{Theme: ThemeLight}); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Theme != ThemeLight {
+		t.Errorf("Theme = %q, want %q", cfg.Theme, ThemeLight)
+	}
+}
+
 // 王/玉の解決。⚠️ **先後を分けられるのは玉だけ**（左馬は盤全体）。
 func TestGyokuFor(t *testing.T) {
 	for _, tc := range []struct {

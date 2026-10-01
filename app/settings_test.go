@@ -712,6 +712,50 @@ func TestSetMovePaneDetached(t *testing.T) {
 	}
 }
 
+// TestSetTheme は画面の配色を固定する（2026-10-02）。
+//
+// ⚠️ **一番の要点は「既定がダークであること」。** ライトを足す前の設定ファイルには
+// 項目が無いので、ここが崩れると**更新しただけで画面の色が変わる。**
+// ⚠️ **"system" は解決せずに返すこと**（OS の設定を読めるのはフロントだけ）。
+func TestSetTheme(t *testing.T) {
+	s := newTestSettings(t, nil)
+
+	st := s.Settings()
+	if st.Theme != ikkyoku.ThemeDark {
+		t.Errorf("既定の配色 = %q, want %q（触っていないのに色が変わります）",
+			st.Theme, ikkyoku.ThemeDark)
+	}
+	if len(st.Themes) == 0 {
+		t.Error("選べる配色の一覧が空です（設定タブの選択肢が出ません）")
+	}
+
+	for _, theme := range []string{ikkyoku.ThemeLight, ikkyoku.ThemeSystem, ikkyoku.ThemeDark} {
+		st, err := s.SetTheme(theme)
+		if err != nil {
+			t.Fatalf("SetTheme(%q): %v", theme, err)
+		}
+		if st.Theme != theme {
+			t.Errorf("Theme = %q, want %q", st.Theme, theme)
+		}
+		cfg, err := ikkyoku.LoadConfig(s.path)
+		if err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		if ikkyoku.NormalizeTheme(cfg.Theme) != theme {
+			t.Errorf("保存された Theme = %q, want %q（次の起動で戻ってしまう）", cfg.Theme, theme)
+		}
+	}
+
+	// ⚠️ **知らない値はダークに倒すこと**（エラーにしない）。
+	st, err := s.SetTheme("あるはずのない配色")
+	if err != nil {
+		t.Fatalf("SetTheme(知らない値): %v", err)
+	}
+	if st.Theme != ikkyoku.ThemeDark {
+		t.Errorf("知らない値の配色 = %q, want %q", st.Theme, ikkyoku.ThemeDark)
+	}
+}
+
 // TestSetEvalGraphAxis は評価値グラフの縦軸を固定する（2026-09-13）。
 //
 // ⚠️ **一番の要点は「既定が素の評価値であること」。** 空や知らない値が
