@@ -100,6 +100,10 @@ const cardFromWatch = (w: WatchEntry): FetchCard => {
     endMark: w.endMark,
     finished: w.finished,
     moves: w.moves,
+    // ⚠️ **中継のカードは人が書く欄を持たない**（2026-10-02）。直せるのは
+    // 棋譜タブに入った棋譜だけ（`KifuService.Annotate`）で、仮の一覧は対象外。
+    eventEdited: "",
+    note: "",
     kif: "",
     encoding: "",
   };

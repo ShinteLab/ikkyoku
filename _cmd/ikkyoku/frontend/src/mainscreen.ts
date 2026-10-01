@@ -627,7 +627,7 @@ export function mountMainScreen(root: HTMLElement): void {
              件数が増えると 3 文字未満は全件走査になるため。 -->
         <div class="library-search">
           <input id="library-text" class="library-text" type="search" spellcheck="false"
-                 placeholder="棋戦名・対局者・場所で検索" />
+                 placeholder="棋戦名・対局者・場所・備考で検索" />
           <label class="field">
             <span class="field-label">期間</span>
             <input id="library-from" type="date" />
@@ -678,6 +678,27 @@ export function mountMainScreen(root: HTMLElement): void {
             <button id="library-modal-close" class="ghost-btn" type="button">閉じる</button>
           </div>
           <dl id="library-modal-meta" class="library-meta"></dl>
+          <!-- 人が書く欄（2026-10-02）。**棋戦名を直す・備考を残す**だけで、
+               ⚠️ **KIF の本文は編集しない**（棚の KIF は原本のまま）。
+               ⚠️ **取得した棋戦名は書き換えない** —— 直した名前は別の欄に入り、
+               取り直して保存しても残る（KifuService.Annotate）。 -->
+          <div class="library-annotate">
+            <label class="library-annotate-field">
+              <span class="field-label">棋戦名</span>
+              <input id="library-modal-event" class="library-annotate-input" type="text"
+                     spellcheck="false" autocomplete="off" />
+            </label>
+            <label class="library-annotate-field">
+              <span class="field-label">備考</span>
+              <textarea id="library-modal-note" class="library-annotate-input is-note"
+                        rows="3" spellcheck="false"></textarea>
+            </label>
+            <p id="library-modal-status" class="status" role="status" aria-live="polite" hidden></p>
+            <div class="library-annotate-bar">
+              <button id="library-modal-revert" class="ghost-btn" type="button" hidden>元に戻す</button>
+              <button id="library-modal-save" class="ghost-btn is-primary" type="button">保存</button>
+            </div>
+          </div>
           <div class="library-modal-foot">
             <button id="library-modal-copy" class="ghost-btn" type="button">KIF をコピー</button>
           </div>

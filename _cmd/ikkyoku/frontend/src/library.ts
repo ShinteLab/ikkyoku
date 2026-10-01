@@ -11,7 +11,9 @@
 // ShogiHome 等の外部ツールへ渡すためのもので、ikkyoku では渡す先が自分自身。
 // **代わりに置くのが「解析」で、その口は棋戦名のリンク**（2026-09-14）。
 import { Clipboard } from "@wailsio/runtime";
+import { FiEdit2 } from "react-icons/fi";
 import { KifuService } from "../bindings/github.com/ShinteLab/ikkyoku/app";
+import { iconMarkup } from "./icon";
 import { openPopup } from "./popup";
 import type {
   GameDetail,
@@ -63,6 +65,22 @@ const movesText = (g: GameSummary): string => {
   return `${g.moves}手`;
 };
 
+// 人が直した棋戦名（2026-10-02。`KifuService.Annotate`）。
+//
+// **表示に使うのは「直した名前 → 取得した名前」の順**（kicho の
+// `Record.DisplayEvent` と同じ規則）。⚠️ **Go 側は `event` を取得した値のまま
+// 返す**ので、ここで 2 つを見て選ぶ —— 1 つにまとめて受け取ると
+// 「直してあるか」も「取得元では何だったか」も画面から分からなくなる。
+const isEdited = (g: GameSummary): boolean => g.eventEdited !== "";
+const displayEvent = (g: GameSummary): string => g.eventEdited || g.event;
+const NO_EVENT = "(棋戦名なし)";
+// 取得元の棋戦名。**空も「空だった」と分かるように出す**（中継で欠けていたのを
+// 埋めた、が一番ありうる使い方なので、空を省くと何を直したのかが読めない）。
+const sourceEvent = (g: GameSummary): string => g.event || "（空）";
+
+// 直した印。⚠️ **行ごとに `renderToStaticMarkup` を回さない**（一覧は数百行になる）。
+const EDITED_MARK = iconMarkup(FiEdit2);
+
 export function mountLibrary(
   root: ParentNode,
   opts: {
@@ -87,10 +105,22 @@ export function mountLibrary(
   const modalClose = root.querySelector<HTMLButtonElement>("#library-modal-close")!;
   const modalMeta = root.querySelector<HTMLElement>("#library-modal-meta")!;
   const modalCopy = root.querySelector<HTMLButtonElement>("#library-modal-copy")!;
+  // 人が書く欄（2026-10-02）。
+  const modalEvent = root.querySelector<HTMLInputElement>("#library-modal-event")!;
+  const modalNote = root.querySelector<HTMLTextAreaElement>("#library-modal-note")!;
+  const modalStatus = root.querySelector<HTMLParagraphElement>("#library-modal-status")!;
+  const modalSave = root.querySelector<HTMLButtonElement>("#library-modal-save")!;
+  const modalRevert = root.querySelector<HTMLButtonElement>("#library-modal-revert")!;
 
   // 今開いている詳細の KIF（原本）。**「KIF をコピー」が渡すのはこれ。**
   // ⚠️ **画面には出さない**（本文を出すのをやめたのが 2026-09-12 の変更）。
   let openKif = "";
+  // 今開いている詳細（人が書く欄の「変えたか」と、書いた先の id を見るため）。
+  // ⚠️ **閉じたら null に戻すこと** —— 保存の返事が閉じたあとに届いたとき、
+  // これで見分けてモーダルを開き直さない。
+  let openDetail: GameDetail | null = null;
+  // 保存しているあいだは押せなくする（続けて押すと同じ書き込みが 2 回走る）。
+  let saving = false;
   // 読み込み中は多重に走らせない（検索ボタン連打・タブの出入り）。
   let busy = false;
 
@@ -120,8 +150,17 @@ export function mountLibrary(
     }
   };
 
+  // モーダルの中の状態行。**一覧の `setStatus` と同じ作法**で、出す場所だけが違う
+  // （モーダルを開いているあいだ、一覧の状態行は幕の向こうで読めない）。
+  const setModalStatus = (msg: string, kind: "" | "error" = "") => {
+    modalStatus.textContent = msg;
+    modalStatus.hidden = msg === "";
+    modalStatus.classList.toggle("is-error", kind === "error");
+  };
+
   const closePreview = () => {
     openKif = "";
+    openDetail = null;
     modalCopy.classList.remove("is-copied");
     if (modal.open) modal.close();
   };
@@ -135,10 +174,60 @@ export function mountLibrary(
     modalMeta.append(dt, dd);
   };
 
+  // 人が書く欄を変えたか。**変えていなければ「保存」は押せない**
+  // （押しても何も起きない口を光らせておかない）。
+  // 比べるのは前後の空白を落とした値 —— 落とすのは kicho（`Library.Annotate`）で、
+  // 空白だけ足したのを「変えた」と見ると、押しても同じものが返ってくる。
+  const annotationDirty = (): boolean =>
+    openDetail !== null &&
+    (modalEvent.value.trim() !== openDetail.eventEdited ||
+      modalNote.value.trim() !== openDetail.note);
+
+  const syncAnnotateButtons = () => {
+    modalSave.disabled = saving || !annotationDirty();
+    modalRevert.disabled = saving;
+  };
+
+  // annotate は人が書く欄を棚へ書き、返ってきた詳細でモーダルを描き直す。
+  //
+  // ⚠️ **一覧も読み直すこと**（`load()`）—— 一覧の棋戦名・印・備考は
+  // 書いたものから出ているので、読み直さないと**直したのに一覧が古いまま**になる。
+  // ⚠️ **整える（空白を落とす・取得した値と同じ名前を「直していない」にする）のは
+  // Go 側**。ここで同じ規則を書かないこと（2 か所にすると割れる）。
+  const annotate = async (eventEdited: string, note: string, keepNoteDraft: boolean) => {
+    const cur = openDetail;
+    if (!cur || saving) return;
+    saving = true;
+    syncAnnotateButtons();
+    setModalStatus("");
+    // 「元に戻す」は棋戦名だけを戻す操作なので、**書きかけの備考は消さない**
+    // （描き直すと欄が保存済みの値に戻るので、控えてから書き戻す）。
+    const draft = modalNote.value;
+    try {
+      const d = await KifuService.Annotate(cur.id, eventEdited, note);
+      // 閉じたあと・別の棋譜を開いたあとに返事が届いたら、モーダルは触らない。
+      if (openDetail?.id === cur.id) {
+        showPreview(d);
+        if (keepNoteDraft) modalNote.value = draft;
+        modalSave.classList.add("is-saved");
+        window.setTimeout(() => modalSave.classList.remove("is-saved"), 900);
+      }
+      void load();
+    } catch (err) {
+      setModalStatus(`保存できませんでした: ${String(err)}`, "error");
+    } finally {
+      saving = false;
+      syncAnnotateButtons();
+    }
+  };
+
   const showPreview = (d: GameDetail) => {
     openKif = d.kif;
-    modalTitle.textContent = d.event || "(棋戦名なし)";
+    openDetail = d;
+    modalTitle.textContent = displayEvent(d) || NO_EVENT;
     modalMeta.replaceChildren();
+    // 直してあるときだけ、取得元では何だったかを出す（見出しは直した名前になっている）。
+    if (isEdited(d)) addMeta("取得元の棋戦名", sourceEvent(d));
     addMeta("先手", d.black);
     addMeta("後手", d.white);
     addMeta("手合割", d.handicap);
@@ -152,6 +241,18 @@ export function mountLibrary(
     // 保存されているのも原本なので、渡すものと棚の中身を食い違わせない。
     modalCopy.classList.remove("is-copied");
     modalCopy.disabled = openKif === "";
+
+    // 人が書く欄。⚠️ **入力欄に入れるのは直した名前だけ**（直していなければ空）で、
+    // 取得した名前は placeholder に出す —— 取得した名前を値として入れると、
+    // 中継が後から棋戦名を埋めても**こちらの古い値で隠し続ける**ことになる。
+    modalEvent.value = d.eventEdited;
+    modalEvent.placeholder = d.event || NO_EVENT;
+    modalNote.value = d.note;
+    modalRevert.hidden = !isEdited(d);
+    modalRevert.title = `取得元の棋戦名（${sourceEvent(d)}）に戻します`;
+    modalSave.classList.remove("is-saved");
+    setModalStatus("");
+    syncAnnotateButtons();
     if (!modal.open) modal.showModal();
   };
 
@@ -236,15 +337,42 @@ export function mountLibrary(
       // ⚠️ **行そのものを押して解析する作りにしないこと** —— 選ぶつもりの操作で
       // 毎回解析タブへ飛ぶ。**押せる場所は棋戦名と「表示」の 2 つだけ。**
       const event = cell(tr, "");
+      const line = document.createElement("div");
+      line.className = "library-event";
       const link = document.createElement("button");
       link.type = "button";
       link.className = "library-link";
-      link.textContent = g.event || "(棋戦名なし)";
-      link.title = `${SOURCE_LABELS[g.source] ?? g.source} ／ クリックで解析タブへ`;
+      // 名前は**直した名前 → 取得した名前**（2026-10-02）。
+      link.textContent = displayEvent(g) || NO_EVENT;
+      link.title = isEdited(g)
+        ? `${SOURCE_LABELS[g.source] ?? g.source} ／ 取得元の棋戦名: ${sourceEvent(g)} ／ クリックで解析タブへ`
+        : `${SOURCE_LABELS[g.source] ?? g.source} ／ クリックで解析タブへ`;
       // ⚠️ **押しているあいだは押せなくすること**（`analyze` が自分で外す）。
       // 続けて押すと**同じ棋譜を 2 回送って根が入れ替わる。**
       link.addEventListener("click", () => void analyze(g.id, link));
-      event.append(link);
+      line.append(link);
+      // 直してある印。⚠️ **押せるものにしないこと** —— 棋戦名のセルで押せるのは
+      // 解析の口（リンク）だけ。直すのは「表示」のモーダルから。
+      // ⚠️ **リンクの外に置くこと** —— 中に入れると、長い名前で省略（…）と一緒に切れる。
+      if (isEdited(g)) {
+        const mark = document.createElement("span");
+        mark.className = "library-edited";
+        mark.innerHTML = EDITED_MARK;
+        mark.title = `棋戦名を直してあります（取得元: ${sourceEvent(g)}）`;
+        line.append(mark);
+      }
+      event.append(line);
+      // 備考は棋戦名の下に薄く 1 行（2026-10-02）。全文は title。
+      // ⚠️ **改行は詰めて 1 行にする**（textarea で書けるので入りうる。
+      // 折り返すと行の高さが備考の長さで変わる）。
+      if (g.note) {
+        event.classList.add("has-note");
+        const note = document.createElement("div");
+        note.className = "library-note";
+        note.textContent = g.note.replace(/\s*\n\s*/g, " ");
+        note.title = g.note;
+        event.append(note);
+      }
 
       // ⚠️ **「検討あり」の印を足さないこと**（2026-09-16 に入れて外した）。
       // **ほとんどの棋譜は一度は開く**ので、印を付けると**全部に付いて
@@ -281,7 +409,8 @@ export function mountLibrary(
       delBtn.textContent = "削除";
       delBtn.title = "棋譜タブから削除します";
       delBtn.addEventListener("click", (e) => {
-        askRemove(e, g.id, g.event || g.black || g.id);
+        // 一覧に出ている名前で聞く（直してあれば直した名前）。
+        askRemove(e, g.id, displayEvent(g) || g.black || g.id);
       });
 
       actions.append(delBtn);
@@ -378,7 +507,27 @@ export function mountLibrary(
   // Esc で閉じたときも状態を揃える（`<dialog>` は自前で閉じる）。
   modal.addEventListener("close", () => {
     openKif = "";
+    openDetail = null;
     modalCopy.classList.remove("is-copied");
+  });
+  for (const el of [modalEvent, modalNote]) {
+    el.addEventListener("input", syncAnnotateButtons);
+  }
+  modalSave.addEventListener("click", () => {
+    void annotate(modalEvent.value, modalNote.value, false);
+  });
+  // 棋戦名の欄は Enter でも保存する（1 行の欄なので改行の用途が無い）。
+  // ⚠️ **変換中の Enter は確定であって保存ではない**（`isComposing`）。
+  modalEvent.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.isComposing && !modalSave.disabled) {
+      e.preventDefault();
+      modalSave.click();
+    }
+  });
+  // 「元に戻す」は直した棋戦名だけを取り消す（備考は保存済みの値のまま送り、
+  // 書きかけは欄に残す）。
+  modalRevert.addEventListener("click", () => {
+    if (openDetail) void annotate("", openDetail.note, true);
   });
   // ⚠️ **クリップボードは Wails ランタイム**（`navigator.clipboard` は secure context
   // 前提で、カスタムスキーム配信のこの webview では当てにできない）。

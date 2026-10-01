@@ -275,6 +275,18 @@ type GameSummary struct {
 	// Finished は終局済みかどうか。UI で手数の横に「（終局）」を出すのに使う。
 	Finished bool `json:"finished"`
 	Moves    int  `json:"moves"`
+
+	// ここから下は**人が書く欄**（2026-10-02。`Annotate` で書く）。
+	//
+	// ⚠️ **`Event` は取得した値のまま運ぶこと**（直した値で上書きして渡さない）。
+	// 画面は両方を見て「直してあるか」と「取得元では何だったか」を出すので、
+	// こちらで 1 つにまとめると**取得元の棋戦名が画面から消える**。
+	// 表示に使う名前は `EventEdited || Event`（kicho の `Record.DisplayEvent` と同じ規則）。
+
+	// EventEdited は人が直した棋戦名。空なら直していない。
+	EventEdited string `json:"eventEdited"`
+	// Note は備考。
+	Note string `json:"note"`
 }
 
 // GameDetail は棋譜 1 件の詳細（KIF 本文つき）。
@@ -301,11 +313,19 @@ func toSummary(r store.Record) GameSummary {
 		EndMark:   r.EndMark,
 		Finished:  r.Finished(),
 		Moves:     r.Moves,
+		// ⚠️ **`Event` に `DisplayEvent()` を入れないこと**（上の `GameSummary` の約束）。
+		EventEdited: r.EventEdited,
+		Note:        r.Note,
 	}
 	if !r.StartedAt.IsZero() {
 		s.StartedAt = r.StartedAt.Format(time.RFC3339)
 	}
 	return s
+}
+
+// recordToDetail は棚の棋譜（KIF 本文つき）を詳細に変換する（`Get` と `Annotate`）。
+func recordToDetail(r store.Record) GameDetail {
+	return GameDetail{GameSummary: toSummary(r), KIF: r.Body, Encoding: r.Encoding}
 }
 
 // fetchedToDetail は kicho.Fetched を画面用に変換する（表示のための整形だけ）。
@@ -336,6 +356,12 @@ func fetchedToDetail(f kicho.Fetched) GameDetail {
 // detailToFetched は画面の内容を保存できる形に戻す。
 //
 // **諸元（source_url）と手数は `Library.Save` が決め直す**ので、ここでは運ぶだけ。
+//
+// ⚠️ **`EventEdited` / `Note` は運ばないこと**（2026-10-02）。`kicho.Fetched` は
+// **取得した値**の入れ物で、`Library.Save` はどうせ人が書く欄に触らないが、
+// 運ぶ道を作ると**取得した値の列に人の値が入る経路**ができる（たとえば
+// `Event` に直した名前を詰めて保存すると、取得元の棋戦名が消える）。
+// 人が書く欄を書く口は `Annotate` の 1 か所だけにする。
 func detailToFetched(d GameDetail) kicho.Fetched {
 	f := kicho.Fetched{
 		Source:    d.Source,
@@ -362,6 +388,7 @@ func detailToFetched(d GameDetail) kicho.Fetched {
 // SearchQuery は検索条件。空の項目は「条件なし」。
 type SearchQuery struct {
 	// Text は棋戦名・対局者・場所への部分一致。
+	// **人が直した棋戦名と備考にも当たる**（2026-10-02。kicho の検索が見ている）。
 	// 3 文字以上なら索引（FTS5 trigram）が効く。それ未満は走査になる。
 	Text string `json:"text"`
 	// From / To は開始日の範囲。"YYYY-MM-DD" 形式。空なら無制限。
@@ -509,7 +536,38 @@ func (s *KifuService) Get(id string) (GameDetail, error) {
 	if err != nil {
 		return GameDetail{}, err
 	}
-	return GameDetail{GameSummary: toSummary(r), KIF: r.Body, Encoding: r.Encoding}, nil
+	return recordToDetail(r), nil
+}
+
+// Annotate は保存済みの棋譜に、直した棋戦名と備考を書く（2026-10-02。詳細モーダルの「保存」）。
+//
+// **中継などの外部サービス由来の棋譜は棋戦名が欠けていることがあり、一覧で
+// 見分けられるよう人が埋める**ための口。`eventEdited` を空にすれば直したのを
+// 取り消せる（「元に戻す」）。前後の空白を落とすのも、取得した値と同じ名前を
+// 「直していない」として持つのも kicho（`Library.Annotate`）が決める ——
+// **こちらで整え直さないこと**（2 か所に書くと規則が割れる）。
+//
+// ⚠️ **取得した値（`Event`）も KIF 本文も書き換えない。** 人が書く欄は別の列に
+// あるので、**取り直して保存しても消えない**（`Library.Save` が触らない）。
+// ⚠️ **外部ツールへの配信（kicho の httpapi）は取得した値のまま**で、直した名前は
+// 棋譜タブの一覧と検索にだけ効く。
+// ⚠️ **対象は棚に入っている棋譜だけ。** 仮の一覧（`watches`）・中継のカードには
+// 書けない（あちらは「どのサイトのどの棋譜か」の写しで、人が書く欄を持たない）。
+//
+// 返すのは書いたあとの詳細（KIF 本文つき）。画面はこれでモーダルを描き直す。
+func (s *KifuService) Annotate(id, eventEdited, note string) (GameDetail, error) {
+	lib, err := s.library()
+	if err != nil {
+		return GameDetail{}, err
+	}
+	ctx, cancel := kifuDBContext()
+	defer cancel()
+
+	r, err := lib.Annotate(ctx, id, kicho.Annotation{EventEdited: eventEdited, Note: note})
+	if err != nil {
+		return GameDetail{}, err
+	}
+	return recordToDetail(r), nil
 }
 
 // Delete は棋譜を削除する。

@@ -206,6 +206,9 @@ func TestKifuServiceWithoutDatabase(t *testing.T) {
 	if _, err := svc.ImportKIF(testKIF); err == nil {
 		t.Error("ImportKIF がエラーを返しません")
 	}
+	if _, err := svc.Annotate("x", "直した棋戦", "備考"); err == nil {
+		t.Error("Annotate がエラーを返しません")
+	}
 	if _, err := svc.Fetch("abc"); err == nil {
 		t.Error("Fetch がエラーを返しません")
 	}
@@ -543,5 +546,113 @@ func TestKifuServiceWatchWithoutDatabase(t *testing.T) {
 	}
 	if _, err := svc.UnwatchAll(); err == nil {
 		t.Error("UnwatchAll がエラーを返しません")
+	}
+}
+
+// ⚠️ **人が直した棋戦名と備考が一覧・検索・詳細に乗り、取得した値は残ること**（2026-10-02）。
+//
+// 一番の要点は **`Event` が取得した値のままであること** —— 画面は `eventEdited` と
+// `event` の両方を見て「直してある」印と「取得元の棋戦名」を出すので、こちらで
+// 直した名前を `Event` に詰めると**取得元では何だったかが画面から消える。**
+// ほかは: **取り直して保存しても消えないこと**（`Save` は人が書く欄に触らない。
+// `detailToFetched` が運ばないことの歯止めでもある）、**直した名前・備考で検索に
+// 当たること**、取得した値と同じ名前を渡すと「直していない」になること（整えるのは
+// kicho。ここではその結果が画面へ届いていることだけを見る）、空で取り消せること、
+// 無い id は失敗すること。
+func TestKifuServiceAnnotate(t *testing.T) {
+	svc, _ := newTestKifuService(t)
+
+	d := GameDetail{
+		GameSummary: GameSummary{
+			Source: store.SourceShogiLive, SourceID: "oui/kifu/67/oui202607290101",
+			Event: "", Black: "先手太郎", White: "後手花子",
+		},
+		KIF: "先手：先手太郎\n後手：後手花子\n手数----指手---------消費時間--\n   1 ７六歩(77)\n",
+	}
+	saved, err := svc.Save(d)
+	if err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	got, err := svc.Annotate(saved.ID, "  第67期王位戦 第1局  ", "  二日目の昼まで  ")
+	if err != nil {
+		t.Fatalf("Annotate: %v", err)
+	}
+	if got.EventEdited != "第67期王位戦 第1局" || got.Note != "二日目の昼まで" {
+		t.Errorf("書いた値が返っていません: eventEdited=%q note=%q", got.EventEdited, got.Note)
+	}
+	if got.Event != "" {
+		t.Errorf("取得した棋戦名が書き換わっています: %q", got.Event)
+	}
+	if got.KIF == "" {
+		t.Error("詳細なのに KIF 本文がありません（モーダルを描き直せない）")
+	}
+
+	check := func(label string, s GameSummary) {
+		t.Helper()
+		if s.EventEdited != "第67期王位戦 第1局" || s.Note != "二日目の昼まで" || s.Event != "" {
+			t.Errorf("%s: 人が書く欄が乗っていないか、取得した値が変わっています: %+v", label, s)
+		}
+	}
+
+	// 一覧（Search）と詳細（Get）の両方に乗ること。
+	res, err := svc.Search(SearchQuery{Text: "王位戦"})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(res.Games) != 1 {
+		t.Fatalf("直した棋戦名で検索に当たりません: %+v", res)
+	}
+	check("Search", res.Games[0])
+	if res, err := svc.Search(SearchQuery{Text: "二日目"}); err != nil || len(res.Games) != 1 {
+		t.Fatalf("備考で検索に当たりません: %+v, %v", res, err)
+	}
+	g, err := svc.Get(saved.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	check("Get", g.GameSummary)
+
+	// ⚠️ 取り直して保存しても消えないこと（取得した値の列だけが更新される）。
+	d.KIF += "   2 ３四歩(33)\n"
+	d.Event = "王位戦"
+	if _, err := svc.Save(d); err != nil {
+		t.Fatalf("Save（取り直し）: %v", err)
+	}
+	g, err = svc.Get(saved.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if g.EventEdited != "第67期王位戦 第1局" || g.Note != "二日目の昼まで" {
+		t.Errorf("取り直して保存したら人が書いた欄が消えました: %+v", g.GameSummary)
+	}
+	if g.Event != "王位戦" || g.Moves != 2 {
+		t.Errorf("取得した値が最新になっていません: %+v", g.GameSummary)
+	}
+
+	// 取得した値と同じ名前は「直していない」になる（備考は残る）。
+	g, err = svc.Annotate(saved.ID, "王位戦", "二日目の昼まで")
+	if err != nil {
+		t.Fatalf("Annotate（同じ名前）: %v", err)
+	}
+	if g.EventEdited != "" {
+		t.Errorf("取得した値と同じ名前が「直した」扱いです: %q", g.EventEdited)
+	}
+
+	// 空で取り消せる（「元に戻す」）。
+	if _, err := svc.Annotate(saved.ID, "第67期王位戦 第1局", ""); err != nil {
+		t.Fatalf("Annotate: %v", err)
+	}
+	g, err = svc.Annotate(saved.ID, "", "")
+	if err != nil {
+		t.Fatalf("Annotate（取り消し）: %v", err)
+	}
+	if g.EventEdited != "" || g.Note != "" || g.Event != "王位戦" {
+		t.Errorf("取り消せていません: %+v", g.GameSummary)
+	}
+
+	// 無い id は失敗する（kicho の store.ErrNotFound をそのまま返す）。
+	if _, err := svc.Annotate("no-such-id", "x", ""); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("無い id で ErrNotFound が返りません: %v", err)
 	}
 }
