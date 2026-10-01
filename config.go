@@ -284,6 +284,17 @@ type Config struct {
 	// **背景ごと透ける。**
 	PieceOpacity float64 `json:"pieceOpacity,omitempty"`
 
+	// BoardColor は盤面（木地）の色（`#rrggbb`。2026-10-02）。**空なら既定**
+	// （`DefaultBoardColor`）。LineColor は盤の枠・罫線・星と、解析タブの駒台の縁の色。
+	// StandColor は解析タブの駒台の色。
+	//
+	// **駒の字の色と同じ扱い**（好みで選ぶ見た目）。⚠️ **テーマ（`Theme`）で
+	// 切り替えないこと** —— 盤の見た目は画面の配色とは別に選ぶもの。
+	// ⚠️ **既定値の解決は `ColorOr` の 1 か所**（ここにもフロントにも書かない）。
+	BoardColor string `json:"boardColor,omitempty"`
+	LineColor  string `json:"lineColor,omitempty"`
+	StandColor string `json:"standColor,omitempty"`
+
 	// PieceFont は今使っている駒フォントの登録 ID。**空なら同梱。**
 	//
 	// ⚠️ **登録の中に「使う」印を持たせない**（エンジンの `Enabled` とは違う）。
@@ -397,6 +408,25 @@ const (
 	// **駒が消えて盤が壊れたようにしか見えない**から（戻し方も分からなくなる）。
 	MinPieceOpacity = 0.2
 )
+
+// 盤・線・駒台の色の既定（2026-10-02）。
+//
+// **盤と線は `core/web` の `--shogi-board-color` / `--shogi-line-color` の既定と
+// 同じ値**（`shogi-board.js`）。⚠️ **向こうが変わったらここも直すこと。**
+// 駒台は ikkyoku が自分で描くもの（`style.css` の `.hand-zone.is-readonly`）。
+const (
+	DefaultBoardColor = "#f3c877"
+	DefaultLineColor  = "#5a3b1a"
+	DefaultStandColor = "#7a5530"
+)
+
+// ColorOr は設定の色を正規化して返す（**読めない値・空は既定**）。
+func ColorOr(v, def string) string {
+	if c := NormalizePieceColor(v); c != "" {
+		return c
+	}
+	return def
+}
 
 // PieceInk は駒の字の色を、**画面にそのまま当てられる 1 つの値**にして返す。
 //

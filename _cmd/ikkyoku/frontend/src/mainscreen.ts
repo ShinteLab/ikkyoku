@@ -17,8 +17,8 @@
 //            (自由編集・合法性を問わない・手番も駒台の先後も未決でよい)
 //   解析   … **確定した局面**の面。評価値を出し、今後ここに手順と分岐ツリーが乗る
 //            (合法手だけを辿る)
-//   設定   … 設定。**関わりでまとめてある**(2026-09-12。撮る / 解析 / 駒の字 /
-//            配色 / 棋譜データベース / 盤面認識(suteme))。⚠️ **足した順に積まないこと。**
+//   設定   … 設定。**関わりでまとめてある**(2026-09-12。撮る / 解析 / 見た目 /
+//            棋譜データベース / 盤面認識(suteme))。⚠️ **足した順に積まないこと。**
 //            ⚠️ **畳むのは区切りの単位で、中でもう一度畳まない**(解析エンジンは
 //            「解析」の中の 1 項目)。⚠️ **見出し(.setting-section)は 2 つ以上を
 //            畳まずに並べるときだけ** —— 今は「撮る」だけ。
@@ -26,7 +26,7 @@
 //            **既定のままで動くものは下**。⚠️ **盤面認識をベース機能だからと上へ
 //            戻さないこと**(認識器の置き場所や学習データへの登録は相当な上級者の操作)。
 //            ⚠️ **認識器の読み込み元と「訂正盤面を suteme に登録する」を離さないこと**
-//            (相手が同じ suteme)。項目を足すときはこの 6 つのどれかに入れる。
+//            (相手が同じ suteme)。項目を足すときはこの 5 つのどれかに入れる。
 //            詳しくは `_docs/ui/screens.md`
 //
 // 「認識詳細情報」(訂正タブの中の折りたたみ。旧デバッグタブ)は
@@ -264,6 +264,9 @@ function applyPieceStyle(
     black: string;
     white: string;
     ink: string;
+    board: string;
+    line: string;
+    stand: string;
   },
   boards: Element[],
 ): void {
@@ -276,6 +279,11 @@ function applyPieceStyle(
   // 濃さを別に当てると、HTML 側は element の `opacity` になり
   // **駒の背景（木地）ごと透ける。**
   root.setProperty("--shogi-piece-color", style.ink);
+  // 盤面・線・駒台の色（2026-10-02）。盤は core/web の差し替え口、駒台は style.css。
+  // ⚠️ **既定の解決は Go 側**（`ikkyoku.ColorOr`）。いつも解決済みの値が来る。
+  root.setProperty("--shogi-board-color", style.board);
+  root.setProperty("--shogi-line-color", style.line);
+  root.setProperty("--stand-color", style.stand);
   for (const b of boards) {
     // ⚠️ **属性そのものを外すこと。** 値を空にして残すと「値なし」＝
     // **先後とも玉**になる（`core/web/README.md` の表）。
@@ -1236,124 +1244,158 @@ export function mountMainScreen(root: HTMLElement): void {
           </div>
         </details>
 
-        <!-- 駒の字（2026-08-16）。**端末に入っているフォントから駒の字を焼いて使う。**
+        <!-- 見た目（2026-10-02）。**画面の配色・盤と駒台の色・駒の字**をまとめた区切り。
+             以前は「駒の字」と「配色」が別の区切りだったが、どれも**好みで選ぶ見え方**
+             なので 1 つにした。
 
-             同梱できる駒フォントは「派生物の作成と再配布を認める」ライセンスの
-             ものに限られる（core/web/README.md。游明朝・どへた・桜鯰は実際に外している）。
-             一方**自分の端末に入っているフォントを、自分の端末で表示に使うのは
-             再配布ではない**、というのがこの機能の拠り所。
-
-             ⚠️ **焼いた字を書き出す口を作らないこと**（Go 側にも無い）。
-             書き出せると「その端末で表示する」を越えてしまい、元フォントの
-             条項が効く側の話になる。 -->
-        <details id="fold-piecefont" class="setting-group setting-fold">
+             ⚠️ **中でもう一度畳まないこと**（区切りの約束）。中の 3 つは素の項目で、
+             短いものが上（配色 → 盤と駒台）、**伸びる一覧を持つ駒の字が下**。
+             ⚠️ **盤と駒台の色はテーマで切り替えない**（駒の字の色と同じ扱い）。 -->
+        <details id="fold-look" class="setting-group setting-fold">
           <summary class="setting-fold-head">
-            <span class="setting-title" data-hint="hint-piecefont">駒の字</span>
-            <span id="fold-piecefont-sum" class="setting-fold-sum"></span>
+            <span class="setting-title">見た目</span>
+            <span class="setting-fold-sum"><span id="fold-theme-sum"></span> / <span
+                  id="fold-piecefont-sum"></span></span>
           </summary>
-          <span id="hint-piecefont" class="setting-note is-hint">
-            盤に並ぶ駒の書体です。端末に入っているフォントから、駒に要る
-            <code id="font-required"></code> の字だけを抜き出して使います。
-            <strong>抜き出した字はこのアプリの表示に使うだけで、ファイルとしては
-            保存も配布もされません。</strong>
-            <strong>元フォントの利用条件はそのまま効きます</strong>ので、
-            作った盤面を配ったり素材として使ったりするときは、そちらを確認してください。
-          </span>
-          <ul id="font-list" class="engine-list"></ul>
 
-          <!-- 王/玉と馬/左馬（2026-08-16）。**どのフォントでも効く**
-               （駒フォントは同じ生成器で焼いているので ss01/ss02 が必ず入っている）。
-
-               ⚠️ **先後を分けられるのは玉だけ。** 玉は王将/玉将という**駒そのものの
-               呼び分け**（上位者が王）なので片側だけがありうるが、左馬は**盤の
-               見た目の選択**なので、使うと決めたら盤全体がそうなる。
-               **左馬に先後の欄を足さないこと**（core/web/README.md）。 -->
-          <div class="setting-fields">
-            <label class="field">
-              <span class="field-label">王 / 玉</span>
-              <select id="font-gyoku"
-                      title="王を玉で書くか。先手だけ・後手だけも選べます"></select>
-            </label>
-            <label class="setting is-inline">
-              <input id="font-hidari-uma" type="checkbox" />
-              <span class="setting-body">
-                <span class="setting-title">馬を左馬にする</span>
-              </span>
-            </label>
-          </div>
-
-          <!-- 駒の字の色と濃さ（2026-08-16）。**字の強いフォント（太い明朝・毛筆）は
-               少し薄いほうが盤に映える。** 端末のフォントを選べるようにした以上、
-               書体ごとに濃さを合わせたくなる。
-
-               ⚠️ **画面では別々の欄だが、当てるのは 1 つの値**（Go 側が rgba に
-               合成する）。濃さを別に当てると、HTML で描いている駒台のチップは
-               element の opacity になり**木地ごと透ける**。 -->
-          <div class="setting-fields">
-            <label class="field">
-              <span class="field-label">字の色</span>
-              <input id="font-ink-color" type="color"
-                     title="駒の字の色（盤・駒台・掴んだ駒に効きます）" />
-            </label>
-            <label class="field">
-              <span class="field-label">濃さ</span>
-              <input id="font-ink-opacity" class="ink-range" type="range"
-                     min="20" max="100" step="5"
-                     title="駒の字の濃さ。字の強いフォントは少し薄いほうが盤に映えます" />
-              <output id="font-ink-opacity-value" class="ink-value"></output>
-            </label>
-            <button id="font-ink-reset" class="ghost-btn" type="button"
-                    title="字の色と濃さを既定に戻します">既定に戻す</button>
-          </div>
-
-          <div class="setting-fields">
-            <button id="font-scan" class="ghost-btn" type="button"
-                    title="端末に入っているフォントを探します（数秒かかります）">フォントを追加…</button>
-          </div>
-          <p id="font-status" class="status" role="status" aria-live="polite"></p>
-
-          <!-- 端末のフォントの一覧。**押したときだけ探す**（実測で 190 ファイル・
-               577MB を読んで 1 秒弱）。起動のたびに走らせる類の処理ではない。 -->
-          <div id="font-picker" class="font-picker" hidden>
+          <!-- 配色（2026-10-02）。**盤の外の色だけ**を切り替える。
+               ⚠️ **選択肢は Go 側が返す**（themes）。フロントに表を書かないこと。 -->
+          <div class="setting-group">
+            <span class="setting-title">配色</span>
             <div class="setting-fields">
               <label class="field">
-                <span class="field-label">絞り込み</span>
-                <input id="font-filter" type="search" placeholder="名前・ファイル名"
-                       spellcheck="false" autocomplete="off" />
+                <span class="field-label">テーマ</span>
+                <select id="theme-select"
+                        title="画面の配色。盤・駒台・駒の色は変わりません"></select>
               </label>
-              <!-- ⚠️ **既定は切**（＝全部出す）。駒の字が無いフォントを消してしまうと、
-                   **探しているのか対象外なのかが画面から分からない。** -->
+            </div>
+          </div>
+
+          <!-- 盤と駒台の色（2026-10-02）。**駒の字の色と同じ扱い**（好みで選ぶ）。
+               ⚠️ **既定は Go 側が解決して返す**（ColorOr）。「既定に戻す」は空を送る。
+               線の色は盤の枠・罫線・星と、解析タブの駒台の縁に効く。 -->
+          <div class="setting-group">
+            <span class="setting-title" data-hint="hint-boardcolor">盤と駒台</span>
+            <span id="hint-boardcolor" class="setting-note is-hint">
+              盤面・線・駒台の色です。線は盤の枠と罫線・星、解析タブの駒台の縁に使います。
+              画面の配色（テーマ）を変えてもこの色は変わりません。
+            </span>
+            <div class="setting-fields">
+              <label class="field">
+                <span class="field-label">盤</span>
+                <input id="board-color" type="color" title="盤面の色" />
+              </label>
+              <label class="field">
+                <span class="field-label">線</span>
+                <input id="line-color" type="color" title="盤の枠・罫線・星と、駒台の縁の色" />
+              </label>
+              <label class="field">
+                <span class="field-label">駒台</span>
+                <input id="stand-color" type="color" title="解析タブの駒台の色" />
+              </label>
+              <button id="board-color-reset" class="ghost-btn" type="button"
+                      title="盤・線・駒台の色を既定に戻します">既定に戻す</button>
+            </div>
+          </div>
+
+            <!-- 駒の字（2026-08-16）。**端末に入っているフォントから駒の字を焼いて使う。**
+
+                 同梱できる駒フォントは「派生物の作成と再配布を認める」ライセンスの
+                 ものに限られる（core/web/README.md。游明朝・どへた・桜鯰は実際に外している）。
+                 一方**自分の端末に入っているフォントを、自分の端末で表示に使うのは
+                 再配布ではない**、というのがこの機能の拠り所。
+
+                 ⚠️ **焼いた字を書き出す口を作らないこと**（Go 側にも無い）。
+                 書き出せると「その端末で表示する」を越えてしまい、元フォントの
+                 条項が効く側の話になる。 -->
+          <div class="setting-group">
+            <span class="setting-title" data-hint="hint-piecefont">駒の字</span>
+            <span id="hint-piecefont" class="setting-note is-hint">
+              盤に並ぶ駒の書体です。端末に入っているフォントから、駒に要る
+              <code id="font-required"></code> の字だけを抜き出して使います。
+              <strong>抜き出した字はこのアプリの表示に使うだけで、ファイルとしては
+              保存も配布もされません。</strong>
+              <strong>元フォントの利用条件はそのまま効きます</strong>ので、
+              作った盤面を配ったり素材として使ったりするときは、そちらを確認してください。
+            </span>
+            <ul id="font-list" class="engine-list"></ul>
+
+            <!-- 王/玉と馬/左馬（2026-08-16）。**どのフォントでも効く**
+                 （駒フォントは同じ生成器で焼いているので ss01/ss02 が必ず入っている）。
+
+                 ⚠️ **先後を分けられるのは玉だけ。** 玉は王将/玉将という**駒そのものの
+                 呼び分け**（上位者が王）なので片側だけがありうるが、左馬は**盤の
+                 見た目の選択**なので、使うと決めたら盤全体がそうなる。
+                 **左馬に先後の欄を足さないこと**（core/web/README.md）。 -->
+            <div class="setting-fields">
+              <label class="field">
+                <span class="field-label">王 / 玉</span>
+                <select id="font-gyoku"
+                        title="王を玉で書くか。先手だけ・後手だけも選べます"></select>
+              </label>
               <label class="setting is-inline">
-                <input id="font-only-usable" type="checkbox" />
+                <input id="font-hidari-uma" type="checkbox" />
                 <span class="setting-body">
-                  <span class="setting-title">駒の字が揃うものだけ</span>
+                  <span class="setting-title">馬を左馬にする</span>
                 </span>
               </label>
             </div>
-            <!-- 選んだ行の見本。**実際に焼いてから当てる**ので、盤に出る字そのもの。 -->
-            <p id="font-sample" class="font-sample" hidden></p>
-            <ul id="font-choices" class="font-choices"></ul>
-            <!-- 探した場所。**目当てのフォントが出てこないときに、どこを見たのかが
-                 分からないと打つ手が無い。** -->
-            <p id="font-dirs" class="setting-path"></p>
-          </div>
-        </details>
 
-        <!-- 配色（2026-10-02）。**盤の外の色だけ**を切り替える（盤と駒の色は変えない）。
+            <!-- 駒の字の色と濃さ（2026-08-16）。**字の強いフォント（太い明朝・毛筆）は
+                 少し薄いほうが盤に映える。** 端末のフォントを選べるようにした以上、
+                 書体ごとに濃さを合わせたくなる。
 
-             ⚠️ **項目が 1 つなので見出しは置かず、項目自身を畳む**（区切りの約束）。
-             ⚠️ **選択肢は Go 側が返す**（themes）。フロントに表を書かないこと。 -->
-        <details id="fold-theme" class="setting-group setting-fold">
-          <summary class="setting-fold-head">
-            <span class="setting-title">配色</span>
-            <span id="fold-theme-sum" class="setting-fold-sum"></span>
-          </summary>
-          <div class="setting-fields">
-            <label class="field">
-              <span class="field-label">テーマ</span>
-              <select id="theme-select"
-                      title="画面の配色。盤と駒の色は変わりません"></select>
-            </label>
+                 ⚠️ **画面では別々の欄だが、当てるのは 1 つの値**（Go 側が rgba に
+                 合成する）。濃さを別に当てると、HTML で描いている駒台のチップは
+                 element の opacity になり**木地ごと透ける**。 -->
+            <div class="setting-fields">
+              <label class="field">
+                <span class="field-label">字の色</span>
+                <input id="font-ink-color" type="color"
+                       title="駒の字の色（盤・駒台・掴んだ駒に効きます）" />
+              </label>
+              <label class="field">
+                <span class="field-label">濃さ</span>
+                <input id="font-ink-opacity" class="ink-range" type="range"
+                       min="20" max="100" step="5"
+                       title="駒の字の濃さ。字の強いフォントは少し薄いほうが盤に映えます" />
+                <output id="font-ink-opacity-value" class="ink-value"></output>
+              </label>
+              <button id="font-ink-reset" class="ghost-btn" type="button"
+                      title="字の色と濃さを既定に戻します">既定に戻す</button>
+            </div>
+
+            <div class="setting-fields">
+              <button id="font-scan" class="ghost-btn" type="button"
+                      title="端末に入っているフォントを探します（数秒かかります）">フォントを追加…</button>
+            </div>
+            <p id="font-status" class="status" role="status" aria-live="polite"></p>
+
+            <!-- 端末のフォントの一覧。**押したときだけ探す**（実測で 190 ファイル・
+                 577MB を読んで 1 秒弱）。起動のたびに走らせる類の処理ではない。 -->
+            <div id="font-picker" class="font-picker" hidden>
+              <div class="setting-fields">
+                <label class="field">
+                  <span class="field-label">絞り込み</span>
+                  <input id="font-filter" type="search" placeholder="名前・ファイル名"
+                         spellcheck="false" autocomplete="off" />
+                </label>
+                <!-- ⚠️ **既定は切**（＝全部出す）。駒の字が無いフォントを消してしまうと、
+                     **探しているのか対象外なのかが画面から分からない。** -->
+                <label class="setting is-inline">
+                  <input id="font-only-usable" type="checkbox" />
+                  <span class="setting-body">
+                    <span class="setting-title">駒の字が揃うものだけ</span>
+                  </span>
+                </label>
+              </div>
+              <!-- 選んだ行の見本。**実際に焼いてから当てる**ので、盤に出る字そのもの。 -->
+              <p id="font-sample" class="font-sample" hidden></p>
+              <ul id="font-choices" class="font-choices"></ul>
+              <!-- 探した場所。**目当てのフォントが出てこないときに、どこを見たのかが
+                   分からないと打つ手が無い。** -->
+              <p id="font-dirs" class="setting-path"></p>
+            </div>
           </div>
         </details>
 
@@ -4872,7 +4914,11 @@ ${st.turnLabel}${n}`;
   const fontInkOpacity = root.querySelector<HTMLInputElement>("#font-ink-opacity")!;
   const fontInkOpacityValue = root.querySelector<HTMLOutputElement>("#font-ink-opacity-value")!;
   const fontInkReset = root.querySelector<HTMLButtonElement>("#font-ink-reset")!;
-  const fontFold = root.querySelector<HTMLDetailsElement>("#fold-piecefont")!;
+  const boardColor = root.querySelector<HTMLInputElement>("#board-color")!;
+  const lineColor = root.querySelector<HTMLInputElement>("#line-color")!;
+  const standColor = root.querySelector<HTMLInputElement>("#stand-color")!;
+  const boardColorReset = root.querySelector<HTMLButtonElement>("#board-color-reset")!;
+  const fontFold = root.querySelector<HTMLDetailsElement>("#fold-look")!;
   const fontFoldSum = root.querySelector<HTMLElement>("#fold-piecefont-sum")!;
 
   // 王/玉・左馬を当てる相手。**2 つの盤の両方**（訂正タブと解析タブ）。
@@ -5033,6 +5079,10 @@ ${st.turnLabel}${n}`;
     fontInkOpacity.min = String(Math.round(st.minPieceOpacity * 100));
     fontInkOpacity.value = String(Math.round(st.pieceOpacity * 100));
     fontInkOpacityValue.textContent = `${Math.round(st.pieceOpacity * 100)}%`;
+    // 盤・線・駒台の色。⚠️ **既定は Go 側が解決して返す**（フロントに書かない）。
+    boardColor.value = st.boardColor;
+    lineColor.value = st.lineColor;
+    standColor.value = st.standColor;
     // ⚠️ **見本の色をここで当てないこと。** `.font-sample` も CSS で
     // `--shogi-piece-color` を見ているので、当てると同じ値を 2 経路で書くことになる
     // （実際に盤へ出る濃さのまま見える、という狙いは CSS 側で満たされている）。
@@ -5309,6 +5359,33 @@ ${st.turnLabel}${n}`;
   fontInkReset.addEventListener("click", () => {
     // ⚠️ **既定の値をここに書かないこと。** 空を送れば Go 側が既定に倒す。
     void saveInk("", 0);
+  });
+
+  // 盤・線・駒台の色（2026-10-02）。**3 つを 1 回で送る**（字の色と同じく、
+  // 引いている最中は間引いて送り、離したときは待たずに送る）。
+  let boardTimer = 0;
+  const saveBoardColors = async (board: string, line: string, stand: string) => {
+    window.clearTimeout(boardTimer);
+    try {
+      showFontState(await FontService.SetBoardColors(board, line, stand));
+    } catch (err) {
+      setFontStatus(`保存できませんでした: ${String(err)}`, "error");
+    }
+  };
+  for (const el of [boardColor, lineColor, standColor]) {
+    el.addEventListener("input", () => {
+      window.clearTimeout(boardTimer);
+      boardTimer = window.setTimeout(() => {
+        void saveBoardColors(boardColor.value, lineColor.value, standColor.value);
+      }, 150);
+    });
+    el.addEventListener("change", () => {
+      void saveBoardColors(boardColor.value, lineColor.value, standColor.value);
+    });
+  }
+  boardColorReset.addEventListener("click", () => {
+    // ⚠️ **既定の値をここに書かないこと。** 空を送れば Go 側が既定に倒す。
+    void saveBoardColors("", "", "");
   });
 
   // 認識器の読み込み元を画面に映す。
