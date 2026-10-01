@@ -85,10 +85,38 @@ func TestFromKIFStopsAtIllegalMove(t *testing.T) {
 	}
 }
 
-// 指し手が 1 手も無ければエラー（貼り間違いを黙って受けない）。
+// ⚠️ **指し手が 0 手でも、手合割の初期局面として読めること**（2026-10-02）。
+//
+// **中継は対局前からヘッダだけの棋譜を配信している**ので、URL から取ると
+// 0 手の棋譜が普通に来る。**手合割の指定が無ければ平手**で、開始局面は
+// 決まっているのだから解析できなければおかしい（以前は断っていて、
+// 解析タブへ送れなかった）。
 func TestFromKIFWithoutMoves(t *testing.T) {
-	if _, _, err := position.FromKIF("先手：太郎\n後手：花子\n"); err == nil {
-		t.Fatal("指し手の無い KIF でエラーにならなかった")
+	hirate, err := kifu.StartSFEN("")
+	if err != nil {
+		t.Fatalf("StartSFEN: %v", err)
+	}
+	for _, src := range []string{
+		"先手：太郎\n後手：花子\n",
+		"手合割：平手\n",
+		"棋戦：テスト戦\n先手：太郎\n後手：花子\n手数----指手---------消費時間--\n",
+	} {
+		st, load, err := position.FromKIF(src)
+		if err != nil {
+			t.Errorf("%q: FromKIF: %v", src, err)
+			continue
+		}
+		if load.Loaded != 0 || load.Total != 0 || load.Note != "" {
+			t.Errorf("%q: 内訳が違います: %+v", src, load)
+		}
+		got, err := st.Root().SFEN()
+		if err != nil {
+			t.Errorf("%q: SFEN: %v", src, err)
+			continue
+		}
+		if got != hirate {
+			t.Errorf("%q: 平手の初期局面になっていません: %s", src, got)
+		}
 	}
 }
 
@@ -167,9 +195,12 @@ func TestFromKIFBoardOnly(t *testing.T) {
 	}
 }
 
-// 盤面図も手も無ければ今までどおり断ること（**貼り間違いの受け皿**）。
+// ヘッダも手も盤面図も読めなければ断ること（**貼り間違いの受け皿**）。
+// HTML やただの文章を平手の初期局面として受けない。
 func TestFromKIFRefusesEmpty(t *testing.T) {
-	if _, _, err := position.FromKIF("手合割：平手\n"); err == nil {
-		t.Error("中身の無い棋譜が読めてしまっています")
+	for _, src := range []string{"", "こんにちは\n", "<html><body>404</body></html>\n"} {
+		if _, _, err := position.FromKIF(src); err == nil {
+			t.Errorf("%q: 棋譜でないものが読めてしまっています", src)
+		}
 	}
 }
