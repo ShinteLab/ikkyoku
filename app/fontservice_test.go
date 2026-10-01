@@ -509,6 +509,55 @@ func TestFontPieceInk(t *testing.T) {
 }
 
 // 色を変えても玉・左馬の設定が巻き添えにならないこと（別の設定）。
+// TestFontBoardColors は盤面・線・駒台の色を固定する（2026-10-02）。
+//
+// ⚠️ **既定が解決済みで返ること**（フロントに既定値を書かせない）・**既定と同じ値は
+// 書き残さないこと**・**読めない色は断らずに既定へ戻すこと**を見ている。
+func TestFontBoardColors(t *testing.T) {
+	s := newTestFonts(t)
+
+	st := s.State()
+	if st.Style.Board != ikkyoku.DefaultBoardColor || st.Style.Line != ikkyoku.DefaultLineColor ||
+		st.Style.Stand != ikkyoku.DefaultStandColor {
+		t.Errorf("既定が解決されていない: %+v", st.Style)
+	}
+	if st.BoardColor != st.Style.Board || st.DefaultStandColor != ikkyoku.DefaultStandColor {
+		t.Errorf("画面に返す値が違う: %+v", st)
+	}
+
+	st, err := s.SetBoardColors("#E8C27A", "#3b2a14", "#604020")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Style.Board != "#e8c27a" || st.Style.Line != "#3b2a14" || st.Style.Stand != "#604020" {
+		t.Errorf("Style = %+v", st.Style)
+	}
+	if got := s.settings.Config(); got.BoardColor != "#e8c27a" || got.LineColor != "#3b2a14" || got.StandColor != "#604020" {
+		t.Errorf("保存されていない: board=%q line=%q stand=%q", got.BoardColor, got.LineColor, got.StandColor)
+	}
+	// ⚠️ **駒の字の色を巻き添えにしないこと。**
+	if st.Style.Ink != ikkyoku.DefaultPieceColor {
+		t.Errorf("駒の字の色が変わった: %q", st.Style.Ink)
+	}
+
+	// 既定と同じ値は書き残さない。
+	if _, err := s.SetBoardColors(ikkyoku.DefaultBoardColor, ikkyoku.DefaultLineColor, ikkyoku.DefaultStandColor); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.settings.Config(); got.BoardColor != "" || got.LineColor != "" || got.StandColor != "" {
+		t.Errorf("既定なのに書き残している: %+v", got)
+	}
+
+	// 読めない色は断らずに既定へ。
+	st, err = s.SetBoardColors("きいろ", "", "#12")
+	if err != nil {
+		t.Fatalf("断らずに丸めること: %v", err)
+	}
+	if st.Style.Board != ikkyoku.DefaultBoardColor || st.Style.Stand != ikkyoku.DefaultStandColor {
+		t.Errorf("読めない色が通った: %+v", st.Style)
+	}
+}
+
 func TestFontPieceInkKeepsGlyphStyle(t *testing.T) {
 	s := newTestFonts(t)
 	if _, err := s.SetGyoku(ikkyoku.GyokuWhite); err != nil {

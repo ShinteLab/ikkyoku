@@ -89,6 +89,16 @@ type FontState struct {
 	// MinPieceOpacity は薄くできる下限。⚠️ **フロントに書かないこと。**
 	MinPieceOpacity float64 `json:"minPieceOpacity"`
 
+	// BoardColor / LineColor / StandColor は盤面・線・駒台の色（2026-10-02）。
+	// **既定は解決済みで返る**（`ikkyoku.ColorOr`）。⚠️ **フロントに既定値を書かないこと。**
+	BoardColor string `json:"boardColor"`
+	LineColor  string `json:"lineColor"`
+	StandColor string `json:"standColor"`
+	// DefaultBoardColor ほかは「既定に戻す」で戻る色（**表示と比較のため**）。
+	DefaultBoardColor string `json:"defaultBoardColor"`
+	DefaultLineColor  string `json:"defaultLineColor"`
+	DefaultStandColor string `json:"defaultStandColor"`
+
 	// Style は上の設定を**画面にそのまま当てられる形**にしたもの。
 	Style PieceStyle `json:"style"`
 	// Note は選んだフォントを焼けなかった理由。**空なら問題なし。**
@@ -137,12 +147,21 @@ type PieceStyle struct {
 	// そちらで濃さを別に当てると element の `opacity` になり、
 	// **駒の背景（木地）ごと透ける。**
 	Ink string `json:"ink"`
+
+	// Board / Line / Stand は盤面・線・駒台の色（2026-10-02）。それぞれ
+	// `--shogi-board-color` / `--shogi-line-color`（core/web）と `--stand-color`（style.css）に当てる。
+	Board string `json:"board"`
+	Line  string `json:"line"`
+	Stand string `json:"stand"`
 }
 
 // pieceStyle は設定から画面に当てる形を組み立てる。
 func pieceStyle(cfg ikkyoku.Config) PieceStyle {
 	st := pieceGlyphStyle(ikkyoku.NormalizeGyoku(cfg.Gyoku), cfg.HidariUma)
 	st.Ink = ikkyoku.PieceInk(cfg.PieceColor, cfg.PieceOpacity)
+	st.Board = ikkyoku.ColorOr(cfg.BoardColor, ikkyoku.DefaultBoardColor)
+	st.Line = ikkyoku.ColorOr(cfg.LineColor, ikkyoku.DefaultLineColor)
+	st.Stand = ikkyoku.ColorOr(cfg.StandColor, ikkyoku.DefaultStandColor)
 	return st
 }
 
@@ -261,6 +280,12 @@ func (s *FontService) state(cfg ikkyoku.Config) FontState {
 		PieceOpacity:      ikkyoku.NormalizePieceOpacity(cfg.PieceOpacity),
 		DefaultPieceColor: ikkyoku.DefaultPieceColor,
 		MinPieceOpacity:   ikkyoku.MinPieceOpacity,
+		BoardColor:        ikkyoku.ColorOr(cfg.BoardColor, ikkyoku.DefaultBoardColor),
+		LineColor:         ikkyoku.ColorOr(cfg.LineColor, ikkyoku.DefaultLineColor),
+		StandColor:        ikkyoku.ColorOr(cfg.StandColor, ikkyoku.DefaultStandColor),
+		DefaultBoardColor: ikkyoku.DefaultBoardColor,
+		DefaultLineColor:  ikkyoku.DefaultLineColor,
+		DefaultStandColor: ikkyoku.DefaultStandColor,
 		Style:             pieceStyle(cfg),
 	}
 	entry, ok := cfg.CurrentPieceFont()
@@ -547,6 +572,27 @@ func (s *FontService) SetPieceInk(color string, opacity float64) (FontState, err
 			o = 0 // 0 が「未設定」
 		}
 		cfg.PieceOpacity = o
+	})
+	return s.state(cfg), err
+}
+
+// SetBoardColors は盤面・線・駒台の色を変える（2026-10-02）。
+//
+// **3 つを 1 回で受ける**（`SetPieceInk` と同じく、書く経路を分けない）。
+// ⚠️ **読めない色は既定に戻す**（断らない）。⚠️ **既定と同じ色は書き残さない**
+// （書き残すと、既定を変えたときに古い値で固まる）。
+func (s *FontService) SetBoardColors(board, line, stand string) (FontState, error) {
+	keep := func(v, def string) string {
+		c := ikkyoku.NormalizePieceColor(v)
+		if c == def {
+			return ""
+		}
+		return c
+	}
+	cfg, err := s.settings.editConfig(func(cfg *ikkyoku.Config) {
+		cfg.BoardColor = keep(board, ikkyoku.DefaultBoardColor)
+		cfg.LineColor = keep(line, ikkyoku.DefaultLineColor)
+		cfg.StandColor = keep(stand, ikkyoku.DefaultStandColor)
 	})
 	return s.state(cfg), err
 }
