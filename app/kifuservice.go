@@ -272,7 +272,8 @@ type GameSummary struct {
 	StartedAt string `json:"startedAt"` // RFC3339。未設定なら空文字
 	// EndMark は終局の種別（例 "投了"）。対局中は空。
 	EndMark string `json:"endMark"`
-	// Finished は終局済みかどうか。UI で手数の横に「（終局）」を出すのに使う。
+	// Finished は終局済みかどうか。棋譜タブの一覧は終局していないものに「未」を付け、
+	// 詳細と中継のカードは手数の横に「（終局）」を出す。
 	Finished bool `json:"finished"`
 	Moves    int  `json:"moves"`
 

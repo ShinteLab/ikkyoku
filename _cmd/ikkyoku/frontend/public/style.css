@@ -5762,6 +5762,14 @@ html.is-graph #app {
   font-variant-numeric: tabular-nums;
 }
 
+/* 終局していない棋譜の印（2026-10-02）。一覧の手数は数値だけで、
+   **終局していないものにだけ**これを数値の左に付ける。 */
+.library-unfinished {
+  margin-right: 6px;
+  font-size: 11px;
+  color: var(--hint-ink);
+}
+
 /* ⚠️ **`align-items: flex-end` は中身の下揃えの一部**（2026-09-14。上の ⚠️）。
    ここは `display: flex` なので**表のセルではなくなっており**、
    `vertical-align` が当たらない —— 外すとボタンだけ揃わない。 */

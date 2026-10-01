@@ -397,8 +397,20 @@ export function mountLibrary(
 
       cell(tr, g.black || "-");
       cell(tr, g.white || "-");
-      const moves = cell(tr, movesText(g), "is-num");
-      if (g.endMark) moves.title = g.endMark;
+      // 一覧の手数は**数値だけ**（2026-10-02）。棚の棋譜は**ほとんど終局している**ので
+      // 「（終局）」を全部の行に付けても情報にならない —— 逆に**終局していないものに
+      // 「未」だけ**を付ける。⚠️ **印は数値の左に置くこと**（右寄せの数値の桁が揃わなくなる）。
+      // 詳細（モーダル）は `movesText` のまま（1 件だけなので言葉で書いてよい）。
+      const moves = cell(tr, String(g.moves), "is-num");
+      if (g.finished) {
+        if (g.endMark) moves.title = g.endMark;
+      } else {
+        const mark = document.createElement("span");
+        mark.className = "library-unfinished";
+        mark.textContent = "未";
+        moves.prepend(mark);
+        moves.title = g.moves === 0 ? "対局前" : "終局していません";
+      }
 
       const actions = document.createElement("td");
       actions.className = "is-actions";
