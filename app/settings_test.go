@@ -897,6 +897,56 @@ func TestSetHidePlayerNames(t *testing.T) {
 	}
 }
 
+// TestSetFlipWinRateBar は勝率バーの左右の入れ替えを固定する（2026-10-02）。
+//
+// ⚠️ **一番の要点は「既定が入れ替えていないこと」。** この項目を知らない古い
+// 設定ファイルで開いたときに、帯の向きが勝手に変わって始まらないこと。
+// ⚠️ **隠す設定とは別の設定であること**（帯を消したまま向きだけ変える使い方がある）。
+func TestSetFlipWinRateBar(t *testing.T) {
+	s := newTestSettings(t, nil)
+
+	if s.Settings().FlipWinRateBar {
+		t.Error("既定が「入れ替え」になっています（触っていないのに先手が左に出ます）")
+	}
+
+	if _, err := s.SetHideWinRateBar(true); err != nil {
+		t.Fatalf("SetHideWinRateBar: %v", err)
+	}
+	st, err := s.SetFlipWinRateBar(true)
+	if err != nil {
+		t.Fatalf("SetFlipWinRateBar: %v", err)
+	}
+	if !st.FlipWinRateBar || !st.HideWinRateBar {
+		t.Errorf("両方立っているはずです: flip=%v hide=%v", st.FlipWinRateBar, st.HideWinRateBar)
+	}
+	cfg, err := ikkyoku.LoadConfig(s.path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if !cfg.FlipWinRateBar {
+		t.Error("保存されていません（次の起動で向きが戻ってしまう）")
+	}
+
+	// 戻せること。⚠️ **隠す設定は残ること。**
+	st, err = s.SetFlipWinRateBar(false)
+	if err != nil {
+		t.Fatalf("SetFlipWinRateBar(false): %v", err)
+	}
+	if st.FlipWinRateBar {
+		t.Error("戻っていません")
+	}
+	if !st.HideWinRateBar {
+		t.Error("隠す設定まで戻っています（別の設定であること）")
+	}
+	cfg, err = ikkyoku.LoadConfig(s.path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.FlipWinRateBar || !cfg.HideWinRateBar {
+		t.Errorf("保存された値が違います: flip=%v hide=%v", cfg.FlipWinRateBar, cfg.HideWinRateBar)
+	}
+}
+
 // ⚠️ **エンジンが名乗った名前は設定ファイルに残すこと。**
 //
 // 名乗りは**繋がないと分からない**ので、メモリだけで持つとアプリを閉じた時点で

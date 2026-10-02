@@ -953,6 +953,8 @@ export function mountMainScreen(root: HTMLElement): void {
                  ⚠️ **左が後手・右が先手**（バーの左右と同じ並び）。
                  ⚠️ **視点を反転しても入れ替えないこと** —— 勝率バーそのものが
                  反転しないので、名前だけ動くと帯との対応が壊れる。
+                 **入れ替わるのは帯の左右を反転したときだけ**（2026-10-02。黒地の
+                 右クリック。applyWinRateFlip が帯と名前を一緒に動かす）。
 
                  ⚠️ **名前が無いときの「後手」「先手」は表示側の既定。**
                  Go 側は空を返す（名前が分かっているのか、既定を出しているだけ
@@ -2184,10 +2186,34 @@ export function mountMainScreen(root: HTMLElement): void {
   // 計算し直さないこと**（式も定数も Go 側。設定で定数を変えたときに片方だけ古くなる）。
   let winrateScores: EngineScore[] = [];
 
+  // 勝率バーの左右を入れ替えているか（2026-10-02。黒地の右クリック）。
+  // 立っていれば**左が先手（赤）・右が後手（青）**。
+  //
+  // ⚠️ **盤の視点（`studyFlipped`）とは別物。連動させないこと** —— 帯は盤ではなく
+  // 横棒なので上下の視点と対応が無い。こちらは「横棒をどちら向きで読みたいか」の好み。
+  let winrateFlipped = false;
+
+  // applyWinRateFlip は帯と対局者名の左右を入れ替える（**画面だけ**。保存は呼び出し側）。
+  //
+  // ⚠️ **対局者名も一緒に動かすこと** —— 名前は帯の左右に並んでいて ▲△ で帯の色と
+  // 対応しているので、帯だけ動くと名前が反対側の色の隣に居ることになる。
+  // ⚠️ **駒台は動かさない**（盤の一部。遠い側が左上・近い側が右下のまま）。
+  // ⚠️ **値の向きは触らない** —— 入れ替えるのは**どちらの端から描くか**（CSS）だけで、
+  // `winrateWhite` の幅は後手の勝率のまま。
+  const applyWinRateFlip = () => {
+    winrateRow.classList.toggle("is-flipped", winrateFlipped);
+    playerNames.black.classList.toggle("is-swapped", winrateFlipped);
+    playerNames.white.classList.toggle("is-swapped", winrateFlipped);
+    // title の並びも見た目の左右に合わせる。
+    renderWinRate();
+  };
+
   // renderWinRate は選ばれているエンジンの勝率をバーに描く。
   //
-  // ⚠️ **左が後手（青）・右が先手（赤）。符号も向きもここでいじらないこと**
+  // ⚠️ **既定は左が後手（青）・右が先手（赤）。符号はここでいじらないこと**
   // （逆に伸びると「エンジンが間違えている」としか読めない壊れ方になる）。
+  // **左右の入れ替え**（`winrateFlipped`）は CSS が描く端を変えるだけで、
+  // ここが入れる値（後手の幅）は同じ。
   // ⚠️ **出すのは 1 つだけ**（押すと切り替わる）。並べると盤の上に段が積まれて
   // そのぶん盤が小さくなるうえ、**形勢を一目で見るための帯**なので読む対象が増える。
   const renderWinRate = () => {
@@ -2214,7 +2240,12 @@ export function mountMainScreen(root: HTMLElement): void {
     winrateWhite.style.width = `${(white * 100).toFixed(1)}%`;
     // ⚠️ **数字は画面に出さず、カーソルを当てたときだけ出す**（盤の上に文字を
     // 積むと、そのぶん盤が小さくなる）。
-    const head = `後手 ${Math.round(white * 100)}% ／ 先手 ${Math.round(black * 100)}%`;
+    // 並びは見た目の左右に合わせる（入れ替えているなら先手が先）。
+    const whiteText = `後手 ${Math.round(white * 100)}%`;
+    const blackText = `先手 ${Math.round(black * 100)}%`;
+    const head = winrateFlipped
+      ? `${blackText} ／ ${whiteText}`
+      : `${whiteText} ／ ${blackText}`;
     winrateBar.title =
       `${head}（評価値 ${one.scoreLabel}）／ ${one.label}` +
       (many ? "　押すと別のエンジンに切り替わります" : "");
@@ -2307,6 +2338,17 @@ export function mountMainScreen(root: HTMLElement): void {
             playersHidden = !playersHidden;
             applyStudyTopRow();
             void SettingsService.SetHidePlayerNames(playersHidden);
+          },
+        },
+        {
+          // 2026-10-02。⚠️ **隠す 2 つとは別のチェック**（帯を消したまま向きだけ
+          // 変えても、次に出したときにその向きで出ればよい）。
+          label: "評価値バーの左右を反転",
+          checked: winrateFlipped,
+          onPick: () => {
+            winrateFlipped = !winrateFlipped;
+            applyWinRateFlip();
+            void SettingsService.SetFlipWinRateBar(winrateFlipped);
           },
         },
       ],
@@ -5468,6 +5510,8 @@ ${st.turnLabel}${n}`;
     hideWinRateBar: boolean;
     // 対局者名を隠しているか（2026-09-10。⚠️ **帯とは別の設定**）。
     hidePlayerNames: boolean;
+    // 勝率バーの左右を入れ替えているか（2026-10-02。立っていれば左が先手）。
+    flipWinRateBar: boolean;
     // 画面の配色（2026-10-02。"dark" / "light" / "system"）。⚠️ **既定の解決は Go 側**
     // （`NormalizeTheme`）。"system" をどちらにするかだけは `theme.ts` が決める。
     theme: string;
@@ -5532,6 +5576,8 @@ ${st.turnLabel}${n}`;
     winrateHidden = !!s.hideWinRateBar;
     playersHidden = !!s.hidePlayerNames;
     applyStudyTopRow();
+    winrateFlipped = !!s.flipWinRateBar;
+    applyWinRateFlip();
     // ⚠️ **評価値グラフの折れ線の色はここが持つ**（側の列とは別）。
     // 切り離すと側の列は別の窓に居るので、**あちらから引けない**。
     graphColors.clear();

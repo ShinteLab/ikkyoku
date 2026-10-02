@@ -67,6 +67,10 @@ type AppSettings struct {
 	// HidePlayerNames は解析タブの**対局者名を隠しているか**（2026-09-10）。
 	// ⚠️ **勝率バーとは別の設定**（帯だけ消して名前は残す使い方が普通）。
 	HidePlayerNames bool `json:"hidePlayerNames"`
+	// FlipWinRateBar は解析タブの**勝率バーの左右を入れ替えているか**（2026-10-02）。
+	// 立っていれば**左が先手・右が後手**。⚠️ **盤の視点とは別の設定**
+	// （`ikkyoku.Config.FlipWinRateBar`）。
+	FlipWinRateBar bool `json:"flipWinRateBar"`
 	// Theme は画面の配色（2026-10-02。"dark" / "light" / "system"。**既定は "dark"**）。
 	//
 	// ⚠️ **解決済みの値が返る**（`ikkyoku.NormalizeTheme`）。ただし "system" は
@@ -407,7 +411,8 @@ func (s *SettingsService) settings() AppSettings {
 		EvalGraphAxis:     ikkyoku.NormalizeEvalAxis(s.cfg.EvalGraphAxis),
 		HideWinRateBar:    s.cfg.HideWinRateBar,
 		HidePlayerNames:   s.cfg.HidePlayerNames,
-		Theme:             ikkyoku.NormalizeTheme(s.cfg.Theme),
+		FlipWinRateBar:    s.cfg.FlipWinRateBar,
+		Theme:            ikkyoku.NormalizeTheme(s.cfg.Theme),
 		Themes:            ikkyoku.ThemeOptions,
 		Training:          trainingSettings(s.cfg.Training),
 		Engines:           engines,
@@ -1239,6 +1244,18 @@ func (s *SettingsService) SetHidePlayerNames(v bool) (AppSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.save(func(cfg *ikkyoku.Config) { cfg.HidePlayerNames = v })
+}
+
+// SetFlipWinRateBar は解析タブの勝率バーの左右を入れ替えて保存する（2026-10-02）。
+//
+// ⚠️ **効かせるのは画面だけ**（`SetHideWinRateBar` と同じ）。評価値の符号も
+// 勝率の値も変わらない —— 変わるのは**どちらの端から先手を描くか**だけ。
+// ⚠️ **隠す設定を巻き添えにしないこと**（帯を消したまま向きだけ変えても、
+// 次に出したときにその向きで出ればよい）。
+func (s *SettingsService) SetFlipWinRateBar(v bool) (AppSettings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.save(func(cfg *ikkyoku.Config) { cfg.FlipWinRateBar = v })
 }
 
 // SetTheme は画面の配色を切り替えて保存する（2026-10-02）。
