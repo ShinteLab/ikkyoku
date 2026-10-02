@@ -2208,6 +2208,28 @@ export function mountMainScreen(root: HTMLElement): void {
     renderWinRate();
   };
 
+  // 勝率バーに出しているエンジンを**側の列のカードに薄い枠で示す**（2026-10-02）。
+  //
+  // ⚠️ **選んでいるのはここ**（`winrateEngineId`）で、側の列は言われたカードに
+  // 印を付けるだけ。**ドックしている列には直に、切り離した窓には
+  // `study:winrate-engine` で**渡す（切り離した窓は切り離す前から生きているので、
+  // 変わるたびに送っておけば出たときに揃っている）。
+  // ⚠️ **印を付けるのはエンジンが 2 つ以上のときだけ**（1 つなら見れば分かる）。
+  // **帯を隠しているあいだも付けない**（見えていない帯の持ち主を示しても意味が無い）。
+  // `markWinRateCard` は側の列ができてから差し替える（ここより下で作るため）。
+  let markWinRateCard = (_id: string) => {};
+  let winrateMarkSent: string | null = null;
+  const syncWinRateMark = () => {
+    const one =
+      winrateScores.find((e) => e.id === winrateEngineId) ?? winrateScores[0];
+    const id = one && winrateScores.length > 1 && !winrateHidden ? one.id : "";
+    markWinRateCard(id);
+    if (id !== winrateMarkSent) {
+      winrateMarkSent = id;
+      void Events.Emit("study:winrate-engine", id);
+    }
+  };
+
   // renderWinRate は選ばれているエンジンの勝率をバーに描く。
   //
   // ⚠️ **既定は左が後手（青）・右が先手（赤）。符号はここでいじらないこと**
@@ -2223,6 +2245,7 @@ export function mountMainScreen(root: HTMLElement): void {
     const many = winrateScores.length > 1;
     winrateBar.classList.toggle("is-switchable", many);
     winrateBar.disabled = !many;
+    syncWinRateMark();
 
     if (!one || one.winRate === null) {
       // **まだ値が無いあいだは中立の見た目にして、50% と書かない**
@@ -2289,6 +2312,8 @@ export function mountMainScreen(root: HTMLElement): void {
   // 縦にはみ出す**（対局者名は 24px あり、帯の 34px とほとんど変わらない）。
   const applyStudyTopRow = () => {
     winrateRow.hidden = winrateHidden || !studyLoaded;
+    // 帯を隠したらカードの印も外す（出したら戻す）。
+    syncWinRateMark();
     playerNames.black.hidden = playersHidden || !studyLoaded;
     playerNames.white.hidden = playersHidden || !studyLoaded;
     // ⚠️ **`studyLoaded` は見ないこと。** 局面が無いあいだも行の高さは
@@ -3197,6 +3222,8 @@ ${st.turnLabel}${n}`;
     analyzeAction: studySplitDetach,
     movesAction: studyMovesDetach,
   });
+  // 勝率バーのエンジンの印（`syncWinRateMark`）。側の列ができたのでここで繋ぐ。
+  markWinRateCard = (id) => sidePane.setWinRateEngine(id);
   // ⚠️ **幕の出口はここ**（幕は下を全部塞ぐので、側の列の「停止」も押せない）。
   batchVeilCancel.addEventListener("click", () => sidePane.cancelBatch());
   // メイン画面は入力タブで始まる（解析タブを開くまで棋譜の自動更新を刻まない）。

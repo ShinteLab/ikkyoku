@@ -85,6 +85,9 @@ export interface SidePaneHandle {
   // ⚠️ **出さない面も中身は生きている**（`setActive` と同じ考え方）——
   // 隠すのは見た目だけで、局面も設定もそのまま届く。
   setParts(parts: { analyze: boolean; moves: boolean }): void;
+  // setWinRateEngine は**勝率バーに出しているエンジン**のカードに薄い枠を付ける
+  // （2026-10-02。空なら外す）。⚠️ **選ぶのは盤の側**で、ここは印を付けるだけ。
+  setWinRateEngine(id: string): void;
 }
 
 export interface SidePaneOptions {
@@ -478,6 +481,19 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
     }
   };
 
+  // 勝率バーに出しているエンジン（2026-10-02。**空なら印を付けない**）。
+  //
+  // ⚠️ **ここで選ばないこと** —— どれをバーに出すかは盤の側（`mainscreen.ts` の
+  // `winrateEngineId`）が持っていて、ここは**言われた id のカードに薄い枠を付けるだけ**。
+  // 盤は別の窓にありうるので、選択を 2 か所に持つと食い違う。
+  // ⚠️ **id で覚えること**（要素を覚えない）。カードは解析のたびに作り直される。
+  let winrateMarkId = "";
+  const paintWinRateMark = () => {
+    for (const el of analyzeEnginesBox.querySelectorAll<HTMLElement>(".analyze-engine")) {
+      el.classList.toggle("is-winrate", winrateMarkId !== "" && el.dataset.id === winrateMarkId);
+    }
+  };
+
   // 色を選ばせる（見出しの色見本を押したとき）。**押した場所に出す**
   // （`window.confirm` を使わないのと同じ理由。popup.ts に寄せてある）。
   //
@@ -843,6 +859,8 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
     }
     // ⚠️ **作り直したら塗り直すこと**（連続モードでは 1 手ごとにここを通る）。
     paintEngineColors();
+    // 勝率バーの印も同じ（覚えているのは id なので、新しいカードに付け直す）。
+    paintWinRateMark();
     // 起動を待つあいだの見た目（中立）に戻す。**押せるかどうかもここで決まる。**
     pushScores();
   };
@@ -2425,6 +2443,13 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
       showAnalyze = parts.analyze;
       showMoves = parts.moves;
       applyParts();
+    },
+    setWinRateEngine(id: string) {
+      if (id === winrateMarkId) {
+        return;
+      }
+      winrateMarkId = id;
+      paintWinRateMark();
     },
   };
 }

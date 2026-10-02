@@ -230,6 +230,13 @@ export function mountStudyScreen(root: HTMLElement, part: StudyScreenPart = "ana
     }
     showVeil(!!event.data?.on, event.data?.note ?? "");
   });
+  // 勝率バーに出しているエンジン（2026-10-02。カードに薄い枠）。⚠️ **選ぶのは
+  // メイン画面**（バーがあちらにある）で、ここは受け取って印を付けるだけ。
+  // ⚠️ **切り離していなくても受け取っておく** —— 送られるのは変わったときだけなので、
+  // 出てから聞き始めると次に変わるまで印が無い。
+  Events.On("study:winrate-engine", (event: { data: string }) => {
+    pane.setWinRateEngine(event.data ?? "");
+  });
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && !veil.hidden) {
       pane.cancelBatch();

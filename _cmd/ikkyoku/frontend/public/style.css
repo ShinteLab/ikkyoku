@@ -222,6 +222,8 @@
   --eval-axis-minor: #31363f;
   --eval-band: #2b3039;
   --winrate-empty: #454956;
+  /* 勝率バーに出しているエンジンのカードの薄い枠（2026-10-02） */
+  --winrate-mark: #5b6375;
   --mark-hand: #000;
   /* 影・幕 */
   --shadow-45: rgba(0, 0, 0, 0.45);
@@ -349,6 +351,7 @@
   --eval-axis-minor: #e8eaee;
   --eval-band: #eef0f4;
   --winrate-empty: #c9ced6;
+  --winrate-mark: #b3bac6;
   --mark-hand: #b5bbc6;
   /* 影・幕 */
   --shadow-45: rgba(20, 30, 50, 0.18);
@@ -2347,6 +2350,14 @@ html.is-main #app {
   padding: 4px 6px;
   background: var(--surface);
   border-radius: 6px;
+}
+
+/* 勝率バーに出しているエンジン（2026-10-02。`setWinRateEngine`）。**うっすら枠を引く。**
+   ⚠️ **border にしないこと** —— 枠の高さは `--analyze-card-h`（実測値）に見込んで
+   あるので、1px 足すだけでエンジン 2 つでスクロールバーが出る。内側の影なら
+   大きさが変わらない。⚠️ **付けるのはエンジンが 2 つ以上のときだけ**（盤の側が決める）。 */
+.analyze-engine.is-winrate {
+  box-shadow: inset 0 0 0 1px var(--winrate-mark);
 }
 
 /* ⚠️ **並ぶものは幅を固定してある**（名前・本数・全て表示。2026-08-15）——
