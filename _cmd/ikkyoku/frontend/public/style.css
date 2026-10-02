@@ -4287,21 +4287,21 @@ html.is-graph #app {
   stroke-width: 0.12;
 }
 
-/* 成る / 成らずを聞くダイアログ。**押した場所に出す**（study.ts が座標を入れる）。
-   ⚠️ **window.confirm を使わないこと** —— あれは画面の真ん中に出るうえ、
-   「OK / キャンセル」でしか聞けない（「キャンセル＝不成」は読み取れない）。
+/* 押した場所に出すメニュー（右クリックのメニュー・成る/成らず・手順を消す確認など）。
+   **OS のコンテキストメニューと同じ形**（2026-10-02）—— 項目は**縦に**並べ、
+   今どれかは行ごと塗る。以前はボタンを横に並べた 2 択のダイアログの形だった。
+   ⚠️ **どれも同じ形**（作りも `popup.ts` の 1 か所）。**別々に書かないこと。**
 
    ⚠️ **position: fixed で body に置く**（盤の箱に入れると、はみ出したぶんが切られる）。 */
-/* 押した場所に出す小さなダイアログ（成る/成らず・手順を消す・手順を追加）。
-   ⚠️ **3 つとも同じ形**（作りも `popup.ts` の 1 か所）。**別々に書かないこと。** */
 .popup-menu {
   position: fixed;
   z-index: 50;
   display: flex;
-  gap: 4px;
+  flex-direction: column;
+  min-width: 160px;
   padding: 4px;
   background: var(--surface);
-  border: 1px solid var(--accent);
+  border: 1px solid var(--line);
   border-radius: 6px;
   box-shadow: 0 6px 18px var(--shadow-50);
 }
@@ -4310,38 +4310,43 @@ html.is-graph #app {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 5px 12px;
+  padding: 6px 20px 6px 10px;
+  font: inherit;
   font-size: 13px;
+  text-align: left;
   color: var(--text);
-  background: var(--surface-3);
-  border: 1px solid var(--line);
+  background: transparent;
+  border: none;
   border-radius: 4px;
   cursor: pointer;
   white-space: nowrap;
 }
 
-.popup-btn:hover {
-  border-color: var(--accent);
-}
-
-/* 消す側のボタン。⚠️ **赤にすること**（元に戻せない操作で、消えるのは 1 手とは
-   限らない）。⚠️ **初期フォーカスは当てない** —— 既定は「やめる」のほう。 */
-.popup-btn.is-danger {
-  color: var(--text-on-accent);
-  background: var(--danger);
-  border-color: var(--danger);
-}
-
-/* 既定の選択肢（成る／手順を追加）。初期フォーカスもこちらに当てる。 */
-.popup-btn.is-primary {
+/* 今どれか。⚠️ **ホバーとフォーカスを同じ印にすること** —— `popup.ts` が
+   ホバーでフォーカスを移すので、印は常に 1 つになる（2 つ光ると Enter で
+   どちらが選ばれるか読めない）。 */
+.popup-btn:hover,
+.popup-btn:focus {
   color: var(--text-on-accent);
   background: var(--accent);
-  border-color: var(--accent);
+  outline: none;
 }
 
-.popup-btn:focus-visible {
-  outline: 2px solid var(--text);
-  outline-offset: 1px;
+/* 消す側の項目。⚠️ **赤にすること**（元に戻せない操作で、消えるのは 1 手とは
+   限らない）。⚠️ **初期フォーカスは当てない** —— 既定は「やめる」のほう。 */
+.popup-btn.is-danger {
+  color: var(--danger);
+}
+
+.popup-btn.is-danger:hover,
+.popup-btn.is-danger:focus {
+  color: var(--text-on-accent);
+  background: var(--danger);
+}
+
+/* 既定の選択肢（成る／手順を追加）。OS のメニューの既定項目と同じく太字にする。 */
+.popup-btn.is-primary {
+  font-weight: 700;
 }
 
 /* 入り切りする行のチェックの印（盤の右クリックの「評価値バー表示」）。
@@ -4352,6 +4357,12 @@ html.is-graph #app {
   width: 11px;
   text-align: center;
   color: var(--accent);
+}
+
+/* 塗った行の上では印を地の色に溶かさない（地が `--accent` になるため）。 */
+.popup-btn:hover .popup-check,
+.popup-btn:focus .popup-check {
+  color: inherit;
 }
 
 /* 色を選ばせるときの丸（折れ線の色）。⚠️ **色だけの行にしないこと** ——
