@@ -1168,8 +1168,39 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
   let studyFirst = 0;
   let studyMoveCount = 0;
   let studyPly = 0;
+  // 本譜の先端の節点 id（`StudyState.mainTip`）。**追いついたあとに戻る先。**
+  // ⚠️ **フロントで本譜の先端を探さないこと**（判断は Go 側の 1 か所）。
+  let studyMainTip = 0;
 
   const batchActive = () => batchLast >= 0;
+
+  // ---- 途中の手の解析（棋譜の自動更新。2026-10-02）---------------------------
+  //
+  // **自動更新で最新手へ付いていったとき、一度に何手も来ていたら、途中の手も
+  // 順に解析してから最新手へ戻る。** 間隔は分単位なので、そのあいだに 2 手 3 手
+  // 進むのは普通にあり、付いていくだけだと**途中の手の評価値が抜けたまま**になる。
+  //
+  // ⚠️ **中身は連続解析そのもの**（`batchStep` が範囲を辿る）。違うのは
+  // **秒数が設定に依らず `catchUpSeconds`**・**終わったら最新手へ戻る**の 2 つだけ。
+  // 連続解析だけの特別な記録の道を作らないのと同じで、**追いつき専用の道を作らない。**
+  //
+  // ⚠️ **最新手そのものは連続モードの自動解析に任せる**（設定の秒数のまま。
+  // 「無制限」で見続ける使い方を変えない）。途中の手を先に、最新手を最後に。
+  // ⚠️ **付いていかなかったとき（先端を見ていなかった）は解析しない** ——
+  // 戻って読んでいる最中に盤を動かすことになる。
+  // ⚠️ **連続モードが切ってあれば解析しない**（最新手も解析されない設定なので）。
+
+  // 途中の手に使う秒数（2026-10-02 のユーザー指定）。⚠️ **「考える秒数」の設定に
+  // 依らない** —— 設定は最新手を見るためのもので、「無制限」のこともある。
+  const catchUpSeconds = 5;
+  // 今走っている連続解析が追いつきか（**畳むのは `stopRun` だけ**）。
+  let catchUp = false;
+  // 最新手へ戻ったときの自動解析を 1 回だけ見送る（追いつきを人が止めたとき）。
+  // ⚠️ **止めた直後に最新手で起こし直さないこと** —— 止める手段が無くなる。
+  let holdAuto = false;
+
+  // runSeconds は今走っているものが 1 手に使う秒数（残り時間と見切りの計算用）。
+  const runSeconds = () => (catchUp ? catchUpSeconds : batchSeconds());
 
   // ---- 自動で指し継ぐ（2026-09-14）------------------------------------------
   //
@@ -1241,7 +1272,7 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
     // ⚠️ **出ているあいだは触らないこと。** 文言は `showBatchProgress` が
     // 1 秒ごとに入れているので、ここから配り直すと**残り時間が消えて戻る。**
     if (runActive() !== busyShown) {
-      showBusy(runActive(), selfActive() ? "自動で指しています…" : "連続解析中…");
+      showBusy(runActive(), selfActive() ? "自動で指しています…" : runLabel());
     }
     // ⚠️ **どこから始まるかをボタン自身に出す**（2026-08-15。以前は「連続解析」の
     // 一言で、始点はツールチップにしか無かった）。始点は**今どこを見ているか**で
@@ -1337,11 +1368,14 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
     onBusy(on, note);
   };
 
+  // runLabel は幕の見出し（**追いつきは連続解析と言わない** —— 人が押していない）。
+  const runLabel = () => (catchUp ? "途中の手を解析中…" : "連続解析中…");
+
   const showBatchProgress = (n: number) => {
     const left = batchEndAt > 0 ? (batchEndAt - Date.now()) / 1000 : 0;
     // ⚠️ **見積もりを過ぎても「終わった」と書かないこと**（まだ走っている）。
     const rest = left > 0 ? `／残り約 ${durationText(left)}` : "／まもなく終わります";
-    showBusy(true, `連続解析中… ${n} / ${batchLast}手目${rest}`);
+    showBusy(true, `${runLabel()} ${n} / ${batchLast}手目${rest}`);
   };
 
   // startBatchTick は残り時間を 1 秒ごとに描き直す。
@@ -1367,16 +1401,17 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
   // 数秒かかることがあり、**そこで見切ると起動の遅いエンジンでは 1 手も進まない。**
   const startRunWatch = () => {
     stopRunWatch();
-    const limit = (batchSeconds() * 2 + 30) * 1000;
+    const limit = (runSeconds() * 2 + 30) * 1000;
     runWatch = window.setTimeout(() => {
       if (!runActive()) {
         return;
       }
-      stopRun(
-        (selfActive() ? "自動で指すのを止めました" : "連続解析を止めました") +
-          ": 1 手ぶんの結果が返ってきません（エンジンが応えていないか、解析が別のものに入れ替わっています）",
-      );
       void AnalyzeService.Stop();
+      finishRun(
+        stopMessage() +
+          ": 1 手ぶんの結果が返ってきません（エンジンが応えていないか、解析が別のものに入れ替わっています）",
+        false,
+      );
     }, limit);
   };
 
@@ -1413,6 +1448,9 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
     selfEngine = "";
     selfPlayed = 0;
     selfSeen.clear();
+    // ⚠️ **追いつきの印もここで畳むこと**（残すと、次に人が押した連続解析が
+    // 5 秒で回って最新手へ飛ぶ）。
+    catchUp = false;
     runStepping = false;
     batchSeq = -1;
     // ⚠️ **見切りのタイマーも消すこと**（残すと、止めたあとに幕の文言だけ
@@ -1427,6 +1465,43 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
     }
   };
 
+  // backToTip は追いつきのあと**最新手（本譜の先端）へ戻る**。
+  //
+  // analyze が偽なら、戻った局面の自動解析（連続モード）を 1 回見送る
+  // （人が止めたとき・解析が起こせなかったとき）。
+  // ⚠️ **戻ること自体はやめない** —— 途中の手に置いたままだと「先端を見ていない」
+  // ことになり、**次の自動更新から付いていかなくなる。**
+  const backToTip = async (analyze: boolean) => {
+    holdAuto = !analyze;
+    try {
+      onState(await StudyService.GoTo(studyMainTip));
+    } catch (err) {
+      setStatus(`最新手へ戻れませんでした: ${String(err instanceof Error ? err.message : err)}`, true);
+    } finally {
+      holdAuto = false;
+    }
+    // ⚠️ **追いつきのあいだに見送った自動更新をここで 1 回やる**（`followTick`）。
+    // 最新手に居る今なら、そのあいだに来た手にも付いていける。
+    // ⚠️ **刻んでいないなら（タブを離れた等）やらない** —— 付いていった先で
+    // 見ていないタブのためにエンジンが起きる。刻み直すときに 1 回取り直すので取りこぼさない。
+    if (followDeferred) {
+      followDeferred = false;
+      if (followTimer) {
+        void followTick();
+      }
+    }
+  };
+
+  // finishRun は走っているものを畳み、**追いつきだったなら最新手へ戻る**。
+  // analyzeTip は戻った最新手を連続モードで解析させるか（**最後まで辿れたときだけ真**）。
+  const finishRun = (message: string, analyzeTip: boolean) => {
+    const back = catchUp;
+    stopRun(message);
+    if (back) {
+      void backToTip(analyzeTip);
+    }
+  };
+
   // batchStep は次の手へ進めて解析を仕掛ける。
   const batchStep = async () => {
     if (runStepping || !batchActive()) {
@@ -1435,7 +1510,9 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
     runStepping = true;
     try {
       if (batchNext > batchLast) {
-        stopRun(`連続解析: ${batchLast}手目まで終わりました`);
+        // ⚠️ **追いつきは黙って最新手へ戻る**（来たことは自動更新の 1 行が既に言っている。
+        // ここで書いても、最新手の解析の「起動しています…」がすぐ上書きする）。
+        finishRun(catchUp ? "" : `連続解析: ${batchLast}手目まで終わりました`, true);
         return;
       }
       const n = batchNext;
@@ -1445,36 +1522,69 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
       // ⚠️ **渡すのは節点の id**（今の経路の ply 番目）。手数ではない。
       const id = studyLine[n - studyFirst];
       if (id === undefined) {
-        stopRun("連続解析: 手順の終わりまで来ました");
+        finishRun(catchUp ? "" : "連続解析: 手順の終わりまで来ました", true);
         return;
       }
       onState(await StudyService.GoTo(id));
       // ⚠️ **`showStudy` の中の自動解析（連続モード）には任せない。**
       // あちらは「まだ解析していない局面なら」という条件で動くので、
       // **連続モードが切ってあると 1 手目で止まる。**
-      await startAnalyze();
+      // ⚠️ **追いつきは設定に依らず `catchUpSeconds`**（途中の手の秒数はユーザー指定）。
+      await startAnalyze(catchUp ? catchUpSeconds : undefined);
       // ⚠️ **待つ世代を控えること。** これと違う世代の done では進まない。
       batchSeq = analyzeSeq;
       startRunWatch();
-      analyzeMeta.textContent = `連続解析: ${n}〜${batchLast}手目のうち ${n}手目`;
+      analyzeMeta.textContent = catchUp
+        ? `途中の手を解析しています: ${n}〜${batchLast}手目のうち ${n}手目（${catchUpSeconds}秒ずつ）`
+        : `連続解析: ${n}〜${batchLast}手目のうち ${n}手目`;
       // ⚠️ **幕にも出すこと。** 下の行は幕越しで読みにくいので、
       // **どこまで進んだか**が分からないと、止めるかどうかを判断できない。
       //
       // 残り時間は**この手を含めた残り手数 × 1 手の秒数**（単純な掛け算）。
       // ⚠️ **1 手ごとに引き直す** —— 通しで 1 回だけ計算すると、起動や移動のぶんの
       // 遅れが積もって最後は大きく外れる。
-      batchEndAt = Date.now() + (batchLast - n + 1) * batchSeconds() * 1000;
+      batchEndAt = Date.now() + (batchLast - n + 1) * runSeconds() * 1000;
       startBatchTick(n);
       if (!analyzeRunning) {
         // 起動そのものに失敗した（エンジンが選ばれていない等）。
         // **ここで止めないと、残りの手でも同じ失敗を繰り返す。**
-        stopRun("");
+        finishRun("", false);
       }
     } catch (err) {
-      stopRun(`連続解析を止めました: ${String(err instanceof Error ? err.message : err)}`);
+      finishRun(
+        `${catchUp ? "途中の手の解析" : "連続解析"}を止めました: ` +
+          String(err instanceof Error ? err.message : err),
+        false,
+      );
     } finally {
       runStepping = false;
     }
+  };
+
+  // startCatchUp は**自動更新で付いていった直後**に、途中の手の解析を始めるか決める。
+  //
+  // got は `FollowKifu` の戻り値。**`onState` に渡す前に呼ぶこと** —— 先に描くと
+  // 最新手で連続モードの自動解析が起き、すぐ途中の手へ移って打ち切ることになる
+  // （エンジンを 1 回ぶん無駄に起こす）。範囲を先に入れておけば `runActive` が立つので、
+  // 描いたときの自動解析は見送られる。
+  // 始めたなら途中の手の数を返す（0 なら始めていない）。
+  const startCatchUp = (got: { added: number; followed: boolean; state: StudyState }): number => {
+    // ⚠️ **付いていったときだけ**（戻って読んでいるなら盤を動かさない）。
+    // ⚠️ **1 手だけなら途中の手は無い**（最新手は連続モードが解析する）。
+    if (!got.followed || got.added < 2 || runActive() || !active) {
+      return 0;
+    }
+    // ⚠️ **連続モードが切ってあれば何もしない**（最新手も解析しない設定）。
+    if (!analyzeContinuous.checked || !analyzeReady) {
+      return 0;
+    }
+    // 付いていった直後なので**今見ているのが最新手**（ply 番目）。新しく生えたのは
+    // その手を含めて後ろの added 手で、**最新手を除いたもの**が途中の手。
+    const tip = (got.state.first ?? 0) + (got.state.ply ?? 0);
+    batchNext = tip - got.added + 1;
+    batchLast = tip - 1;
+    catchUp = true;
+    return got.added - 1;
   };
 
 
@@ -1593,12 +1703,21 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
   //
   // ⚠️ **走っている解析も止めること。** 順番を止めるだけだと、今の 1 手の解析が
   // 秒数いっぱい走り続ける（止めたのに止まっていないように見える）。
+  // ⚠️ **追いつきを止めたら最新手へ戻る（解析はしない）**（`finishRun`）。
   const cancelBatch = () => {
-    stopRun(selfActive() ? "自動で指すのを止めました" : "連続解析を止めました");
     if (analyzeRunning) {
       void AnalyzeService.Stop();
     }
+    finishRun(stopMessage(), false);
   };
+
+  // stopMessage は人が止めたときの 1 行（何を止めたのかを言う）。
+  const stopMessage = () =>
+    selfActive()
+      ? "自動で指すのを止めました"
+      : catchUp
+        ? "途中の手の解析を止めました"
+        : "連続解析を止めました";
 
   // ⚠️ **Esc でも止められること。** 幕が出ているあいだ他に押せるものは無いので、
   // 取り違えようが無い（普段の Esc はダイアログを閉じる操作で、そちらは
@@ -1659,7 +1778,8 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
   });
   analyzeSeconds.addEventListener("change", syncBatchButton);
 
-  const startAnalyze = async () => {
+  // seconds を渡すと設定の「考える秒数」の代わりにそれを使う（**途中の手の解析だけ**）。
+  const startAnalyze = async (seconds?: number) => {
     analyzeStatus.hidden = true;
     analyzeStatus.textContent = "";
     engineCards.clear();
@@ -1669,7 +1789,7 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
     reserveLines();
     try {
       // ⚠️ **候補手の本数は渡さない**（エンジンごとの設定を Go 側が読む）。
-      const st = await AnalyzeService.Start(Number(analyzeSeconds.value) || 0);
+      const st = await AnalyzeService.Start(seconds ?? (Number(analyzeSeconds.value) || 0));
       analyzeSeq = st.seq;
       analyzedSfen = st.sfen;
       // 参加するエンジンは Go 側が決める（設定で「解析に使う」を付けたもの）。
@@ -1769,7 +1889,16 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
     // ⚠️ **「停止」は連続解析も止めること。** 止めたのに次の手が始まったら、
     // 止める手段が無い（連続モードで止めたら止まったままにするのと同じ話）。
     if (runActive()) {
-      stopRun(selfActive() ? "自動で指すのを止めました" : "連続解析を止めました");
+      // ⚠️ **追いつきなら最新手へ戻る（解析はしない）**（`finishRun`）。
+      // 戻るので、**今の途中の手で解析を起こし直さないこと**（すぐ打ち切ることになる）。
+      const back = catchUp;
+      finishRun(stopMessage(), false);
+      if (back) {
+        if (analyzeRunning) {
+          void AnalyzeService.Stop();
+        }
+        return;
+      }
     }
     if (analyzeRunning) {
       // **打ち切っても、そこまでの評価値は残る**（設計原則3）。捨てる操作ではない。
@@ -1814,6 +1943,12 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
       return;
     }
     autoAnalyzed = studySfen;
+    // ⚠️ **途中の手の解析を人が止めて最新手へ戻ったところ**（`backToTip`）。
+    // 仕掛けたことにして見送る —— 止めた直後に起こし直すと止める手段が無くなる。
+    if (holdAuto) {
+      holdAuto = false;
+      return;
+    }
     void startAnalyze();
   };
 
@@ -1821,6 +1956,7 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
     // 入れた瞬間から効かせる。**仕掛け済みの記録は捨てる** ——
     // 前に失敗した局面でも、入れ直したなら試すのが期待どおり。
     autoAnalyzed = "";
+    holdAuto = false;
     autoAnalyze();
   });
 
@@ -1858,10 +1994,13 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
     // 手数ぶんが数秒で流れる。**
     // ⚠️ **黙って止めないこと** —— 何が起きたのか分からないと直しようがない。
     if (event.data.interrupted && runActive() && event.data.seq === batchSeq) {
-      stopRun(
-        (selfActive() ? "自動で指すのを止めました" : "連続解析を止めました") +
+      // ⚠️ **追いつきなら最新手へ戻る**（`finishRun`。途中の手に置いたままだと
+      // 次の自動更新から付いていかなくなる）。
+      finishRun(
+        stopMessage() +
           ": 解析が考える時間を使い切る前に打ち切られました" +
           "（別の窓やタブで解析を起こしていないか確認してください）",
+        false,
       );
     }
     // ⚠️ **1 つ終わっただけでは解析は終わらない**（他のエンジンはまだ読んでいる）。
@@ -1959,6 +2098,8 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
   let shown = true;
   let followTimer = 0;
   let followBusy = false;
+  // 途中の手の解析のあいだに見送った回があるか（**戻ったら 1 回やる**。`backToTip`）。
+  let followDeferred = false;
 
   // showFollowNote は自動更新の結果の 1 行。⚠️ **持ち主でない窓にも送ること** ——
   // 手順を切り離していると、持ち主の窓の手順の行は隠れている。
@@ -1974,6 +2115,14 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
     if (followBusy || !followOn || studyReload.disabled) {
       return;
     }
+    // ⚠️ **途中の手を解析しているあいだは取りに行かない**（2026-10-02）。
+    // 取ると付いていけない（局面を追いつきが握っている）まま手が伸び、
+    // **終わって戻る先が古い最新手になる** —— そこはもう先端ではないので、
+    // **以後の自動更新が付いていかなくなる。** 戻ったところで 1 回やる（`backToTip`）。
+    if (catchUp) {
+      followDeferred = true;
+      return;
+    }
     followBusy = true;
     // ⚠️ **取っているあいだは再読み込みのアイコンを回す**（押した取り直しと同じ見た目）。
     // 回ることが「追っている」の手応えにもなる。二重に押させない役も兼ねる。
@@ -1983,15 +2132,25 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
       // 1 手ずつ動かしているので、横から動かすと解析を打ち切り合う。
       // 手順は伸ばしておく（取り直すだけなら見ている位置は動かない）。
       const got = await StudyService.FollowKifu(!runActive());
+      // ⚠️ **途中の手の解析は描く前に決めること**（`startCatchUp`）。
+      const between = startCatchUp(got);
       onState(got.state);
+      if (between > 0) {
+        syncBatchButton();
+        void batchStep();
+      }
       // ⚠️ **手が来ていなければ黙ること**（定期的に通るので、毎回出すと
       // 他の操作の理由を押し流す）。**来たとき・断りがあるときだけ出す。**
       if (got.added > 0 || got.note) {
         const parts: string[] = [];
         if (got.added > 0) {
-          parts.push(got.followed
-            ? `新しい手が${got.added}手来ました`
-            : `新しい手が${got.added}手来ました（見ている局面はそのままです）`);
+          parts.push(
+            between > 0
+              ? `新しい手が${got.added}手来ました（途中の${between}手を${catchUpSeconds}秒ずつ解析してから最新手へ移ります）`
+              : got.followed
+                ? `新しい手が${got.added}手来ました`
+                : `新しい手が${got.added}手来ました（見ている局面はそのままです）`,
+          );
         }
         if (got.note) {
           parts.push(got.note);
@@ -2104,6 +2263,7 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
       studyMoveCount = Math.max(0, studyLine.length - 1);
       // ⚠️ **連続解析の始点になる。** 手順リストで戻れば、そこから解析し直せる。
       studyPly = next?.ply ?? 0;
+      studyMainTip = next?.mainTip ?? 0;
       // 器ごと出し入れする（局面が無いときは分ける相手も居ない）。
       analyzeRow.hidden = !loaded;
       // ⚠️ **局面があるあいだは枠を出しっぱなしにする**（中身が空でも）。
@@ -2220,8 +2380,10 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
     release() {
       // ⚠️ **連続解析も止めること**（走ったままタブを離れると、見えないところで
       // 局面が動き続ける）。
-      stopRun("");
+      // ⚠️ **追いつきの途中なら最新手へ戻しておく**（解析はしない）。途中の手に
+      // 置いたままだと、タブに戻ったときの自動更新が付いていかなくなる。
       void AnalyzeService.Stop();
+      finishRun("", false);
     },
     cancelBatch() {
       // ⚠️ **持ち主でなければ頼むだけ**（`study:batch` と同じ理由）。幕の出口は
