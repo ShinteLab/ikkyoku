@@ -40,6 +40,7 @@ import (
 	// パッケージ名がぶつかるから。**
 	ikkyokuapp "github.com/ShinteLab/ikkyoku/app"
 	"github.com/ShinteLab/ikkyoku/guide"
+	"github.com/ShinteLab/ikkyoku/log"
 )
 
 //go:embed all:frontend/dist
@@ -73,41 +74,43 @@ type appWindows struct {
 }
 
 func main() {
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	}))
-	slog.SetDefault(logger)
+	// ログは実行ファイルの隣（ikkyoku_<日付>.log）。wails3 dev のときはコンソールにも出す
+	// （consoleLog。devbuild.go / prodbuild.go）。⚠️ **書けなくても起動は止めない。**
+	logCloser, logErr := log.Init(log.Options{Console: consoleLog})
+	if logErr != nil {
+		log.Warn("ログの準備で問題がありました", "error", logErr)
+	}
 
-	settingsSvc := ikkyokuapp.NewSettingsService(logger)
+	settingsSvc := ikkyokuapp.NewSettingsService()
 	cfg := settingsSvc.Config()
-	captureSvc := NewCaptureService(logger, cfg.SutemeDataDir, cfg.SutemeSourceOr())
-	positionSvc := ikkyokuapp.NewPositionService(logger)
-	trainingSvc := ikkyokuapp.NewTrainingService(logger, settingsSvc)
+	captureSvc := NewCaptureService(cfg.SutemeDataDir, cfg.SutemeSourceOr())
+	positionSvc := ikkyokuapp.NewPositionService()
+	trainingSvc := ikkyokuapp.NewTrainingService(settingsSvc)
 	// 「駒の字」（設定タブ）。端末に入っているフォントから駒の字を焼く。
 	// **盤に当てるのはフロント**で、ここが返すのは family 名と data URL まで。
-	fontSvc := ikkyokuapp.NewFontService(logger, settingsSvc)
+	fontSvc := ikkyokuapp.NewFontService(settingsSvc)
 	// 局面を持つ Service は 2 つあり、**別のものを持っている**（混同しないこと）。
 	//
 	//   positionSvc … 訂正タブ。認識の誤りを直す面。未決・不正でよい
 	//   studySvc    … 解析タブ。確定した局面。**訂正タブから写しを採る**
 	//
 	// 受け渡しは studySvc.Adopt の 1 か所だけ（訂正タブの「この局面を解析する」）。
-	studySvc := ikkyokuapp.NewStudyService(logger, positionSvc)
+	studySvc := ikkyokuapp.NewStudyService(positionSvc)
 	// 解析は**確定した局面**にだけかかる。局面を持っているのは studySvc なので、
 	// フロントから SFEN を渡してもらうのではなく、あちらから読む。
-	analyzeSvc := ikkyokuapp.NewAnalyzeService(logger, studySvc, settingsSvc)
+	analyzeSvc := ikkyokuapp.NewAnalyzeService(studySvc, settingsSvc)
 	// 棋譜データベース（棚）。**実装は kicho のままで、ikkyoku は利用する側**。
 	// ⚠️ **開けなくてもアプリは動く**（設計原則3）——「解析する」の行き先を持つので
 	// studySvc のあとに作り、開くのは下（失敗しても起動を止めない）。
-	kifuSvc := ikkyokuapp.NewKifuService(logger, studySvc)
+	kifuSvc := ikkyokuapp.NewKifuService(studySvc)
 	// フロントが生きているかの計測だけを持つ Service(diagservice.go)。
 	// 局面にもキャプチャにも関与しない。
-	diagSvc := ikkyokuapp.NewDiagService(logger)
+	diagSvc := ikkyokuapp.NewDiagService()
 
 	app := application.New(application.Options{
 		Name:        "ikkyoku",
 		Description: "ikkyoku - shogi broadcast region capture",
-		Logger:      logger,
+		Logger:      slog.Default(),
 		Services: []application.Service{
 			application.NewService(captureSvc),
 			application.NewService(settingsSvc),
@@ -138,11 +141,11 @@ func main() {
 		graph:           graph,
 		side:            side,
 		moves:           moves,
-		frameGeom:       newGeometryTracker("frame", state.Frame, logger),
-		mainGeom:        newGeometryTracker("main", state.Main, logger),
-		graphGeom:       newGeometryTracker("graph", state.Graph, logger),
-		sideGeom:        newGeometryTracker("side", state.Side, logger),
-		movesGeom:       newGeometryTracker("moves", state.Moves, logger),
+		frameGeom:       newGeometryTracker("frame", state.Frame),
+		mainGeom:        newGeometryTracker("main", state.Main),
+		graphGeom:       newGeometryTracker("graph", state.Graph),
+		sideGeom:        newGeometryTracker("side", state.Side),
+		movesGeom:       newGeometryTracker("moves", state.Moves),
 		mainHasSavedPos: mainHasSavedPos,
 	}
 	wins.frameGeom.attach(frame)
@@ -162,7 +165,7 @@ func main() {
 	// 棚を開く。⚠️ **失敗してもここで止めない** —— 理由は KifuService が抱えて
 	// 設定タブに出す（撮った 1 局面と貼った棋譜の解析は棚に依らない。設計原則3）。
 	if dbPath, err := cfg.KifuDB(); err != nil {
-		logger.Warn("棋譜データベースの場所を決められませんでした", "error", err)
+		log.Warn("棋譜データベースの場所を決められませんでした", "error", err)
 	} else {
 		kifuSvc.Open(dbPath)
 	}
@@ -178,13 +181,13 @@ func main() {
 	// 空の状態を控えに書いてしまう。
 	var studyStore *ikkyokuapp.StudyStore
 	if dir, err := cfg.StudyDir(); err != nil {
-		logger.Warn("検討の控えの場所を決められませんでした", "error", err)
+		log.Warn("検討の控えの場所を決められませんでした", "error", err)
 	} else {
-		studyStore = ikkyokuapp.NewStudyStore(logger, dir, studySvc)
+		studyStore = ikkyokuapp.NewStudyStore(dir, studySvc)
 		if ok, err := studyStore.Restore(); err != nil {
-			logger.Warn("前回の検討を戻せませんでした", "dir", dir, "error", err)
+			log.Warn("前回の検討を戻せませんでした", "dir", dir, "error", err)
 		} else if !ok {
-			logger.Debug("戻す検討はありませんでした", "dir", dir)
+			log.Debug("戻す検討はありませんでした", "dir", dir)
 		}
 		studyStore.Start()
 		// ⚠️ **棋譜タブにも繋ぐこと**（2026-09-16。Step 2）。棚から「解析する」を
@@ -215,7 +218,7 @@ func main() {
 			_, err = settingsSvc.SetMovePaneDetached(false)
 		}
 		if err != nil {
-			logger.Error("ドックに戻せませんでした", "window", kind, "error", err)
+			log.Error("ドックに戻せませんでした", "window", kind, "error", err)
 		}
 	}
 	// ⚠️ **起動時の設定を `CaptureService` にも入れておくこと**（2026-09-12）。
@@ -237,7 +240,7 @@ func main() {
 	// 終了の入口は 2 つ（メイン画面を閉じる / 枠のメニューの「終了」）。
 	// **後始末はこの 1 本に寄せる**（保存の経路を 1 本にしてあるのと同じ理由）。
 	quit := func() {
-		saveWindowState(wins, logger)
+		saveWindowState(wins)
 		analyzeSvc.Close()
 		// ⚠️ **解析を止めてから控えること。** 先に控えると、**止める直前まで
 		// 届いていた評価値が落ちる**（間引きの幅だけ遅れて届くため）。
@@ -248,13 +251,13 @@ func main() {
 	}
 	captureSvc.beforeQuit = quit
 
-	registerFrameHooks(app, wins, state.Frame, captureSvc, cfg.FitOnStartup, logger)
+	registerFrameHooks(app, wins, state.Frame, captureSvc, cfg.FitOnStartup)
 	registerMainHooks(app, wins, state.Main, quit)
-	registerGraphHooks(wins, state.Graph, settingsSvc, logger)
-	registerSideHooks(wins, state.Side, settingsSvc, logger)
-	registerMovesHooks(wins, state.Moves, settingsSvc, logger)
-	registerHotkey(app, captureSvc, logger)
-	registerVisibilityLog(wins, logger)
+	registerGraphHooks(wins, state.Graph, settingsSvc)
+	registerSideHooks(wins, state.Side, settingsSvc)
+	registerMovesHooks(wins, state.Moves, settingsSvc)
+	registerHotkey(app, captureSvc)
+	registerVisibilityLog(wins)
 	diagSvc.Watch()
 
 	// 駒種推論器(suteme)を先に用意しておく。3.5MB の学習データを読むので、
@@ -262,9 +265,11 @@ func main() {
 	captureSvc.ReloadRecognizer()
 
 	if err := app.Run(); err != nil {
-		logger.Error("アプリが異常終了しました", "error", err)
+		log.Error("アプリが異常終了しました", "error", err)
+		logCloser.Close()
 		os.Exit(1)
 	}
+	logCloser.Close()
 }
 
 // newFrameWindow は盤に重ねる Frameless の透過ウィンドウを作る。
@@ -444,7 +449,7 @@ func newMovesWindow(app *application.App, st guide.Window) *application.WebviewW
 
 // registerMovesHooks は手順の窓の位置の復元と、**閉じたらドックに戻す**を仕込む
 // （`registerSideHooks` と同じ形。**揃えておくこと**）。
-func registerMovesHooks(wins *appWindows, st guide.Window, settings *ikkyokuapp.SettingsService, logger *slog.Logger) {
+func registerMovesHooks(wins *appWindows, st guide.Window, settings *ikkyokuapp.SettingsService) {
 	moves := wins.moves
 	moves.RegisterHook(events.Common.WindowRuntimeReady, func(e *application.WindowEvent) {
 		if st.X != unsetPosition || st.Y != unsetPosition {
@@ -468,7 +473,7 @@ func registerMovesHooks(wins *appWindows, st guide.Window, settings *ikkyokuapp.
 
 // registerSideHooks は右の列の窓の位置の復元と、**閉じたらドックに戻す**を仕込む
 // （`registerGraphHooks` と同じ形。**揃えておくこと**）。
-func registerSideHooks(wins *appWindows, st guide.Window, settings *ikkyokuapp.SettingsService, logger *slog.Logger) {
+func registerSideHooks(wins *appWindows, st guide.Window, settings *ikkyokuapp.SettingsService) {
 	side := wins.side
 	side.RegisterHook(events.Common.WindowRuntimeReady, func(e *application.WindowEvent) {
 		if st.X != unsetPosition || st.Y != unsetPosition {
@@ -498,7 +503,7 @@ func registerSideHooks(wins *appWindows, st guide.Window, settings *ikkyokuapp.S
 // ⚠️ **設定の側も戻すこと。** 窓だけ隠して設定が「切り離している」のままだと、
 // **次の起動で中身の見えない窓が出る**。だから `SetEvalGraphDetached(false)` を
 // 通す（そこから `applyEvalGraphDetached` が呼ばれて、メイン画面へも知らせが行く）。
-func registerGraphHooks(wins *appWindows, st guide.Window, settings *ikkyokuapp.SettingsService, logger *slog.Logger) {
+func registerGraphHooks(wins *appWindows, st guide.Window, settings *ikkyokuapp.SettingsService) {
 	graph := wins.graph
 	graph.RegisterHook(events.Common.WindowRuntimeReady, func(e *application.WindowEvent) {
 		if st.X != unsetPosition || st.Y != unsetPosition {
@@ -544,7 +549,7 @@ func applyPosition(opts *application.WebviewWindowOptions, st guide.Window) bool
 // **ここを伸ばすと、起動してから枠が出るまでの無言の時間がそのまま伸びる。**
 const startupFitDelay = 200 * time.Millisecond
 
-func registerFrameHooks(app *application.App, wins *appWindows, st guide.Window, svc *CaptureService, fitOnStartup bool, logger *slog.Logger) {
+func registerFrameHooks(app *application.App, wins *appWindows, st guide.Window, svc *CaptureService, fitOnStartup bool) {
 	frame := wins.frame
 	// WindowRuntimeReady はウィンドウ単位で発火し、この時点なら ScreenNearestDipPoint も
 	// SetSize/SetPosition も確実に効く(ApplicationStarted では不確実)。
@@ -567,7 +572,7 @@ func registerFrameHooks(app *application.App, wins *appWindows, st guide.Window,
 			// 探しているあいだは枠もメイン画面も画面に無い状態にしておく
 			// (自分のウィンドウが 1 枚も写らないので、塗り潰しも要らない)。
 			// 出すのは合わせ終えてから。
-			startupFit(app, wins, svc, logger)
+			startupFit(app, wins, svc)
 			return
 		}
 		// **枠は出さない。** タイトルバーの「枠を表示」を押すまで隠れたまま。
@@ -610,7 +615,7 @@ func registerFrameHooks(app *application.App, wins *appWindows, st guide.Window,
 // 探索が失敗しても、どちらも出ないままではアプリが操作できない。
 // ⚠️ **メイン画面は枠のあと**(`revealMain` が枠の位置を基準に置くため。
 // 合わせたあとの枠に対して逃がさないと、キャプチャ領域に重なりうる)。
-func startupFit(app *application.App, wins *appWindows, svc *CaptureService, logger *slog.Logger) {
+func startupFit(app *application.App, wins *appWindows, svc *CaptureService) {
 	go func() {
 		defer func() {
 			wins.frame.Show()
@@ -626,11 +631,11 @@ func startupFit(app *application.App, wins *appWindows, svc *CaptureService, log
 
 		result, err := svc.FitFrame()
 		if err != nil {
-			logger.Warn("起動時の自動フィットに失敗しました", "error", err)
+			log.Warn("起動時の自動フィットに失敗しました", "error", err)
 			app.Event.Emit("fit:done", FitResult{Message: "盤を探せませんでした: " + err.Error()})
 			return
 		}
-		logger.Info("起動時の自動フィット",
+		log.Info("起動時の自動フィット",
 			"fitted", result.Fitted, "message", result.Message, "elapsed", time.Since(started))
 		app.Event.Emit("fit:done", result)
 	}()
@@ -677,7 +682,7 @@ func registerMainHooks(app *application.App, wins *appWindows, st guide.Window, 
 //
 // 位置・サイズの追跡(geometry.go)とは別物なので混ぜないこと。あちらは保存のため、
 // こちらは現象の再現待ち。**listener で十分**(記録するだけで、破棄とレースしない)。
-func registerVisibilityLog(wins *appWindows, logger *slog.Logger) {
+func registerVisibilityLog(wins *appWindows) {
 	watch := func(name string, w *application.WebviewWindow) {
 		for label, id := range map[string]events.WindowEventType{
 			"表示":  events.Common.WindowShow,
@@ -687,7 +692,7 @@ func registerVisibilityLog(wins *appWindows, logger *slog.Logger) {
 			"戻す":  events.Common.WindowRestore,
 		} {
 			w.OnWindowEvent(id, func(*application.WindowEvent) {
-				logger.Debug("ウィンドウの表示状態", "window", name, "event", label)
+				log.Debug("ウィンドウの表示状態", "window", name, "event", label)
 			})
 		}
 	}
@@ -705,7 +710,7 @@ func registerVisibilityLog(wins *appWindows, logger *slog.Logger) {
 //
 // **ここで Position()/Size() を読まない。** メイン画面を閉じる経路では既に破棄が
 // 進行中で不正な値が返る(geometry.go)。動いたときに記録しておいた値を使う。
-func saveWindowState(wins *appWindows, logger *slog.Logger) {
+func saveWindowState(wins *appWindows) {
 	st := appState{
 		Frame: wins.frameGeom.snapshot(),
 		Main:  wins.mainGeom.snapshot(),
@@ -714,30 +719,30 @@ func saveWindowState(wins *appWindows, logger *slog.Logger) {
 		Moves: wins.movesGeom.snapshot(),
 	}
 	if err := saveAppState(st); err != nil {
-		logger.Error("ウィンドウ状態の保存に失敗しました", "error", err)
+		log.Error("ウィンドウ状態の保存に失敗しました", "error", err)
 		return
 	}
-	logger.Info("ウィンドウ状態を保存しました", "frame", st.Frame, "main", st.Main)
+	log.Info("ウィンドウ状態を保存しました", "frame", st.Frame, "main", st.Main)
 }
 
 // registerHotkey はグローバルホットキー(既定 alt+s)を登録する。
 // ウィンドウが非アクティブでも効くことが重要(中継の再生画面にフォーカスがある状態で
 // 撮るのが普通の使い方のため)。
-func registerHotkey(app *application.App, svc *CaptureService, logger *slog.Logger) {
+func registerHotkey(app *application.App, svc *CaptureService) {
 	accel, err := hotkeyAccelerator(resolveHotkey())
 	if err != nil {
-		logger.Error("ホットキーの解決に失敗しました", "error", err)
+		log.Error("ホットキーの解決に失敗しました", "error", err)
 		return
 	}
 	if err := app.GlobalShortcut.Register(accel, func() {
 		if _, err := svc.Capture(); err != nil {
-			logger.Error("ホットキーからのキャプチャに失敗しました", "error", err)
+			log.Error("ホットキーからのキャプチャに失敗しました", "error", err)
 			app.Event.Emit("capture:failed", err.Error())
 		}
 	}); err != nil {
 		// 登録失敗は致命的にしない(他アプリと競合している環境がありうる)。
 		// 「撮る」ボタンは引き続き使えるので、UI からエラーが分かるようにだけ通知する。
-		logger.Warn("グローバルホットキーの登録に失敗しました", "hotkey", accel, "error", err)
+		log.Warn("グローバルホットキーの登録に失敗しました", "hotkey", accel, "error", err)
 		app.Event.Emit("hotkey:register-failed", map[string]any{
 			"hotkey": accel,
 			"error":  err.Error(),

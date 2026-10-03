@@ -1,8 +1,6 @@
 package app
 
 import (
-	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -26,9 +24,8 @@ func newTestSettings(t *testing.T, engines []ikkyoku.EngineEntry) *SettingsServi
 		t.Fatalf("SaveConfig: %v", err)
 	}
 	return &SettingsService{
-		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-		path:   path,
-		cfg:    cfg,
+		path: path,
+		cfg:  cfg,
 	}
 }
 

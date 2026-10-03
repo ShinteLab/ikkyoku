@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ShinteLab/ikkyoku/log"
 	"github.com/ShinteLab/ikkyoku/position"
 )
 
@@ -147,7 +148,7 @@ func (s *StudyService) sessionRecord() (StudyRecord, bool) {
 	snap, err := s.study.Snapshot()
 	if err != nil {
 		// 根が組み上がらない検討は存在しないはず（`Adopt` が断る）。
-		s.logger.Warn("検討を控えられませんでした", "error", err)
+		log.Warn("検討を控えられませんでした", "error", err)
 		return StudyRecord{}, false
 	}
 	if s.session == "" {

@@ -2,7 +2,6 @@ package app
 
 import (
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/ShinteLab/ikkyoku"
 	"github.com/ShinteLab/ikkyoku/analyze"
+	"github.com/ShinteLab/ikkyoku/log"
 	"github.com/ShinteLab/ikkyoku/recognize"
 	"github.com/ShinteLab/ikkyoku/training"
 )
@@ -306,7 +306,6 @@ func engineSettings(e ikkyoku.EngineEntry, i int) EngineSettings {
 // CaptureService と分けてあるのは、あちらが「撮る」ことの責務だから。設定は
 // 起動時にも読むので、**main() が最初に作って、読み込み済みの Config を配る**役でもある。
 type SettingsService struct {
-	logger *slog.Logger
 	// PickFile はファイル選択ダイアログ。**`_cmd/ikkyoku` が差し込む。**
 	//
 	// ⚠️ **ここで Wails を import しないこと。** ダイアログは Wails の口だが、
@@ -354,17 +353,17 @@ type SettingsService struct {
 
 // NewSettingsService は設定を読み込んだ状態で作る。
 // 読めなければゼロ値で続ける(設定ファイルが無いのは正常な状態)。
-func NewSettingsService(logger *slog.Logger) *SettingsService {
-	s := &SettingsService{logger: logger}
+func NewSettingsService() *SettingsService {
+	s := &SettingsService{}
 	path, err := ikkyoku.DefaultConfigPath()
 	if err != nil {
-		logger.Warn("設定ファイルの場所を決められませんでした", "error", err)
+		log.Warn("設定ファイルの場所を決められませんでした", "error", err)
 		return s
 	}
 	s.path = path
 	cfg, err := ikkyoku.LoadConfig(path)
 	if err != nil {
-		logger.Warn("設定を読み込めませんでした", "path", path, "error", err)
+		log.Warn("設定を読み込めませんでした", "path", path, "error", err)
 		return s
 	}
 	s.cfg = cfg
@@ -412,7 +411,7 @@ func (s *SettingsService) settings() AppSettings {
 		HideWinRateBar:    s.cfg.HideWinRateBar,
 		HidePlayerNames:   s.cfg.HidePlayerNames,
 		FlipWinRateBar:    s.cfg.FlipWinRateBar,
-		Theme:            ikkyoku.NormalizeTheme(s.cfg.Theme),
+		Theme:             ikkyoku.NormalizeTheme(s.cfg.Theme),
 		Themes:            ikkyoku.ThemeOptions,
 		Training:          trainingSettings(s.cfg.Training),
 		Engines:           engines,
@@ -441,7 +440,7 @@ func (s *SettingsService) settings() AppSettings {
 func (s *SettingsService) kifuDBPathLocked() string {
 	p, err := s.cfg.KifuDB()
 	if err != nil {
-		s.logger.Warn("棋譜データベースの場所を決められませんでした", "error", err)
+		log.Warn("棋譜データベースの場所を決められませんでした", "error", err)
 		return ""
 	}
 	return p
@@ -648,7 +647,7 @@ func (s *SettingsService) setEngineOptionSpecs(id string, specs []ikkyoku.Engine
 		}
 		return list
 	}); err != nil {
-		s.logger.Warn("エンジンの option を控えられませんでした", "id", id, "error", err)
+		log.Warn("エンジンの option を控えられませんでした", "id", id, "error", err)
 	}
 }
 
@@ -681,7 +680,7 @@ func (s *SettingsService) rememberEngineName(id, name string) {
 		}
 		return list
 	}); err != nil {
-		s.logger.Warn("エンジンの名乗りを控えられませんでした", "id", id, "error", err)
+		log.Warn("エンジンの名乗りを控えられませんでした", "id", id, "error", err)
 	}
 }
 
@@ -1385,15 +1384,15 @@ func (s *SettingsService) save(apply func(*ikkyoku.Config)) (AppSettings, error)
 	}
 	cfg, err := ikkyoku.LoadConfig(s.path)
 	if err != nil {
-		s.logger.Warn("設定を読み直せませんでした。読み込み済みの内容に書きます", "error", err)
+		log.Warn("設定を読み直せませんでした。読み込み済みの内容に書きます", "error", err)
 		cfg = s.cfg
 	}
 	apply(&cfg)
 	if err := ikkyoku.SaveConfig(s.path, cfg); err != nil {
-		s.logger.Error("設定を保存できませんでした", "path", s.path, "error", err)
+		log.Error("設定を保存できませんでした", "path", s.path, "error", err)
 		return s.settings(), err
 	}
 	s.cfg = cfg
-	s.logger.Info("設定を保存しました", "path", s.path)
+	log.Info("設定を保存しました", "path", s.path)
 	return s.settings(), nil
 }

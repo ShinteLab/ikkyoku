@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -12,6 +11,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/events"
 
 	"github.com/ShinteLab/ikkyoku/guide"
+	"github.com/ShinteLab/ikkyoku/log"
 )
 
 // ウィンドウの位置・サイズ。**追跡と永続化**の 2 つが入っている。
@@ -240,8 +240,7 @@ func clampToScreen(state guide.Window, defW, defH int) (x, y, w, h int) {
 // 「閉じる操作を全部自前の経路に通す」ことができない。そこで、動いたときに
 // 記録しておき、終了時にはその記録を保存する方式にしている。
 type geometryTracker struct {
-	name   string
-	logger *slog.Logger
+	name string
 
 	mu    sync.Mutex
 	state guide.Window
@@ -249,8 +248,8 @@ type geometryTracker struct {
 
 // newGeometryTracker は初期値(前回終了時に復元した値)で追跡を始める。
 // 一度も動かさずに終了した場合は、この初期値がそのまま保存される。
-func newGeometryTracker(name string, initial guide.Window, logger *slog.Logger) *geometryTracker {
-	return &geometryTracker{name: name, logger: logger, state: initial}
+func newGeometryTracker(name string, initial guide.Window) *geometryTracker {
+	return &geometryTracker{name: name, state: initial}
 }
 
 // attach は移動・リサイズのイベントを購読して記録を更新する。
@@ -268,7 +267,7 @@ func (t *geometryTracker) record(win *application.WebviewWindow) {
 	x, y := win.Position()
 	w, h := win.Size()
 	if w <= 0 || h <= 0 {
-		t.logger.Debug("ウィンドウ位置の記録を見送りました", "window", t.name, "width", w, "height", h)
+		log.Debug("ウィンドウ位置の記録を見送りました", "window", t.name, "width", w, "height", h)
 		return
 	}
 	t.mu.Lock()

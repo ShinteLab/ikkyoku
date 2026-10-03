@@ -3,13 +3,13 @@ package app
 import (
 	"encoding/base64"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 
 	"github.com/ShinteLab/ikkyoku"
+	"github.com/ShinteLab/ikkyoku/log"
 	"github.com/ShinteLab/ikkyoku/piecefont"
 )
 
@@ -26,7 +26,6 @@ import (
 // ⚠️ **盤に当てるのはフロント。** ここが返すのは family 名と data URL までで、
 // どの要素に当てるかは CSS の `--shogi-font` の仕事。
 type FontService struct {
-	logger   *slog.Logger
 	settings *SettingsService
 
 	mu sync.Mutex
@@ -40,8 +39,8 @@ type FontService struct {
 	previewSeq int
 }
 
-func NewFontService(logger *slog.Logger, settings *SettingsService) *FontService {
-	return &FontService{logger: logger, settings: settings, baked: map[string]string{}}
+func NewFontService(settings *SettingsService) *FontService {
+	return &FontService{settings: settings, baked: map[string]string{}}
 }
 
 // FontFace は webview に登録する 1 つ分（family 名と data URL）。
@@ -299,7 +298,7 @@ func (s *FontService) state(cfg ikkyoku.Config) FontState {
 	face, err := s.bake(entry)
 	if err != nil {
 		// 焼けなくても同梱で描ける（設計原則3）。理由だけ出す。
-		s.logger.Warn("駒フォントを焼けませんでした", "id", entry.ID, "path", entry.Path, "error", err)
+		log.Warn("駒フォントを焼けませんでした", "id", entry.ID, "path", entry.Path, "error", err)
 		st.Note = fmt.Sprintf("「%s」を使えないので同梱の字で描いています: %v", entry.DisplayName(), err)
 		return st
 	}
@@ -418,7 +417,7 @@ func (s *FontService) Scan() (FontScan, error) {
 	s.available = fonts
 	s.scanned = true
 	s.mu.Unlock()
-	s.logger.Info("端末のフォントを探しました", "書体", len(fonts), "焼ける", out.Usable)
+	log.Info("端末のフォントを探しました", "書体", len(fonts), "焼ける", out.Usable)
 	return out, nil
 }
 
@@ -484,7 +483,7 @@ func (s *FontService) Add(path string, index int) (FontState, error) {
 	if err != nil {
 		return s.state(cfg), err
 	}
-	s.logger.Info("駒フォントを登録しました", "id", id, "name", f.Name, "path", f.Path, "index", f.Index)
+	log.Info("駒フォントを登録しました", "id", id, "name", f.Name, "path", f.Path, "index", f.Index)
 	return s.state(cfg), nil
 }
 

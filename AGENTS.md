@@ -200,6 +200,7 @@ Claude Code でスキルとして使いたい人は、各自の `.claude/skills/
 | `github.com/ShinteLab/engine`（`/search`） | ①Step 1 の足場（`usi/local.go`。Step 2 で消える）②**合法手生成**（`legal/`。消えない）。⚠️ **解析を engine の直呼びに戻さないこと** |
 | `github.com/ShinteLab/core` | `<shogi-board>` の配信・`core/sfen` / `core/usi` / `core/kifu` / `core/shogifont` |
 | `github.com/ShinteLab/kicho` | **棋譜データベース**（棚・取得・KIF の文字コード判別）。`goja` / `modernc.org/sqlite` などを持ち込む（全部 PureGo。そのぶん exe が膨らむ） |
+| `github.com/wenteasy/log` | **ログの土台**（`log/` が使う。ハンドラ・日ごとのファイル・パッケージごとのレベル）。タグで引く（replace ではない） |
 
 依存の向きは `ikkyoku → core / suteme / engine / kicho`。**逆参照しない**。
 ワークスペースに並んでいる状態では **`replace` の相対パス参照**で、`_cmd/ikkyoku` にも
@@ -235,6 +236,7 @@ Claude Code でスキルとして使いたい人は、各自の `.claude/skills/
 | `diff.go` | **撮った 2 枚がどれくらい違うか**（`FrameDiff`。追従のふるい）。**測るだけ**で、しきい値は呼ぶ側（`_cmd/ikkyoku` の `gate`）。⚠️ **盤の矩形を渡すこと**（画面全体だと秒読みで毎周「変化あり」になる） |
 | `config.go` | **設定はすべてここ**（標準ライブラリのみ）。⚠️ **各項目の約束はフィールドのコメント**。共通の型は 3 つ —— **bool はゼロ値が既定になる向きで持つ**（`Hide...`）・**既定の解決は関数 1 か所**（`ThinkSeconds` / `KifuDB` / `PonanzaConstantOr` など）・**知らない値は読める値に丸めて安全側に倒す**（`NormalizeEvalAxis` / `NormalizeGyoku` / `PieceInk`）。⚠️ **棚の既定は `ikkyoku/kicho.db`**（kicho アプリと同じ SQLite を 2 プロセスから開かない） |
 | `dialog.go` | ファイル選択ダイアログ（`app` へ `FilePicker` として差し込む。Wails の口なのでここ） |
+| `log/` | **ログ**（`log.Info` など。ikkyoku のコードはここで出す）。出口は実行ファイルの隣の `ikkyoku_<日付>.log`（dev のときはターミナルにも）・レベルはパッケージごと。⚠️ **Logger を引数で配らない**（`log/AGENTS.md`） |
 | `recognize/` | 画像 → 盤面（`suteme` を呼ぶだけ）・盤の矩形を探す `DetectRegion` |
 | `position/` | **「とある局面」**（訂正の操作・手番・駒台・SFEN・`Rotate180`・手の木 `Study`・棋譜の取り込み・新規対局・`Connect`）。画像を知らない |
 | `legal/` | 合法手生成のラッパ（`engine` を呼ぶのはここだけ） |

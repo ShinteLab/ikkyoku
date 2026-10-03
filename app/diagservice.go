@@ -11,9 +11,10 @@
 package app
 
 import (
-	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/ShinteLab/ikkyoku/log"
 )
 
 // DiagService は「画面が真っ黒になって何も触れなくなる」現象を切り分けるための計測。
@@ -49,8 +50,6 @@ import (
 //
 // **状態は持つが、局面やキャプチャには一切関与しない。** 計測だけの Service。
 type DiagService struct {
-	logger *slog.Logger
-
 	mu    sync.Mutex
 	beats map[string]*heartbeatState
 }
@@ -84,8 +83,8 @@ const heartbeatInterval = 5 * time.Second
 // 「心拍は続いていたのか、止まったのか」を判定するためのもの。**
 const heartbeatStaleAfter = 90 * time.Second
 
-func NewDiagService(logger *slog.Logger) *DiagService {
-	return &DiagService{logger: logger, beats: map[string]*heartbeatState{}}
+func NewDiagService() *DiagService {
+	return &DiagService{beats: map[string]*heartbeatState{}}
 }
 
 // Heartbeat はフロントから定期的に呼ばれる。window は "frame" / "main"。
@@ -100,12 +99,12 @@ func (s *DiagService) Heartbeat(window string, heapMB float64, hidden bool) {
 	if !ok {
 		st = &heartbeatState{}
 		s.beats[window] = st
-		s.logger.Info("フロントエンドの心拍を検知しました", "window", window)
+		log.Info("フロントエンドの心拍を検知しました", "window", window)
 	}
 	if st.stale {
 		// 止まっていたものが戻った。**これが出るかどうかで手当てが変わる**
 		// (戻るなら描き直しで復帰しうる。戻らないなら読み込み直すしかない)。
-		s.logger.Info("フロントエンドの心拍が戻りました",
+		log.Info("フロントエンドの心拍が戻りました",
 			"window", window, "断絶", time.Since(st.last).Round(time.Second))
 		st.stale = false
 	}
@@ -120,7 +119,7 @@ func (s *DiagService) Heartbeat(window string, heapMB float64, hidden bool) {
 // 開いていない限り消える)。黒くなった件では何も出ていないが、
 // 「出ていない」ことを根拠にするには、まず出る経路が要る。
 func (s *DiagService) ReportError(window, kind, message, stack string) {
-	s.logger.Warn("フロントエンドで例外が発生しました",
+	log.Warn("フロントエンドで例外が発生しました",
 		"window", window, "kind", kind, "message", message, "stack", stack)
 }
 
@@ -139,7 +138,7 @@ func (s *DiagService) Watch() {
 					continue
 				}
 				st.stale = true
-				s.logger.Warn("フロントエンドの心拍が途切れました",
+				log.Warn("フロントエンドの心拍が途切れました",
 					"window", name,
 					"最後の心拍", st.last.Format(time.TimeOnly),
 					"heapMB", st.heapMB,

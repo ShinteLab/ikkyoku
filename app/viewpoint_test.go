@@ -1,8 +1,6 @@
 package app
 
 import (
-	"io"
-	"log/slog"
 	"testing"
 
 	"github.com/ShinteLab/ikkyoku/position"
@@ -18,7 +16,7 @@ const (
 // edited は盤を読み込んだ PositionService を返す。
 func edited(t *testing.T, board string) *PositionService {
 	t.Helper()
-	s := NewPositionService(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	s := NewPositionService()
 	if _, err := s.Load(board, nil); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -134,7 +132,6 @@ func TestAnalyzeSFENRotatesOnlyForGotePOV(t *testing.T) {
 
 // 採ると解析タブには**回した局面**が入る（訂正タブは撮った向きのまま）。
 func TestAdoptRotatesForGotePOV(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	pos := edited(t, gotePovBoard)
 	if _, err := pos.SetTurn(int(position.TurnBlack)); err != nil {
 		t.Fatalf("SetTurn: %v", err)
@@ -143,7 +140,7 @@ func TestAdoptRotatesForGotePOV(t *testing.T) {
 		t.Fatalf("SetViewpoint: %v", err)
 	}
 
-	study := NewStudyService(logger, pos)
+	study := NewStudyService(pos)
 	st, err := study.Adopt()
 	if err != nil {
 		t.Fatalf("Adopt: %v", err)

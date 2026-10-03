@@ -1,8 +1,6 @@
 package app
 
 import (
-	"io"
-	"log/slog"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -19,9 +17,8 @@ func newTestFonts(t *testing.T) *FontService {
 	if err := ikkyoku.SaveConfig(path, ikkyoku.Config{}); err != nil {
 		t.Fatalf("SaveConfig: %v", err)
 	}
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	settings := &SettingsService{logger: logger, path: path}
-	return NewFontService(logger, settings)
+	settings := &SettingsService{path: path}
+	return NewFontService(settings)
 }
 
 // ⚠️ **端末に駒の字を持つフォントが無ければ skip する**（`piecefont` と同じ理由）。

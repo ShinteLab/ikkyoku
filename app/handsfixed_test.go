@@ -1,8 +1,6 @@
 package app
 
 import (
-	"io"
-	"log/slog"
 	"testing"
 
 	"github.com/ShinteLab/ikkyoku/position"
@@ -68,7 +66,7 @@ func TestSetHandsFixedMakesHandicapPositionAdoptable(t *testing.T) {
 
 	// ⚠️ **ここまで通って初めて意味がある。** 解析タブが根として受け取り、
 	// 合法手まで出ること（＝駒を押せば手が進む）。
-	study := NewStudyService(slog.New(slog.NewTextHandler(io.Discard, nil)), s)
+	study := NewStudyService(s)
 	got, err := study.Adopt()
 	if err != nil {
 		t.Fatalf("Adopt: %v", err)
@@ -125,7 +123,7 @@ func TestSetHandsFixedKeepsAssignedHands(t *testing.T) {
 
 // 局面がまだ無いなら断ること（他の操作と同じ）。
 func TestSetHandsFixedWithoutPosition(t *testing.T) {
-	s := NewPositionService(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	s := NewPositionService()
 	if _, err := s.SetHandsFixed(true); err == nil {
 		t.Fatal("局面が無いのに通りました")
 	}
@@ -137,7 +135,7 @@ func TestSetHandsFixedWithoutPosition(t *testing.T) {
 // 未決として出てきて**そのままでは確定できない**（＝独自ハンデを作る入口として
 // 使えない）。手番が上手（後手）であることも一緒に見ている。
 func TestLoadHandicapStartsAsHandicap(t *testing.T) {
-	s := NewPositionService(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	s := NewPositionService()
 
 	st, err := s.LoadHandicap("二枚落ち")
 	if err != nil {
@@ -180,7 +178,7 @@ func TestLoadHandicapClearsViewpoint(t *testing.T) {
 // ⚠️ **「訂正を捨てて戻す」も手合割のまま戻すこと**（何度でも）。
 // 盤面 SFEN から作り直すと駒台の逆算が復活し、**捨てた拍子に確定できなくなる。**
 func TestResetKeepsHandicap(t *testing.T) {
-	s := NewPositionService(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	s := NewPositionService()
 	if _, err := s.LoadHandicap("二枚落ち"); err != nil {
 		t.Fatalf("LoadHandicap: %v", err)
 	}
@@ -207,7 +205,7 @@ func TestResetKeepsHandicap(t *testing.T) {
 // ⚠️ **手番は攻方＝先手**（盤が空でも手番は決まっている）。⚠️ **駒台は逆算する**
 // （詰将棋の「残り全部は玉方の持駒」がまさに逆算。手合割とは逆なので混同しないこと）。
 func TestLoadEmptyStartsProblem(t *testing.T) {
-	s := NewPositionService(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	s := NewPositionService()
 
 	st, err := s.LoadEmpty()
 	if err != nil {
@@ -328,7 +326,7 @@ func TestAdoptMateProblemKeepsBoardWithoutMoves(t *testing.T) {
 		t.Fatalf("SetMateProblem: %v", err)
 	}
 
-	study := NewStudyService(slog.New(slog.NewTextHandler(io.Discard, nil)), s)
+	study := NewStudyService(s)
 	st, err := study.Adopt()
 	if err != nil {
 		t.Fatalf("Adopt: %v（詰将棋を断ってはいけない）", err)
@@ -359,7 +357,7 @@ func TestAdoptMateProblemKeepsBoardWithoutMoves(t *testing.T) {
 func TestMateProblemHandsAreReal(t *testing.T) {
 	const pawn = 0 // 歩（position/sfen の駒コード）
 
-	s := NewPositionService(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	s := NewPositionService()
 	st, err := s.LoadEmpty()
 	if err != nil {
 		t.Fatalf("LoadEmpty: %v", err)

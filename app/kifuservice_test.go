@@ -3,8 +3,6 @@ package app
 import (
 	"errors"
 	"fmt"
-	"io"
-	"log/slog"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -20,9 +18,8 @@ import (
 // **テストが手元の棚を書き換える**（settings_test.go / fontservice_test.go と同じ話）。
 func newTestKifuService(t *testing.T) (*KifuService, *StudyService) {
 	t.Helper()
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	study := NewStudyService(logger, NewPositionService(logger))
-	svc := NewKifuService(logger, study)
+	study := NewStudyService(NewPositionService())
+	svc := NewKifuService(study)
 	svc.Open(filepath.Join(t.TempDir(), "kicho.db"))
 	t.Cleanup(svc.Close)
 	if st := svc.Status(); !st.Ready {
@@ -181,9 +178,8 @@ func TestKifuServiceSearchRejectsBadDates(t *testing.T) {
 // 動き、棋譜タブだけが使えない。理由が読めないと設定タブへ辿り着けないので、
 // **どのメソッドも同じ文言を返す**（`library()` の 1 か所）。
 func TestKifuServiceWithoutDatabase(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	study := NewStudyService(logger, NewPositionService(logger))
-	svc := NewKifuService(logger, study)
+	study := NewStudyService(NewPositionService())
+	svc := NewKifuService(study)
 	// **開いていない**（main が open を呼べなかったときと同じ状態）。
 
 	st := svc.Status()
@@ -531,8 +527,7 @@ func TestKifuServiceUnwatchAll(t *testing.T) {
 // 仮の一覧は棚（SQLite）の上にあるので、開けていなければ使えない。
 // **それでも取得そのものは動く**（カードは今日のあいだ画面に残る）。
 func TestKifuServiceWatchWithoutDatabase(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	svc := NewKifuService(logger, NewStudyService(logger, NewPositionService(logger)))
+	svc := NewKifuService(NewStudyService(NewPositionService()))
 	// **開いていない**（main が open を呼べなかったときと同じ状態）。
 
 	if _, err := svc.Watches(); err == nil {

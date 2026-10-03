@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/ShinteLab/core/kifu"
+	"github.com/ShinteLab/ikkyoku/log"
 	"github.com/ShinteLab/ikkyoku/position"
 )
 
@@ -206,7 +207,7 @@ func (s *StudyService) followProbe(board *position.Board, cost *position.CellCos
 			ranked = got
 			top := got.Candidates[0]
 			out.Fit = top.Fit
-			s.logger.Info("候補を並べました", "tip", tipID, "moves", top.Moves,
+			log.Info("候補を並べました", "tip", tipID, "moves", top.Moves,
 				"fit", top.Fit, "margin", got.Margin, "cost", top.Cost, "rotated", rotated)
 
 			// ⚠️ **盤として読めていないならここで終わり**（CM・解説の画面）。
@@ -251,7 +252,7 @@ func (s *StudyService) followProbe(board *position.Board, cost *position.CellCos
 	if err != nil {
 		return FollowProbe{}, err
 	}
-	s.logger.Info("本譜の先に繋げるか下見しました",
+	log.Info("本譜の先に繋げるか下見しました",
 		"tip", tipID, "stop", r.Stop.String(), "depth", r.Depth,
 		"candidates", len(r.Solutions), "nodes", r.Nodes,
 		"cost", r.Cost, "fixed", len(r.Fixed), "rotated", rotated)
@@ -329,7 +330,7 @@ func (s *StudyService) FollowApply(moves []string, rev int, goTo bool) (a Follow
 		}
 	}
 	a = FollowApplied{State: s.changed(), Added: g.Added, Note: reloadNote(g)}
-	s.logger.Info("撮った盤面を本譜の先に繋ぎました",
+	log.Info("撮った盤面を本譜の先に繋ぎました",
 		"moves", len(moves), "added", g.Added, "movedAt", g.MovedAt, "goTo", goTo)
 	return a, nil
 }
@@ -577,7 +578,7 @@ func (s *StudyService) FollowAuto(boardSFEN string, cellConfidence []float64) (a
 		a.Flipped, a.FlipMove = s.looksFlipped(board, cost, rotated)
 	}
 	if a.Added > 1 {
-		s.logger.Info("1 枚から追いつきました", "moves", a.Moves, "guess", a.Guess)
+		log.Info("1 枚から追いつきました", "moves", a.Moves, "guess", a.Guess)
 	}
 	return a, nil
 }

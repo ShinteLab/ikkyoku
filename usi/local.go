@@ -18,11 +18,11 @@ package usi
 import (
 	"context"
 	"io"
-	"log/slog"
 
 	"github.com/ShinteLab/core/usi/client"
 	shogi "github.com/ShinteLab/engine"
 	"github.com/ShinteLab/engine/search"
+	"github.com/ShinteLab/ikkyoku/log"
 )
 
 // localDepth は同梱エンジンの探索深さ。
@@ -46,7 +46,7 @@ func Local(ctx context.Context) (*client.Session, error) {
 		// Start は quit / EOF で返る。返ったらパイプを閉じて、
 		// こちら側の読み取りにも EOF を伝える。
 		if err := u.Start(); err != nil {
-			slog.Debug("同梱エンジンが終了しました", "error", err)
+			log.Debug("同梱エンジンが終了しました", "error", err)
 		}
 		_ = outW.Close()
 		_ = cmdR.Close()

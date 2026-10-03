@@ -3,8 +3,6 @@ package app
 import (
 	"bytes"
 	"encoding/json"
-	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,8 +11,7 @@ import (
 // empty はまだ何も採っていない解析タブを返す（復元の受け皿）。
 func empty(t *testing.T) *StudyService {
 	t.Helper()
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return NewStudyService(logger, NewPositionService(logger))
+	return NewStudyService(NewPositionService())
 }
 
 // analyzed は本譜 2 手＋枝 1 本に評価値を付けた検討を返す。
@@ -172,9 +169,8 @@ func TestStudySessionDoesNotOverwriteLiveStudy(t *testing.T) {
 // ディスクへ書いて読み直せること（`StudyStore`）。
 func TestStudyStoreWritesAndRestores(t *testing.T) {
 	dir := t.TempDir()
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	s := analyzed(t)
-	store := NewStudyStore(logger, dir, s)
+	store := NewStudyStore(dir, s)
 	store.flush()
 
 	names, err := store.list()
@@ -190,7 +186,7 @@ func TestStudyStoreWritesAndRestores(t *testing.T) {
 	}
 
 	back := empty(t)
-	ok, err := NewStudyStore(logger, dir, back).Restore()
+	ok, err := NewStudyStore(dir, back).Restore()
 	if err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
@@ -206,9 +202,8 @@ func TestStudyStoreWritesAndRestores(t *testing.T) {
 // **毎回「変わった」ことになり、解析のたびにディスクを叩く。**
 func TestStudyStoreSkipsUnchanged(t *testing.T) {
 	dir := t.TempDir()
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	s := analyzed(t)
-	store := NewStudyStore(logger, dir, s)
+	store := NewStudyStore(dir, s)
 	store.flush()
 	names, _ := store.list()
 	before, err := os.Stat(filepath.Join(dir, names[0]))
@@ -227,8 +222,7 @@ func TestStudyStoreSkipsUnchanged(t *testing.T) {
 
 // ⚠️ **控えが 1 つも無くても起動が通ること**（設計原則3）。
 func TestStudyStoreRestoreWithoutFiles(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	ok, err := NewStudyStore(logger, filepath.Join(t.TempDir(), "まだ無い"), empty(t)).Restore()
+	ok, err := NewStudyStore(filepath.Join(t.TempDir(), "まだ無い"), empty(t)).Restore()
 	if err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
@@ -329,7 +323,6 @@ func TestStudySessionKeepsGameID(t *testing.T) {
 // 棚の棋譜を開き直すと**前の検討がそのまま戻ること**（Step 2 の目的）。
 func TestStudyStoreRestoreGame(t *testing.T) {
 	dir := t.TempDir()
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	s := adopted(t)
 	loaded(t, s, "game-1")
 	record(t, s, "e1", score(70))
@@ -341,12 +334,12 @@ func TestStudyStoreRestoreGame(t *testing.T) {
 		t.Fatalf("Play: %v", err)
 	}
 	record(t, s, "e1", score(-40))
-	store := NewStudyStore(logger, dir, s)
+	store := NewStudyStore(dir, s)
 	store.flush()
 
 	// 別のアプリを立ち上げた、のつもり。
 	back := empty(t)
-	other := NewStudyStore(logger, dir, back)
+	other := NewStudyStore(dir, back)
 	// ⚠️ **別の棋譜の控えを開かないこと**（索引が id で引けている歯止め）。
 	if _, ok := other.RestoreGame("game-2"); ok {
 		t.Error("解析していない棋譜の控えを開いています")
@@ -367,10 +360,9 @@ func TestStudyStoreRestoreGame(t *testing.T) {
 // **それが普通**で、棚に入っているほうが特別。
 func TestStudyStoreIgnoresSessionsWithoutGame(t *testing.T) {
 	dir := t.TempDir()
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	store := NewStudyStore(logger, dir, analyzed(t))
+	store := NewStudyStore(dir, analyzed(t))
 	store.flush()
-	other := NewStudyStore(logger, dir, empty(t))
+	other := NewStudyStore(dir, empty(t))
 	if _, ok := other.RestoreGame(""); ok {
 		t.Error("空の id で開けてしまいます")
 	}
@@ -379,8 +371,7 @@ func TestStudyStoreIgnoresSessionsWithoutGame(t *testing.T) {
 // ⚠️ **控えが無い棋譜では黙って false を返すこと**（設計原則3）。
 // **「解析する」が押せなくなってはいけない。**
 func TestStudyStoreRestoreGameMissing(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	store := NewStudyStore(logger, t.TempDir(), empty(t))
+	store := NewStudyStore(t.TempDir(), empty(t))
 	if _, ok := store.RestoreGame("game-9"); ok {
 		t.Error("無い控えを開いたことになっています")
 	}
@@ -390,17 +381,16 @@ func TestStudyStoreRestoreGameMissing(t *testing.T) {
 // 人が「この棋譜を解析する」と言っているのだから、入れ替えるのが正しい。
 func TestStudyStoreRestoreGameReplacesLiveStudy(t *testing.T) {
 	dir := t.TempDir()
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	s := adopted(t)
 	loaded(t, s, "game-1")
-	NewStudyStore(logger, dir, s).flush()
+	NewStudyStore(dir, s).flush()
 
 	// 別の検討をしている最中に開く。
 	live := adopted(t)
 	if _, err := live.Play("7g7f"); err != nil {
 		t.Fatalf("Play: %v", err)
 	}
-	if _, ok := NewStudyStore(logger, dir, live).RestoreGame("game-1"); !ok {
+	if _, ok := NewStudyStore(dir, live).RestoreGame("game-1"); !ok {
 		t.Fatal("始まっている検討の上から開けません")
 	}
 	rec, _ := live.sessionRecord()
@@ -413,10 +403,9 @@ func TestStudyStoreRestoreGameReplacesLiveStudy(t *testing.T) {
 // あいだに入れ替えると、**直前までの手と評価値が前のセッションから落ちる。**
 func TestStudyStoreSavesBeforeSwitching(t *testing.T) {
 	dir := t.TempDir()
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	s := adopted(t)
 	loaded(t, s, "game-1")
-	store := NewStudyStore(logger, dir, s)
+	store := NewStudyStore(dir, s)
 	store.Start()
 	defer store.Close()
 

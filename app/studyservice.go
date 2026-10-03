@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -11,6 +10,7 @@ import (
 	"github.com/ShinteLab/core/kifu"
 	"github.com/ShinteLab/ikkyoku/analyze"
 	"github.com/ShinteLab/ikkyoku/legal"
+	"github.com/ShinteLab/ikkyoku/log"
 	"github.com/ShinteLab/ikkyoku/position"
 )
 
@@ -42,7 +42,6 @@ import (
 // **手順は木**（2026-08-13）。戻って別の手を指すと**枝が生える**（前の手順は消えない）。
 // 木の形の最終形は `core/kifu` が持てるようになってから決める（`position` に仮置き）。
 type StudyService struct {
-	logger *slog.Logger
 	// src は訂正タブの局面。**読むのは Adopt の瞬間だけ。**
 	src *PositionService
 
@@ -147,8 +146,8 @@ type StudyService struct {
 	evals evalStore
 }
 
-func NewStudyService(logger *slog.Logger, src *PositionService) *StudyService {
-	return &StudyService{logger: logger, src: src}
+func NewStudyService(src *PositionService) *StudyService {
+	return &StudyService{src: src}
 }
 
 // StudyState は解析タブが描くのに要るもの一式。
@@ -311,7 +310,7 @@ func (s *StudyService) Adopt() (st StudyState, err error) {
 	st = s.changed()
 	s.mu.Unlock()
 
-	s.logger.Info("局面を解析タブへ採りました", "sfen", st.SFEN, "rotated", rotated)
+	log.Info("局面を解析タブへ採りました", "sfen", st.SFEN, "rotated", rotated)
 	return st, nil
 }
 
@@ -385,7 +384,7 @@ func (s *StudyService) resumeByKey(key, text string) (KifuLoad, bool) {
 	}
 	load, err := s.graftKifu(text)
 	if err != nil {
-		s.logger.Warn("前の検討に棋譜を据え直せませんでした", "key", key, "error", err)
+		log.Warn("前の検討に棋譜を据え直せませんでした", "key", key, "error", err)
 		return KifuLoad{State: st, Summary: "前の検討の続きを開きました",
 			Note: "棋譜は読めませんでした"}, true
 	}
@@ -412,7 +411,7 @@ func (s *StudyService) linkGame(key, gameID string) bool {
 	st := s.changed()
 	s.mu.Unlock()
 	s.publish(st, nil)
-	s.logger.Info("今の検討を棋譜タブの棋譜に結びました", "gameId", gameID)
+	log.Info("今の検討を棋譜タブの棋譜に結びました", "gameId", gameID)
 	return true
 }
 
@@ -464,7 +463,7 @@ func (s *StudyService) loadKifuFrom(text, sourceURL, gameID, key string) (load K
 	st := s.changed()
 	s.mu.Unlock()
 
-	s.logger.Info("棋譜を読み込みました",
+	log.Info("棋譜を読み込みました",
 		"moves", k.Loaded, "total", k.Total, "note", k.Note, "url", s.sourceURL)
 	return KifuLoad{State: st, Summary: kifuSummary(k), Note: k.Note}, nil
 }
@@ -511,7 +510,7 @@ func (s *StudyService) LoadKifuURL(rawURL string) (KifuLoad, error) {
 	if err != nil {
 		return KifuLoad{State: s.State()}, err
 	}
-	s.logger.Info("棋譜を取得しました", "url", got.URL, "encoding", got.Encoding, "bytes", len(got.Text))
+	log.Info("棋譜を取得しました", "url", got.URL, "encoding", got.Encoding, "bytes", len(got.Text))
 
 	// ⚠️ **棚の行は無い**（URL から取っただけで棚には入っていない）。
 	load, err := s.loadKifuFrom(got.Text, got.URL, "", "")
@@ -587,7 +586,7 @@ func (s *StudyService) SetKifuFollow(on bool) (st StudyState, err error) {
 		return s.state(), nil
 	}
 	s.kifuFollow = on
-	s.logger.Info("棋譜の自動更新", "on", on, "url", s.sourceURL)
+	log.Info("棋譜の自動更新", "on", on, "url", s.sourceURL)
 	// ⚠️ **`changed` ではなく版だけ進める** —— 控え（`markDirty`）に書く中身は
 	// 何も変わっていない。版を進めないと、`study:changed` を受けた窓が
 	// 「既に描いた版」として捨てる。
@@ -674,7 +673,7 @@ func (s *StudyService) reloadKifu(advance bool) (load KifuLoad, err error) {
 			note += "／" + msg
 		}
 	}
-	s.logger.Info("棋譜を取り直しました", "url", got.URL, "moves", k.Loaded,
+	log.Info("棋譜を取り直しました", "url", got.URL, "moves", k.Loaded,
 		"kept", graft.Kept, "added", graft.Added, "movedAt", graft.MovedAt,
 		"auto", advance, "followed", followed)
 	return KifuLoad{State: st, Summary: summary, Note: note,
@@ -719,7 +718,7 @@ func (s *StudyService) graftKifu(text string) (load KifuLoad, err error) {
 			note += "／" + msg
 		}
 	}
-	s.logger.Info("前の検討に棋譜を据え直しました",
+	log.Info("前の検討に棋譜を据え直しました",
 		"moves", k.Loaded, "kept", graft.Kept, "added", graft.Added, "movedAt", graft.MovedAt)
 	return KifuLoad{State: st, Summary: kifuSummary(k), Note: note}, nil
 }
@@ -870,7 +869,7 @@ func (s *StudyService) NewGame(handicap string) (load KifuLoad, err error) {
 	st := s.changed()
 	s.mu.Unlock()
 
-	s.logger.Info("新しい対局を作りました", "handicap", name, "sfen", st.SFEN)
+	log.Info("新しい対局を作りました", "handicap", name, "sfen", st.SFEN)
 	summary := fmt.Sprintf("%sで対局を始めました", name)
 	if name != position.Hirate {
 		// ⚠️ **駒落ちは上手（後手）から指す。** 盤を見ただけでは手番が分からず、

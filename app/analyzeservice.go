@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"sort"
 	"strings"
 	"sync"
@@ -12,6 +11,7 @@ import (
 	coreusi "github.com/ShinteLab/core/usi"
 	"github.com/ShinteLab/ikkyoku"
 	"github.com/ShinteLab/ikkyoku/analyze"
+	"github.com/ShinteLab/ikkyoku/log"
 )
 
 // AnalyzeService は確定した局面をエンジンに解析させる Service（Phase 4）。
@@ -61,7 +61,6 @@ import (
 // ⚠️ **どのイベントにも engineId が載る。** 複数のエンジンが同時に喋るので、
 // **seq だけでは行き先を決められない**（フロントはエンジンごとに表示を持つ）。
 type AnalyzeService struct {
-	logger *slog.Logger
 	// study は**解析タブが持っている確定局面**。⚠️ **PositionService（訂正タブ）
 	// を直に見ないこと** —— あちらは訂正の途中の、まだ決めていない局面で、
 	// その評価値には意味が無い。
@@ -130,8 +129,8 @@ type AnalyzeEngine struct {
 	Builtin bool `json:"builtin"`
 }
 
-func NewAnalyzeService(logger *slog.Logger, study *StudyService, settings *SettingsService) *AnalyzeService {
-	return &AnalyzeService{logger: logger, study: study, settings: settings}
+func NewAnalyzeService(study *StudyService, settings *SettingsService) *AnalyzeService {
+	return &AnalyzeService{study: study, settings: settings}
 }
 
 // close は走っている解析を打ち切り、エンジンが終わるまで待つ（アプリの終了時）。
@@ -152,7 +151,7 @@ func (s *AnalyzeService) Close() {
 		select {
 		case <-done:
 		case <-time.After(engineShutdownWait):
-			s.logger.Warn("エンジンの終了を待ちきれませんでした")
+			log.Warn("エンジンの終了を待ちきれませんでした")
 		}
 	}
 	// ⚠️ **打ち切っただけではプロセスは終わらない**（接続を使い回すので、
@@ -333,7 +332,7 @@ func (s *AnalyzeService) CheckEngine(id string) EngineCheck {
 	info, err := newSession(entry).Connect(ctx)
 	if err != nil {
 		out.Error = err.Error()
-		s.logger.Warn("エンジンに繋げませんでした", "id", entry.ID, "path", entry.Path, "error", err)
+		log.Warn("エンジンに繋げませんでした", "id", entry.ID, "path", entry.Path, "error", err)
 		return out
 	}
 	out.OK = true
@@ -347,7 +346,7 @@ func (s *AnalyzeService) CheckEngine(id string) EngineCheck {
 	// 結び付いているのが素直（保存の操作では繋がない、という線引きは変えていない）。
 	s.settings.setEngineOptionSpecs(entry.ID, engineOptions(info.Declared))
 	s.rememberEngine(entry.ID, info.Name)
-	s.logger.Info("エンジンに繋がりました",
+	log.Info("エンジンに繋がりました",
 		"id", entry.ID, "name", info.Name, "path", entry.Path,
 		"options", info.Options, "applied", info.Applied, "startupMs", info.StartupMS)
 	return out
@@ -515,7 +514,7 @@ func (s *AnalyzeService) Start(seconds int) (AnalyzeState, error) {
 		select {
 		case <-prev:
 		case <-time.After(cancelGrace):
-			s.logger.Warn("前の解析が畳まれるのを待ちきれませんでした。重なったまま始めます")
+			log.Warn("前の解析が畳まれるのを待ちきれませんでした。重なったまま始めます")
 		}
 	}
 
@@ -609,7 +608,7 @@ func (s *AnalyzeService) runOne(
 		})
 	})
 	if err != nil {
-		s.logger.Warn("解析できませんでした",
+		log.Warn("解析できませんでした",
 			"engine", label, "id", entry.ID, "sfen", target.Root, "error", err)
 		s.emit("analyze:failed", AnalyzeFailure{Seq: seq, EngineID: entry.ID, Error: err.Error()})
 		return
@@ -621,7 +620,7 @@ func (s *AnalyzeService) runOne(
 	// 連続解析では手数ぶん**出るので、151 手の棋譜を通すとこの行だけでログが埋まる
 	// （エンジンを 2 つ有効にすればその倍）。**消したのではなく黙らせただけ**なので、
 	// 追うときはハンドラの Level を debug にすること。
-	s.logger.Debug("解析しました",
+	log.Debug("解析しました",
 		"engine", res.Engine, "id", entry.ID, "sfen", target.Root, "depth", res.Depth,
 		"best", res.Bestmove, "nodes", res.Nodes,
 		"elapsedMs", res.ElapsedMS, "startupMs", res.StartupMS, "reused", res.Reused,
@@ -695,12 +694,12 @@ func (s *AnalyzeService) SolveMate(seconds int) (MateSolution, error) {
 	res, err := s.sessionFor(entry).Mate(context.Background(), target.Current,
 		analyze.MateOptions{Limit: limit, MultiPV: entry.MultiPV()}, nil)
 	if err != nil {
-		s.logger.Warn("詰み探索に失敗しました",
+		log.Warn("詰み探索に失敗しました",
 			"engine", entry.DisplayName(), "sfen", target.Current, "error", err)
 		return MateSolution{}, err
 	}
 	s.rememberEngine(entry.ID, res.Engine)
-	s.logger.Info("詰み探索が終わりました",
+	log.Info("詰み探索が終わりました",
 		"engine", res.Engine, "kind", string(res.Kind), "moves", len(res.Moves),
 		"elapsedMs", res.ElapsedMS, "sfen", target.Current)
 

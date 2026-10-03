@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -113,8 +112,7 @@ func TestStudyServiceReloadFromBroadcastPage(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	s := NewStudyService(logger, NewPositionService(logger))
+	s := NewStudyService(NewPositionService())
 	if _, err := s.LoadKifuURL(srv.URL + "/live.html"); err != nil {
 		t.Fatalf("LoadKifuURL: %v", err)
 	}

@@ -1,8 +1,6 @@
 package app
 
 import (
-	"io"
-	"log/slog"
 	"strings"
 	"testing"
 )
@@ -15,9 +13,8 @@ const (
 // storedStudy は控えを自動保存する解析タブを返す（**Start まで済ませる**）。
 func storedStudy(t *testing.T, dir string) (*StudyService, *StudyStore) {
 	t.Helper()
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	s := NewStudyService(logger, NewPositionService(logger))
-	store := NewStudyStore(logger, dir, s)
+	s := NewStudyService(NewPositionService())
+	store := NewStudyStore(dir, s)
 	store.Start()
 	t.Cleanup(func() { _ = store.Close() })
 	return s, store
@@ -101,8 +98,7 @@ func TestStudyServiceLoadKifuResumesPastedStudy(t *testing.T) {
 func TestKifuServiceSendToStudyGameResumes(t *testing.T) {
 	dir := t.TempDir()
 	s, store := storedStudy(t, dir)
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	svc := NewKifuService(logger, s)
+	svc := NewKifuService(s)
 	svc.Store = store
 
 	card := GameDetail{GameSummary: GameSummary{Source: "jsa", SourceID: "live-1"}, KIF: keyKifA}
@@ -160,8 +156,7 @@ func TestStudyStoreLinkGameCurrent(t *testing.T) {
 	}
 	// 別のアプリから棋譜タブの「解析する」で開ける（**すぐ書かれていること**）。
 	back := empty(t)
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if _, ok := NewStudyStore(logger, dir, back).RestoreGame("game-1"); !ok {
+	if _, ok := NewStudyStore(dir, back).RestoreGame("game-1"); !ok {
 		t.Error("結んだ検討が棋譜タブから開けません")
 	}
 }

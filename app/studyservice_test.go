@@ -2,7 +2,6 @@ package app
 
 import (
 	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -19,15 +18,14 @@ const hirateBoard = "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL"
 // adopted は初期局面を採った StudyService を返す。
 func adopted(t *testing.T) *StudyService {
 	t.Helper()
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	pos := NewPositionService(logger)
+	pos := NewPositionService()
 	if _, err := pos.Load(hirateBoard, nil); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	if _, err := pos.SetTurn(1); err != nil { // 先手番
 		t.Fatalf("SetTurn: %v", err)
 	}
-	study := NewStudyService(logger, pos)
+	study := NewStudyService(pos)
 	if _, err := study.Adopt(); err != nil {
 		t.Fatalf("Adopt: %v", err)
 	}
@@ -37,15 +35,14 @@ func adopted(t *testing.T) *StudyService {
 // adoptedFrom は**指定した盤面**を採った解析タブを返す（途中の局面を根にする用）。
 func adoptedFrom(t *testing.T, board string) *StudyService {
 	t.Helper()
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	pos := NewPositionService(logger)
+	pos := NewPositionService()
 	if _, err := pos.Load(board, nil); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	if _, err := pos.SetTurn(2); err != nil { // 後手番
 		t.Fatalf("SetTurn: %v", err)
 	}
-	study := NewStudyService(logger, pos)
+	study := NewStudyService(pos)
 	if _, err := study.Adopt(); err != nil {
 		t.Fatalf("Adopt: %v", err)
 	}
@@ -177,15 +174,14 @@ func TestStudyServiceGoToAndDropFrom(t *testing.T) {
 
 // 採り直したら手順ごと入れ替わること。**前の局面の手順を引き継がない。**
 func TestStudyServiceAdoptResetsMoves(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	pos := NewPositionService(logger)
+	pos := NewPositionService()
 	if _, err := pos.Load(hirateBoard, nil); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	if _, err := pos.SetTurn(1); err != nil {
 		t.Fatalf("SetTurn: %v", err)
 	}
-	s := NewStudyService(logger, pos)
+	s := NewStudyService(pos)
 	if _, err := s.Adopt(); err != nil {
 		t.Fatalf("Adopt: %v", err)
 	}
@@ -203,8 +199,7 @@ func TestStudyServiceAdoptResetsMoves(t *testing.T) {
 
 // 何も採っていなければ手は指せない（**エラーで、落ちないこと**）。
 func TestStudyServicePlayWithoutPosition(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	s := NewStudyService(logger, NewPositionService(logger))
+	s := NewStudyService(NewPositionService())
 	if _, err := s.Play("7g7f"); err == nil {
 		t.Error("局面が無いのに指せました")
 	}
@@ -223,8 +218,7 @@ func TestStudyServicePlayWithoutPosition(t *testing.T) {
 // 「この対局を初手から解析する」ためで、連続解析の始点は**今見ている手**なので、
 // 最終手に置くと押す前に必ず戻る操作が要る。
 func TestStudyServiceLoadKifu(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	s := NewStudyService(logger, NewPositionService(logger))
+	s := NewStudyService(NewPositionService())
 
 	load, err := s.LoadKifu("棋戦：テスト戦\n先手：先手太郎\n後手：後手花子\n" +
 		"手数----指手---------消費時間--\n" +
@@ -300,8 +294,7 @@ func TestStudyServiceLoadKifuURL(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	s := NewStudyService(logger, NewPositionService(logger))
+	s := NewStudyService(NewPositionService())
 	load, err := s.LoadKifuURL(srv.URL + "/sample.kif")
 	if err != nil {
 		t.Fatalf("LoadKifuURL: %v", err)
@@ -342,8 +335,7 @@ func TestStudyServiceLoadKifuURLKeepsPositionOnError(t *testing.T) {
 // ⚠️ **採ったときと同じ形（確定した局面 + 空の手順 + 合法手）**で返ること。
 // ここが揃っていないと、始めた直後に駒を押しても何も光らない。
 func TestStudyServiceNewGame(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	s := NewStudyService(logger, NewPositionService(logger))
+	s := NewStudyService(NewPositionService())
 
 	got, err := s.NewGame("平手")
 	if err != nil {
@@ -387,8 +379,7 @@ func TestStudyServiceNewGame(t *testing.T) {
 //   - ⚠️ **`Handicap` が残る**こと —— ここが空だと、棚に保存する段でも
 //     KIF に書き出す段でも**平手の棋譜**になり、そこから先が全部ずれる
 func TestStudyServiceNewGameHandicap(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	s := NewStudyService(logger, NewPositionService(logger))
+	s := NewStudyService(NewPositionService())
 
 	got, err := s.NewGame("二枚落ち")
 	if err != nil {
@@ -449,8 +440,7 @@ func TestStudyServiceReloadKifuKeepsEvals(t *testing.T) {
 	body := kifuHead + "   1 ７六歩(77)\n   2 ３四歩(33)\n"
 	srv := kifuServer(t, &body)
 
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	s := NewStudyService(logger, NewPositionService(logger))
+	s := NewStudyService(NewPositionService())
 	if _, err := s.LoadKifuURL(srv.URL + "/live.kif"); err != nil {
 		t.Fatalf("LoadKifuURL: %v", err)
 	}
@@ -511,8 +501,7 @@ func TestStudyServiceReloadKifuReplacesDivergedMoves(t *testing.T) {
 	body := kifuHead + "   1 ７六歩(77)\n   2 ３四歩(33)\n"
 	srv := kifuServer(t, &body)
 
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	s := NewStudyService(logger, NewPositionService(logger))
+	s := NewStudyService(NewPositionService())
 	if _, err := s.LoadKifuURL(srv.URL + "/live.kif"); err != nil {
 		t.Fatalf("LoadKifuURL: %v", err)
 	}
@@ -581,8 +570,7 @@ func TestStudyServiceReloadKifuKeepsBranchSelection(t *testing.T) {
 	body := kifuHead + "   1 ７六歩(77)\n   2 ３四歩(33)\n   3 ２六歩(27)\n"
 	srv := kifuServer(t, &body)
 
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	s := NewStudyService(logger, NewPositionService(logger))
+	s := NewStudyService(NewPositionService())
 	if _, err := s.LoadKifuURL(srv.URL + "/live.kif"); err != nil {
 		t.Fatalf("LoadKifuURL: %v", err)
 	}
@@ -631,8 +619,7 @@ func TestStudyServiceReloadKifuKeepsMovesOnError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	s := NewStudyService(logger, NewPositionService(logger))
+	s := NewStudyService(NewPositionService())
 	if _, err := s.LoadKifuURL(srv.URL + "/live.kif"); err != nil {
 		t.Fatalf("LoadKifuURL: %v", err)
 	}
@@ -920,8 +907,7 @@ func TestStudyServicePlayLine(t *testing.T) {
 
 // 何も採っていなければ指し継げない（**エラーで、落ちないこと**）。
 func TestStudyServicePlayLineWithoutPosition(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	s := NewStudyService(logger, NewPositionService(logger))
+	s := NewStudyService(NewPositionService())
 	if _, err := s.PlayLine("e1", "7g7f", true); err == nil {
 		t.Error("局面が無いのに指せました")
 	}

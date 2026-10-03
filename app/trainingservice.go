@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 	"image"
-	"log/slog"
 	"time"
 
+	"github.com/ShinteLab/ikkyoku/log"
 	"github.com/ShinteLab/ikkyoku/training"
 )
 
@@ -23,12 +23,11 @@ import (
 // ⚠️ **画面に見えていない駒を知識で補った訂正は送らないこと**（テロップで盤が
 // 隠れている等）。ラベルが画素と一致しなくなる。これも自動送信にしない理由。
 type TrainingService struct {
-	logger   *slog.Logger
 	settings *SettingsService
 }
 
-func NewTrainingService(logger *slog.Logger, settings *SettingsService) *TrainingService {
-	return &TrainingService{logger: logger, settings: settings}
+func NewTrainingService(settings *SettingsService) *TrainingService {
+	return &TrainingService{settings: settings}
 }
 
 // TrainingStatus は「今このサーバに送ってよいか」の問い合わせ結果。
@@ -77,7 +76,7 @@ func (s *TrainingService) Status() TrainingStatus {
 	res, err := c.Status(ctx)
 	if err != nil {
 		st.Error = err.Error()
-		s.logger.Info("suteme の状態を取れませんでした", "target", target, "error", err)
+		log.Info("suteme の状態を取れませんでした", "target", target, "error", err)
 		return st
 	}
 	st.Reachable = true
@@ -135,10 +134,10 @@ func (s *TrainingService) Send(path, sfen string, x1, y1, x2, y2 int) (TrainingS
 		Bounds:    image.Rect(x1, y1, x2, y2),
 	})
 	if err != nil {
-		s.logger.Warn("訂正データを登録できませんでした", "target", c.BaseURL, "path", path, "error", err)
+		log.Warn("訂正データを登録できませんでした", "target", c.BaseURL, "path", path, "error", err)
 		return TrainingSendResult{}, err
 	}
-	s.logger.Info("訂正データを登録しました",
+	log.Info("訂正データを登録しました",
 		"target", c.BaseURL, "id", res.ID, "duplicate", res.Duplicate, "path", path)
 	return TrainingSendResult{ID: res.ID, Duplicate: res.Duplicate, Entries: res.Entries}, nil
 }

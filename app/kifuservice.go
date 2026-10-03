@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ShinteLab/ikkyoku/log"
 	"github.com/ShinteLab/kicho"
 	"github.com/ShinteLab/kicho/store"
 )
@@ -39,8 +40,6 @@ import (
 // 「取得して内容を確認 → その表示内容をそのまま保存」という流れにするのが目的で、
 // 保存時にサイトへ取り直しには行かない（kicho の役割分担をそのまま引き継ぐ）。
 type KifuService struct {
-	logger *slog.Logger
-
 	// study は「解析する」の行き先（SendToStudy）。
 	//
 	// ⚠️ **`PositionService`（訂正タブ）は持たない。** 棋譜は既に確定した局面なので
@@ -70,8 +69,8 @@ type KifuService struct {
 //
 // 開くのは open（main が起動時に、設定タブがパスを変えたときに呼ぶ）。
 // **コンストラクタで開かないのは、開けなかったときにアプリを止めないため。**
-func NewKifuService(logger *slog.Logger, study *StudyService) *KifuService {
-	return &KifuService{logger: logger, study: study}
+func NewKifuService(study *StudyService) *KifuService {
+	return &KifuService{study: study}
 }
 
 // 操作ごとの制限時間。
@@ -113,7 +112,7 @@ func (s *KifuService) openLocked(path string) {
 	if s.lib != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), kifuCloseTimeout)
 		if err := s.lib.Close(ctx); err != nil {
-			s.logger.Warn("棋譜データベースを閉じられませんでした", "path", s.path, "error", err)
+			log.Warn("棋譜データベースを閉じられませんでした", "path", s.path, "error", err)
 		}
 		cancel()
 		s.lib = nil
@@ -122,17 +121,17 @@ func (s *KifuService) openLocked(path string) {
 
 	if strings.TrimSpace(path) == "" {
 		s.openErr = fmt.Errorf("棋譜データベースの場所が決まっていません")
-		s.logger.Warn("棋譜データベースの場所が決まっていません")
+		log.Warn("棋譜データベースの場所が決まっていません")
 		return
 	}
-	lib, err := kicho.Open(path, s.logger)
+	lib, err := kicho.Open(path, slog.Default())
 	if err != nil {
 		s.openErr = describeOpenError(err)
-		s.logger.Warn("棋譜データベースを開けませんでした", "path", path, "error", s.openErr)
+		log.Warn("棋譜データベースを開けませんでした", "path", path, "error", s.openErr)
 		return
 	}
 	s.lib = lib
-	s.logger.Info("棋譜データベースを開きました", "path", path)
+	log.Info("棋譜データベースを開きました", "path", path)
 }
 
 // describeOpenError は棚を開けなかった理由に、ikkyoku 側の直し方を足す。
@@ -194,7 +193,7 @@ func (s *KifuService) Close() {
 	ctx, cancel := context.WithTimeout(context.Background(), kifuCloseTimeout)
 	defer cancel()
 	if err := s.lib.Close(ctx); err != nil {
-		s.logger.Warn("棋譜データベースを閉じられませんでした", "path", s.path, "error", err)
+		log.Warn("棋譜データベースを閉じられませんでした", "path", s.path, "error", err)
 	}
 	s.lib = nil
 }
@@ -619,7 +618,7 @@ func (s *KifuService) SendToStudy(id string) (KifuLoad, error) {
 	// 棋譜が読めなかったことだけを断って返す。
 	load, err := s.study.graftKifu(d.KIF)
 	if err != nil {
-		s.logger.Warn("棋譜を据え直せませんでした", "id", d.ID, "error", err)
+		log.Warn("棋譜を据え直せませんでした", "id", d.ID, "error", err)
 		return KifuLoad{State: st, Note: "前の検討を開きました（棚の棋譜は読めませんでした）"}, nil
 	}
 	return load, nil
@@ -1009,6 +1008,6 @@ func (s *KifuService) SaveStudy() (GameSummary, error) {
 	// 載らない**ので、次の起動まで「解析する」が続きから開かない。
 	s.study.setGameID(rec.ID)
 	s.study.saveNow()
-	s.logger.Info("検討を棚に登録しました", "id", rec.ID, "moves", rec.Moves)
+	log.Info("検討を棚に登録しました", "id", rec.ID, "moves", rec.Moves)
 	return toSummary(rec), nil
 }

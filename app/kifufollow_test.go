@@ -2,7 +2,6 @@ package app
 
 import (
 	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -14,8 +13,7 @@ import (
 func followService(t *testing.T, body *string) *StudyService {
 	t.Helper()
 	srv := kifuServer(t, body)
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	s := NewStudyService(logger, NewPositionService(logger))
+	s := NewStudyService(NewPositionService())
 	if _, err := s.LoadKifuURL(srv.URL + "/live.kif"); err != nil {
 		t.Fatalf("LoadKifuURL: %v", err)
 	}
@@ -176,8 +174,7 @@ func TestStudyServiceFollowKifuDropsStaleFetch(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	s = NewStudyService(logger, NewPositionService(logger))
+	s = NewStudyService(NewPositionService())
 	if _, err := s.LoadKifuURL(srv.URL + "/live.kif"); err != nil {
 		t.Fatalf("LoadKifuURL: %v", err)
 	}

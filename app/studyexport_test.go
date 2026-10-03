@@ -112,6 +112,7 @@ func TestStudyExportKIFMidGameRoot(t *testing.T) {
 		t.Errorf("開き直すと別の局面です:\n got = %s\nwant = %s", gotSFEN, want)
 	}
 }
+
 // 手合割の対局も、その手合割の初期局面として書き出せること。
 func TestStudyExportKIFHandicap(t *testing.T) {
 	s := adopted(t)

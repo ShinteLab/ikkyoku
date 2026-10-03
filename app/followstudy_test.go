@@ -1,8 +1,6 @@
 package app
 
 import (
-	"io"
-	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -14,15 +12,14 @@ import (
 // following は「初期局面を採った解析タブ」と「撮った局面を置く訂正タブ」を返す。
 func following(t *testing.T) (*StudyService, *PositionService) {
 	t.Helper()
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	pos := NewPositionService(logger)
+	pos := NewPositionService()
 	if _, err := pos.Load(hirateBoard, nil); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	if _, err := pos.SetTurn(1); err != nil {
 		t.Fatalf("SetTurn: %v", err)
 	}
-	study := NewStudyService(logger, pos)
+	study := NewStudyService(pos)
 	if _, err := study.Adopt(); err != nil {
 		t.Fatalf("Adopt: %v", err)
 	}
@@ -308,12 +305,11 @@ func TestFollowApplyKeepsEvals(t *testing.T) {
 
 // 解析タブに何も無ければ断ること（繋ぐ先が無い）。**理由を出す。**
 func TestFollowProbeWithoutStudy(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	pos := NewPositionService(logger)
+	pos := NewPositionService()
 	if _, err := pos.Load(hirateBoard, nil); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	s := NewStudyService(logger, pos)
+	s := NewStudyService(pos)
 	if _, err := s.FollowProbe(); err == nil {
 		t.Fatal("繋ぐ先が無いのに通りました")
 	}

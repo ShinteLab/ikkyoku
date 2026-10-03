@@ -10,7 +10,6 @@ import (
 	_ "image/gif"  // 画像ファイルの読み込み（loadImage）
 	_ "image/jpeg" // 同上
 	"image/png"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,6 +20,7 @@ import (
 
 	"github.com/ShinteLab/ikkyoku"
 	"github.com/ShinteLab/ikkyoku/guide"
+	"github.com/ShinteLab/ikkyoku/log"
 	"github.com/ShinteLab/ikkyoku/recognize"
 )
 
@@ -74,8 +74,7 @@ type CaptureService struct {
 	// メイン画面がどちらであっても撮る基準は枠のまま。枠は隠されていても HWND が
 	// 生きているため領域の定義自体は有効だが、**撮るのは枠が出ているときだけ**
 	// (Capture の requireFrame)。
-	wins   *appWindows
-	logger *slog.Logger
+	wins *appWindows
 
 	// beforeQuit は枠のメニューの「終了」から呼ぶ後始末（ウィンドウ位置の保存・
 	// エンジンとの接続の close）。**終了の入口が 2 つある**ので、中身は
@@ -232,9 +231,8 @@ type CaptureService struct {
 	onPaneShowFailed func(kind string)
 }
 
-func NewCaptureService(logger *slog.Logger, recognizerDir, recognizerSource string) *CaptureService {
+func NewCaptureService(recognizerDir, recognizerSource string) *CaptureService {
 	return &CaptureService{
-		logger:           logger,
 		recognizerDir:    recognizerDir,
 		recognizerSource: recognizerSource,
 	}
@@ -306,18 +304,18 @@ func (s *CaptureService) loadRecognizer() RecognizerStatus {
 		// 帯の判定器は**推論器が読めなくても読む**(下の dir と同じ理由)。
 		if n, err := recognize.UseStripJudgeEmbedded(); err != nil {
 			st.StripError = err.Error()
-			s.logger.Warn("焼き込んだ帯の判定器を読み込めませんでした(盤の位置が 1マス滑ることがあります)", "error", err)
+			log.Warn("焼き込んだ帯の判定器を読み込めませんでした(盤の位置が 1マス滑ることがあります)", "error", err)
 		} else {
 			st.StripSamples = n
-			s.logger.Info("焼き込んだ帯の判定器を読み込みました", "samples", n)
+			log.Info("焼き込んだ帯の判定器を読み込みました", "samples", n)
 		}
 		if err := recognize.UsePredictorEmbedded(); err != nil {
 			st.Error = err.Error()
-			s.logger.Warn("焼き込んだ駒種推論器を読み込めませんでした", "error", err)
+			log.Warn("焼き込んだ駒種推論器を読み込めませんでした", "error", err)
 			return st
 		}
 		st.Ready = true
-		s.logger.Info("焼き込んだ駒種推論器を読み込みました", "source", st.Source)
+		log.Info("焼き込んだ駒種推論器を読み込みました", "source", st.Source)
 		return st
 
 	case ikkyoku.SutemeSourceDir:
@@ -326,19 +324,19 @@ func (s *CaptureService) loadRecognizer() RecognizerStatus {
 		// 駒種推論器は要らない(ガイド枠の自動フィット recognize.DetectRegion がそれ)。
 		if n, err := recognize.UseStripJudgeFrom(dir); err != nil {
 			st.StripError = err.Error()
-			s.logger.Warn("盤の縁の帯の判定器を読み込めませんでした(盤の位置が 1マス滑ることがあります)",
+			log.Warn("盤の縁の帯の判定器を読み込めませんでした(盤の位置が 1マス滑ることがあります)",
 				"dir", dir, "error", err)
 		} else {
 			st.StripSamples = n
-			s.logger.Info("盤の縁の帯の判定器を読み込みました", "dir", dir, "samples", n)
+			log.Info("盤の縁の帯の判定器を読み込みました", "dir", dir, "samples", n)
 		}
 		if err := recognize.UsePredictorFrom(dir); err != nil {
 			st.Error = err.Error()
-			s.logger.Warn("駒種推論器を読み込めませんでした", "dir", dir, "error", err)
+			log.Warn("駒種推論器を読み込めませんでした", "dir", dir, "error", err)
 			return st
 		}
 		st.Ready = true
-		s.logger.Info("駒種推論器を読み込みました", "dir", dir)
+		log.Info("駒種推論器を読み込みました", "dir", dir)
 		return st
 
 	default:
@@ -346,7 +344,7 @@ func (s *CaptureService) loadRecognizer() RecognizerStatus {
 		// 実際に読めるかどうかは最初のキャプチャのときに分かる。
 		recognize.UseDefaultPredictor()
 		recognize.UseDefaultStripJudge()
-		s.logger.Info("suteme のデータは既定探索に任せます")
+		log.Info("suteme のデータは既定探索に任せます")
 		return st
 	}
 }
@@ -542,7 +540,7 @@ func (s *CaptureService) Quit() {
 	if s.beforeQuit != nil {
 		s.beforeQuit()
 	}
-	s.logger.Info("終了します")
+	log.Info("終了します")
 	s.app.Quit()
 }
 
@@ -562,7 +560,7 @@ func (s *CaptureService) RepairMain() {
 	if s.wins == nil || s.wins.main == nil {
 		return
 	}
-	s.logger.Info("メイン画面を描き直します")
+	log.Info("メイン画面を描き直します")
 	s.wins.main.Hide()
 	s.revealMain()
 }
@@ -633,7 +631,7 @@ func (s *CaptureService) applyClickThrough(on bool) {
 		ch := make(chan struct{})
 		s.clickStop = ch
 		s.mu.Unlock()
-		s.logger.Info("枠の内側を素通しにします")
+		log.Info("枠の内側を素通しにします")
 		go s.watchCursor(ch)
 		return
 	}
@@ -642,7 +640,7 @@ func (s *CaptureService) applyClickThrough(on bool) {
 		close(stop)
 	}
 	s.setMouseThrough(false)
-	s.logger.Info("枠の素通しをやめます")
+	log.Info("枠の素通しをやめます")
 }
 
 // watchCursor はカーソルが「撮る範囲の内側」に居るあいだだけ枠を素通しにする。
@@ -712,7 +710,7 @@ func (s *CaptureService) setMouseThrough(on bool) {
 		return
 	}
 	if err := setMouseTransparent(hwnd, on); err != nil {
-		s.logger.Warn("枠の素通しを切り替えられませんでした", "on", on, "error", err)
+		log.Warn("枠の素通しを切り替えられませんでした", "on", on, "error", err)
 		return
 	}
 	s.mouseThrough = on
@@ -933,10 +931,10 @@ func (s *CaptureService) CaptureQuiet() (CaptureResult, error) {
 				s.mu.Lock()
 				s.boardAnchor, s.anchorRegion = got, region
 				s.mu.Unlock()
-				s.logger.Info("枠が動いたので追う盤を取り直しました", "board", got.Board)
+				log.Info("枠が動いたので追う盤を取り直しました", "board", got.Board)
 			} else if same, why := anchor.Matches(got); !same {
 				result.OffBoard, result.OffBoardReason = true, why
-				s.logger.Info("別の盤と判断しました", "reason", why,
+				log.Info("別の盤と判断しました", "reason", why,
 					"master", anchor.Board, "got", got.Board,
 					"colorGap", anchor.ColorGap(got))
 			}
@@ -1032,12 +1030,10 @@ func (s *CaptureService) gate(img image.Image) string {
 		}
 		// ⚠️ **ここが「黙って止まらない」ための保険**（2026-09-18）。
 		// **ふるいが外していても、いずれ読む。**
-		if s.logger != nil {
-			s.logger.Info("変化が無いまま続いたので 1 枚読みます（ふるいの取りこぼしの確認）",
-				"省いた周", s.gateSkipped,
-				"いちばん大きかった差", fmt.Sprintf("%.5f", s.gateMaxSkip),
-				"しきい値", gateChangedRatio)
-		}
+		log.Info("変化が無いまま続いたので 1 枚読みます（ふるいの取りこぼしの確認）",
+			"省いた周", s.gateSkipped,
+			"いちばん大きかった差", fmt.Sprintf("%.5f", s.gateMaxSkip),
+			"しきい値", gateChangedRatio)
 		return read()
 	}
 	return read() // 変化したあと静止した ＝ 読むならこの 1 枚
@@ -1164,7 +1160,7 @@ func (s *CaptureService) noteQuiet(r CaptureResult) {
 	s.quietOutcome = kind
 	s.mu.Unlock()
 	if changed {
-		s.logger.Info(msg, "reason", r.OffBoardReason, "confidence", r.Confidence)
+		log.Info(msg, "reason", r.OffBoardReason, "confidence", r.Confidence)
 	}
 }
 
@@ -1200,7 +1196,7 @@ func (s *CaptureService) AnchorBoard() (CaptureResult, error) {
 	s.mu.Lock()
 	s.boardAnchor, s.anchorRegion = sig, region
 	s.mu.Unlock()
-	s.logger.Info("追う盤を決めました", "board", sig.Board, "color", sig.Color, "dir", dir)
+	log.Info("追う盤を決めました", "board", sig.Board, "color", sig.Color, "dir", dir)
 	return r, nil
 }
 
@@ -1215,7 +1211,7 @@ func (s *CaptureService) AnchorBoard() (CaptureResult, error) {
 func (s *CaptureService) startFollowDir() string {
 	base, err := ikkyoku.DefaultOutDir()
 	if err != nil {
-		s.logger.Warn("録画の保存先が決められません", "error", err)
+		log.Warn("録画の保存先が決められません", "error", err)
 		return ""
 	}
 	// ⚠️ **今撮った 1 枚をそのまま使うこと**（`CaptureQuiet` が控えている）。
@@ -1227,7 +1223,7 @@ func (s *CaptureService) startFollowDir() string {
 	dir := filepath.Join(base, "follow", time.Now().Format("20060102-150405"))
 	if img != nil {
 		if _, err := ikkyoku.SavePNGAs(img, dir, "master.png"); err != nil {
-			s.logger.Warn("マスタ画像を残せません", "error", err)
+			log.Warn("マスタ画像を残せません", "error", err)
 			return ""
 		}
 	}
@@ -1262,7 +1258,7 @@ func (s *CaptureService) SaveFollowFrame(number int, moves []string, guess bool)
 	name := followFrameName(number, moves, guess)
 	path, err := ikkyoku.SavePNGAs(img, dir, name)
 	if err != nil {
-		s.logger.Warn("採用した画像を残せません", "name", name, "error", err)
+		log.Warn("採用した画像を残せません", "name", name, "error", err)
 		return ""
 	}
 	return path
@@ -1291,17 +1287,17 @@ func (s *CaptureService) SaveConnectFrame(number int, moves []string, fixed bool
 	}
 	base, err := ikkyoku.DefaultOutDir()
 	if err != nil {
-		s.logger.Warn("繋いだ手の画像を残せません", "error", err)
+		log.Warn("繋いだ手の画像を残せません", "error", err)
 		return ""
 	}
 	dir := filepath.Join(base, "connect", time.Now().Format("20060102"))
 	name := connectFrameName(number, moves, fixed)
 	path, err := ikkyoku.SavePNGAs(img, dir, name)
 	if err != nil {
-		s.logger.Warn("繋いだ手の画像を残せません", "name", name, "error", err)
+		log.Warn("繋いだ手の画像を残せません", "name", name, "error", err)
 		return ""
 	}
-	s.logger.Info("繋いだ手の画像を残しました", "path", path, "moves", strings.Join(moves, " "))
+	log.Info("繋いだ手の画像を残しました", "path", path, "moves", strings.Join(moves, " "))
 	return path
 }
 
@@ -1348,10 +1344,10 @@ func (s *CaptureService) SaveFollowMiss(number int, kind string) string {
 	name := followMissName(number, kind, n)
 	path, err := ikkyoku.SavePNGAs(img, dir, name)
 	if err != nil {
-		s.logger.Warn("繋げなかった画像を残せません", "name", name, "error", err)
+		log.Warn("繋げなかった画像を残せません", "name", name, "error", err)
 		return ""
 	}
-	s.logger.Info("繋げなかった周を残しました", "name", name)
+	log.Info("繋げなかった周を残しました", "name", name)
 	return path
 }
 
@@ -1421,7 +1417,7 @@ func (s *CaptureService) ClearBoardAnchor() {
 	s.resetGate()
 	s.mu.Unlock()
 	if shots > 0 {
-		s.logger.Info("追跡を止めました", "撮った枚数", shots, "認識した枚数", reads,
+		log.Info("追跡を止めました", "撮った枚数", shots, "認識した枚数", reads,
 			"省いた割合", fmt.Sprintf("%.0f%%", 100*float64(shots-reads)/float64(shots)))
 	}
 }
@@ -1492,10 +1488,10 @@ func (s *CaptureService) loadImage(path string) (CaptureResult, error) {
 		if err != nil {
 			return CaptureResult{}, err
 		}
-		s.logger.Info("読み込んだ画像を PNG にして控えました", "from", path, "path", saved, "format", format)
+		log.Info("読み込んだ画像を PNG にして控えました", "from", path, "path", saved, "format", format)
 		path = saved
 	}
-	s.logger.Info("画像を読み込みました", "path", path, "format", format,
+	log.Info("画像を読み込みました", "path", path, "format", format,
 		"width", img.Bounds().Dx(), "height", img.Bounds().Dy())
 	return s.deliver(img, path, ImageSourceFile), nil
 }
@@ -1507,7 +1503,7 @@ func (s *CaptureService) deliver(img image.Image, path, source string) CaptureRe
 	var buf bytes.Buffer
 	thumb := ""
 	if err := png.Encode(&buf, img); err != nil {
-		s.logger.Warn("サムネイル用のPNGエンコードに失敗しました", "error", err)
+		log.Warn("サムネイル用のPNGエンコードに失敗しました", "error", err)
 	} else {
 		thumb = "data:image/png;base64," + base64.StdEncoding.EncodeToString(buf.Bytes())
 	}
@@ -1530,7 +1526,7 @@ func (s *CaptureService) deliver(img image.Image, path, source string) CaptureRe
 		Warnings:  []string{},
 		HandTotal: map[string]int{},
 	}
-	s.logger.Info("キャプチャしました", "path", path, "width", b.Dx(), "height", b.Dy(), "source", source)
+	log.Info("キャプチャしました", "path", path, "width", b.Dx(), "height", b.Dy(), "source", source)
 
 	// **撮れたことを先に知らせる。** 認識(下)は数秒かかるので、ここで一度切らないと
 	// 枠は「撮影中…」のまま止まって見え、メイン画面は前の 1 枚を出したままになる。
@@ -1560,14 +1556,14 @@ func (s *CaptureService) deliver(img image.Image, path, source string) CaptureRe
 	// エラーになるのは盤そのものが取れなかったときだけになる。
 	if board, err := recognize.FromImage(img); err != nil {
 		result.RecognizeError = err.Error()
-		s.logger.Warn("盤面を認識できませんでした", "path", path, "error", err)
+		log.Warn("盤面を認識できませんでした", "path", path, "error", err)
 	} else {
 		result.SFEN = board.SFEN
 		result.Confidence = board.Confidence
 		result.Warnings = board.Warnings
 		result.HandTotal = board.HandTotal
 		result.Debug = board.Debug
-		s.logger.Info("盤面を認識しました",
+		log.Info("盤面を認識しました",
 			"sfen", board.SFEN, "confidence", board.Confidence, "warnings", len(board.Warnings),
 			// 盤面と判定した矩形・その決め方・使った推論器の 1 行要約。
 			// 撮り溜めたログから「いつから外し始めたか」を追えるようにしておく。
@@ -1632,7 +1628,7 @@ func (s *CaptureService) FitFrame() (FitResult, error) {
 		}, nil
 	}
 	if b.Dx() < guide.MinBoardPx || b.Dy() < guide.MinBoardPx {
-		s.logger.Info("検出した盤が小さすぎるので合わせませんでした",
+		log.Info("検出した盤が小さすぎるので合わせませんでした",
 			"width", b.Dx(), "height", b.Dy(), "confidence", conf)
 		return FitResult{
 			Confidence: conf,
@@ -1661,7 +1657,7 @@ func (s *CaptureService) FitFrame() (FitResult, error) {
 	// 次回起動で元の位置に戻る。ここで明示的に記録しておく。
 	s.wins.frameGeom.record(s.wins.frame)
 
-	s.logger.Info("ガイド枠を盤に合わせました",
+	log.Info("ガイド枠を盤に合わせました",
 		"confidence", conf,
 		"from", fmt.Sprintf("%d,%d,%dx%d", x, y, w, h),
 		"to", fmt.Sprintf("%d,%d,%dx%d", nx, ny, nw, nh))
@@ -1692,17 +1688,17 @@ func (s *CaptureService) findBoard(region ikkyoku.Region) (image.Rectangle, floa
 		b := det.Rect.Sub(img.Bounds().Min).Add(image.Pt(region.X, region.Y))
 		switch {
 		case err != nil:
-			s.logger.Debug("枠の内側には盤がありませんでした", "confidence", det.Confidence)
+			log.Debug("枠の内側には盤がありませんでした", "confidence", det.Confidence)
 		case s.looksLikePartOfBoard(b, region, det.Confidence):
 			// 縦横とも半分に縮む候補は「盤の一部」を掴んでいる可能性が高い。
 			// 採らずに画面全体の探索へ回す(そちらで本来の盤が見つかることがある)。
 		default:
-			s.logger.Info("枠の内側で盤を見つけました",
+			log.Info("枠の内側で盤を見つけました",
 				"rect", b.String(), "confidence", det.Confidence)
 			return b, det.Confidence, nil
 		}
 	} else {
-		s.logger.Warn("枠の内側を撮れませんでした", "error", err)
+		log.Warn("枠の内側を撮れませんでした", "error", err)
 	}
 
 	// 2) 画面全体(枠がいるディスプレイ 1 枚)。
@@ -1716,12 +1712,12 @@ func (s *CaptureService) findBoard(region ikkyoku.Region) (image.Rectangle, floa
 	}
 	det, err := recognize.DetectRegion(img)
 	if err != nil {
-		s.logger.Info("画面に盤が見つかりませんでした",
+		log.Info("画面に盤が見つかりませんでした",
 			"display", disp.String(), "confidence", det.Confidence, "error", err)
 		return image.Rectangle{}, det.Confidence, nil
 	}
 	b := det.Rect.Sub(img.Bounds().Min).Add(image.Pt(disp.X, disp.Y))
-	s.logger.Info("画面の中に盤を見つけました", "rect", b.String(), "confidence", det.Confidence)
+	log.Info("画面の中に盤を見つけました", "rect", b.String(), "confidence", det.Confidence)
 	return b, det.Confidence, nil
 }
 
@@ -1742,7 +1738,7 @@ func (s *CaptureService) looksLikePartOfBoard(board image.Rectangle, region ikky
 	if !guide.TooSmall(board, region) {
 		return false
 	}
-	s.logger.Info("枠の内側で見つけた盤が小さすぎるので採りませんでした",
+	log.Info("枠の内側で見つけた盤が小さすぎるので採りませんでした",
 		"board", fmt.Sprintf("%dx%d", board.Dx(), board.Dy()),
 		"region", fmt.Sprintf("%dx%d", region.Width, region.Height),
 		"confidence", conf)
@@ -1764,7 +1760,7 @@ func (s *CaptureService) frameDisplay(region ikkyoku.Region) (ikkyoku.Region, er
 	}
 	// モニタ構成の隙間などで中心がどこにも入らないとき。撮れないよりはましなので
 	// プライマリに落とす(見つからなければ「盤が見つかりません」になるだけ)。
-	s.logger.Warn("枠がどのディスプレイにも属していません。プライマリを探します", "region", region.String())
+	log.Warn("枠がどのディスプレイにも属していません。プライマリを探します", "region", region.String())
 	return ikkyoku.PrimaryRegion()
 }
 
@@ -1822,7 +1818,7 @@ func (s *CaptureService) applyEvalGraphDetached(detached bool) {
 	if s.app != nil {
 		s.app.Event.Emit("graph:detached", detached)
 	}
-	s.logger.Info("評価値グラフの置き場所を変えました", "detached", detached)
+	log.Info("評価値グラフの置き場所を変えました", "detached", detached)
 }
 
 // initPaneDetached は起動時の切り離しの設定を控える（2026-09-12）。
@@ -1897,7 +1893,7 @@ func (s *CaptureService) syncPaneWindows() {
 		// ⚠️ **出せなかったらドックへ戻すこと**（設計原則3）。設定だけが
 		// 「切り離し」で残ると、**中身がどこにも無いうえ戻す入口も無い。**
 		if !w.win.IsVisible() && s.onPaneShowFailed != nil {
-			s.logger.Warn("窓を出せませんでした。ドックに戻します", "window", w.name)
+			log.Warn("窓を出せませんでした。ドックに戻します", "window", w.name)
 			s.onPaneShowFailed(w.kind)
 		}
 	}
@@ -1917,7 +1913,7 @@ func (s *CaptureService) applyStudyPaneDetached(detached bool) {
 	if s.app != nil {
 		s.app.Event.Emit("side:detached", detached)
 	}
-	s.logger.Info("候補手の置き場所を変えました", "detached", detached)
+	log.Info("候補手の置き場所を変えました", "detached", detached)
 }
 
 // applyMovePaneDetached は**手順の面**の切り離しを窓に反映する（2026-09-12）。
@@ -1936,7 +1932,7 @@ func (s *CaptureService) applyMovePaneDetached(detached bool) {
 	if s.app != nil {
 		s.app.Event.Emit("moves:detached", detached)
 	}
-	s.logger.Info("手順の置き場所を変えました", "detached", detached)
+	log.Info("手順の置き場所を変えました", "detached", detached)
 }
 
 // maskWindows は撮った画像から、まだ写っている自分のウィンドウを塗り潰す。
@@ -1954,7 +1950,7 @@ func (s *CaptureService) applyMovePaneDetached(detached bool) {
 func (s *CaptureService) maskWindows(img image.Image, disp ikkyoku.Region) {
 	rgba, ok := img.(*image.RGBA)
 	if !ok {
-		s.logger.Warn("撮った画像を塗り潰せません(*image.RGBA ではありません)")
+		log.Warn("撮った画像を塗り潰せません(*image.RGBA ではありません)")
 		return
 	}
 	// スクリーン座標 → 撮った画像の座標。
@@ -1977,7 +1973,7 @@ func (s *CaptureService) maskWindows(img image.Image, disp ikkyoku.Region) {
 		}
 		r, err := windowRectPhysical(hwnd)
 		if err != nil {
-			s.logger.Warn("ウィンドウの矩形を取得できませんでした", "window", w.name, "error", err)
+			log.Warn("ウィンドウの矩形を取得できませんでした", "window", w.name, "error", err)
 			continue
 		}
 		rect := image.Rect(r.X, r.Y, r.X+r.Width, r.Y+r.Height).Add(off).Intersect(rgba.Bounds())
@@ -1985,7 +1981,7 @@ func (s *CaptureService) maskWindows(img image.Image, disp ikkyoku.Region) {
 			continue // 別のディスプレイにいる
 		}
 		draw.Draw(rgba, rect, image.NewUniform(color.Black), image.Point{}, draw.Src)
-		s.logger.Debug("ウィンドウを塗り潰しました", "window", w.name, "rect", rect.String())
+		log.Debug("ウィンドウを塗り潰しました", "window", w.name, "rect", rect.String())
 	}
 }
 
@@ -2005,21 +2001,21 @@ func (s *CaptureService) CopyImage(path string) error {
 	}
 	f, err := os.Open(path)
 	if err != nil {
-		s.logger.Warn("画像を開けませんでした", "path", path, "error", err)
+		log.Warn("画像を開けませんでした", "path", path, "error", err)
 		return err
 	}
 	defer f.Close()
 
 	img, err := png.Decode(f)
 	if err != nil {
-		s.logger.Warn("画像を読めませんでした", "path", path, "error", err)
+		log.Warn("画像を読めませんでした", "path", path, "error", err)
 		return err
 	}
 	if err := copyImageToClipboard(img); err != nil {
-		s.logger.Warn("画像をクリップボードに入れられませんでした", "path", path, "error", err)
+		log.Warn("画像をクリップボードに入れられませんでした", "path", path, "error", err)
 		return err
 	}
-	s.logger.Info("画像をクリップボードに入れました", "path", path)
+	log.Info("画像をクリップボードに入れました", "path", path)
 	return nil
 }
 

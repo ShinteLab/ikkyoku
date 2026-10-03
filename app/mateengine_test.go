@@ -1,8 +1,6 @@
 package app
 
 import (
-	"io"
-	"log/slog"
 	"testing"
 
 	ikkyoku "github.com/ShinteLab/ikkyoku"
@@ -71,17 +69,15 @@ func TestSetEngineMate(t *testing.T) {
 // ⚠️ **詰将棋エンジンが無いときは「入れてください」と言うだけ**（設計原則3。
 // 通常の解析を巻き込まない）。
 func TestSolveMateWithoutMateEngine(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	pos := NewPositionService(logger)
+	pos := NewPositionService()
 	if _, err := pos.LoadEmpty(); err != nil {
 		t.Fatalf("LoadEmpty: %v", err)
 	}
-	study := NewStudyService(logger, pos)
+	study := NewStudyService(pos)
 	if _, err := study.Adopt(); err != nil {
 		t.Fatalf("Adopt: %v", err)
 	}
 	s := &AnalyzeService{
-		logger:   logger,
 		study:    study,
 		settings: newTestSettings(t, []ikkyoku.EngineEntry{{ID: "a", Path: "a.exe", Enabled: true}}),
 	}
@@ -96,8 +92,7 @@ func TestSolveMateWithoutMateEngine(t *testing.T) {
 // 畳んだ形で置くと読みづらい。⚠️ **2 本目（余詰）は枝のまま** ——
 // 先に足したほうを黙って押しのけないこと。
 func TestAddLineOnMateProblemBecomesMainLine(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	pos := NewPositionService(logger)
+	pos := NewPositionService()
 	// 1 手詰（後手玉 5一・先手歩 5三・攻方の持駒は金）。
 	if _, err := pos.Load("4k4/9/4P4/9/9/9/9/9/9", nil); err != nil {
 		t.Fatalf("Load: %v", err)
@@ -108,7 +103,7 @@ func TestAddLineOnMateProblemBecomesMainLine(t *testing.T) {
 	if _, err := pos.SetHand(4, true, 1); err != nil { // 4=金 を攻方の駒台へ
 		t.Fatalf("SetHand: %v", err)
 	}
-	study := NewStudyService(logger, pos)
+	study := NewStudyService(pos)
 	if _, err := study.Adopt(); err != nil {
 		t.Fatalf("Adopt: %v", err)
 	}

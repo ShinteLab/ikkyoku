@@ -12,13 +12,14 @@ package app
 import (
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ShinteLab/ikkyoku/log"
 )
 
 // studyStoreDebounce は控えを書くまでの間（**間引き**）。
@@ -40,9 +41,8 @@ const studyStoreKeep = 200
 // Service の公開メソッドは**そのままフロントの API**（bindings）になるので、
 // 控えの出し入れのような**フロントが呼ばないもの**を生やせない。
 type StudyStore struct {
-	logger *slog.Logger
-	dir    string
-	svc    *StudyService
+	dir string
+	svc *StudyService
 
 	wake   chan struct{}
 	done   chan struct{}
@@ -73,9 +73,8 @@ type StudyStore struct {
 }
 
 // NewStudyStore は控えの置き場を用意する（**ディレクトリはまだ作らない**）。
-func NewStudyStore(logger *slog.Logger, dir string, svc *StudyService) *StudyStore {
+func NewStudyStore(dir string, svc *StudyService) *StudyStore {
 	return &StudyStore{
-		logger: logger,
 		dir:    dir,
 		svc:    svc,
 		wake:   make(chan struct{}, 1),
@@ -160,7 +159,7 @@ func (t *StudyStore) flush() {
 	rec.SavedAt = 0
 	body, err := json.Marshal(rec)
 	if err != nil {
-		t.logger.Warn("検討の控えを組み立てられませんでした", "error", err)
+		log.Warn("検討の控えを組み立てられませんでした", "error", err)
 		return
 	}
 	if string(body) == string(t.last) {
@@ -169,12 +168,12 @@ func (t *StudyStore) flush() {
 	rec.SavedAt = time.Now().Unix()
 	out, err := json.Marshal(rec)
 	if err != nil {
-		t.logger.Warn("検討の控えを組み立てられませんでした", "error", err)
+		log.Warn("検討の控えを組み立てられませんでした", "error", err)
 		return
 	}
 	if err := t.write(rec.ID, out); err != nil {
 		// ⚠️ **止めないこと**（設計原則3）。控えが書けなくても解析は続く。
-		t.logger.Warn("検討を控えられませんでした", "id", rec.ID, "dir", t.dir, "error", err)
+		log.Warn("検討を控えられませんでした", "id", rec.ID, "dir", t.dir, "error", err)
 		return
 	}
 	t.last = body
@@ -225,7 +224,7 @@ func (t *StudyStore) Restore() (bool, error) {
 	if b, err := json.Marshal(rec); err == nil {
 		t.last = b
 	}
-	t.logger.Info("前回の検討を戻しました", "id", rec.ID, "path", path)
+	log.Info("前回の検討を戻しました", "id", rec.ID, "path", path)
 	return true, nil
 }
 
@@ -259,7 +258,7 @@ func (t *StudyStore) prune() {
 	}
 	for _, n := range names[:len(names)-studyStoreKeep] {
 		if err := os.Remove(filepath.Join(t.dir, n)); err != nil {
-			t.logger.Warn("古い控えを消せませんでした", "name", n, "error", err)
+			log.Warn("古い控えを消せませんでした", "name", n, "error", err)
 		}
 	}
 }
@@ -286,7 +285,7 @@ func (t *StudyStore) index() {
 	t.keys = map[string]string{}
 	names, err := t.list()
 	if err != nil {
-		t.logger.Warn("控えの索引を作れませんでした", "dir", t.dir, "error", err)
+		log.Warn("控えの索引を作れませんでした", "dir", t.dir, "error", err)
 		return
 	}
 	// ⚠️ **古い順に読むこと**（`list` がそう返す）。同じ棋譜の控えが複数あったら
@@ -373,17 +372,17 @@ func (t *StudyStore) restoreIndexed(lookup func() string, what, value string) (S
 	path := filepath.Join(t.dir, name)
 	body, err := os.ReadFile(path)
 	if err != nil {
-		t.logger.Warn("控えが読めませんでした", "path", path, "error", err)
+		log.Warn("控えが読めませんでした", "path", path, "error", err)
 		return StudyState{}, false
 	}
 	var rec StudyRecord
 	if err := json.Unmarshal(body, &rec); err != nil {
-		t.logger.Warn("控えが読めませんでした", "path", path, "error", err)
+		log.Warn("控えが読めませんでした", "path", path, "error", err)
 		return StudyState{}, false
 	}
 	st, err := t.svc.adoptSession(rec)
 	if err != nil {
-		t.logger.Warn("控えを開けませんでした", "path", path, "error", err)
+		log.Warn("控えを開けませんでした", "path", path, "error", err)
 		return StudyState{}, false
 	}
 	// ⚠️ **開いた中身を `last` に入れること**（復元直後に同じ内容を書き直さない）。
@@ -391,7 +390,7 @@ func (t *StudyStore) restoreIndexed(lookup func() string, what, value string) (S
 	if b, err := json.Marshal(rec); err == nil {
 		t.last = b
 	}
-	t.logger.Info("この棋譜の前の検討を開きました", what, value, "path", path)
+	log.Info("この棋譜の前の検討を開きました", what, value, "path", path)
 	return st, true
 }
 
@@ -425,12 +424,12 @@ func (t *StudyStore) LinkGame(key, gameID string) {
 	path := filepath.Join(t.dir, name)
 	body, err := os.ReadFile(path)
 	if err != nil {
-		t.logger.Warn("控えが読めませんでした", "path", path, "error", err)
+		log.Warn("控えが読めませんでした", "path", path, "error", err)
 		return
 	}
 	var rec StudyRecord
 	if err := json.Unmarshal(body, &rec); err != nil {
-		t.logger.Warn("控えが読めませんでした", "path", path, "error", err)
+		log.Warn("控えが読めませんでした", "path", path, "error", err)
 		return
 	}
 	if rec.GameID != "" {
@@ -447,9 +446,9 @@ func (t *StudyStore) LinkGame(key, gameID string) {
 		return
 	}
 	if err := t.write(rec.ID, out); err != nil {
-		t.logger.Warn("控えに棋譜を結べませんでした", "path", path, "error", err)
+		log.Warn("控えに棋譜を結べませんでした", "path", path, "error", err)
 		return
 	}
 	t.games[gameID] = name
-	t.logger.Info("前の検討を棋譜タブの棋譜に結びました", "gameId", gameID, "path", path)
+	log.Info("前の検討を棋譜タブの棋譜に結びました", "gameId", gameID, "path", path)
 }

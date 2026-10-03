@@ -2,9 +2,9 @@ package app
 
 import (
 	"fmt"
-	"log/slog"
 	"sync"
 
+	"github.com/ShinteLab/ikkyoku/log"
 	"github.com/ShinteLab/ikkyoku/position"
 )
 
@@ -21,8 +21,6 @@ import (
 // 「盤・在庫・警告」を全部返せば、フロント側に局面の写しを持たなくて済む
 // （持つと、Go 側の盤とフロントの盤がずれたときに直しようがない）。
 type PositionService struct {
-	logger *slog.Logger
-
 	mu sync.Mutex
 	// pos は訂正中の局面。まだ何も読んでいなければ nil。
 	pos *position.Position
@@ -55,8 +53,8 @@ type PositionService struct {
 	confidence *[9][9]float64
 }
 
-func NewPositionService(logger *slog.Logger) *PositionService {
-	return &PositionService{logger: logger}
+func NewPositionService() *PositionService {
+	return &PositionService{}
 }
 
 // EditCell は 1 マスの見え方。フロントが盤に重ねる当たり判定と、
@@ -180,7 +178,7 @@ func (s *PositionService) loadBoard(boardSFEN string, conf *[9][9]float64) (Edit
 
 	if err != nil {
 		// 読めなかったところがあっても訂正は始められる。理由だけ返す。
-		s.logger.Warn("盤面を完全には読めませんでした", "error", err)
+		log.Warn("盤面を完全には読めませんでした", "error", err)
 		return st, fmt.Errorf("盤面を完全には読めませんでした: %w", err)
 	}
 	return st, nil

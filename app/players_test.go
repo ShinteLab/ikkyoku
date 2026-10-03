@@ -1,8 +1,6 @@
 package app
 
 import (
-	"io"
-	"log/slog"
 	"testing"
 )
 
@@ -19,9 +17,8 @@ func TestStudyServicePlayers(t *testing.T) {
 手数----指手---------消費時間--
    1 ７六歩(77)   ( 0:16/00:00:16)
 `
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	pos := NewPositionService(logger)
-	s := NewStudyService(logger, pos)
+	pos := NewPositionService()
+	s := NewStudyService(pos)
 
 	load, err := s.LoadKifu(kif)
 	if err != nil {
