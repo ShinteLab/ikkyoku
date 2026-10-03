@@ -18,8 +18,10 @@
     （最初の行が「ログを開始しました」で、`levels=既定` になっていること）
   - ⚠️ **ログファイルが書き換わっても `wails3 dev` が作り直しを始めないこと**（`bin` は監視の対象外のはず）
   - **配る exe（`task build:embed`）ではコンソールが開かず、exe の隣にファイルだけできること**
-  - **`ikkyoku-log.json` を exe の隣に置くと効くこと**（たとえば `github.com/ShinteLab/engine` を INFO に
-    すると、解析中に同梱エンジンの `USER>` / `USER<` の行が出る。既定の Warn では出ない）
+  - **`ikkyoku-log.json` を exe の隣に置くと効くこと**（たとえば `github.com/ShinteLab/engine` を DEBUG に
+    すると、解析中に同梱エンジンの `USER>` / `USER<` の行が出る。既定の Info では出ない）
+  - **既定のまま同梱エンジンで解析しても、USI の行（`USER>` / `USER<` / `Ans:`）が流れないこと**
+    （engine 側で Debug に下げた。2026-10-03。出るのは起動ごとの `usi start` 1 行だけのはず）
   - **Wails 自身のログ・kicho のログ・追従のログ（「変化が無いまま続いたので 1 枚読みます」など）が
     今までどおり出ること**（Logger を引数で配るのをやめたので、出し損ねていないか）
 
@@ -1174,11 +1176,6 @@
   - ⚠️ **40 件級の option でも設定タブが縦に伸びきらないこと**（中でスクロールする）
   - ⚠️ **実行ファイルを差し替えたら項目が「未取得」に戻り、設定した値は
     「宣言に無い項目」として残ること**
-- ⚠️ **同梱エンジンのログがうるさい可能性。** `engine` の USI 層は送受信した行を
-  すべて Info で出す（`engine/TODO.md` の 4）。2026-10-03 からは **パッケージごとのレベルで
-  `github.com/ShinteLab/engine` だけ既定で Warn に絞っている**（`log/setup.go` の `defaultLevels`。
-  全体のレベルは Info のまま）。**実機で確認して、USI の行が要らないなら engine 側で Debug に
-  下げるのが本筋**（ikkyoku 側で全体のログレベルを下げて誤魔化さない）
 - **「訂正データを送信」の UI。** **API そのものは実サーバ相手に確認済み**
   (2026-08-08。一時ディレクトリで `suteme-training 8099` を起動し、撮り溜めた PNG を
   `recognize.FromImage` → `training.Register` で登録 → `history.json` に

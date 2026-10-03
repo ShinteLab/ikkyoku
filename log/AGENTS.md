@@ -15,7 +15,8 @@
 - **コンソール**: `Options.Console` のときだけ標準エラーにも。`_cmd/ikkyoku` が
   **ビルドタグ `production` が無いとき**（＝ `wails3 dev` / `go run`）に立てる（`devbuild.go` / `prodbuild.go`）
 - **レベル**: 呼び出し元の**パッケージごと**。実行ファイルの隣に `ikkyoku-log.json` があれば読む。
-  無ければ既定（root は Info、`github.com/ShinteLab/engine` は Warn —— 同梱エンジンが USI の送受信を 1 行ずつ出すため）
+  無ければ既定（全体を Info）。⚠️ **既定でライブラリを個別に絞らないこと** —— うるさいなら
+  そのライブラリ側でレベルを下げる（engine の USI の送受信は engine 側で Debug にしてある）
 
 ```json
 {
@@ -23,7 +24,7 @@
   "packages": [
     {"name": "github.com/ShinteLab/ikkyoku/app", "level": "DEBUG"},
     {"name": "main.(*CaptureService).noteQuiet", "level": "DEBUG"},
-    {"name": "github.com/ShinteLab/engine", "level": "WARN"}
+    {"name": "github.com/ShinteLab/engine", "level": "DEBUG"}
   ]
 }
 ```

@@ -19,8 +19,8 @@ import (
 
 const startpos = "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1"
 
-// engine の USI 層は受け取った行・送った行を全部 slog.Info に出す。
-// テストの出力が埋まるので黙らせる（engine/TODO.md の「ログの出力先」）。
+// 同梱エンジン（engine）は起動のたびに Info を 1 行出す（USI の送受信は Debug）。
+// テストの出力を汚さないよう黙らせる。
 func TestMain(m *testing.M) {
 	// **テストではなく USI エンジンとして起動する経路**（exec_test.go）。
 	// 外部エンジンを起こす経路を、実際の将棋エンジン無しで確かめるため。

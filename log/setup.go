@@ -36,12 +36,11 @@ const (
 	keepDays = 14
 )
 
-// defaultLevels は LevelsFile が無いときの設定。
+// defaultLevels は LevelsFile が無いときの設定。全体を Info にするだけ。
+// ⚠️ **ライブラリを個別に絞って黙らせないこと。** うるさいなら、そのライブラリで
+// レベルを下げる（engine の USI の送受信は engine 側で Debug にした。2026-10-03）。
 func defaultLevels() (slog.Level, map[string]slog.Level) {
-	return LevelInfo, map[string]slog.Level{
-		// 同梱エンジン（usi/local.go）は USI の送受信を 1 行ずつ Info で出すので、普段は絞る。
-		"github.com/ShinteLab/engine": LevelWarn,
-	}
+	return LevelInfo, nil
 }
 
 // Init はログの出口を組み、slog.Default() をそこへ向ける。main の最初に 1 回だけ呼ぶ。
