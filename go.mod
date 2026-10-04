@@ -5,7 +5,7 @@ go 1.26.1
 require (
 	github.com/ShinteLab/core v0.2.0
 	github.com/ShinteLab/engine v0.2.1
-	github.com/ShinteLab/suteme v0.0.0-00010101000000-000000000000
+	github.com/ShinteLab/suteme v0.2.1
 	github.com/kbinani/screenshot v0.0.0-20250624051815-089614a94018
 	github.com/wenteasy/log v0.3.0
 	golang.design/x/hotkey v0.6.1
@@ -40,5 +40,3 @@ require (
 	golang.org/x/text v0.40.0
 	golang.org/x/xerrors v0.0.0-20231012003039-104605ab7028 // indirect
 )
-
-replace github.com/ShinteLab/suteme => ../suteme

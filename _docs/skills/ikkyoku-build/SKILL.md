@@ -1,6 +1,6 @@
 ---
 name: ikkyoku-build
-description: ikkyoku（一局）をビルドする・動かす・配る。go build / go test の打ち場所、Wails3 の bindings 生成（クローン直後と worktree で必ず要る）、frontend の npm、認識器を焼き込んだ配布ビルド、バージョンの上げ方（_cmd/version.go）と常用場所への配置（local:deploy）、git worktree で replace が解決できないときのジャンクション。「ビルドが通らない」「Cannot find module '../bindings/...'」「TS2307 が延々と出る」「配布用の exe を作る」「worktree で ../suteme が見つからない」「バージョンを上げる」「local:deploy」ときに使う。
+description: ikkyoku（一局）をビルドする・動かす・配る。go build / go test の打ち場所、Wails3 の bindings 生成（クローン直後と worktree で必ず要る）、frontend の npm、認識器を焼き込んだ配布ビルド、バージョンの上げ方（_cmd/version.go）と常用場所への配置（local:deploy）、兄弟のモジュール（core / suteme / engine / kicho）のタグの上げ方。「ビルドが通らない」「Cannot find module '../bindings/...'」「TS2307 が延々と出る」「配布用の exe を作る」「兄弟の修正が入らない」「unknown revision」「バージョンを上げる」「local:deploy」ときに使う。
 ---
 
 # ikkyoku をビルドする
@@ -213,25 +213,11 @@ wails3 task local:build-info                           # ビルド情報の反�
   `build/ios/` も作られるが .gitignore 済み）。
   タスクマネージャに古い名前が残るのは Windows のキャッシュ（スキル `wails3` の pitfalls.md 14）
 
-## ⚠️ git worktree では replace が解決できない
+## worktree と兄弟のモジュール
 
-`replace` は go.mod からの相対パスなので、`ikkyoku/.claude/worktrees/<名前>/` で作業すると
-`../suteme` が `ikkyoku/.claude/worktrees/suteme` を指してしまい解決できない。
-⚠️ **worktree 側に合わせて replace を書き換えないこと**（本来の配置で壊れる）。
-代わりに、ジャンクションを置いてパスを成立させる:
-
-```powershell
-$w = 'D:\Go\Projects\shinte\ikkyoku\.claude\worktrees'
-New-Item -ItemType Junction -Path (Join-Path $w 'suteme') -Target 'D:\Go\Projects\shinte\suteme'
-New-Item -ItemType Junction -Path (Join-Path $w 'engine') -Target 'D:\Go\Projects\shinte\engine'
-New-Item -ItemType Junction -Path (Join-Path $w 'kicho')  -Target 'D:\Go\Projects\shinte\kicho'
-```
-
-`.gitignore` が `.*` を無視するので git には見えない。
-`core` はタグで引くようになった（2026-10-04）ので、ジャンクションは要らない。
-`_cmd/ikkyoku` 側の `../../../suteme` も同じジャンクションで解決される。
-
-⚠️ **消すときは `Remove-Item -Recurse` を使わないこと**（参照先の中身まで消しうる）。
+兄弟の 4 つはタグで引く（2026-10-05 から）ので、**worktree でも Go のビルドに隣のチェックアウトは要らない。**
+以前の `../suteme` などを成立させるジャンクション（`.claude/worktrees/core` など）は要らなくなった。
+⚠️ 残っているものを消すときは `Remove-Item -Recurse` を使わないこと（参照先の中身まで消しうる）。
 `[System.IO.Directory]::Delete($path, $false)` で reparse point だけを消す。
 
 ⚠️ **worktree には `frontend/node_modules` も `frontend/bindings` も無い。**
@@ -240,30 +226,34 @@ New-Item -ItemType Junction -Path (Join-Path $w 'kicho')  -Target 'D:\Go\Project
 ## ⚠️ モジュールが 2 つあることの落とし穴
 
 ルート（`github.com/ShinteLab/ikkyoku`）と `_cmd/ikkyoku`（Wails アプリ）は別の go.mod。
-ワークスペースに並んでいる状態では、どちらも `replace` の相対パスで兄弟を引く。
-**`core` だけはタグで引く**（2026-10-04 から。`require github.com/ShinteLab/core v0.2.0`）:
+**兄弟の 4 つ（core / suteme / engine / kicho）はどちらもタグで引く**（core は 2026-10-04、残りは 2026-10-05 から）。
+replace は `_cmd/ikkyoku` → ルートの 1 本だけ:
 
 ```
-go.mod                    replace .../suteme => ../suteme,       .../engine => ../engine,       .../kicho => ../kicho
-_cmd/ikkyoku/go.mod       replace .../suteme => ../../../suteme, .../engine => ../../../engine, .../kicho => ../../../kicho
+_cmd/ikkyoku/go.mod       replace github.com/ShinteLab/ikkyoku => ../../
 ```
 
-- ⚠️ **手元の `../core` を直しても ikkyoku には入らない。** core でタグを打って push し、
-  **2 つの go.mod の両方で**バージョンを上げる（`go mod edit -require=github.com/ShinteLab/core@vX.Y.Z`。
-  `_cmd/ikkyoku` は `-modfile=_cmd/ikkyoku/go.mod`）。suteme / engine / kicho を replace で引いていても、
-  それらがコンパイルされるときの core も**このタグ**になる（向こうの `replace ../core` は読まれない）
+- ⚠️ **手元の兄弟を直しても ikkyoku には入らない。** 向こうでタグを打って push し、
+  **2 つの go.mod の両方で**バージョンを上げる:
+
+  ```bash
+  go mod edit -require=github.com/ShinteLab/suteme@vX.Y.Z
+  go mod edit -modfile=_cmd/ikkyoku/go.mod -require=github.com/ShinteLab/suteme@vX.Y.Z
+  go mod tidy
+  ```
+
+  `_cmd/ikkyoku` の `go mod tidy` も流す（`cd _cmd/ikkyoku` で）。兄弟どうしの依存（suteme → core など）は
+  MVS で大きいほうが選ばれるので、**ikkyoku の go.mod の版が向こうの要求より古いと `go mod tidy` で上がる**
+  （core を上げずに suteme だけ上げても、suteme が新しい core を要求していれば core も動く。差分を見ること）
+- ⚠️ **タグは向こうの go.mod の replace を外したコミットに打つこと。** 外す前のコミットのタグを引くと、
+  `replace ../core` と仮の版（`v0.0.0-00010101…`）を持ったモジュールが入ってくる
+  （2026-10-05 に suteme v0.2.0 がそうだったので v0.2.1 を打ち直した）
 - ⚠️ **push する前に取りに行かないこと。** proxy.golang.org と sum.golang.org は「無い」という答えを
-  しばらく覚えるので、push のあとでも 404 が続く（2026-10-04 に v0.2.0 で踏んだ）
-
-- **`_cmd/ikkyoku` にも同じ replace が要る。** path 置換されたモジュール自身の replace は
+  しばらく覚えるので、push のあとでも 30 分ほど 404 が続く（2026-10-04 に core v0.2.0 で踏んだ）。
+  先に `git ls-remote --tags origin` で上がっているのを確かめる
+- **`_cmd/ikkyoku` にもルートと同じ require が要る。** path 置換されたモジュール自身の replace は
   無視される（`ikkyoku` を `../../` で参照している以上、`ikkyoku/go.mod` の replace は効かない）
-- ⚠️ **kicho が相対 replace で引く依存は、2 つの go.mod 両方で解決できなければならない。**
-  Go はメインモジュール以外の replace を読まないので、kicho に依存が増えるたびに
-  replace を書き足すか、タグで引く。`core` はタグで引いているので replace は要らない。
-  取りこぼしは kicho の `.\check-consumers.ps1` が見る（⚠️ `go.work` は replace より
-  優先されるので、ビルドが通っても取りこぼしは検出できない。⚠️ **このスクリプトはまだ
-  「core の replace が無い」を NG と数える**。タグで引いている今は誤検出）
-- ⚠️ **kicho の公開 API を変えたら kicho 側で `.\check-consumers.ps1` を流すこと** ——
+- ⚠️ **kicho の公開 API を変えたら、タグを打つ前に kicho 側で `.\check-consumers.ps1` を流すこと** ——
   kicho で `go build ./...` を通しても ikkyoku はコンパイルされない
   （2026-09-07 に向こうが `Store()` を閉じて公開 API を `Library` に集めた）
 - ⚠️ **`kicho` はルートモジュールが使う**（`app/kifuservice.go`）ので、**go.mod は 2 つとも require する**

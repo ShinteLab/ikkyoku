@@ -4,7 +4,7 @@
 
 | ディレクトリ | 中身 |
 |---|---|
-| `ikkyoku-build/` | ビルド・bindings の生成・配布ビルド（焼き込み）・worktree のジャンクション |
+| `ikkyoku-build/` | ビルド・bindings の生成・配布ビルド（焼き込み）・兄弟のモジュールのタグの上げ方 |
 | `ikkyoku-verify/` | 実機で何を押すか（`references/checklist.md` = 未検証 / `references/verified.md` = 確認済み） |
 | `ikkyoku-follow/` | 中継の追従の調整とデバッグ（症状から引く表・録画とログの読み方・ふるいの定数・`references/measurements.md` = 速さの実測） |
 | `ikkyoku-handicap-mate/` | 手合割（駒落ち）と詰将棋の全体像・詰将棋エンジンを繋ぐ手順（`references/engines.md` = どのエンジンが何を返すかの実測） |

@@ -113,7 +113,7 @@ Claude Code でスキルとして使いたい人は、各自の `.claude/skills/
 
 | 置き場所 | 中身 | 引くとき |
 |---|---|---|
-| スキル **`ikkyoku-build`**（`_docs/skills/`） | **ビルド・bindings の生成・配布ビルド（焼き込み）・バージョンの上げ方・常用場所への配置（`local:deploy`）・worktree のジャンクション** | ビルドが通らないとき / 配るとき |
+| スキル **`ikkyoku-build`**（`_docs/skills/`） | **ビルド・bindings の生成・配布ビルド（焼き込み）・バージョンの上げ方・常用場所への配置（`local:deploy`）・兄弟のモジュールのバージョンの上げ方** | ビルドが通らないとき / 配るとき |
 | スキル **`ikkyoku-verify`**（`_docs/skills/`） | **実機で何を押すか**（未検証チェックリスト・確認済みの記録・確かめ方） | 実装が終わって実機で触るとき |
 | スキル **`ikkyoku-follow`**（`_docs/skills/`） | **中継の追従の調整とデバッグ**（症状から引く表・録画とログの読み方・ふるいの定数の詰め方・速さの実測） | 追従が進まないとき / 定数を詰めるとき |
 | スキル **`ikkyoku-handicap-mate`**（`_docs/skills/`） | **手合割（駒落ち）と詰将棋の全体像**（3 通りの解釈・4 つの入口・側の呼び名）と**詰将棋エンジンを繋ぐ手順**、⚠️ **どのエンジンが何を返すかの実測**（`references/engines.md`） | 駒落ち・詰将棋・詰み探索を触るとき |
@@ -205,11 +205,11 @@ Claude Code でスキルとして使いたい人は、各自の `.claude/skills/
 | `github.com/wenteasy/log` | **ログの土台**（`log/` が使う。ハンドラ・日ごとのファイル・パッケージごとのレベル）。タグで引く（replace ではない） |
 
 依存の向きは `ikkyoku → core / suteme / engine / kicho`。**逆参照しない**。
-ワークスペースに並んでいる状態では **`replace` の相対パス参照**で、`_cmd/ikkyoku` にも
-同じ replace が要る。**`core` だけはタグで引く**（2026-10-04 から。2 つの go.mod の両方で上げる）。⚠️ **go.mod まわりの落とし穴**（kicho の依存の書き足し・
-`go mod tidy` のあとの確認・`check-consumers.ps1`）と、⚠️ **git worktree で replace が
-解決できないときのジャンクション**（worktree 側に合わせて replace を書き換えないこと）は
-スキル `ikkyoku-build`。
+**兄弟の 4 つ（core / suteme / engine / kicho）はタグで引く**（2026-10-05 から。replace ではない）。
+⚠️ **手元の兄弟を直しても ikkyoku には入らない** —— 向こうでタグを打って push し、
+**2 つの go.mod（ルートと `_cmd/ikkyoku`）の両方で**上げる。replace が残っているのは
+`_cmd/ikkyoku` → ルート（`../../`）だけ。⚠️ **go.mod まわりの落とし穴**（上げ方・
+push の前に取りに行かない・`go mod tidy` のあとの確認・`check-consumers.ps1`）はスキル `ikkyoku-build`。
 
 ## 設計制約（必ず守ること）
 
@@ -267,7 +267,7 @@ go test ./...
 - ⚠️ **配る exe は `task build:embed`**（`wails3 build` は認識器を焼き込まない）
 - ⚠️ **Wails は手元の CLI に追従している**（beta.26）。スキル `wails3` は alpha2.117 前提なので食い違う
 - ⚠️ **実装したら `ikkyoku-verify` の `checklist.md` に足すこと**（「触ってみて大丈夫だった」を根拠にしない）
-- go.mod・`go mod tidy`・worktree のジャンクションはスキル `ikkyoku-build`
+- go.mod・`go mod tidy`・兄弟のモジュールのバージョンの上げ方はスキル `ikkyoku-build`
 
 ## テスト方針
 

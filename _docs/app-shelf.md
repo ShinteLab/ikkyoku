@@ -57,7 +57,7 @@ kicho の UI は将来「テスト用のモック」または
    **kicho 側**（`kicho.Fetched` / `Library.Save` / `Library.Watch` / `RefetchableURL`）。
    同じ変換を `kicho/_cmd/kicho/kifuservice.go` も持つので、こちらに書くと必ず割れる。
    足りないものが出たら **kicho の `Library` に足す**（`Store()` は無い）。
-   直したら kicho 側で `.\check-consumers.ps1` を流すこと
+   直したら kicho 側で `.\check-consumers.ps1` を流し、タグを打ってこちらの go.mod を上げること
 5. ⚠️ **DTO は `app` にローカルに持つ**（`GameSummary` / `GameDetail` /
    `SearchQuery` / `SearchResult` / `WatchEntry`）。
    `store.Record` / `store.Watch` をそのままフロントへ出さないこと ——
@@ -125,7 +125,7 @@ kicho の `store` は接続を 1 本に絞っているので、止まらない�
   片方だけ更新した状態で同じ DB を指すと `store.ErrSchemaTooNew` で開けない
   （黙って開いて後段が `no such column` で落ちるより良い、という判断）。
   **実際に 2026-09-08 に v4 へ上がった**（仮の一覧 / `watches`）——
-  `replace` で相対参照している以上、**ビルドし直せば揃う**
+  **kicho のタグを上げてビルドし直せば揃う**（2026-10-05 からタグで引いている。手元の kicho を直しただけでは入らない）
 - ⚠️ **存在チェックをしない**（SQLite は無ければ作る）。まだ無い場所を先に書く
   順序が普通にある（エンジンのパスとはそこが違う）
 - ⚠️ **変えたその場で開き直す**（`SettingsService.onKifuDBPath` → `KifuService.open`）。
