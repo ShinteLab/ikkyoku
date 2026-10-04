@@ -10,7 +10,7 @@ info:
   productIdentifier: "com.shintelab.ikkyoku" # The unique product identifier
   description: "Ikkyoku - Shogi broadcast analyzer" # ⚠️ Windowsのタスクバー/タスクマネージャ表示名になる(wails3 skill pitfalls.md 14)
   copyright: "(c)2026, ShinteLab" # Copyright text
-  comments: "shogi broadcast region capture" # Comments
+  comments: "Analyze positions from shogi broadcasts and explore other lines" # Comments
   version: "0.2.1" # The application version
   # cfBundleIconName: "appicon" # The macOS icon name in Assets.car icon bundles (optional)
   #                               # Should match the name of your .icon file without the extension

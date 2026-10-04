@@ -162,7 +162,7 @@ func main() {
 
 	app := application.New(application.Options{
 		Name:        "ikkyoku",
-		Description: "ikkyoku - shogi broadcast region capture",
+		Description: "Ikkyoku - Shogi broadcast analyzer",
 		Logger:      slog.Default(),
 		// ⚠️ **致命的なエラーを箱にする口**（fatal.go）。無いと Wails はログに出して
 		// os.Exit(1) するだけで、配る exe では**何も言わずに消える**（WebView2 が無いときなど）。

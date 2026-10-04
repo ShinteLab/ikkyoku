@@ -9,7 +9,7 @@
 			"FileDescription": "Ikkyoku - Shogi broadcast analyzer",
 			"LegalCopyright": "(c)2026, ShinteLab",
 			"ProductName": "ikkyoku",
-			"Comments": "shogi broadcast region capture"
+			"Comments": "Analyze positions from shogi broadcasts and explore other lines"
 		}
 	}
 }

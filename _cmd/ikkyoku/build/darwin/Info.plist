@@ -5,7 +5,7 @@
 		<key>CFBundleExecutable</key>
 		<string>ikkyoku</string>
 		<key>CFBundleGetInfoString</key>
-		<string>shogi broadcast region capture</string>
+		<string>Analyze positions from shogi broadcasts and explore other lines</string>
 		<key>CFBundleIconFile</key>
 		<string>icons</string>
 		<key>CFBundleIconName</key>
