@@ -143,6 +143,7 @@
 | `followstudy_test.go` | `_docs/app-follow.md` |
 | `studyservice_test.go`（`PlayLine`）・`evalgraph_test.go` / `evalgraph_end_test.go`・`players_test.go` | `_docs/app-study.md` |
 | `studystore_test.go` / `studyexport_test.go` / `studykey_test.go` | `_docs/app-studystore.md` |
+| `kifunote_test.go`（棋譜の消費時間とコメント） | `_docs/position-study.md` |
 
 - `fontservice_test.go` — **駒の字**（2026-08-16）。⚠️ **一番の要点は
   「同梱に戻れること」** —— 登録を消しても、選んでいたフォントが消えても、

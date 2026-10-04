@@ -39,6 +39,8 @@ package position
 
 import (
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/ShinteLab/core/kifu"
 	"github.com/ShinteLab/ikkyoku/legal"
@@ -122,6 +124,32 @@ type Node struct {
 	// 最初の子は「先に足した」以上の意味を持たないので、そこまで本筋扱いすると
 	// **同じ手に続きを 2 つ足したときに、先に足したほうが上位に見える。**
 	Main bool `json:"main"`
+	// Time は**棋譜に書いてあったこの手の消費時間**（"4:00"。2026-10-04）。
+	//
+	// ⚠️ **棋譜に時間が書いてあったときだけ入る**（`MoveNote.Timed`）。0 秒の手は
+	// 正当なので、**値が 0 かどうかで出す/出さないを決めないこと**（"0:00" と
+	// 「書いてない」は別物）。⚠️ **書式は Go 側**（`kifu.FormatSpend`。分は繰り上げない）。
+	Time string `json:"time,omitempty"`
+	// Comment は**棋譜に書いてあったこの手のコメント**（KIF の `*` 行。複数行は改行で連結）。
+	//
+	// ⚠️ **解析で足した手・盤で指した手には付かない**（棋譜の手ではないので、元から無い）。
+	Comment string `json:"comment,omitempty"`
+}
+
+// MoveNote は**棋譜に書いてあった、その手の注記**（消費時間とコメント。2026-10-04）。
+//
+// ⚠️ **棋譜の手にしか付かない。** `FromKIF` が付け、取り直し（`TakeNotes`）が
+// 写す。解析で足した手・盤で指した手・追従が推測で足した手には**元から無い**。
+type MoveNote struct {
+	// Spend はこの手の消費時間（`Timed` のときだけ意味がある）。
+	Spend time.Duration
+	// Timed は**棋譜に消費時間の欄があったか**（`kifu.Document.ShowTime`）。
+	//
+	// ⚠️ **`Spend > 0` で代用しないこと** —— 0 秒の手は正当で、時間の欄が無い
+	// 棋譜（shogidb2 など）は全手 0 になる。
+	Timed bool
+	// Comment はこの手のコメント（KIF の `*` 行。複数行は改行で連結）。
+	Comment string
 }
 
 // treeNode は手順ツリーの節点（**パッケージの外へ出さない**）。
@@ -154,6 +182,10 @@ type treeNode struct {
 	// ⚠️ **`kids[0]` であることだけでは表せない** —— あちらは「先に足した」以上の
 	// 意味を持たないと決めてある（先に足したほうを上位に見せない）。
 	chosen bool
+	// note は棋譜に書いてあった消費時間とコメント（`MoveNote`）。
+	//
+	// ⚠️ **根（top）の `Comment` は開始局面のコメント**（KIF で最初の手より前の `*` 行）。
+	note MoveNote
 	// kids は子。**kids[0] が本譜側**（`Graft` はここへ据え直す）。
 	kids []*treeNode
 }
@@ -382,6 +414,56 @@ func (n *treeNode) node(depth int, main bool) Node {
 		Sources: append([]string(nil), n.sources...),
 		Hand:    n.hand,
 		Guess:   n.guess,
+		Time:    n.note.time(),
+		Comment: n.note.Comment,
+	}
+}
+
+// time は画面に出す消費時間（書いてなければ空）。
+func (m MoveNote) time() string {
+	if !m.Timed {
+		return ""
+	}
+	return strings.TrimSpace(kifu.FormatSpend(m.Spend))
+}
+
+// RootComment は**開始局面のコメント**（棋譜の最初の手より前の `*` 行。無ければ空）。
+func (s *Study) RootComment() string { return s.top.note.Comment }
+
+// MainNotes は本譜の手の注記を `MainLine` と同じ並びで返す（棋譜へ書き出す用）。
+//
+// ⚠️ **止まる場所は `MainLine` と同じ**（`mainNext`）。ずれると、書き出した
+// KIF で**別の手にコメントが付く。**
+func (s *Study) MainNotes() []MoveNote {
+	out := []MoveNote{}
+	for n := s.top; ; {
+		k := s.mainNext(n)
+		if k == nil {
+			break
+		}
+		n = k
+		out = append(out, n.note)
+	}
+	return out
+}
+
+// TakeNotes は**棋譜から組み立てた検討（from）の注記を、本譜の上へ写す**
+// （取り直しの `Graft` のあと。2026-10-04）。
+//
+// `Graft` は手（USI）しか受け取らないので、据え直しただけでは
+// **新しく載った手に消費時間もコメントも付かない**（中継の自動更新で
+// 増えた手だけ時間が出ない）。
+//
+// ⚠️ **棋譜の側を正にする**（書いてなければ消す）。取り直しは
+// 「URL の側を正にする」操作なので、注記も同じ扱いにする。
+// ⚠️ **辿るのは両方の `kids[0]` が同じ手のあいだだけ** —— 据え直しが途中で
+// 止まっていたら、その先は別の手なので写さない。
+func (s *Study) TakeNotes(from *Study) {
+	a, b := s.top, from.top
+	a.note.Comment = b.note.Comment
+	for len(a.kids) > 0 && len(b.kids) > 0 && a.kids[0].usi == b.kids[0].usi {
+		a, b = a.kids[0], b.kids[0]
+		a.note = b.note
 	}
 }
 

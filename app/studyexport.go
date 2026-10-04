@@ -63,6 +63,12 @@ func (s *StudyService) exportKIF() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("指し手を棋譜の表記にできませんでした: %w", err)
 	}
+	// **棋譜から読んだ消費時間とコメントは書き戻す**（2026-10-04）。落とすと、
+	// 棚に入れて開き直したときに**手順リストから消える。**
+	// ⚠️ **並びは `MainLine` と同じ**（`MainNotes` が同じところで止まる）。
+	notes := s.study.MainNotes()
+	doc.Comment = s.study.RootComment()
+	timed := false
 	doc.Moves = make([]kifu.Move, 0, len(texts))
 	for i, t := range texts {
 		// ⚠️ **表記にできなかった手があったら書き出さないこと。** 名前が空のまま
@@ -71,13 +77,17 @@ func (s *StudyService) exportKIF() (string, error) {
 		if !t.OK || t.Name == "" {
 			return "", fmt.Errorf("%d手目（%s）を棋譜の表記にできませんでした", i+1, t.USI)
 		}
-		doc.Moves = append(doc.Moves, kifu.Move{
-			Num: i + 1, Name: t.Name, FromX: t.FromX, FromY: t.FromY,
-		})
+		m := kifu.Move{Num: i + 1, Name: t.Name, FromX: t.FromX, FromY: t.FromY}
+		if i < len(notes) {
+			m.Spend, m.Comment = notes[i].Spend, notes[i].Comment
+			timed = timed || notes[i].Timed
+		}
+		doc.Moves = append(doc.Moves, m)
 	}
-	// ⚠️ **消費時間は出さない**（`ShowTime` を立てない）。この検討はどこからも
-	// 時間を受け取っていないので、立てると **" ( 0:00/00:00:00)" が全手に並ぶ。**
-	doc.ShowTime = false
+	// ⚠️ **消費時間は棋譜から受け取ったときだけ出す**（`ShowTime`）。撮った局面から
+	// 始めた検討は時間をどこからも受け取っていないので、立てると
+	// **" ( 0:00/00:00:00)" が全手に並ぶ。**
+	doc.ShowTime = timed
 	return doc.String(), nil
 }
 

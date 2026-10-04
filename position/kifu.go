@@ -80,6 +80,9 @@ func FromKIF(text string) (*Study, KIFLoad, error) {
 	}
 
 	study := NewStudy(root)
+	// **棋譜の消費時間とコメントも手に持たせる**（2026-10-04。手順リストに出す）。
+	// 開始局面のコメント（最初の手より前の `*` 行）は根に付ける。
+	study.top.note.Comment = doc.Comment
 	for i, mv := range moves {
 		// ⚠️ **`Play` を使わないこと**（2026-08-14）。あちらは「人が盤で指した」
 		// 印が付く。**棋譜の手は実際に現れた指し手**なので、自分で試しに指した手と
@@ -91,6 +94,16 @@ func FromKIF(text string) (*Study, KIFLoad, error) {
 			}
 			load.Note = fmt.Sprintf("%d手目「%s」で止まりました: %v", i+1, name, err)
 			break
+		}
+		// ⚠️ **`moves` と `doc.Moves` は同じ並び**（`DecodeMoves` は終局印を
+		// 数えず、読めなくなったところで切るだけ）。⚠️ **時間の欄が無い棋譜では
+		// `Timed` を立てないこと** —— 全手 0 秒として "0:00" が並ぶ。
+		if i < len(doc.Moves) {
+			study.cur.note = MoveNote{
+				Spend:   doc.Moves[i].Spend,
+				Timed:   doc.ShowTime,
+				Comment: doc.Moves[i].Comment,
+			}
 		}
 		load.Loaded++
 	}

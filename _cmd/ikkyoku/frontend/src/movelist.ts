@@ -161,6 +161,15 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
     // 手数の戻り方でしか分からない。**本譜側には出さない**（線が増えるだけ）。
     const isFork = (n: { parent: number; main: boolean }) =>
       !n.main && rows.filter((x) => x.parent === n.parent).length > 1;
+    // ---- 棋譜の消費時間とコメント（2026-10-04）------------------------------
+    //
+    // **手の右に「時間」「コメント」の列を足す。** 列は行どうしで揃える
+    // （`.is-noted` が手の列の幅を字下げぶん差し引いて取る）。
+    // ⚠️ **棋譜に書いてあった手にしか無い**（解析で足した手・盤で指した手には
+    // Go 側が付けない）。⚠️ **どちらも無い棋譜では列を作らない**（今までの見た目のまま）。
+    const rootComment = state.rootComment ?? "";
+    const hasTime = rows.some((n) => !!n.time);
+    const hasComment = !!rootComment || rows.some((n) => !!n.comment);
     // 手数と手を別の要素にして、**手数の桁を揃える**（縦に並ぶので、揃っていないと
     // 何手目を見ているのかが読み取りにくい）。
     const chip = (
@@ -168,6 +177,7 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
       o?: {
         depth?: number; main?: boolean; parent?: number; fork?: boolean;
         sources?: string[]; hand?: boolean; guess?: boolean;
+        time?: string; comment?: string;
       },
     ) => {
       // ⚠️ **行は chip とトグルの 2 つ**（ボタンの中にボタンは置けない）。
@@ -212,7 +222,12 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
       const t = document.createElement("span");
       t.className = "move-text";
       t.textContent = label;
-      b.append(i, t);
+      // 手と印はひとまとめ（`.move-main`）。⚠️ **時間とコメントの列を揃える基準**は
+      // この箱の幅なので、印を外へ出さないこと（出すと印の数だけ列がずれる）。
+      const main = document.createElement("span");
+      main.className = "move-main";
+      main.appendChild(t);
+      b.append(i, main);
       // 自分で盤に指した手（2026-08-14）。**黒い丸で、目立たなくてよい** ——
       // 読みたいのは「エンジンが挙げた手（色）」のほうで、これは
       // **後から「これは自分で入れた手だ」と分かればよい**という程度の印。
@@ -222,7 +237,7 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
         const dot = document.createElement("span");
         dot.className = "move-source is-hand";
         dot.title = "自分で指した手";
-        b.appendChild(dot);
+        main.appendChild(dot);
       }
       // 中継の画面から**推測で足した手**（2026-09-15）。
       //
@@ -234,7 +249,7 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
         const dot = document.createElement("span");
         dot.className = "move-source is-guess";
         dot.title = "中継の画面から推測で足した手（違っていたらここから消せます）";
-        b.appendChild(dot);
+        main.appendChild(dot);
       }
       // ⚠️ **手の後ろに出す**（前に置くと、手数と手のあいだに割り込んで
       // **縦に並んだ手の頭が揃わなくなる**）。
@@ -249,7 +264,35 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
         dot.style.background = e.color;
         // ⚠️ **色だけにしないこと**（色が読めなくても誰の手かは分かるように）。
         dot.title = `${e.label} が挙げた手`;
-        b.appendChild(dot);
+        main.appendChild(dot);
+      }
+      // 時間とコメント。⚠️ **どの行にも同じ列を作る**（中身が空でも）—— 作ったり
+      // 作らなかったりすると、コメントの頭が行ごとに左右へずれる。
+      if (hasTime || hasComment) {
+        b.classList.add("is-noted");
+        if (hasTime) {
+          const tm = document.createElement("span");
+          tm.className = "move-time";
+          tm.textContent = o?.time ?? "";
+          b.appendChild(tm);
+        }
+        const full = o?.comment ?? "";
+        if (full) {
+          const c = document.createElement("span");
+          c.className = "move-comment";
+          // 列は 1 行。**改行は詰めて並べ、収まらなければ「…」**（全文はホバー）。
+          c.textContent = full.replace(/\s*\n\s*/g, " ");
+          // ⚠️ **全文を出すのは切れているときだけ**（収まっているなら読めている）。
+          // 手のボタンの説明より内側に付くので、コメントの上ではこちらが出る。
+          c.addEventListener("mouseenter", () => {
+            if (c.scrollWidth > c.clientWidth) {
+              c.title = full;
+            } else {
+              c.removeAttribute("title");
+            }
+          });
+          b.appendChild(c);
+        }
       }
       b.classList.toggle("is-current", id === at);
       // ⚠️ **枝は見た目で分かるようにする**（字下げ + 色）。同じ手数の手が
@@ -263,7 +306,8 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
       row.appendChild(b);
       return row;
     };
-    movesPanel.appendChild(chip("", "開始局面", 0, "採ったときの局面に戻ります"));
+    movesPanel.appendChild(
+      chip("", "開始局面", 0, "採ったときの局面に戻ります", { comment: rootComment }));
     for (const m of rows) {
       // 畳んである枝の中は出さない（**畳むのは見た目だけ**なので、手順は生きている）。
       if (hidden(m.id)) {
@@ -279,6 +323,7 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
           {
             depth: m.depth, main: m.main, parent: m.parent, fork: isFork(m),
             sources: m.sources ?? [], hand: m.hand ?? false, guess: m.guess ?? false,
+            time: m.time ?? "", comment: m.comment ?? "",
           }),
       );
     }

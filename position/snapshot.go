@@ -12,6 +12,7 @@ package position
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 // StudySnapshot は検討を丸ごと控えたもの（JSON にしてディスクへ）。
@@ -49,6 +50,8 @@ type StudySnapshot struct {
 	// ⚠️ **消した id を使い回さないために持つ。** 最大の id + 1 で済ませると、
 	// **消した枝の解析が後から別の節点の評価値として書き戻る**（`Study.nextID`）。
 	NextID int `json:"nextId"`
+	// Comment は**開始局面のコメント**（`Study.RootComment`。2026-10-04）。
+	Comment string `json:"comment,omitempty"`
 }
 
 // NodeSnapshot は節点 1 つ。
@@ -72,6 +75,14 @@ type NodeSnapshot struct {
 	Guess     bool     `json:"guess,omitempty"`
 	Variation bool     `json:"variation,omitempty"`
 	Chosen    bool     `json:"chosen,omitempty"`
+	// Spend は棋譜に書いてあった消費時間（秒。2026-10-04）。**書いてなければ nil。**
+	//
+	// ⚠️ **0 と nil を分けること** —— 0 秒の手は正当で、「書いてない」とは別物
+	// （`MoveNote.Timed`）。⚠️ **落とさないこと** —— 控えから開き直すと
+	// 棋譜を読み直す口が無いので、二度と戻らない。
+	Spend *int `json:"spend,omitempty"`
+	// Comment は棋譜に書いてあったコメント。
+	Comment string `json:"comment,omitempty"`
 }
 
 // Snapshot は今の検討を控える。
@@ -91,13 +102,14 @@ func (s *Study) Snapshot() (StudySnapshot, error) {
 		Current:     s.cur.id,
 		End:         s.end,
 		NextID:      s.nextID,
+		Comment:     s.top.note.Comment,
 	}
 	// ⚠️ **前順（親が先・兄弟は順番どおり）で並べること。** 復元は
 	// 「親へ順に足す」だけなので、**この並びが木の形そのもの**になる。
 	var walk func(n *treeNode)
 	walk = func(n *treeNode) {
 		for _, k := range n.kids {
-			snap.Nodes = append(snap.Nodes, NodeSnapshot{
+			ns := NodeSnapshot{
 				ID:        k.id,
 				Parent:    n.id,
 				USI:       k.usi,
@@ -107,7 +119,13 @@ func (s *Study) Snapshot() (StudySnapshot, error) {
 				Guess:     k.guess,
 				Variation: k.variation,
 				Chosen:    k.chosen,
-			})
+				Comment:   k.note.Comment,
+			}
+			if k.note.Timed {
+				sec := int(k.note.Spend / time.Second)
+				ns.Spend = &sec
+			}
+			snap.Nodes = append(snap.Nodes, ns)
 			walk(k)
 		}
 	}
@@ -139,6 +157,7 @@ func RestoreStudy(snap StudySnapshot) (*Study, error) {
 	root.MateProblem = snap.MateProblem
 
 	s := NewStudy(root)
+	s.top.note.Comment = snap.Comment
 	for _, ns := range snap.Nodes {
 		if ns.ID <= 0 {
 			return nil, fmt.Errorf("ikkyoku/position: 控えの節点 id が不正です: %d", ns.ID)
@@ -163,6 +182,11 @@ func RestoreStudy(snap StudySnapshot) (*Study, error) {
 			guess:     ns.Guess,
 			variation: ns.Variation,
 			chosen:    ns.Chosen,
+			note:      MoveNote{Comment: ns.Comment},
+		}
+		if ns.Spend != nil {
+			n.note.Spend = time.Duration(*ns.Spend) * time.Second
+			n.note.Timed = true
 		}
 		if n.text == "" {
 			n.text = n.usi

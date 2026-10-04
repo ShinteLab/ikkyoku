@@ -227,6 +227,9 @@ type StudyState struct {
 	// ⚠️ **一直線ではない**（2026-08-13）。`Depth` が字下げ、`Main` が本譜側。
 	// 並びは「その手 → 枝 → 本譜の続き」で、**ある手の子孫は必ずその直後に固まる**。
 	Nodes []position.Node `json:"nodes"`
+	// RootComment は**開始局面のコメント**（棋譜の最初の手より前の `*` 行。2026-10-04）。
+	// 手のコメントは `Node.Comment`。
+	RootComment string `json:"rootComment,omitempty"`
 	// CurrentID は今見ている節点（0 なら根）。**手順リストの現在位置。**
 	CurrentID int `json:"currentId"`
 	// MainTip は**本譜の先端**の節点（手が 1 つも無ければ 0 ＝ 根）。
@@ -765,6 +768,9 @@ func (s *StudyService) mergeReloadLocked(next *position.Study) position.GraftRes
 	// ——どこを見ているかはユーザーが選んだ状態で、取り直しはあくまで
 	// **URL の側を正にする**操作。
 	got := s.study.Graft(next.MainLine())
+	// **消費時間とコメントも棋譜の側から写す**（2026-10-04）。`Graft` は手しか
+	// 受け取らないので、写さないと**自動更新で増えた手だけ時間が出ない。**
+	s.study.TakeNotes(next)
 	// **終局まで載ったなら、そこが対局の終わり**（2026-09-16）。
 	//
 	// ⚠️ **据え直した側の id は使えない**（別の木の番号）。本譜の先端が
@@ -1425,30 +1431,31 @@ func (s *StudyService) state() StudyState {
 		moves, legalErr = []legal.Move{}, err.Error()
 	}
 	return StudyState{
-		Loaded:     true,
-		BoardSFEN:  cur.BoardSFEN(),
-		SFEN:       full,
-		Turn:       int(cur.Turn),
-		TurnLabel:  cur.Turn.String(),
-		MoveNumber: cur.MoveNumber,
-		Hands:      cur.Inventory(),
-		Warnings:   warnings,
-		RootSFEN:   root,
-		First:      s.moveBaseLocked(),
-		Nodes:      s.study.Nodes(),
-		CurrentID:  s.study.CurrentID(),
-		MainTip:    mainTipID(s.study),
-		Line:       s.study.Line(),
-		Ply:        s.study.Ply(),
-		Played:     s.study.Played(),
-		Legal:      moves,
-		LegalError: legalErr,
-		Black:      s.game.Black,
-		White:      s.game.White,
-		Handicap:   handicapLabel(s.game.Handicap),
-		SourceURL:  s.sourceURL,
-		GameID:     s.gameID,
-		KifuFollow: s.kifuFollow,
-		Rev:        s.rev,
+		Loaded:      true,
+		BoardSFEN:   cur.BoardSFEN(),
+		SFEN:        full,
+		Turn:        int(cur.Turn),
+		TurnLabel:   cur.Turn.String(),
+		MoveNumber:  cur.MoveNumber,
+		Hands:       cur.Inventory(),
+		Warnings:    warnings,
+		RootSFEN:    root,
+		First:       s.moveBaseLocked(),
+		Nodes:       s.study.Nodes(),
+		RootComment: s.study.RootComment(),
+		CurrentID:   s.study.CurrentID(),
+		MainTip:     mainTipID(s.study),
+		Line:        s.study.Line(),
+		Ply:         s.study.Ply(),
+		Played:      s.study.Played(),
+		Legal:       moves,
+		LegalError:  legalErr,
+		Black:       s.game.Black,
+		White:       s.game.White,
+		Handicap:    handicapLabel(s.game.Handicap),
+		SourceURL:   s.sourceURL,
+		GameID:      s.gameID,
+		KifuFollow:  s.kifuFollow,
+		Rev:         s.rev,
 	}
 }

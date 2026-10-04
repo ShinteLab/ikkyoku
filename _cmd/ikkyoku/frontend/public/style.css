@@ -4715,6 +4715,48 @@ html.is-graph #app {
   text-overflow: ellipsis;
 }
 
+/* 手と、その後ろの印（`.move-source`）をまとめる箱（2026-10-04）。
+   ⚠️ **印をこの外へ出さないこと** —— 棋譜の時間とコメントの列はこの箱の右端に
+   揃えるので、外にあると印の数だけ列がずれる。 */
+.move-main {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+/* 棋譜の時間とコメントがあるときは、**手の箱の右端を行どうしで揃える**（2026-10-04）。
+   ⚠️ **字下げぶんを差し引くこと**（`--move-depth` は行から継承する。式は `.move-row` と
+   同じ）。差し引かないと、深い行ほど列が右へずれる。
+   ⚠️ **最小幅にとどめる**（固定幅にしない）—— 長い表記（「△同　成銀左上」）を
+   切るより、その行だけ列がずれるほうがまし。 */
+.move-chip.is-noted .move-main {
+  min-width: calc(6.5em - min(var(--move-depth, 0), 6) * 12px);
+}
+
+/* 棋譜の消費時間（"4:00"）。**右揃え・桁揃え**で縦に読めるように。
+   ⚠️ **空でも幅を取る**（コメントの頭を揃えるため）。"125:00" が入る幅。
+   色は直書きせず薄めるだけ（今見ている手・消える手の地でもそのまま読める）。 */
+.move-time {
+  flex: 0 0 auto;
+  width: 3.6em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+
+/* 棋譜のコメント。**1 行で、収まらなければ「…」**（全文はホバー）。
+   ⚠️ **残りの幅だけをもらう**（`flex-basis: 0`）—— 長いコメントが手と時間を
+   押し潰さないように。 */
+.move-comment {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.7;
+}
+
 /* 誰が言った手か（2026-08-14）。**解析の候補手から足した枝**に付く色の丸で、
    色は**評価値グラフの折れ線と同じ**（`mainscreen.ts` の `colorOf`）。
 
