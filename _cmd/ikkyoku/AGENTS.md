@@ -26,9 +26,9 @@ CLI は無い。**
   `module ikkyoku`、`replace github.com/ShinteLab/ikkyoku => ../../` でルートパッケージを参照する
 - **Wails のバージョンは手元の CLI に追従している。** このディレクトリを作った時点の CLI は
   `v3.0.0-beta.3` だった（`wails3 skill` が前提にしている `alpha2.117` より新しい）。
-  ⚠️ **2026-09-08 時点では CLI も `go.mod` も `v3.0.0-beta.16`**（この節の
-  「手元の CLI は beta.3」は古い記述だった）。**下に出てくる beta.3 の話は
-  そのとき確かめたもの**で、beta.16 で再確認はしていない。
+  ⚠️ **2026-10-04 時点では CLI も `go.mod` も `v3.0.0-beta.26`**（2026-09-08 時点は
+  beta.16。この節の「手元の CLI は beta.3」は古い記述だった）。**下に出てくる beta.3 の話は
+  そのとき確かめたもの**で、beta.16 でも beta.26 でも再確認はしていない。
   `wails3 init` の `-t vanilla` フラグは **beta.3 では無視され、常に React テンプレートが
   生成される**（実機で確認したバグ）。そのため `wails3 init -t vanilla` の出力を
   React 抜きの vanilla TypeScript に手作業で作り直してある。将来 CLI を上げたときは
