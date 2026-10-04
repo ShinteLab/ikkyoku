@@ -303,6 +303,13 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
                  （開始局面なら開始局面のコメント）。⚠️ **無ければ欄は空のまま**（閉じない。
                  手を辿るたびに欄が出たり消えたりすると、手順のリストの高さが跳ねる）。
                  ⚠️ **入切は設定が持つ**（次の起動でも同じ形で始める）。 -->
+            <!-- 手順とコメント欄の境目（2026-10-04）。**高さは人が決める。**
+                 ⚠️ **他のバー（解析結果と手順の境目など）と操作の形を揃えること**
+                 （掴む・上下キー）。書き換えるのは --move-comment-h ただ 1 つで、
+                 余りは手順のリストがもらう。 -->
+            <div id="comment-split" class="split-bar side-part-moves" role="separator" hidden
+                 aria-orientation="horizontal" aria-label="コメント欄の高さ" tabindex="0"
+                 title="ドラッグでコメント欄の高さを変えます（余りは手順に渡ります）。上下キーでも動きます"></div>
             <div id="study-comment" class="study-comment side-part-moves" hidden></div>
 `;
   const q = <T extends Element>(sel: string) => host.querySelector<T>(sel)!;
@@ -358,6 +365,8 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
   const studyMoveStatus = q<HTMLParagraphElement>("#study-move-status");
   const commentToggle = q<HTMLButtonElement>("#study-comment-toggle");
   const studyComment = q<HTMLDivElement>("#study-comment");
+  const commentSplit = q<HTMLDivElement>("#comment-split");
+  const studyMovesBox = q<HTMLDivElement>(".study-moves-box");
 
   // コメント欄（2026-10-04）。**出すかは設定**（`showMoveComment`）、**中身は今の局面**。
   let commentShown = false;
@@ -368,6 +377,8 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
     commentToggle.setAttribute("aria-pressed", String(commentShown));
     commentToggle.title = commentShown ? "コメント欄をしまう" : "コメント欄を出す";
     studyComment.hidden = !loaded || !commentShown;
+    // ⚠️ **境目のバーも欄と一緒に出し入れすること**（分ける相手が居ないのに線だけ浮く）。
+    commentSplit.hidden = studyComment.hidden;
     if (!loaded || !commentShown) {
       return;
     }
@@ -380,6 +391,67 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
     // 手を移ったら先頭から読ませる（前の手で下までスクロールしていても）。
     studyComment.scrollTop = 0;
   };
+  // ---- 手順とコメント欄の境目（スプリットバー。2026-10-04）----------------
+  //
+  // **書き換えるのは `--move-comment-h` ただ 1 つ**で、余りは手順のリストがもらう
+  // （`.study-moves-box` は `flex: 1 1 0`）。解析結果と手順の境目と**同じ形**
+  // （掴む・上下キー）。⚠️ **バーは欄の上にある**ので、上へ引くと欄が高くなる。
+  //
+  // ⚠️ **手順を 0 まで潰させないこと**（上限は「リスト + 欄」から最低限を残して決める。
+  // 列の高さは窓で変わるので、px の定数ではなく**その場で測る**）。
+  const COMMENT_H_MIN = 30;
+  const MOVES_KEEP = 60;
+  let commentH = 0; // 0 = まだ人が決めていない（CSS の既定に任せる）
+  const setCommentH = (px: number) => {
+    const max = Math.max(
+      COMMENT_H_MIN, studyMovesBox.clientHeight + studyComment.clientHeight - MOVES_KEEP);
+    const next = Math.min(Math.max(Math.round(px), COMMENT_H_MIN), max);
+    if (next === commentH) {
+      return;
+    }
+    commentH = next;
+    // ⚠️ **:root に入れること**（`--analyze-engines-h` と同じ置き場所）。
+    document.documentElement.style.setProperty("--move-comment-h", `${next}px`);
+    commentSplit.setAttribute("aria-valuenow", String(next));
+  };
+  commentSplit.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    commentSplit.setPointerCapture(e.pointerId);
+    commentSplit.classList.add("is-dragging");
+    const startY = e.clientY;
+    // ⚠️ **起点は「今の実寸」**（まだ人が決めていないときは CSS の既定なので、
+    // 変数からは読めない）。
+    const startH = studyComment.offsetHeight;
+    const onMove = (ev: PointerEvent) => setCommentH(startH - (ev.clientY - startY));
+    const onUp = () => {
+      commentSplit.classList.remove("is-dragging");
+      commentSplit.removeEventListener("pointermove", onMove);
+      commentSplit.removeEventListener("pointerup", onUp);
+      commentSplit.removeEventListener("pointercancel", onUp);
+    };
+    commentSplit.addEventListener("pointermove", onMove);
+    commentSplit.addEventListener("pointerup", onUp);
+    commentSplit.addEventListener("pointercancel", onUp);
+  });
+  // ⚠️ **押した向きにバーが動く**（↑ で欄が高くなる）。
+  commentSplit.addEventListener("keydown", (e) => {
+    const step = e.shiftKey ? 32 : 8;
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setCommentH((commentH || studyComment.offsetHeight) + step);
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setCommentH((commentH || studyComment.offsetHeight) - step);
+    }
+  });
+  // 窓が低くなると上限も下がる。**はみ出したままにしないこと**
+  // （⚠️ **決めていないうちは触らない** —— 0 を書き込むと下限に張り付く）。
+  window.addEventListener("resize", () => {
+    if (commentH > 0 && !studyComment.hidden) {
+      setCommentH(commentH);
+    }
+  });
+
   commentToggle.addEventListener("click", () => {
     // **先に見た目を変える**（保存の往復を待たない）。保存した結果は `onSettings` で
     // 受け取り直すので、失敗したら設定の側に戻る。

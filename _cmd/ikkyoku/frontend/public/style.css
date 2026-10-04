@@ -4627,18 +4627,19 @@ html.is-graph #app {
 .study-comment-toggle {
   position: absolute;
   left: 8px;
-  bottom: 2px;
+  bottom: 10px;
   z-index: 1;
   background: var(--surface-3);
 }
 
 /* 手順の下のコメント欄（2026-10-04）。**今見ている手の棋譜のコメント**を出す。
-   ⚠️ **高さは固定**（中身で伸び縮みさせない）—— 手を辿るたびに手順のリストの
-   高さが跳ねる。長いコメントは欄の中でスクロールする。
+   ⚠️ **高さは人が決める**（上のスプリットバー `#comment-split` が `--move-comment-h` を
+   書き換える。決めるまでは 4 行）。⚠️ **中身で伸び縮みさせない** —— 手を辿るたびに
+   手順のリストの高さが跳ねる。長いコメントは欄の中でスクロールする。
    ⚠️ **改行はそのまま**（`pre-wrap`）。KIF のコメントは行に意味があることが多い。 */
 .study-comment {
   flex: 0 0 auto;
-  height: calc(12.5px * 1.5 * 4 + 10px);
+  height: var(--move-comment-h, calc(12.5px * 1.5 * 4 + 10px));
   margin: 0 6px;
   padding: 4px 6px;
   overflow-y: auto;
