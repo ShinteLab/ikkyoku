@@ -10,9 +10,9 @@
 # **gzip で持つ**(実測: 生 23.2MB → 9.9MB)。suteme 側の読み込み口が io.Reader を
 # 取るので、展開したファイルを置く必要は無い(recognize/embedded.go)。
 #
-# ⚠️ **suteme の dist/ は `training.ExportCompact`(学習サーバの「配布用に書き出す」)が
-# 作るもの。** リポジトリ直下の training_data_v7.bin(全件)ではなく、
-# 間引いた配布セットを配ること。
+# ⚠️ **suteme の dist/ は `training.ExportCompact`(学習サーバの「配布用に書き出す」・
+# `suteme-training -export`)が作るもの。** リポジトリ直下の training_data_v*.bin(全件)ではなく、
+# 間引いた配布セットを配ること。**dist/ が無ければ、ここで `-export` を呼んで作る**(2026-10-04)。
 [CmdletBinding()]
 param(
     # suteme の配布セットの場所。既定はワークスペースに 6 つ並べた構成
@@ -27,8 +27,25 @@ $appDir = Split-Path -Parent $PSScriptRoot
 $root = Split-Path -Parent (Split-Path -Parent $appDir)
 $modelDir = Join-Path $root 'recognize\model'
 
-# 見つからないときに「何をすればいいか」を出して止まる(2026-10-04)。
-# **dist/ は suteme の学習サーバが書き出すもの**で、ここで作れるものではない。
+# dist/ を suteme に書き出させる(`suteme-training -export`。2026-10-04)。成功したら true。
+# **データディレクトリには suteme の場所を渡す** —— 学習データ(*.bin)は gitignore なので、
+# suteme の worktree には無い(ここでの suteme は ikkyoku の隣の本体のチェックアウト)。
+function Invoke-SutemeExport([string]$suteme) {
+    Write-Host "suteme の配布セット(dist/)が無いので書き出します: $suteme"
+    Write-Host '  (go run ./_cmd/suteme-training -export)'
+    Push-Location $suteme
+    try {
+        & go run ./_cmd/suteme-training -export $suteme
+        return ($LASTEXITCODE -eq 0)
+    } catch {
+        Write-Host "  書き出せませんでした: $_"
+        return $false
+    } finally {
+        Pop-Location
+    }
+}
+
+# 見つからない・作れないときに「何をすればいいか」を出して止まる(2026-10-04)。
 # 以前は「-Dist <パス> で指定してください」とだけ出していたが、task から呼ぶと
 # -Dist は渡せず(wails3 task は -- の後ろを渡さない)、作り方も分からなかった。
 function Stop-NoDist([string[]]$searched, [string]$suteme) {
@@ -37,15 +54,14 @@ function Stop-NoDist([string[]]$searched, [string]$suteme) {
     $lines += ($searched | ForEach-Object { "    $_" })
     $lines += ''
     if ($suteme) {
-        $lines += '  dist/ は suteme の学習サーバで書き出します:'
+        $lines += '  suteme に書き出させようとしましたが、できませんでした(上に理由が出ています)。'
+        $lines += '  学習データ(training_data_v*.bin)が suteme のリポジトリにあるか確かめて、手で書き出してください:'
         $lines += "    1. cd $suteme"
-        $lines += '       go run ./_cmd/suteme-training'
-        $lines += '    2. ブラウザで http://localhost:8080 を開き、「履歴」タブの下の「配布用に書き出す」→「書き出す」'
-        $lines += '       (サーバを起動したまま別のターミナルで  Invoke-RestMethod -Method Post http://localhost:8080/api/export  でもよい)'
-        $lines += '    3. もう一度 task model:copy'
+        $lines += '       go run ./_cmd/suteme-training -export'
+        $lines += '    2. もう一度 task model:copy'
     } elseif ($Dist) {
         $lines += '  指定した場所(SUTEME_DIST)にありません。dist/ は suteme のリポジトリの中に、'
-        $lines += '  学習サーバ(go run ./_cmd/suteme-training)の「履歴」タブ →「配布用に書き出す」で作られます。'
+        $lines += '  go run ./_cmd/suteme-training -export で作られます。'
     } else {
         $lines += '  suteme のリポジトリが ikkyoku の隣に見つかりません(shinte/ikkyoku と shinte/suteme を並べる構成が前提)。'
         $lines += '  別の場所にあるなら、その dist/ を指してください:'
@@ -74,7 +90,13 @@ if ($Dist) {
     $sutemeFound = $sutemes | Where-Object { Test-Path (Join-Path $_ 'go.mod') } | Select-Object -First 1
 }
 if (-not $Dist -or -not (Test-Path $Dist)) {
-    Stop-NoDist $searched $sutemeFound
+    # ⚠️ **作れるのは dist/ が無いときだけ。** あるときは書き出し直さない —— 中身は学習データの
+    # その時点の写しで、いつ作り直すかは学習した人が決める(下で日付と作り直し方を出す)。
+    if ($sutemeFound -and (Invoke-SutemeExport $sutemeFound)) {
+        $Dist = Join-Path $sutemeFound 'dist'
+    } else {
+        Stop-NoDist $searched $sutemeFound
+    }
 }
 
 # suteme 側のファイル名 → 焼き込み側の名前。
@@ -93,6 +115,10 @@ if (-not $train) {
     # dist/ はあるが中身が無い(書き出しの途中で止まった など)。作り方は同じ。
     Stop-NoDist @("$Dist (training_data_v*.bin がありません)") (Split-Path -Parent $Dist)
 }
+# どの時点の書き出しを焼くのかを出す。**学習し直しても dist/ は古いまま**なので、
+# 作り直し方も一緒に出す(ここは dist/ があるときは書き出し直さない)。
+Write-Host ("{0} を使います({1:yyyy-MM-dd HH:mm} の書き出し)" -f $train.FullName, $train.LastWriteTime)
+Write-Host ("  学習し直したあとなら、先に書き出し直す: cd {0}; go run ./_cmd/suteme-training -export" -f (Split-Path -Parent $Dist))
 $pairs = @(
     @{ From = $train.Name;            To = 'predictor.bin.gz' },
     @{ From = 'strip_data_v1.bin';    To = 'strip.bin.gz' }

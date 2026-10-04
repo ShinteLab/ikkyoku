@@ -102,15 +102,18 @@ task build:embed        # model:copy + wails3 のビルド（EXTRA_TAGS=embedmod
 - ⚠️ **ビルドが通ることでは足りない。** 中身が壊れていても `go:embed` は通るので、
   配布ビルドの前に `go test -tags embedmodel ./recognize/` で
   **実際に認識器として組み立てられること**を確かめる
-- ⚠️ **`suteme/dist` は suteme の学習サーバの「配布用に書き出す」が作る**（無ければ
-  `model:copy` が止まり、探した場所と作り方を出す）。作り方:
+- **`suteme/dist` が無ければ `model:copy` が suteme に書き出させる**（2026-10-04。
+  `go run ./_cmd/suteme-training -export <suteme の場所>`。実測 1 秒弱）。
+  ⚠️ **あるときは書き出し直さない** —— 中身は学習データのその時点の写しで、いつ作り直すかは
+  学習した人が決める。`model:copy` は使う `dist/` の日付と作り直し方を出すので、
+  **学習し直したあとは先に書き出し直す**:
 
   ```powershell
-  cd ..\suteme                      # ikkyoku の隣の suteme
-  go run ./_cmd/suteme-training     # 学習サーバ。http://localhost:8080
-  # ブラウザで「履歴」タブの下の「配布用に書き出す」→「書き出す」
-  # （またはサーバを起動したまま: Invoke-RestMethod -Method Post http://localhost:8080/api/export）
+  cd ..\suteme                              # ikkyoku の隣の suteme（本体のチェックアウト）
+  go run ./_cmd/suteme-training -export     # dist/ を作り直す（画面の「配布用に書き出す」と同じ）
   ```
+
+  書き出せなかったとき（学習データが無い など）は、探した場所と手で書き出す手順を出して止まる
 
   suteme を ikkyoku の隣に置いていないときは `wails3 task model:copy SUTEME_DIST=D:/path/to/suteme/dist`
   （`build:embed` / `local:deploy` にも同じ形で渡せる）。⚠️ **`-- -Dist ...` では渡らない**

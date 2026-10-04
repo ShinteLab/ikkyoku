@@ -184,7 +184,8 @@ task build:embed        # model:copy + wails3 のビルド(EXTRA_TAGS=embedmodel
 | `recognize/model/strip.bin.gz` | `suteme/dist/strip_data_v1.bin` を gzip したもの |
 | `recognize/model/source.txt` | 出所（画面とログに出る。焼き込むと元のファイル名が残らないため）|
 
-- ⚠️ **`suteme` の `dist/` は「配布用に書き出す」（`training.ExportCompact`）が作るもの。**
+- ⚠️ **`suteme` の `dist/` は「配布用に書き出す」（`training.ExportCompact`。画面か
+  `suteme-training -export`）が作るもの。** 無ければ `task model:copy` が `-export` を呼んで作る
   リポジトリ直下の全件（`training_data_v*.bin`）ではなく、間引いた配布セットを配ること
 - **この 3 ファイルがそのまま配布モデル**（2 段目）。`recognize/model/` を zip にして配れば、
   受け取った人は既定の置き場所に展開するだけで使える（手順はスキル `ikkyoku-build`）
