@@ -3,7 +3,7 @@ module ikkyoku
 go 1.26.1
 
 require (
-	github.com/ShinteLab/core v0.0.0-00010101000000-000000000000
+	github.com/ShinteLab/core v0.2.0
 	github.com/ShinteLab/ikkyoku v0.0.0-00010101000000-000000000000
 	github.com/ShinteLab/suteme v0.0.0-00010101000000-000000000000
 	github.com/wailsapp/wails/v3 v3.0.0-beta.26
@@ -51,8 +51,6 @@ require (
 replace github.com/ShinteLab/ikkyoku => ../../
 
 replace github.com/ShinteLab/suteme => ../../../suteme
-
-replace github.com/ShinteLab/core => ../../../core
 
 replace github.com/ShinteLab/engine => ../../../engine
 

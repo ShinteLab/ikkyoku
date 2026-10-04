@@ -206,7 +206,7 @@ Claude Code でスキルとして使いたい人は、各自の `.claude/skills/
 
 依存の向きは `ikkyoku → core / suteme / engine / kicho`。**逆参照しない**。
 ワークスペースに並んでいる状態では **`replace` の相対パス参照**で、`_cmd/ikkyoku` にも
-同じ replace が要る。⚠️ **go.mod まわりの落とし穴**（kicho の依存の書き足し・
+同じ replace が要る。**`core` だけはタグで引く**（2026-10-04 から。2 つの go.mod の両方で上げる）。⚠️ **go.mod まわりの落とし穴**（kicho の依存の書き足し・
 `go mod tidy` のあとの確認・`check-consumers.ps1`）と、⚠️ **git worktree で replace が
 解決できないときのジャンクション**（worktree 側に合わせて replace を書き換えないこと）は
 スキル `ikkyoku-build`。
