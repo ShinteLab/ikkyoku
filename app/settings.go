@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/ShinteLab/ikkyoku"
 	"github.com/ShinteLab/ikkyoku/analyze"
@@ -352,6 +353,13 @@ type SettingsService struct {
 	mu   sync.Mutex
 	path string
 	cfg  ikkyoku.Config
+
+	// loadErr は起動時に設定を読めなかった理由（2026-10-04）。**起動は止めない**
+	// （既定の設定で動く）が、黙っていると**次に設定を 1 つ変えた瞬間に上書きして、
+	// 元の設定が全部消える**。画面の ⚠ に出すため `LoadProblem` で渡す。
+	loadErr error
+	// loadBackup は読めなかった設定ファイルを写した先（写せなかったら空）。
+	loadBackup string
 }
 
 // NewSettingsService は設定を読み込んだ状態で作る。
@@ -367,10 +375,43 @@ func NewSettingsService() *SettingsService {
 	cfg, err := ikkyoku.LoadConfig(path)
 	if err != nil {
 		log.Warn("設定を読み込めませんでした", "path", path, "error", err)
+		s.loadErr = err
+		s.loadBackup = backupBrokenConfig(path)
 		return s
 	}
 	s.cfg = cfg
 	return s
+}
+
+// backupBrokenConfig は読めなかった設定ファイルを別名で写し、写した先を返す。
+//
+// ⚠️ **元のファイルは動かさない（写すだけ）。** 既定の設定のまま何かを変えると元の
+// 場所へ保存されるので、**写しておかないと手で直す材料が残らない**。ファイル自体が
+// 読めない（権限など）なら写せないので空を返す。
+func backupBrokenConfig(path string) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	dst := path + ".broken-" + time.Now().Format("20060102-150405")
+	if err := os.WriteFile(dst, b, 0o644); err != nil {
+		log.Warn("読めなかった設定ファイルを写せませんでした", "path", dst, "error", err)
+		return ""
+	}
+	log.Warn("読めなかった設定ファイルを写しました", "path", dst)
+	return dst
+}
+
+// LoadProblem は起動時に設定を読めなかった理由と、壊れたファイルを写した先を返す
+// （読めていれば err は nil）。画面の ⚠ に出すための口。
+//
+// ⚠️ **`//wails:ignore` を外さないこと**（`Config` と同じ。`main` から呼ぶ口）。
+//
+//wails:ignore
+func (s *SettingsService) LoadProblem() (backup string, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.loadBackup, s.loadErr
 }
 
 // FilePicker はファイル選択ダイアログ。取り消したら空文字を返す。

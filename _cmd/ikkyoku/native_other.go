@@ -41,3 +41,7 @@ func mouseButtonDown() bool { return false }
 func copyImageToClipboard(img image.Image) error {
 	return fmt.Errorf("ikkyoku: このOSでは画像のコピーは未対応です(Windows専用)")
 }
+
+func messageBox(title, text string) error {
+	return fmt.Errorf("ikkyoku: このOSでは未対応です(Windows専用)")
+}

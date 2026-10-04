@@ -11,7 +11,7 @@ Service は `ikkyoku/app`、枠の幾何は `ikkyoku/guide`、画面は `fronten
 
 | 触るもの | 読む文書 |
 |---|---|
-| ウィンドウの生成・起動時に出す窓・Frameless・窓の位置と大きさ（`main.go` / `window.go`）・**メイン画面が真っ黒になる** | `_docs/cmd-windows.md` |
+| ウィンドウの生成・起動時に出す窓・Frameless・窓の位置と大きさ（`main.go` / `window.go`）・**メイン画面が真っ黒になる**・**起動で黙って消えない**（`fatal.go` / `issues.go`） | `_docs/cmd-windows.md` |
 | 枠の透過・素通し・移動とリサイズ・**キャプチャ領域（物理ピクセル・HWND）**（`native_windows.go` / `captureservice.go`） | `_docs/cmd-frame.md`（寸法と幾何は `guide/AGENTS.md`） |
 | 撮る・中継を追う（枠の札・ふるい・録画）・画像ファイル・撮った画像のパス・ホットキー（`captureservice.go`） | `_docs/cmd-capture.md`（調整とデバッグはスキル `ikkyoku-follow`） |
 
@@ -54,7 +54,7 @@ CLI は無い。**
     イベントを捨てても解析は進む）
   - ⚠️ **`CaptureService` だけが残っているのは、ウィンドウと HWND を触るから**
     （枠の表示/非表示・素通し・自分を隠して撮る・メイン画面の塗り潰し）。
-    **他の 8 つとは関数フックでしか繋がっていない**ので、ここだけ独立している
+    **他の 9 つとは関数フックでしか繋がっていない**ので、ここだけ独立している
   - ⚠️ **`main` から呼ぶ口は `//wails:ignore` を付けて公開する**
     （`SettingsService.Config` / `KifuService.Open` / `Close` /
     `AnalyzeService.Close`）。**付けないと bindings に出てフロント API になる**
@@ -64,7 +64,9 @@ CLI は無い。**
 | `main.go` | ウィンドウ 2 枚の生成・**Service の登録**・フック登録・起動時の自動フィット・終了時の後始末。⚠️ **Service の実体は `ikkyoku/app`**（`application.NewService()` は任意のパッケージの値を取れる）。⚠️ **import は別名にしてある** —— パッケージ名 `app` が `application.App` の変数 `app` とぶつかる。**main しか使わない小物も畳んである**（`/shinte-web/` の配信・ホットキーのアクセラレータ変換・ファイル選択ダイアログ） |
 | `captureservice.go` | Wails にバインドする Service。**ウィンドウと HWND を触るのでここに残っている**（枠の表示/非表示・素通し・自分を隠して撮る・メイン画面の塗り潰し・終了(`Quit`)・認識の呼び出し・ガイド枠の自動フィット `FitFrame`・**画像ファイルの読み込み `OpenImage`**）。⚠️ **撮る（`Capture`）と読み込む（`loadImage`）は `deliver` で合流する** —— そこから先（サムネイル・`capture:shot` / `capture:done`・認識）は 1 本だけ。⚠️ **寸法と幾何は `ikkyoku/guide`**（`captureRegion` はそれを使って HWND の矩形から領域を出すだけ） |
 | `window.go` | ウィンドウの位置・サイズ。**永続化**（`app-window.json`・既定値・画面内へのクランプ）と**追跡**（動くたびに記録。⚠️ **終了時には `Position()` を読めない**）の 2 つ。⚠️ **5 枚ぶん**（枠・メイン画面・**評価値グラフ**・**候補手**・**手順**）。⚠️ **古いファイルには `graph` / `side` / `moves` が無い**ので既定に倒すこと（倒さないと大きさ 0 の窓が出る） |
-| `native_windows.go` | **Win32 の直呼び**（`golang.org/x/sys/windows` の LazyProc。**cgo を使わないための層**）。①ウィンドウの矩形 ②枠の素通し（`WS_EX_TRANSPARENT`）とカーソル ③画像を CF_DIB でクリップボードへ。⚠️ **ここに判断を書かないこと** —— 付け外しの判断は `captureservice.go` の `watchCursor`、寸法は `ikkyoku/guide` |
+| `native_windows.go` | **Win32 の直呼び**（`golang.org/x/sys/windows` の LazyProc。**cgo を使わないための層**）。①ウィンドウの矩形 ②枠の素通し（`WS_EX_TRANSPARENT`）とカーソル ③画像を CF_DIB でクリップボードへ ④**メッセージボックス**（`fatal.go` が使う。WebView2 にも Wails にも頼らない）。⚠️ **ここに判断を書かないこと** —— 付け外しの判断は `captureservice.go` の `watchCursor`、寸法は `ikkyoku/guide` |
+| `fatal.go` | **続けられなくなったときの最後の口**（2026-10-04）。Wails の致命的なエラー（`Options.ErrorHandler`）と main の panic を**OS のメッセージボックス**で出してから終わる。⚠️ **箱にするのは `*application.FatalError` だけ**（致命的でないエラーも同じ口に来る）。⚠️ **起動はできるが足りないものはここに来ない**（`issues.go` → ⚠）。`_docs/cmd-windows.md` の「起動で黙って消えない」 |
+| `issues.go` | **起動はできたが足りないもの**を `app.IssueService` へ載せる（認識器・棋譜データベース。設定・ログ・異常終了・控え・メイン画面の保険は `main.go` が直に載せる）。⚠️ **直ったら消すこと**・⚠️ **ホットキーの登録失敗は載せない**（2026-08-10 の決定）・⚠️ **文言に「棚」と書かない** |
 | `native_other.go` | 上のスタブ（Windows 以外）。**呼ばれたらエラーを返すだけ。** ⚠️ **関数を足したら両方に足すこと** |
 | `version` | **アプリのバージョン（唯一の正）**。`main.go` が `//go:embed` で焼き込み、起動時にログへ出す。⚠️ **手で書き換えない** —— ルートで `go run _cmd/version.go` を使う（`config.yml` と `package.json` へも伝播させる。手順はスキル `ikkyoku-build`） |
 | `Taskfile.local.yml` | **git に入れない**個人用の `local:deploy`（バージョンの伝播 → 焼き込みビルド → ビルド情報のコミット → タグ → 常用場所へコピー）。雛形と手順はスキル `ikkyoku-build`。⚠️ **`Taskfile.yml` の include の `optional: true` を外さない**（無い環境で全部のタスクが落ちる） |
@@ -87,6 +89,11 @@ CLI は無い。**
   ⚠️ **盤の有無のふるい（`detectGate`）の歯止めも同じファイル** ——
   **実際の検出は見ない**（`suteme` の仕事）。見ているのは**通す側の約束**で、
   **追う盤が無い / 枠が動いた / 見送りが続いた**ときに通すこと
+- `fatal_test.go` — **続けられないときの箱の文面**（`fatalMessage`）と **⚠ の合わせ方**
+  （`syncRecognizerIssue` / `syncKifuDBIssue`）。⚠️ 歯止めは —— **WebView2 が原因なら
+  名指しすること**（利用者が自分で直せる唯一のもの）・**panic のスタックを箱に全部載せない
+  こと**・**直ったら ⚠ から消えること**・**帯の判定データは駒種の推論器と別の問題として
+  出すこと**（直す場所を間違えないように）
 - `recognizersource_test.go` — 認識器の読み込み元の解決（`resolveRecognizerSource`）。
   ⚠️ **`auto` を「焼き込み優先」にしない**歯止め —— 開発中（＝ディレクトリを
   指している状態）に焼き込みへ倒れると、**学習データを更新しても反映されない**

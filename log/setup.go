@@ -43,6 +43,13 @@ func defaultLevels() (slog.Level, map[string]slog.Level) {
 	return LevelInfo, nil
 }
 
+// fileDir はログファイルを書いているディレクトリ（Init が決める。書けていなければ空）。
+var fileDir string
+
+// Dir はログファイルを書いているディレクトリを返す。**書けていなければ空**
+// （画面の ⚠ に「ログの場所」として出す・異常終了の記録を置く）。
+func Dir() string { return fileDir }
+
 // Init はログの出口を組み、slog.Default() をそこへ向ける。main の最初に 1 回だけ呼ぶ。
 //
 //   - ファイル: Dir/ikkyoku_<日付>.log（日ごと。keepDays より古いものは消す）
@@ -54,6 +61,7 @@ func defaultLevels() (slog.Level, map[string]slog.Level) {
 // 返す io.Closer は必ず nil ではない（終了時に Close する）。
 func Init(opts Options) (io.Closer, error) {
 	var errs []error
+	fileDir = ""
 	dir := opts.Dir
 	if dir == "" {
 		exe, err := os.Executable()
@@ -76,6 +84,7 @@ func Init(opts Options) (io.Closer, error) {
 			sinks = append(sinks, wlog.NewSimpleHandler(w, LevelTrace))
 			closer = w
 			file = filepath.Join(dir, FilePrefix+"_"+time.Now().Format("20060102")+".log")
+			fileDir = dir
 		}
 	}
 	if opts.Console {

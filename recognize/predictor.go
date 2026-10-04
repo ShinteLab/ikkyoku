@@ -2,7 +2,9 @@ package recognize
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/ShinteLab/suteme"
 )
@@ -37,6 +39,37 @@ func UsePredictorFrom(dir string) error {
 // キャッシュも捨てられるので、再読み込みの入口としても使える。
 func UseDefaultPredictor() {
 	suteme.SetPredictor(nil)
+}
+
+// FindDefaultPredictor は suteme 既定の探索（カレントディレクトリ → 実行ファイルの
+// ディレクトリ）で駒種推論器のデータが**見つかるか**だけを確かめる（2026-10-04）。
+// 見つからなければ、どこを探したかを含むエラーを返す。
+//
+// **読み込みはしない**（ファイルがあるかを見るだけ）。既定の探索は最初に撮ったときに
+// 初めて走るので、**データが無いことに撮るまで気づけない**。画面の ⚠ に出すために
+// 起動時に前もって見る口で、ここが nil を返しても読めることまでは保証しない。
+func FindDefaultPredictor() error {
+	names := append([]string{suteme.DefaultDataFile, suteme.DefaultModelFile}, suteme.LegacyDataFiles...)
+	dirs := []string{"."}
+	if exe, err := os.Executable(); err == nil {
+		dirs = append(dirs, filepath.Dir(exe))
+	}
+	for _, dir := range dirs {
+		for _, name := range names {
+			if st, err := os.Stat(filepath.Join(dir, name)); err == nil && !st.IsDir() {
+				return nil
+			}
+		}
+	}
+	abs := make([]string, len(dirs))
+	for i, d := range dirs {
+		if a, err := filepath.Abs(d); err == nil {
+			d = a
+		}
+		abs[i] = d
+	}
+	return fmt.Errorf("ikkyoku/recognize: %s / %s が %s にありません",
+		suteme.DefaultDataFile, suteme.DefaultModelFile, strings.Join(abs, " にも "))
 }
 
 // UseStripJudgeFrom は dir に置かれた帯の教師データから、盤の縁の帯の判定器を

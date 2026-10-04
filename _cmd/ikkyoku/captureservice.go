@@ -93,9 +93,16 @@ type CaptureService struct {
 	// (枠の外への配置・表示位置の記録)を 2 回目以降に繰り返さないための記録。
 	// 前面に出す(Show/Focus)のは毎回。revealMain 参照。
 	mainShown bool
+	// frameReady は枠ウィンドウの WindowRuntimeReady が来たか（2026-10-04）。
+	// **起動時にメイン画面を出す合図はこれ**なので、来ないとメイン画面が 1 枚も出ない
+	// まま動き続ける。`revealIfStuck` が待つのはこれ。
+	frameReady bool
 	// recognizerStatus は直近の読み込み結果。表示のためだけに 3.5MB を
 	// 読み直さなくて済むよう覚えておく。
 	recognizerStatus RecognizerStatus
+	// onRecognizer は認識器を読み直すたびに呼ぶ（画面の ⚠ を合わせるため。main.go が差し込む）。
+	// ⚠️ **起動時だけでなく、設定タブで指し直したときも呼ぶこと** —— 直ったのに ⚠ が残る。
+	onRecognizer func(RecognizerStatus)
 
 	// boardAnchor は**追いかけている盤の見た目**（2026-09-15。中継の追従）。
 	//
@@ -270,7 +277,11 @@ func (s *CaptureService) ReloadRecognizer() RecognizerStatus {
 	st := s.loadRecognizer()
 	s.mu.Lock()
 	s.recognizerStatus = st
+	hook := s.onRecognizer
 	s.mu.Unlock()
+	if hook != nil {
+		hook(st)
+	}
 	return st
 }
 
@@ -438,6 +449,7 @@ func (s *CaptureService) revealMain() {
 	first := !s.mainShown
 	s.mainShown = true
 	s.mu.Unlock()
+	revealed.Store(true)
 
 	if first {
 		s.placeMainBesideFrame()
@@ -454,6 +466,46 @@ func (s *CaptureService) revealMain() {
 		// (非表示のあいだの座標は当てにならない。geometry.go 参照)。
 		s.wins.mainGeom.record(s.wins.main)
 	}
+}
+
+// markFrameReady は枠ウィンドウの WindowRuntimeReady が来たことを記録する
+// （registerFrameHooks のフックの頭で呼ぶ）。
+func (s *CaptureService) markFrameReady() {
+	s.mu.Lock()
+	s.frameReady = true
+	s.mu.Unlock()
+}
+
+// revealIfStuck は**枠の準備が来ないままメイン画面が出ていなければ**、メイン画面を出す
+// （2026-10-04。起動から mainRevealTimeout 後に 1 回だけ呼ぶ）。出したら true。
+//
+// 起動時にメイン画面を出す合図は**枠の** WindowRuntimeReady（registerFrameHooks）で、
+// これは枠の WebView がページを読み込んでランタイムを起こしたときに来る。**枠の側で
+// 何かが失敗すると合図が来ず、プロセスは生きているのに窓が 1 枚も出ない**
+// （タスクバーにも出ないので、利用者からは「起動しない」にしか見えない）。
+//
+// ⚠️ **枠の準備が来ていたら何もしないこと。** 「起動時に盤面を探す」は探し終えてから
+// 出す（数秒かかる）ので、時間だけで判断すると探している最中に割り込む。
+// ⚠️ **枠の横へは置かない**（placeMainBesideFrame を通らない）。枠の位置は合図の中で
+// 記録するので、合図が来ていないと保存前のセンチネル値（-32000）を基準に置いてしまう。
+// ここで出すのは前回の位置か、それが無ければ画面の中央（newMainWindow の既定）。
+func (s *CaptureService) revealIfStuck() bool {
+	if s.wins == nil || s.wins.main == nil {
+		return false
+	}
+	s.mu.Lock()
+	if s.frameReady || s.mainShown {
+		s.mu.Unlock()
+		return false
+	}
+	s.mainShown = true
+	s.mu.Unlock()
+	revealed.Store(true)
+
+	s.wins.main.Show()
+	s.wins.main.Focus()
+	s.wins.mainGeom.record(s.wins.main)
+	return true
 }
 
 // placeMainBesideFrame はメイン画面を枠に重ならない位置へ置く。

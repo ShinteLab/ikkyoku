@@ -55,6 +55,7 @@
 // Go 側が枠の外へ逃がす(captureservice.go の placeMainBesideFrame)。
 import { Clipboard, Events, Window } from "@wailsio/runtime";
 import {
+  FiAlertTriangle,
   FiChevronDown,
   FiChevronLeft,
   FiChevronRight,
@@ -82,6 +83,7 @@ import { iconMarkup } from "./icon";
 import { mountEditor } from "./editor";
 import { mountLibrary } from "./library";
 import { mountFetchCards } from "./fetchcards";
+import { mountIssues } from "./issues";
 import { mountEvalPane } from "./evalgraphpane";
 import { enableVeilDrag } from "./veildrag";
 import type { EvalMode } from "./evalgraph";
@@ -353,6 +355,12 @@ export function mountMainScreen(root: HTMLElement): void {
              枠の側のツールバーに □ があり、**合わせる相手は枠**なので、
              枠が出ていない状態から押す操作ではない。 -->
         <div class="toolbar-actions">
+          <!-- 起動はできたが足りないもの・できないこと（2026-10-04。issues.ts）。
+               ⚠️ **問題があるときだけ出る**（hidden で始める）。押すと一覧の吹き出し。
+               ⚠️ **枠のトグルより左に置く** —— 出たり消えたりするので、右に置くと
+               いつも押すトグルの位置が動く。 -->
+          <button id="issues-btn" class="toolbar-btn is-icon is-issues" type="button"
+                  hidden>${iconMarkup(FiAlertTriangle)}</button>
           <button id="frame-toggle" class="toolbar-btn is-icon" type="button"
                   aria-pressed="false">${iconMarkup(FiMaximize)}</button>
         </div>
@@ -4529,6 +4537,8 @@ ${st.turnLabel}${n}`;
   // ⚠️ **状態は Go 側が知らせる**（`frame:visible`）—— 枠の ✕ で隠したことは
   // メイン画面からは分からないので、自前で覚えると**隠れているのに
   // 「出ています」のまま**になる。
+  mountIssues(root.querySelector<HTMLButtonElement>("#issues-btn")!);
+
   const frameToggle = root.querySelector<HTMLButtonElement>("#frame-toggle")!;
   let frameVisible = false;
   const showFrameState = (visible: boolean) => {

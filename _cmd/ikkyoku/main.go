@@ -87,10 +87,50 @@ func main() {
 	if logErr != nil {
 		log.Warn("ログの準備で問題がありました", "error", logErr)
 	}
+	// ⚠️ **ここから下で panic したら、箱を出してから終わる**（fatal.go）。配る exe は
+	// 標準エラーの行き先が無いので、無いと**何も言わずに消える**。
+	defer recoverMain()
 	log.Info("ikkyoku を起動します", "version", strings.TrimSpace(version))
+
+	// 起動はできたが足りないもの・できないこと（2026-10-04）。メイン画面のツールバーの ⚠ が
+	// 一覧にする。**どれも起動は止めない**（設計原則3）。載せ方は issues.go。
+	issues := ikkyokuapp.NewIssueService()
+	issues.SetLogDir(log.Dir())
+	if logErr != nil {
+		effect := ""
+		if log.Dir() == "" {
+			effect = "問題が起きても記録が残りません"
+		}
+		issues.Set(ikkyokuapp.Issue{
+			Key: issueLog, Level: ikkyokuapp.IssueWarn,
+			Title: "ログの準備で問題がありました", Effect: effect, Detail: logErr.Error(),
+		})
+	}
+	// 異常終了の記録（log/crash.go）。前回のものが残っていれば ⚠ に出す。
+	if prev, err := log.CatchCrash(); err != nil {
+		log.Warn("異常終了の記録を用意できませんでした", "error", err)
+	} else if prev != "" {
+		log.Warn("前回は異常終了していました", "record", prev)
+		issues.Set(ikkyokuapp.Issue{
+			Key: issueCrash, Level: ikkyokuapp.IssueWarn,
+			Title: "前回は異常終了しました", Detail: prev,
+		})
+	}
 
 	settingsSvc := ikkyokuapp.NewSettingsService()
 	cfg := settingsSvc.Config()
+	if backup, err := settingsSvc.LoadProblem(); err != nil {
+		effect := "既定の設定で動いています。設定を変えると、読めなかったファイルは上書きされます"
+		detail := err.Error()
+		if backup != "" {
+			effect = "既定の設定で動いています（読めなかったファイルは写しを残しました）"
+			detail += "\n写し: " + backup
+		}
+		issues.Set(ikkyokuapp.Issue{
+			Key: issueConfig, Level: ikkyokuapp.IssueError,
+			Title: "設定ファイルを読めません", Effect: effect, Detail: detail,
+		})
+	}
 	captureSvc := NewCaptureService(cfg.SutemeDataDir, cfg.SutemeSourceOr())
 	positionSvc := ikkyokuapp.NewPositionService()
 	trainingSvc := ikkyokuapp.NewTrainingService(settingsSvc)
@@ -119,6 +159,9 @@ func main() {
 		Name:        "ikkyoku",
 		Description: "ikkyoku - shogi broadcast region capture",
 		Logger:      slog.Default(),
+		// ⚠️ **致命的なエラーを箱にする口**（fatal.go）。無いと Wails はログに出して
+		// os.Exit(1) するだけで、配る exe では**何も言わずに消える**（WebView2 が無いときなど）。
+		ErrorHandler: handleWailsError,
 		Services: []application.Service{
 			application.NewService(captureSvc),
 			application.NewService(settingsSvc),
@@ -129,6 +172,7 @@ func main() {
 			application.NewService(analyzeSvc),
 			application.NewService(kifuSvc),
 			application.NewService(diagSvc),
+			application.NewService(issues),
 		},
 		Assets: assetOptions(),
 		Mac: application.MacOptions{
@@ -170,15 +214,22 @@ func main() {
 	// **別ウィンドウとの連動の土台**で、これが無いと「変えた窓」しか気づけない
 	// （`app.Event.Emit` はアプリ全体に届く）。
 	studySvc.Emit = func(name string, data any) { app.Event.Emit(name, data) }
+	issues.Emit = func(name string, data any) { app.Event.Emit(name, data) }
 	// 棚を開く。⚠️ **失敗してもここで止めない** —— 理由は KifuService が抱えて
 	// 設定タブに出す（撮った 1 局面と貼った棋譜の解析は棚に依らない。設計原則3）。
+	// ⚠️ **開けたかどうかを ⚠ に合わせること**（開き直すたびに。直ったら消える）。
+	openKifuDB := func(path string) {
+		kifuSvc.Open(path)
+		syncKifuDBIssue(issues, kifuSvc.Status())
+	}
 	if dbPath, err := cfg.KifuDB(); err != nil {
 		log.Warn("棋譜データベースの場所を決められませんでした", "error", err)
+		syncKifuDBIssue(issues, ikkyokuapp.KifuDBStatus{Error: err.Error()})
 	} else {
-		kifuSvc.Open(dbPath)
+		openKifuDB(dbPath)
 	}
 	// 設定タブで場所を変えたらその場で開き直す（認識器の読み込み元と同じ扱い）。
-	settingsSvc.OnKifuDBPath = kifuSvc.Open
+	settingsSvc.OnKifuDBPath = openKifuDB
 	// 検討の控え（2026-09-16）。**再起動しても前回の続きから始められるように、
 	// 木と評価値を丸ごと残す。**
 	//
@@ -190,10 +241,22 @@ func main() {
 	var studyStore *ikkyokuapp.StudyStore
 	if dir, err := cfg.StudyDir(); err != nil {
 		log.Warn("検討の控えの場所を決められませんでした", "error", err)
+		issues.Set(ikkyokuapp.Issue{
+			Key: issueStudyStore, Level: ikkyokuapp.IssueWarn,
+			Title:  "検討の控えの場所を決められません",
+			Effect: "解析した内容が残らず、次の起動で前回の続きから始められません",
+			Detail: err.Error(),
+		})
 	} else {
 		studyStore = ikkyokuapp.NewStudyStore(dir, studySvc)
 		if ok, err := studyStore.Restore(); err != nil {
 			log.Warn("前回の検討を戻せませんでした", "dir", dir, "error", err)
+			issues.Set(ikkyokuapp.Issue{
+				Key: issueStudyStore, Level: ikkyokuapp.IssueWarn,
+				Title:  "前回の検討を戻せませんでした",
+				Effect: "前回の続きからは始められません",
+				Detail: dir + "\n" + err.Error(),
+			})
 		} else if !ok {
 			log.Debug("戻す検討はありませんでした", "dir", dir)
 		}
@@ -270,15 +333,38 @@ func main() {
 
 	// 駒種推論器(suteme)を先に用意しておく。3.5MB の学習データを読むので、
 	// 最初のキャプチャのときに読み始めると撮った瞬間に待たされる。
+	// ⚠️ **読み直すたびに ⚠ を合わせる**（設定タブで指し直したときも。issues.go）。
+	captureSvc.onRecognizer = func(st RecognizerStatus) { syncRecognizerIssue(issues, st) }
 	captureSvc.ReloadRecognizer()
 
+	// メイン画面が出ないまま動き続けるのを防ぐ（2026-10-04。revealIfStuck）。
+	// ⚠️ **app.Run() の前の Show() は何もしない**ので、時間が来るのは Run の中になる
+	// ように、待ち時間は起動にかかる時間より十分長くとる。
+	time.AfterFunc(mainRevealTimeout, func() {
+		if !captureSvc.revealIfStuck() {
+			return
+		}
+		log.Warn("枠ウィンドウの準備が来ないので、メイン画面だけを出しました", "after", mainRevealTimeout)
+		issues.Set(ikkyokuapp.Issue{
+			Key: issueMainWindow, Level: ikkyokuapp.IssueError,
+			Title:  "ガイド枠の画面を用意できませんでした",
+			Effect: "撮れないことがあります",
+			Detail: fmt.Sprintf("起動から %v たっても枠の画面の準備が終わらなかったため、メイン画面だけを出しました", mainRevealTimeout),
+		})
+	})
+
 	if err := app.Run(); err != nil {
-		log.Error("アプリが異常終了しました", "error", err)
+		showFatal(err.Error())
 		logCloser.Close()
 		os.Exit(1)
 	}
 	logCloser.Close()
 }
+
+// mainRevealTimeout は、枠の準備が来ないときにメイン画面だけを出すまでの待ち時間（revealIfStuck）。
+// 遅い端末の最初の WebView2 の起動（数秒）より十分長くとる —— 短いと、間に合っているのに
+// 枠の横へ置く前にメイン画面が中央に出てしまう。
+const mainRevealTimeout = 15 * time.Second
 
 // newFrameWindow は盤に重ねる Frameless の透過ウィンドウを作る。
 //
@@ -562,6 +648,8 @@ func registerFrameHooks(app *application.App, wins *appWindows, st guide.Window,
 	// WindowRuntimeReady はウィンドウ単位で発火し、この時点なら ScreenNearestDipPoint も
 	// SetSize/SetPosition も確実に効く(ApplicationStarted では不確実)。
 	frame.RegisterHook(events.Common.WindowRuntimeReady, func(e *application.WindowEvent) {
+		// ⚠️ **頭で記録すること**（revealIfStuck が「合図が来たか」を見る）。
+		svc.markFrameReady()
 		if st.X != unsetPosition || st.Y != unsetPosition {
 			x, y, w, h := clampToScreen(st, defaultFrameWidth, defaultFrameHeight)
 			frame.SetSize(w, h)

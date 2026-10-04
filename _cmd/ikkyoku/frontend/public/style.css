@@ -921,6 +921,89 @@ html.is-main #app {
   background: var(--pressed-bg-hover);
 }
 
+/* ⚠️ **`.is-icon` の `display: flex` は `hidden` に勝つ**ので打ち消す（`.icon-btn[hidden]` と
+   同じ話）。落とすと、問題が無いのに ⚠ が出たままになる。 */
+.toolbar-btn[hidden] {
+  display: none;
+}
+
+/* 起動はできたが足りないもの・できないこと（2026-10-04。issues.ts）。
+   **問題があるときだけ出る**ので、出たら目に入る色にする（薄くしない）。
+   その機能が使えない（error）と、使えるが欠けている（warn）で色を分ける。 */
+.toolbar-btn.is-issues.is-warn {
+  color: var(--warn);
+  border-color: var(--warn-2);
+}
+
+.toolbar-btn.is-issues.is-error {
+  color: var(--danger);
+  border-color: var(--line-danger);
+}
+
+/* 押すと出る一覧。⚠️ **position: fixed で body に置く**（issues.ts の冒頭）。
+   ⚠️ **文字を選べるようにしておく** —— パスやエラーの文を写して調べるためのもの
+   （ツールバーの user-select: none を引き継がない）。 */
+.issues-pop {
+  position: fixed;
+  z-index: 60;
+  width: min(420px, calc(100vw - 16px));
+  overflow: auto;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px var(--shadow-45);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.issues-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.issue {
+  padding-left: 8px;
+  border-left: 3px solid var(--warn-2);
+}
+
+.issue.is-error {
+  border-left-color: var(--danger-line);
+}
+
+.issue-title {
+  font-weight: 600;
+  color: var(--text-title);
+}
+
+.issue-effect {
+  color: var(--text-2);
+}
+
+/* 元のエラーと場所。改行を活かし、長いパスは折り返す。 */
+.issue-detail {
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.issues-log {
+  margin-top: 8px;
+  padding-top: 6px;
+  font-size: 11px;
+  color: var(--text-dim);
+  border-top: 1px solid var(--line-soft);
+  overflow-wrap: anywhere;
+}
+
 /* ---- ウィンドウ操作(Frameless の代償) ------------------------------------
    OS のタイトルバーを外した代わりの最小化・最大化・閉じる。右端に、
    Windows のタイトルバーと同じ並びで置く。 */

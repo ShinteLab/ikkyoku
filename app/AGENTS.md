@@ -1,8 +1,8 @@
 # app の AGENTS.md
 
-**フロントに公開する Service**（設定・訂正・解析・棋譜・駒の字・学習送信・計測）。
+**フロントに公開する Service**（設定・訂正・解析・棋譜・駒の字・学習送信・計測・問題の一覧）。
 ⚠️ **wails3 を import しない** —— Wails の口（ダイアログ・イベント）は `FilePicker` /
-`EventEmitter` として `_cmd` から差し込む。⚠️ **8 つの Service は非公開メソッドで互いに
+`EventEmitter` として `_cmd` から差し込む。⚠️ **9 つの Service は非公開メソッドで互いに
 繋がっているのでパッケージを割らない**（公開すると bindings に出てフロント API になる）。⚠️ **`PositionService`（訂正タブ）と
 `StudyService`（解析タブ）は別の局面**で、繋がるのは `Adopt` の 1 か所だけ。
 
@@ -47,6 +47,7 @@
 | `fontservice.go` | **駒の字**の Service（`State` / `Scan` / `Preview` / `Add` / `Use` / `Remove` / `Rename` / **`SetGyoku` / `SetHidariUma`**）。返すのは **family 名と data URL、それに当てる `font-feature-settings` まで**で、画面に当てるのはフロント（`--shogi-font` と `--piece-features-*`）。⚠️ **焼いた TTF はディスクに残さない**（元フォントを入れ替えたのに古い字で描く事故が起きる）。⚠️ **玉の先後の判定を呼び出し側に書かせない**（`pieceStyle`。盤と自前の駒で別々に書くと「盤は玉なのに掴むと王」になる） |
 | `analyzeservice.go` | 確定した局面を解析する Service（`Start` / `Stop` / `State` / `CheckEngine`）。**順位 1 の評価値を `StudyService.recordEval` に渡す**（評価値グラフ。⚠️ **記録先の判断はしない** —— 手順を持っていないので、捨てた枝かどうかを確かめようがない）。**局面は持たない**（`StudyService` から読む。⚠️ **`PositionService` を見ないこと**）。⚠️ **登録した「解析に使う」エンジンを同時に走らせる**（1 エンジン 1 プロセス）。途中経過はイベント（**`engineId` つき**）。⚠️ **発火の口は持たない** ——`Emit`（`app.EventEmitter`）を `main.go` が差し込む |
 | `diagservice.go` | **フロントが生きているかの計測**（心拍・例外の中継）。局面にもキャプチャにも関与しない。「メイン画面が真っ黒になる」現象を切り分けるためのもの（`_docs/cmd-windows.md`） |
+| `issueservice.go` | **起動はできたが足りないもの・できないことの一覧**（2026-10-04。`Report` だけがフロントの API。`Set` / `Clear` / `SetLogDir` は `//wails:ignore` で `main` から呼ぶ）。メイン画面のツールバーの ⚠ が写す。⚠️ **鍵ごとに 1 つ・直ったら `Clear`**（積みっぱなしにしない）・⚠️ **同じ鍵は並びを動かさずに差し替える**・⚠️ **起動を止めるものはここに来ない**（`_cmd/ikkyoku/fatal.go`）。何を載せるかは `_cmd/ikkyoku/issues.go`、線引きは `_docs/cmd-windows.md` の「起動で黙って消えない」 |
 | `kifufetch.go` | **URL から棋譜を取ってくる**（`fetchKIF`）。文字コードの判別・HTML から .kif を辿る・上限つきの読み取りは全部 `kicho/scrape`。⚠️ **`kicho.Library` を経由しない** —— URL から棋譜を読むのは棚に依らない操作（設計原則3） |
 
 ## 訂正タブ ⇄ 解析タブの継ぎ目
@@ -145,6 +146,10 @@
 | `studystore_test.go` / `studyexport_test.go` / `studykey_test.go` | `_docs/app-studystore.md` |
 | `kifunote_test.go`（棋譜の消費時間とコメント） | `_docs/position-study.md` |
 
+- `issueservice_test.go` — **⚠ の一覧**（2026-10-04）。**直ったら消えること**・**同じ鍵は
+  並びを変えずに差し替えること**（開いている吹き出しの中身が跳ねない）・中身が同じなら流さないこと
+- `settings_broken_test.go` — **壊れた設定ファイルの写し**（2026-10-04）。⚠️ **元のファイルを
+  動かさず、中身をそのまま写すこと**（写しが無いと、次に設定を変えた瞬間に元の設定が消える）
 - `fontservice_test.go` — **駒の字**（2026-08-16）。⚠️ **一番の要点は
   「同梱に戻れること」** —— 登録を消しても、選んでいたフォントが消えても、
   **同梱の字で盤が描けること**（設計原則3）。ほかは:

@@ -26,6 +26,7 @@ import (
 //	① ウィンドウの矩形   … HWND からクライアント/ウィンドウ矩形を物理ピクセルで取る
 //	② 枠の素通し         … WS_EX_TRANSPARENT の付け外しとカーソルの位置
 //	③ クリップボード     … 画像を CF_DIB で載せる
+//	④ メッセージボックス … 画面を出す前に終わるときの最後の口（fatal.go）
 
 // ---- ① ウィンドウの矩形 ---------------------------------------------------
 
@@ -401,4 +402,17 @@ func dibFromImage(img image.Image) ([]byte, error) {
 		}
 	}
 	return out, nil
+}
+
+// ---- ④ メッセージボックス -------------------------------------------------
+
+// messageBox は OS のメッセージボックスでエラーを出し、閉じられるまで待つ。
+//
+// **WebView2 にも Wails にも頼らない**（それが動かないときに出すものなので）。
+// 最前面に出す —— 起動直後で自分の窓が 1 枚も無いと、後ろに隠れて気づかれない。
+func messageBox(title, text string) error {
+	_, err := windows.MessageBox(0,
+		windows.StringToUTF16Ptr(text), windows.StringToUTF16Ptr(title),
+		windows.MB_OK|windows.MB_ICONERROR|windows.MB_SETFOREGROUND|windows.MB_TOPMOST)
+	return err
 }
