@@ -15,6 +15,12 @@ includes:
   windows: ./build/windows/Taskfile.yml
   darwin: ./build/darwin/Taskfile.yml
   linux: ./build/linux/Taskfile.yml
+  # 個人用の local:deploy（ビルド → 常用場所へコピー）。git に入れないファイルなので
+  # ⚠️ optional を外さないこと（無い環境で wails3 build / dev まで落ちる）。
+  # 作り方はスキル ikkyoku-build（雛形は _docs/skills/ikkyoku-build/references/Taskfile.local.yml）。
+  local:
+    taskfile: Taskfile.local.yml
+    optional: true
   # ikkyoku はデスクトップ専用(将棋中継のキャプチャ用)。
   # ios / android は対象外なので includes から外してある(wails3 skill setup.md 参照)。
 

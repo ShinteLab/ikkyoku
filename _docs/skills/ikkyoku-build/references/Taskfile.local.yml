@@ -1,0 +1,101 @@
+version: '3'
+
+# ikkyoku の local:deploy の雛形。_cmd/ikkyoku/Taskfile.local.yml へコピーして使う
+# （git に入れない。.gitignore 済み）。手順と理由はスキル ikkyoku-build の「常用場所へ配る」。
+#
+#   wails3 task local:deploy                            既定のコピー先へ
+#   wails3 task local:deploy DEPLOY_DEST="D:/tmp/ikkyoku"  コピー先を指定（-- の後ろの引数は渡らない）
+#   wails3 task local:build-info                        ビルド情報の反映だけ（bump・コミット・タグはしない）
+
+vars:
+  DEPLOY_DEST: '{{.DEPLOY_DEST | default "D:/Program Files/ikkyoku"}}'
+  # build-info とビルドが書き換える Git 管理下のファイル（_cmd/ikkyoku からの相対パス）。
+  # ⚠️ build/ を丸ごと指定しない（手で直している build/Taskfile.yml や copy-model.ps1 を巻き込む）。
+  BUILD_INFO_FILES: >-
+    version
+    build/config.yml
+    build/darwin/Info.plist
+    build/darwin/Info.dev.plist
+    build/darwin/icons.icns
+    build/linux/desktop
+    build/linux/nfpm/nfpm.yaml
+    build/windows/info.json
+    build/windows/icon.ico
+    build/windows/nsis/wails_tools.nsh
+    build/windows/wails.exe.manifest
+    frontend/package.json
+    frontend/package-lock.json
+
+tasks:
+  deploy:
+    desc: Deploy built files locally.
+    cmds:
+      # 起動中の exe は上書きできないので先に終了させる。
+      # 未起動時は Get-Process が失敗し powershell.exe が exit 1 を返すので
+      # ignore_error で無視する（起動していないのは正常な状態）。
+      - cmd: powershell -Command "Get-Process {{.APP_NAME}} -ErrorAction SilentlyContinue | Stop-Process -Force"
+        ignore_error: true
+      - task: bump-version
+      # CI でビルドしないので、バージョンやアプリ情報はここで反映してから焼き込む
+      - task: build-info
+      # ⚠️ wails3 build ではなく build:embed（認識器を焼き込む。wails3 build の exe は
+      # 隣に認識器のデータが無いと盤面を読めない）。先頭の ':' は Taskfile.yml 側のタスクを指す。
+      - task: :build:embed
+      # ビルドが通ってからコミットする（build 中の npm install が package-lock.json を揃えるので、それも含める）
+      - task: commit-build-info
+      - task: tag-version
+      - powershell -Command "New-Item -ItemType Directory -Force -Path '{{.DEPLOY_DEST}}' | Out-Null"
+      # ⚠️ bin/* ではなく exe だけ。ログは exe の隣（ikkyoku_<日付>.log）に出るので、bin の exe を
+      # 試しに起動していると、そのログでコピー先の同じ日のログを上書きしてしまう。
+      # 認識器は焼き込んであるので、exe 1 つで動く（設定と棚は os.UserConfigDir() の下）。
+      - powershell -Command "Copy-Item -Path 'bin/{{.APP_NAME}}.exe' -Destination '{{.DEPLOY_DEST}}' -Force"
+
+  build-info:
+    desc: Propagate version and app info to the build assets.
+    cmds:
+      - task: sync-version
+      # -name / -binaryname は config.yml から読まれず、省略すると空で展開される。
+      # -binaryname は Taskfile.yml の APP_NAME と一致させる。
+      - wails3 update build-assets -name "{{.APP_NAME}}" -binaryname "{{.APP_NAME}}" -config build/config.yml -dir build
+
+  # version ファイル（唯一の正）を config.yml / package.json に反映する。
+  # version.go はリポジトリルートからの相対パスで書かれている。
+  sync-version:
+    internal: true
+    dir: ../..
+    cmds:
+      - go run _cmd/version.go
+
+  # 今のバージョンのタグがある（= 配ったのに version を上げていない）なら
+  # patch を 1 つ上げる。タグが無ければ何も上げない。
+  bump-version:
+    internal: true
+    dir: ../..
+    cmds:
+      - go run _cmd/version.go -auto
+
+  # ビルド情報のファイルに変更があればそれだけをコミットする。
+  # パスを指定した git commit はそのファイルだけを対象にするので、
+  # 作業中の他の変更（ステージ済みのものも含む）は巻き込まない。変更が無ければ何もしない。
+  commit-build-info:
+    internal: true
+    cmds:
+      - |
+        if git diff --quiet HEAD -- {{.BUILD_INFO_FILES}}; then
+          echo "build info: no changes"
+        else
+          git commit -m "chore: ikkyoku $(< version) のビルド情報を反映する" -m "Glory to mankind." -- {{.BUILD_INFO_FILES}}
+        fi
+
+  # ビルドした HEAD に v + バージョンのタグを打つ。
+  # 同じバージョンで再 deploy したときは、最初に打ったタグを動かさない。push はしない。
+  tag-version:
+    internal: true
+    cmds:
+      - |
+        tag="v$(< version)"
+        if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+          echo "tag $tag already exists at $(git rev-parse --short "$tag^{commit}")"
+        else
+          git tag "$tag" && echo "tagged $tag at $(git rev-parse --short HEAD)"
+        fi

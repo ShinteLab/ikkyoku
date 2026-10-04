@@ -9,3 +9,5 @@ build/windows/nsis/MicrosoftEdgeWebview2Setup.exe
 build/ios/
 build/android/
 build/docker/
+# 個人用の local:deploy（コピー先が人ごとに違うので git に入れない）
+Taskfile.local.yml

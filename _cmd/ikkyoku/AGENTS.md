@@ -67,6 +67,7 @@ CLI は無い。**
 | `native_windows.go` | **Win32 の直呼び**（`golang.org/x/sys/windows` の LazyProc。**cgo を使わないための層**）。①ウィンドウの矩形 ②枠の素通し（`WS_EX_TRANSPARENT`）とカーソル ③画像を CF_DIB でクリップボードへ。⚠️ **ここに判断を書かないこと** —— 付け外しの判断は `captureservice.go` の `watchCursor`、寸法は `ikkyoku/guide` |
 | `native_other.go` | 上のスタブ（Windows 以外）。**呼ばれたらエラーを返すだけ。** ⚠️ **関数を足したら両方に足すこと** |
 | `version` | **アプリのバージョン（唯一の正）**。`main.go` が `//go:embed` で焼き込み、起動時にログへ出す。⚠️ **手で書き換えない** —— ルートで `go run _cmd/version.go` を使う（`config.yml` と `package.json` へも伝播させる。手順はスキル `ikkyoku-build`） |
+| `Taskfile.local.yml` | **git に入れない**個人用の `local:deploy`（バージョンの伝播 → 焼き込みビルド → ビルド情報のコミット → タグ → 常用場所へコピー）。雛形と手順はスキル `ikkyoku-build`。⚠️ **`Taskfile.yml` の include の `optional: true` を外さない**（無い環境で全部のタスクが落ちる） |
 | `devbuild.go` / `prodbuild.go` | **ログをターミナルにも出すか**（`consoleLog`）。ビルドタグ `production` が無い（＝ `wails3 dev`）ときだけ出す。⚠️ **判定はビルドタグで**（配る exe は `-H windowsgui` で標準エラーの行き先が無い）。ログ本体は `log/AGENTS.md` |
 | `frontend/src/*.ts` | **画面。⚠️ 一覧と制約は `_cmd/ikkyoku/frontend/src/AGENTS.md`**（そこから `_docs/ui/*.md` を引く） |
 

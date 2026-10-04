@@ -1,6 +1,6 @@
 ---
 name: ikkyoku-build
-description: ikkyoku（一局）をビルドする・動かす・配る。go build / go test の打ち場所、Wails3 の bindings 生成（クローン直後と worktree で必ず要る）、frontend の npm、認識器を焼き込んだ配布ビルド、バージョンの上げ方（_cmd/version.go）、git worktree で replace が解決できないときのジャンクション。「ビルドが通らない」「Cannot find module '../bindings/...'」「TS2307 が延々と出る」「配布用の exe を作る」「worktree で ../suteme が見つからない」「バージョンを上げる」ときに使う。
+description: ikkyoku（一局）をビルドする・動かす・配る。go build / go test の打ち場所、Wails3 の bindings 生成（クローン直後と worktree で必ず要る）、frontend の npm、認識器を焼き込んだ配布ビルド、バージョンの上げ方（_cmd/version.go）と常用場所への配置（local:deploy）、git worktree で replace が解決できないときのジャンクション。「ビルドが通らない」「Cannot find module '../bindings/...'」「TS2307 が延々と出る」「配布用の exe を作る」「worktree で ../suteme が見つからない」「バージョンを上げる」「local:deploy」ときに使う。
 ---
 
 # ikkyoku をビルドする
@@ -121,19 +121,45 @@ go run _cmd/version.go -auto     # v+今のバージョンのタグがあれば 
 
 - ⚠️ **`version` も `config.yml` の `info.version` も `package.json` も手で書き換えない。**
   ずれると exe に焼き込まれる値と、ファイルのプロパティに出る値が食い違う
-- ⚠️ **`build/windows/info.json` と `build/darwin/Info.plist` は `version.go` が書かない。**
-  上げたあとに作り直す（`-name` / `-binaryname` は省くと空になるので必ず付ける）:
+- ⚠️ **`build/windows/info.json` などは `version.go` が書かない。** `wails3 update build-assets` で
+  作り直す。**ふだんは下の `local:deploy` がやる**ので手で打たなくてよい
+- ⚠️ **タグはまだ 1 つも無い**（2026-10-04）。`-auto` はタグ `v<バージョン>` を見て上げる。
+  最初の `local:deploy` で `v0.1.0` が付き、次の deploy から自動で patch が上がる
 
-  ```powershell
-  cd _cmd\ikkyoku
-  wails3 update build-assets -name "ikkyoku" -binaryname "ikkyoku" -config build/config.yml -dir build
-  ```
+## 常用場所へ配る（`local:deploy`）
 
-  ⚠️ **手元の CLI（beta.23）とアプリ（beta.16）が揃っていない。** 作り直すとバージョン以外の
-  テンプレートの差分（`nsis`・マニフェストなど）まで入ることがあるので、**`git diff` を見て、
-  バージョンの行以外が変わっていたら取り込む前に止まる**
-- ⚠️ **タグはまだ 1 つも無い**（2026-10-04）。`-auto` はタグ `v<バージョン>` を見て上げるので、
-  配ったときに `git tag v<バージョン>` を打っておかないと上がらない
+**CI でビルドしないので、バージョンの伝播・ビルド・コミット・タグを 1 コマンドでやる。**
+`_cmd/ikkyoku/Taskfile.local.yml` は**人ごとのファイル**（コピー先が違う）なので git に入れていない。
+**雛形は `references/Taskfile.local.yml`**。コピーして、要ればコピー先（`DEPLOY_DEST`）を直す:
+
+```powershell
+Copy-Item _docs\skills\ikkyoku-build\references\Taskfile.local.yml _cmd\ikkyoku\
+cd _cmd\ikkyoku
+wails3 task local:deploy                               # 既定は D:/Program Files/ikkyoku
+wails3 task local:deploy DEPLOY_DEST="D:/tmp/ikkyoku"  # コピー先を変える（-- の後ろの引数は渡らない）
+wails3 task local:build-info                           # ビルド情報の反映だけ（bump・コミット・タグはしない）
+```
+
+やること（順に）: 起動中の ikkyoku を止める → **タグ `v<今のバージョン>` があれば patch を上げる** →
+`version.go` で揃え直し → `update build-assets` → **`build:embed`**（認識器を焼き込む） →
+**ビルド情報のファイルだけをコミット** → `v<バージョン>` のタグ（push しない） → **exe だけ**をコピー。
+
+- ⚠️ **`Taskfile.yml` の `local` の include から `optional: true` を外さない。** 無い環境で
+  `wails3 build` / `wails3 dev` まで落ちる。⚠️ **`Taskfile.yml` 側から `local:` のタスクを呼ばない**（同じ理由）
+- ⚠️ **ビルドは `wails3 build` ではなく `build:embed`**（`task: :build:embed`。先頭の `:` は
+  `Taskfile.yml` 側を指す）。`wails3 build` の exe は認識器のデータが隣に無いと盤面を読めない
+- ⚠️ **コピーするのは exe だけ**（`bin/*` にしない）。ログは exe の隣に出るので、`bin` の exe を
+  試しに起動していると、そのログでコピー先の同じ日のログを上書きする。設定と棚は
+  `os.UserConfigDir()/ikkyoku` にあるので、exe を置き換えても消えない
+- ⚠️ **コミットは列挙したファイルだけ**（`git commit -- <paths>`）。作業中の変更は巻き込まないが、
+  **exe には入る**。リリースとして残すなら、先にコミットしてから deploy する
+- ⚠️ **同じコミットで deploy し直しても patch が上がる**（直前の deploy がタグを打っているため）。
+  コピーだけやり直したいなら `bin\ikkyoku.exe` を手でコピーする
+- ⚠️ **ずっと `update build-assets` が走っていなかった**（2026-10-04 まで）。`info.json` などは
+  テンプレートのまま（会社名 `My Company`・説明 `My Product Description` = タスクマネージャの表示名）。
+  **最初の deploy でアプリの情報に置き換わり、それがコミットされる**（スクラッチで作り直して、
+  差分がアプリ情報の行だけなのを確かめた。CLI は beta.26。`build/ios/` も作られるが .gitignore 済み）。
+  タスクマネージャに古い名前が残るのは Windows のキャッシュ（スキル `wails3` の pitfalls.md 14）
 
 ## ⚠️ git worktree では replace が解決できない
 
