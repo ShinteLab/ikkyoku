@@ -217,6 +217,8 @@ wails3 task local:build-info                           # ビルド情報の反�
 
 兄弟の 4 つはタグで引く（2026-10-05 から）ので、**worktree でも Go のビルドに隣のチェックアウトは要らない。**
 以前の `../suteme` などを成立させるジャンクション（`.claude/worktrees/core` など）は要らなくなった。
+⚠️ **ワークスペースに `go.work` を置いているときは、worktree では `GOWORK=off` を付ける**
+（worktree は `use` に入っていないので、上の `go.work` を拾って `directory prefix . does not contain modules listed in go.work` で止まる）。
 ⚠️ 残っているものを消すときは `Remove-Item -Recurse` を使わないこと（参照先の中身まで消しうる）。
 `[System.IO.Directory]::Delete($path, $false)` で reparse point だけを消す。
 
