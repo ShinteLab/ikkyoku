@@ -1,6 +1,6 @@
 ---
 name: ikkyoku-build
-description: ikkyoku（一局）をビルドする・動かす・配る。go build / go test の打ち場所、Wails3 の bindings 生成（クローン直後と worktree で必ず要る）、frontend の npm、認識器を焼き込んだ配布ビルド、git worktree で replace が解決できないときのジャンクション。「ビルドが通らない」「Cannot find module '../bindings/...'」「TS2307 が延々と出る」「配布用の exe を作る」「worktree で ../suteme が見つからない」ときに使う。
+description: ikkyoku（一局）をビルドする・動かす・配る。go build / go test の打ち場所、Wails3 の bindings 生成（クローン直後と worktree で必ず要る）、frontend の npm、認識器を焼き込んだ配布ビルド、バージョンの上げ方（_cmd/version.go）、git worktree で replace が解決できないときのジャンクション。「ビルドが通らない」「Cannot find module '../bindings/...'」「TS2307 が延々と出る」「配布用の exe を作る」「worktree で ../suteme が見つからない」「バージョンを上げる」ときに使う。
 ---
 
 # ikkyoku をビルドする
@@ -105,6 +105,35 @@ task build:embed        # model:copy + wails3 のビルド（EXTRA_TAGS=embedmod
 詳しくは `recognize/AGENTS.md` の「認識器の読み込み元は 3 通り」。
 
 - `Taskfile.yml` の `includes` から `ios` / `android` を外してある（デスクトップ専用なので。`build/ios`・`build/android`・`build/docker` も削除済み）
+
+## バージョンを上げる（`_cmd/version.go`）
+
+**唯一の正は `_cmd/ikkyoku/version`**（1 行）。exe には `//go:embed version` で焼き込まれ、
+起動時にログへ出る（`ikkyoku を起動します version=...`）。**リポジトリのルートで**:
+
+```powershell
+go run _cmd/version.go -print    # 今のバージョンを出すだけ
+go run _cmd/version.go 0.2.0     # 指定した値にする
+go run _cmd/version.go -bump     # patch / minor / major を対話で選ぶ（Enter = patch）
+go run _cmd/version.go           # version の値で config.yml / package.json を揃え直す
+go run _cmd/version.go -auto     # v+今のバージョンのタグがあれば patch を上げる（無ければ揃え直すだけ）
+```
+
+- ⚠️ **`version` も `config.yml` の `info.version` も `package.json` も手で書き換えない。**
+  ずれると exe に焼き込まれる値と、ファイルのプロパティに出る値が食い違う
+- ⚠️ **`build/windows/info.json` と `build/darwin/Info.plist` は `version.go` が書かない。**
+  上げたあとに作り直す（`-name` / `-binaryname` は省くと空になるので必ず付ける）:
+
+  ```powershell
+  cd _cmd\ikkyoku
+  wails3 update build-assets -name "ikkyoku" -binaryname "ikkyoku" -config build/config.yml -dir build
+  ```
+
+  ⚠️ **手元の CLI（beta.23）とアプリ（beta.16）が揃っていない。** 作り直すとバージョン以外の
+  テンプレートの差分（`nsis`・マニフェストなど）まで入ることがあるので、**`git diff` を見て、
+  バージョンの行以外が変わっていたら取り込む前に止まる**
+- ⚠️ **タグはまだ 1 つも無い**（2026-10-04）。`-auto` はタグ `v<バージョン>` を見て上げるので、
+  配ったときに `git tag v<バージョン>` を打っておかないと上がらない
 
 ## ⚠️ git worktree では replace が解決できない
 

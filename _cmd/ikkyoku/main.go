@@ -46,6 +46,13 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
+// version はアプリのバージョン。**唯一の正は同じディレクトリの `version` ファイル**で、
+// 上げるときは手で書き換えず `go run _cmd/version.go`（リポジトリのルートで）を使う
+// （config.yml と package.json へも伝播させるため）。改行が付いているので TrimSpace して使う。
+//
+//go:embed version
+var version string
+
 // appWindows はウィンドウ 5 枚と、その位置・サイズの追跡をまとめたもの
 // （枠 / メイン画面 / 評価値グラフ / 候補手 / 手順。2026-09-12 に手順を分けた）。
 type appWindows struct {
@@ -80,6 +87,7 @@ func main() {
 	if logErr != nil {
 		log.Warn("ログの準備で問題がありました", "error", logErr)
 	}
+	log.Info("ikkyoku を起動します", "version", strings.TrimSpace(version))
 
 	settingsSvc := ikkyokuapp.NewSettingsService()
 	cfg := settingsSvc.Config()
