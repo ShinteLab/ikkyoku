@@ -26,7 +26,7 @@
     撮って認識できること
   - **学習データの欄を無いディレクトリにすると、その場で黄色い ⚠「指定した認識器を使えないので、…で
     動いています」が出ること**（焼き込みの無い dev では「認識器がありません」の赤）。戻すと消えること
-  - **suteme で `go run ./_cmd/suteme-training -export -gzip -out ..\ikkyoku\_cmd\ikkyoku\model` が通り、
+  - **suteme で `go run ./_cmd/suteme-training -export -gzip -out ../ikkyoku/_cmd/ikkyoku/model` が通り、
     `model/` に `training_data_v8.bin.gz` / `strip_data_v1.bin.gz` / `export.json` ができること**。
     **`git status` に `model/` が出ないこと**。その 3 ファイルを `%LOCALAPPDATA%\ikkyoku\model` に置き、
     学習データの欄を空にすると「配布モデルから読んでいます」になること。配布モデルの欄が空のとき、
