@@ -1,7 +1,7 @@
 [Desktop Entry]
 Version=1.0
 Name=ikkyoku
-Comment=ikkyoku
+Comment=Ikkyoku - Shogi broadcast analyzer
 # The Exec line includes %u to pass the URL to the application
 Exec=/usr/local/bin/ikkyoku %u
 Terminal=false
