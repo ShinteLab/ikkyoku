@@ -20,29 +20,41 @@ type Config struct {
 	OutDir  string  `json:"outDir,omitempty"`
 	Hotkey  string  `json:"hotkey,omitempty"`
 
-	// SutemeDataDir は suteme の駒種推論器の学習データ
-	// (training_data_v2.json / model_v2.json)を置いたディレクトリ。
+	// SutemeDataDir は suteme の学習ディレクトリ(training_data_v*.bin / strip_data_v1.bin)。
+	// **自分で育てた学習データ**で、認識器の 3 段の 1 段目(SutemeSource 参照)。
 	//
-	// 空なら suteme 既定の探索(カレントディレクトリ → 実行ファイルのディレクトリ)に任せる。
+	// 空ならこの段は無い(⚠️ suteme 既定の探索 —— カレントディレクトリ → 実行ファイルの隣 ——
+	// には任せない。2026-10-04)。
 	// 指定できるようにしてあるのは、**学習データが 3.5MB 級で、しかも育て続けるもの**
 	// だから。実行ファイルの隣にコピーを置く運用にすると、更新のたびにコピーし直す必要が
 	// あり、古いデータで認識してしまう事故が起きる。開発中は suteme のリポジトリを
 	// 直接指しておけば、データを更新した結果がそのまま反映される。
 	SutemeDataDir string `json:"sutemeDataDir,omitempty"`
 
+	// SutemeModelDir はダウンロードした配布モデル(predictor.bin.gz / strip.bin.gz /
+	// source.txt)を置いたディレクトリ。認識器の 3 段の 2 段目(2026-10-04)。
+	//
+	// **空なら既定の置き場所**(`DefaultModelDir`。%LOCALAPPDATA%\ikkyoku\model)。解決は ModelDir の 1 か所。
+	// ⚠️ **exe の隣を既定にしないこと** —— Program Files には書けず、exe を置き換えるたびに
+	// 一緒に動かすことになる。
+	SutemeModelDir string `json:"sutemeModelDir,omitempty"`
+
 	// SutemeSource は認識器(駒種推論器と盤の縁の帯の判定器)をどこから読むか。
 	//
-	// **exe 1 つで配れる形と、学習データを育てながら使う形の両方が要る**ので、
-	// 読み込み元を選べるようにしてある。値は 3 つ:
+	// **認識器は 3 段**(2026-10-04): 1. 学習データ(SutemeDataDir) → 2. 配布モデル
+	// (SutemeModelDir) → 3. 焼き込み。**基本は焼き込みで動き、置いたもの・育てたものが
+	// あればそちらを使う。** 値は「どの段から見始めるか」:
 	//
-	//	"" / "auto" … SutemeDataDir が指定されていればそちら、駄目なら焼き込み、
-	//	               それも無ければ suteme 既定の探索(既定)
-	//	"dir"       … SutemeDataDir から読む。焼き込みがあっても使わない
-	//	"embed"     … バイナリに焼き込んだものを読む(`-tags embedmodel` のビルドのみ)
+	//	"" / "auto" … 1 段目から(既定)
+	//	"dir"       … 1 段目から(auto と同じ順。学習データを使う意思表示として残してある)
+	//	"model"     … 2 段目から(学習データは見ない)
+	//	"embed"     … 3 段目から(焼き込みだけ)
 	//
-	// ⚠️ **焼き込みが入っていないビルドで "embed" にしても認識器は用意できない。**
-	// その場合は dir へ落ちる(`recognize.EmbeddedAvailable`)。設計原則3(段階的に劣化する)
-	// のとおり、**どれも読めなくてもアプリは動く**(認識結果が空になるだけ)。
+	// **見始めた段から下へ順に見て、読めた最初の段を使う。** 置かれていない段は黙って
+	// 飛ばし、**置いてあるのに読めなかった段は ⚠ に出して**下へ落とす。下に何も無ければ
+	// 上の段も見る(焼き込みの無いビルドで "embed" にしていても動くように)。
+	// 解決は `_cmd/ikkyoku` の `recognizerOrder` / `loadRecognizer`。
+	// 設計原則3(段階的に劣化する)のとおり、**どれも読めなくてもアプリは動く**(盤面が読めないだけ)。
 	SutemeSource string `json:"sutemeSource,omitempty"`
 
 	// FitOnStartup は起動時に盤面を探してガイド枠を合わせるか。
@@ -851,11 +863,13 @@ func (e EngineEntry) OptionValue(o EngineOption) (value string, custom bool) {
 // 認識器の読み込み元（`Config.SutemeSource`）。**文字列を直に書かないこと** ——
 // 設定ファイル・Go・フロントの 3 か所に散ると綴りの食い違いに気づけない。
 const (
-	// SutemeSourceAuto は「指定があればディレクトリ、無ければ焼き込み」（既定）。
+	// SutemeSourceAuto は 3 段を上から順に見る（既定）。
 	SutemeSourceAuto = "auto"
-	// SutemeSourceDir はディレクトリ（`SutemeDataDir`）から読む。
+	// SutemeSourceDir は学習データ（`SutemeDataDir`）から見始める。
 	SutemeSourceDir = "dir"
-	// SutemeSourceEmbed はバイナリに焼き込んだものを読む。
+	// SutemeSourceModel は配布モデル（`SutemeModelDir`）から見始める（2026-10-04）。
+	SutemeSourceModel = "model"
+	// SutemeSourceEmbed は焼き込んだものから見始める。
 	SutemeSourceEmbed = "embed"
 )
 
@@ -863,15 +877,38 @@ const (
 //
 // **空・未知の値は auto** として扱う（設定ファイルは手で編集する前提なので、
 // 綴り間違いでアプリが認識できなくなるより既定へ倒す）。
-// ⚠️ **これが「焼き込みが在るか」までは見ない。** 実際にどちらから読むかの解決は
-// `recognize.EmbeddedAvailable` を見る側（`_cmd/ikkyoku` の `loadRecognizer`）の仕事。
+// ⚠️ **これが「どの段が在るか」までは見ない。** 実際にどこから読むかの解決は
+// `_cmd/ikkyoku` の `loadRecognizer` の仕事。
 func (c Config) SutemeSourceOr() string {
 	switch c.SutemeSource {
-	case SutemeSourceDir, SutemeSourceEmbed:
+	case SutemeSourceDir, SutemeSourceModel, SutemeSourceEmbed:
 		return c.SutemeSource
 	default:
 		return SutemeSourceAuto
 	}
+}
+
+// DefaultModelDir はダウンロードした配布モデルの既定の置き場所を返す
+// （Windows では %LOCALAPPDATA%\ikkyoku\model。2026-10-04）。
+//
+// ⚠️ **設定（os.UserConfigDir = %APPDATA%）ではなく %LOCALAPPDATA% に置く** —— 10MB 級の
+// データで、移動プロファイルに乗せるものではない。⚠️ **exe の隣にしない**（書けない場所に
+// 置かれることがあり、exe を置き換えるたびに一緒に動かすことになる）。
+func DefaultModelDir() (string, error) {
+	dir, err := os.UserCacheDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "ikkyoku", "model"), nil
+}
+
+// ModelDir は配布モデルの置き場所を返す（空なら DefaultModelDir）。
+// **既定の解決はここ 1 か所**（呼び出し側にもフロントにも書かない）。
+func (c Config) ModelDir() (string, error) {
+	if c.SutemeModelDir != "" {
+		return c.SutemeModelDir, nil
+	}
+	return DefaultModelDir()
 }
 
 // DefaultAnalyzeSeconds は「考える秒数」の既定（解析タブ）。

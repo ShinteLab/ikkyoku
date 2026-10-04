@@ -75,6 +75,10 @@ type Board struct {
 	Debug *Debug `json:"debug,omitempty"`
 }
 
+// ErrNoRecognizer は認識器が 1 組も読めていない（学習データ・配布モデル・焼き込みの
+// どれも無い）。撮った画像は残るが、盤面は読めない（設計原則3）。
+var ErrNoRecognizer = errors.New("ikkyoku/recognize: 認識器がありません（学習データ・配布モデル・焼き込みのどれも読めていません）")
+
 // FromImage は画像から盤面を割り出す。
 //
 // **既定では盤面がおかしくてもエラーにしない**(設計原則3「段階的に劣化すること」)。
@@ -88,6 +92,12 @@ type Board struct {
 func FromImage(img image.Image, opts ...Option) (Board, error) {
 	if img == nil {
 		return Board{}, fmt.Errorf("ikkyoku/recognize: 画像がありません")
+	}
+	// ⚠️ **認識器を差し替えていなければ suteme を呼ばない**（2026-10-04）。呼ぶと suteme
+	// 既定の探索（カレントディレクトリ → 実行ファイルの隣）に落ちる。ikkyoku はその段を
+	// 使わない（predictor.go の冒頭）。
+	if !Ready() {
+		return Board{}, ErrNoRecognizer
 	}
 
 	// 持ち駒の先後は割り振らない(suteme.HandNone。既定のまま)。

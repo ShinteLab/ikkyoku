@@ -38,29 +38,40 @@ func TestFatalMessage(t *testing.T) {
 // 認識器の ⚠ の歯止め。**直ったら消えること**（設定タブで指し直したあと ⚠ が残ると、
 // ほかの問題が増えても気づかれない）と、**帯の判定データは別の問題として出すこと**
 // （駒種は読めているのに「認識器が無い」と出すと、直す場所を間違える）。
+// 3 段（2026-10-04）になってからは、**下の段で動いているときは黄色**（盤面は読める）。
 func TestSyncRecognizerIssue(t *testing.T) {
 	issues := ikkyokuapp.NewIssueService()
-	keys := func() []string {
-		var ks []string
+	level := func(key string) string {
 		for _, is := range issues.Report().Issues {
-			ks = append(ks, is.Key)
+			if is.Key == key {
+				return is.Level
+			}
 		}
-		return ks
+		return ""
 	}
 
-	syncRecognizerIssue(issues, RecognizerStatus{Mode: ikkyoku.SutemeSourceDir, Error: "no data", StripError: "no strip"})
-	if got := keys(); len(got) != 2 || got[0] != issueRecognizer || got[1] != issueStrip {
-		t.Fatalf("鍵 = %v", got)
+	// どの段も読めない: 赤。判定データの ⚠ は出さない（認識器が無いのが先）。
+	syncRecognizerIssue(issues, RecognizerStatus{Error: "none", StripError: "x"})
+	if level(issueRecognizer) != ikkyokuapp.IssueError || level(issueStrip) != "" {
+		t.Fatalf("一覧 = %+v", issues.Report().Issues)
 	}
 
-	syncRecognizerIssue(issues, RecognizerStatus{Mode: ikkyoku.SutemeSourceDir, Ready: true, StripError: "no strip"})
-	if got := keys(); len(got) != 1 || got[0] != issueStrip {
-		t.Fatalf("駒種が読めたのに残っている: %v", got)
+	// 学習データが読めず配布モデルで動いている: 黄。判定データが無ければそれも黄。
+	syncRecognizerIssue(issues, RecognizerStatus{
+		Ready: true, Mode: ikkyoku.SutemeSourceModel,
+		Skipped: []string{"学習データ（D:/x）を読めません"}, StripError: "no strip",
+	})
+	if level(issueRecognizer) != ikkyokuapp.IssueWarn || level(issueStrip) != ikkyokuapp.IssueWarn {
+		t.Fatalf("一覧 = %+v", issues.Report().Issues)
+	}
+	if !strings.Contains(issues.Report().Issues[0].Title, "配布モデル") {
+		t.Fatalf("どの段で動いているかが出ていない: %q", issues.Report().Issues[0].Title)
 	}
 
-	syncRecognizerIssue(issues, RecognizerStatus{Mode: ikkyoku.SutemeSourceEmbed, Ready: true, StripSamples: 10})
-	if got := keys(); len(got) != 0 {
-		t.Fatalf("直ったのに残っている: %v", got)
+	// 直った: 消える。
+	syncRecognizerIssue(issues, RecognizerStatus{Ready: true, Mode: ikkyoku.SutemeSourceEmbed, StripSamples: 10})
+	if n := len(issues.Report().Issues); n != 0 {
+		t.Fatalf("直ったのに残っている: %+v", issues.Report().Issues)
 	}
 }
 

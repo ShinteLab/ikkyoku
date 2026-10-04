@@ -27,7 +27,8 @@ go test ./...
 
 ```powershell
 cd _cmd\ikkyoku
-go test .           # clipboard の往復（⚠️ クリップボードの中身が置き換わる）と認識器の読み込み元
+go test .           # clipboard の往復（⚠️ クリップボードの中身が置き換わる）と認識器の 3 段
+go test -skip Clipboard .   # クリップボードを書き換えたくないとき
 ```
 
 ## Wails3 アプリ
@@ -101,8 +102,36 @@ task build:embed        # model:copy + wails3 のビルド（EXTRA_TAGS=embedmod
 - ⚠️ **ビルドが通ることでは足りない。** 中身が壊れていても `go:embed` は通るので、
   配布ビルドの前に `go test -tags embedmodel ./recognize/` で
   **実際に認識器として組み立てられること**を確かめる
+- ⚠️ **`suteme/dist` は suteme の学習サーバの「配布用に書き出す」が作る**（無ければ
+  `model:copy` が止まる）。学習データの版は決め打ちしていない（`training_data_v*.bin` の
+  いちばん大きい版。2026-10-04 までは v7 決め打ちで、v8 になってから通らなくなっていた）
 
-詳しくは `recognize/AGENTS.md` の「認識器の読み込み元は 3 通り」。
+詳しくは `recognize/AGENTS.md` の「認識器は 3 段」。
+
+### 配布モデルを置く（2026-10-04。今は手で置く）
+
+認識器は **学習データ → 配布モデル → 焼き込み** の 3 段（`_docs/design-capture.md` の
+「決定: 認識器は 3 段」）。**配布モデルは焼き込みと同じ 3 ファイル**なので、作り方も同じ:
+
+```powershell
+cd _cmd\ikkyoku
+task model:copy      # recognize/model/ に predictor.bin.gz / strip.bin.gz / source.txt ができる
+Compress-Archive ..\..\recognize\model\* -DestinationPath ikkyoku-model.zip   # .gitignore は入れなくてよい
+```
+
+受け取った側は、zip を**既定の置き場所**に展開するだけで次の起動から使われる
+（設定タブで場所を変えた・読み直したときはその場で）:
+
+```powershell
+Expand-Archive ikkyoku-model.zip -DestinationPath "$env:LOCALAPPDATA\ikkyoku\model"
+```
+
+- 別の場所に置くなら設定タブ「盤面認識（suteme）」の「配布モデル」に指す（空なら既定の場所。
+  欄が空のときは実際に探している場所が薄く出る）
+- ⚠️ **焼き込みより古い配布モデルは「自動」では使われない**（`source.txt` の日付で比べる）。
+  使われていない理由は設定タブの読み込み元の下と、ツールバーの ⚠ に出る
+- ⚠️ **形式の版が exe と合わないモデルは読めずに下の段（焼き込み）で動く**（⚠ に出る）
+- **今どこから読んでいるか**は設定タブの読み込み元の下（`RecognizerStatus` を写している）
 
 - `Taskfile.yml` の `includes` から `ios` / `android` を外してある（デスクトップ専用なので。`build/ios`・`build/android`・`build/docker` も削除済み）
 
