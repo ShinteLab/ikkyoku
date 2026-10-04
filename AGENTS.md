@@ -205,11 +205,8 @@ Claude Code でスキルとして使いたい人は、各自の `.claude/skills/
 | `github.com/wenteasy/log` | **ログの土台**（`log/` が使う。ハンドラ・日ごとのファイル・パッケージごとのレベル）。タグで引く（replace ではない） |
 
 依存の向きは `ikkyoku → core / suteme / engine / kicho`。**逆参照しない**。
-**兄弟の 4 つ（core / suteme / engine / kicho）はタグで引く**（2026-10-05 から。replace ではない）。
-⚠️ **手元の兄弟を直しても ikkyoku には入らない** —— 向こうでタグを打って push し、
-**2 つの go.mod（ルートと `_cmd/ikkyoku`）の両方で**上げる。replace が残っているのは
-`_cmd/ikkyoku` → ルート（`../../`）だけ。⚠️ **go.mod まわりの落とし穴**（上げ方・
-push の前に取りに行かない・`go mod tidy` のあとの確認・`check-consumers.ps1`）はスキル `ikkyoku-build`。
+兄弟の 4 つ（core / suteme / engine / kicho）の参照のしかたと、⚠️ **go.mod まわりの落とし穴**
+（手元の兄弟を直しても入らない・上げ方・`go mod tidy` のあとの確認・`check-consumers.ps1`）はスキル `ikkyoku-build`。
 
 ## 設計制約（必ず守ること）
 
