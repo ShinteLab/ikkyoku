@@ -105,8 +105,8 @@ kicho の UI が持っていた機能（取得 / 登録 / 蔵書）を ikkyoku �
 | 段 | 何か | 置き場所 | 設定 |
 |---|---|---|---|
 | 1. 学習データ | suteme で**自分で育てた**もの（生の `training_data_v*.bin` / `strip_data_v1.bin`） | suteme の学習ディレクトリ | `sutemeDataDir` |
-| 2. 配布モデル | **ダウンロードして置いた**配布セット（`predictor.bin.gz` / `strip.bin.gz` / `source.txt`） | 既定は `%LOCALAPPDATA%\ikkyoku\model` | `sutemeModelDir`（空なら既定） |
-| 3. 焼き込み | **exe に最初から入っている**配布セット（`-tags embedmodel`） | exe の中 | — |
+| 2. 配布モデル | **ダウンロードして置いた**配布セット（suteme の配布用の書き出しそのもの: `training_data_v8.bin(.gz)` / `strip_data_v1.bin(.gz)` / `export.json`） | 既定は `%LOCALAPPDATA%\ikkyoku\model` | `sutemeModelDir`（空なら既定） |
+| 3. 焼き込み | **exe に最初から入っている**配布セット（`-tags embedmodel`。手元の `_cmd/ikkyoku/model/` を埋め込む） | exe の中 | — |
 
 設定 `sutemeSource` は「どの段から見始めるか」（`auto` / `dir` / `model` / `embed`）。
 **置かれていない段は黙って飛ばし、置いてあるのに読めない段は ⚠ に出して下へ落とす。**
@@ -123,18 +123,25 @@ kicho の UI が持っていた機能（取得 / 登録 / 蔵書）を ikkyoku �
   の「起動で黙って消えない」）。黙って落ちると、置いたモデルが効いていないことに気づけない
 - ⚠️ **駒種の推論器と盤の縁の判定器は同じ段から 1 組で差し替える**（`recognize.Set.Use`）。
   別々に読むと「駒種は最新の学習データ、盤の位置合わせは学習前」になる（2026-08-22 に踏んだ）
-- ⚠️ **配布モデルは焼き込みと同じ形にする。** 焼き込み＝「exe に最初から入っている配布セット」
-  なので、読む口が 1 本で済む（`recognize.LoadPack` と `LoadEmbedded` が組み立てを共用）。
-  作り方も同じ（`task model:update` が作る `recognize/model/` の 3 ファイルがそのまま配布モデル）
-- ⚠️ **焼き込むのは手元の `recognize/model/`。ビルドは suteme を見ない**（2026-10-04）。以前は
+- ⚠️ **配布モデルは焼き込みと同じ形にし、その形は suteme の配布用の書き出しそのものにする。**
+  焼き込み＝「exe に最初から入っている配布セット」なので、読む口が 1 本で済む
+  （`recognize.LoadPackFS`）。**ikkyoku 独自の名前や形を持たない** —— 持つと、suteme の書き出しを
+  ikkyoku の形へ変える手順が要る（2026-10-04 の途中まではそうだった）。版も suteme のファイル名が
+  持つので、**exe に入っている suteme が読めない版の書き出しは「版が合わない」として下へ落ちる**
+- ⚠️ **焼き込むのは手元の `_cmd/ikkyoku/model/`。ビルドは suteme を見ない。手元を作るのは suteme**
+  （`go run ./_cmd/suteme-training -export -gzip -out <ikkyoku>/_cmd/ikkyoku/model`）。以前は
   ビルドのたびに `suteme/dist` を持ってきていたので、**何が焼き込まれるかがビルドした瞬間の
   suteme の状態で決まっていた**（学習し直すと意図せず入り、書き出し直し忘れると古いまま入る）。
-  焼き込むモデルは「今回はこれを配る」と決めるもので、**入れ替えるのは `model:update` か
-  `MODEL_DIR=`（`build:embed` / `local:deploy`）だけ**。手元は git に入れない（10MB 級を学習し直す
-  たびにコミットすることになる）
+  焼き込むモデルは「今回はこれを配る」と決めるもので、**入れ替えるのは suteme で書き出したときと
+  `MODEL_DIR=`（`build:embed` / `local:deploy`）を渡したときだけ**。ikkyoku のビルドは suteme の
+  場所に依存しない
+- ⚠️ **手元はアプリの横（`_cmd/ikkyoku/model/`）に置き、`go:embed` もアプリ（`_cmd/ikkyoku`）が持つ。**
+  焼き込むモデルは exe の持ち物で、wails3 でビルドする場所の横が自然（以前は `recognize/model/`
+  に置き、`recognize` が埋め込んでいた）。**フォルダごと git に入れない**（名前で無視すると、
+  ファイル名が変わったときに git に入る。10MB 級を学習し直すたびにコミットすることにもなる）
 - ⚠️ **形式の版が合わない配布モデルは読めずに下へ落ちる**（suteme の読み込みが断る）。
   古い exe に新しい形式のモデルを置いても、焼き込みで動く
-- ⚠️ **焼き込みより古い配布モデルは使わない**（`source.txt` の日付で比べる。`auto` のとき）。
+- ⚠️ **焼き込みより古い配布モデルは使わない**（書き出しの記録 `export.json` の日時で比べる。`auto` のとき）。
   exe を更新したのに、昔置いたモデルが優先されて精度が下がるのを防ぐ。**「配布モデルから」を
   選んでいれば古くても使う**（意思表示）。日付が読めないものは古いと見なさない
 - ⚠️ **配布モデルの既定の置き場所は exe の隣にしない。** Program Files には書けず、

@@ -116,18 +116,22 @@
 | 段 | 読む口 | 設定 |
 |---|---|---|
 | 1. 学習データ（生の .bin） | `LoadDir` | `sutemeDataDir` |
-| 2. 配布モデル（`predictor.bin.gz` / `strip.bin.gz` / `source.txt`） | `LoadPack`（置かれていなければ `ErrNoPack`） | `sutemeModelDir`（空なら `%LOCALAPPDATA%\ikkyoku\model`） |
-| 3. 焼き込み（2 と同じ形） | `LoadEmbedded` | — |
+| 2. 配布モデル（suteme の配布用の書き出し: `training_data_v8.bin(.gz)` / `strip_data_v1.bin(.gz)` / `export.json`） | `LoadPack`（置かれていなければ `ErrNoPack`） | `sutemeModelDir`（空なら `%LOCALAPPDATA%\ikkyoku\model`） |
+| 3. 焼き込み（2 と同じ形。`_cmd/ikkyoku/model/` を埋め込んで `SetEmbedded` で渡す） | `LoadEmbedded` | — |
 
 どれも**読んで 1 組（`Set`）を返すだけ**で、差し替えるのは `Set.Use`。どの段を使うかは
 `_cmd/ikkyoku/captureservice.go` の `loadRecognizer` / `recognizerOrder`。
 
 - ⚠️ **置かれていない（`ErrNoPack`）と読めないを分けること。** 既定の置き場所が空なのは
   普通の状態で、⚠ に出すことではない
-- ⚠️ **配布モデルと焼き込みの組み立ては共用**（`loadPack`）。片方だけ直すと、置いたモデルと
-  焼き込みで振る舞いが変わる
-- ⚠️ **`source.txt` の日付は `(yyyy-mm-dd)` で読む**（`_cmd/ikkyoku/build/model.ps1` が書く形）。
-  読めなければゼロで、**古いと見なさない**（`Set.OlderThan`）
+- ⚠️ **配布モデルと焼き込みの読み方は共用**（`LoadPackFS`。置いたものは `os.DirFS`、焼き込みは
+  埋め込んだ `fs.FS`）。片方だけ直すと、置いたモデルと焼き込みで振る舞いが変わる
+- ⚠️ **配布セットの形は suteme の書き出しそのもの**（ikkyoku 独自の名前を持たない）。
+  **読めるファイル名は exe に入っている suteme の版で決まる**（`suteme.DefaultDataFile`）ので、
+  版が違う書き出しは「版が合わない」と言って断る（`ErrNoPack` ではない。⚠ に出して下へ落ちる）。
+  `.gz` を先に見て、無ければ圧縮しない版を読む
+- ⚠️ **日時は書き出しの記録 `export.json` の `date` で読む**（suteme の `training.ExportInfo`）。
+  無ければゼロで、**古いと見なさない**（`Set.OlderThan`）
 - ⚠️ **`FromImage` は認識器を差し替えていなければ suteme を呼ばない**（`ErrNoRecognizer`）。
   呼ぶと suteme 既定の探索に落ちる
 
@@ -150,24 +154,43 @@
   「※設定と別の場所」）は `mode === "dir"` のときだけにしてある
 - 解決は `recognizerOrder` / `loadRecognizer`（`_cmd/ikkyoku/captureservice.go`）の 1 か所。
   回帰テストは `_cmd/ikkyoku/recognizersource_test.go`（見る順と落ち方）と
-  `recognize/predictor_test.go`（1 組の読み方・`ErrNoPack`・日付・`FromImage` の門番）
+  `recognize/predictor_test.go`（1 組の読み方・`ErrNoPack`・版違い・日時・焼き込み・`FromImage` の門番）
 
-### 焼き込みの中身とビルド手順
+### 焼き込みの中身とビルド手順（2026-10-04 に `_cmd/ikkyoku/model/` へ移した）
 
-**データはこのリポジトリに置いていない**（`recognize/model/` は `.gitignore`）。
-10MB 級のバイナリを、学習し直すたびにコミットすることになるため。
-**`recognize/model/` が「手元のモデル」で、ビルドはそれをそのまま焼き込む**（2026-10-04）:
+**焼き込むのは `_cmd/ikkyoku/model/`（手元のモデル）で、`go:embed` を持つのは `_cmd/ikkyoku`**
+（`embedmodel_on.go`）。`recognize` は `SetEmbedded(fs.FS)` で中身を受け取って読むだけ
+（`embedded.go`）。⚠️ **`recognize` に `go:embed` を戻さないこと** —— 焼き込むモデルは
+アプリ（exe）の持ち物で、置き場所もアプリの横（wails3 でビルドする場所）が自然。以前は
+`recognize/model/` に置いていた（ルートの `.gitignore` に `/recognize/model/` だけ残してある）。
+
+**手元のモデルを作るのは suteme**（ikkyoku のビルドは suteme を見ない）:
 
 ```powershell
-cd ikkyoku\_cmd\ikkyoku
-wails3 task model:update                       # 手元を suteme の学習データから作り直す（suteme に -export させる）
+cd ..\suteme
+go run ./_cmd/suteme-training -export -gzip -out ..\ikkyoku\_cmd\ikkyoku\model   # 手元を作り直す
+cd ..\ikkyoku\_cmd\ikkyoku
 wails3 task build:embed                        # 手元をそのまま焼き込む(EXTRA_TAGS=embedmodel)
 wails3 task build:embed MODEL_DIR=<フォルダ>     # 置いてある配布モデルを手元に写してから焼き込む
 ```
 
-⚠️ **ビルドで suteme を見ないこと**（以前はビルドのたびに `suteme/dist` を持ってきていた）。
-何が焼き込まれるかがビルドした瞬間の suteme の状態で決まってしまう。**手元を入れ替えるのは
-`model:update` か `MODEL_DIR` だけ**（手順はスキル `ikkyoku-build`）
+- ⚠️ **ビルドで suteme を見ないこと**（以前はビルドのたびに `suteme/dist` を持ってきていた）。
+  何が焼き込まれるかがビルドした瞬間の suteme の状態で決まってしまう。**手元を入れ替えるのは
+  suteme で書き出したときと `MODEL_DIR` だけ**（手順はスキル `ikkyoku-build`）
+- ⚠️ **手元（`_cmd/ikkyoku/model/`）はフォルダごと git に入れない**（`_cmd/ikkyoku/.gitignore`）。
+  名前で無視すると、ファイル名が変わったときに git に入る（以前の `*.gz` / `source.txt` がそうだった）
+- **手元の形は配布モデルと同じ**（suteme の配布用の書き出しそのもの: `training_data_v8.bin.gz` /
+  `strip_data_v1.bin.gz` / `export.json`）。zip にして配れば、受け取った人は既定の置き場所に
+  展開するだけで使える
+- **gzip で持つ**（suteme の `-gzip`）。実測 生 24.8MB → 10.6MB。`suteme` 側の口が `io.Reader` を
+  取る（`PredictorFrom` / `StripJudgeFrom`）ので、展開したファイルを置く必要は無い
+- **手元が空ならビルドが止まる**（`build:embed` の頭で suteme の書き出し方を出す。
+  `wails3 build -tags embedmodel` なら `go:embed` がファイルを見つけられずに止まる）。それが狙い
+- **ビルドが通ることでは足りない。** 中身が壊れていても `go:embed` は通るので、
+  配布ビルドの前に `cd _cmd\ikkyoku; go test -tags embedmodel -skip Clipboard .`
+  （`embedmodel_test.go`）で**実際に認識器として組み立てられること**を確かめる
+- 通常のビルド（タグなし）には**データが入らない**（`embedmodel_off.go` が nil を返す）。
+  開発中に 10MB をリンクすることはなく、`model/` が空でもビルドが通る
 
 **タグを渡す口は 3 つある**（beta.3 で確認済み。どれも同じ
 `go build -tags production,embedmodel ... -ldflags="-w -s -H windowsgui"` になる）:
@@ -182,31 +205,6 @@ wails3 task build:embed MODEL_DIR=<フォルダ>     # 置いてある配布モ�
   `-H windowsgui`（コンソールを出さない）も入っている。タグを足す口は `EXTRA_TAGS`
 - ⚠️ **`wails3 dev` と `wails3 package` に `-tags` は無い。** 開発モードで焼き込みを
   試すなら `task build:embed` した exe を直接起動する
-
-| 置き場所 | 中身 |
-|---|---|
-| `recognize/model/predictor.bin.gz` | `suteme/dist/training_data_v*.bin`（**版がいちばん大きいもの**。2026-10-04 に v7 決め打ちをやめた）を gzip したもの |
-| `recognize/model/strip.bin.gz` | `suteme/dist/strip_data_v1.bin` を gzip したもの |
-| `recognize/model/source.txt` | 出所（画面とログに出る。焼き込むと元のファイル名が残らないため）|
-
-- ⚠️ **`suteme` の `dist/` は「配布用に書き出す」（`training.ExportCompact`。画面か
-  `suteme-training -export`）が作るもの。** `task model:update` が `-export` を呼んで作り、取り込む
-  リポジトリ直下の全件（`training_data_v*.bin`）ではなく、間引いた配布セットを配ること
-- **この 3 ファイルがそのまま配布モデル**（2 段目）。`recognize/model/` を zip にして配れば、
-  受け取った人は既定の置き場所に展開するだけで使える（手順はスキル `ikkyoku-build`）
-- **gzip で持つ。** 実測 生 23.2MB → 9.9MB。exe は **13.4MB → 23.3MB**（+9.9MB。
-  `wails3 build` の配布ビルド。`go build` だけの素の exe なら 19.2MB → 29.2MB）。
-  `suteme` 側の口が `io.Reader` を取る（`PredictorFrom` / `StripJudgeFrom`）ので、
-  展開したファイルを置く必要は無い（`recognize/embedded.go`）
-- **焼き込み側のファイル名に版を入れていない**（`training_data_v7` → `predictor`）。
-  版が上がるたびに `go:embed` の行を書き換えることになるため。どの版かは `source.txt`
-- **手元が空ならビルドが止まる**（`build:embed` の頭で入れ方を出す。`wails3 build -tags embedmodel`
-  なら `go:embed` がファイルを見つけられずに止まる）。それが狙い。空のデータで配れてしまうより止まったほうがよい
-- **ビルドが通ることでは足りない。** 中身が壊れていても `go:embed` は通るので、
-  配布ビルドの前に `go test -tags embedmodel ./recognize/` で
-  **実際に認識器として組み立てられること**を確かめる
-- 通常のビルド（タグなし）には**データが入らない**。`recognize/embedded_off.go` が
-  空の変数を返すだけなので、開発中に 20MB をリンクすることはない
 
 ## 分かっていること（設計に効く）
 

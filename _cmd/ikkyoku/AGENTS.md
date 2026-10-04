@@ -68,6 +68,7 @@ CLI は無い。**
 | `fatal.go` | **続けられなくなったときの最後の口**（2026-10-04）。Wails の致命的なエラー（`Options.ErrorHandler`）と main の panic を**OS のメッセージボックス**で出してから終わる。⚠️ **箱にするのは `*application.FatalError` だけ**（致命的でないエラーも同じ口に来る）。⚠️ **起動はできるが足りないものはここに来ない**（`issues.go` → ⚠）。`_docs/cmd-windows.md` の「起動で黙って消えない」 |
 | `issues.go` | **起動はできたが足りないもの**を `app.IssueService` へ載せる（認識器・棋譜データベース。設定・ログ・異常終了・控え・メイン画面の保険は `main.go` が直に載せる）。⚠️ **直ったら消すこと**・⚠️ **ホットキーの登録失敗は載せない**（2026-08-10 の決定）・⚠️ **文言に「棚」と書かない** |
 | `native_other.go` | 上のスタブ（Windows 以外）。**呼ばれたらエラーを返すだけ。** ⚠️ **関数を足したら両方に足すこと** |
+| `embedmodel_on.go` / `embedmodel_off.go` / `model/` | **認識器の焼き込み**（2026-10-04 に `recognize` から移した）。`-tags embedmodel` のときだけ `model/`（手元のモデル）を `go:embed` し、`main` が `recognize.SetEmbedded` で渡す。`model/` の中身は suteme の配布用の書き出し（`go run ./_cmd/suteme-training -export -gzip -out <ここの model>`）。⚠️ **`model/` はフォルダごと git に入れない**（`.gitignore`）・⚠️ **ビルドで suteme を見ない**（入れ替えは suteme で書き出すか `build:embed MODEL_DIR=`。`build/model.ps1`）。理由は `_docs/design-capture.md` の「決定: 認識器は 3 段」 |
 | `version` | **アプリのバージョン（唯一の正）**。`main.go` が `//go:embed` で焼き込み、起動時にログへ出す。⚠️ **手で書き換えない** —— ルートで `go run _cmd/version.go` を使う（`config.yml` と `package.json` へも伝播させる。手順はスキル `ikkyoku-build`） |
 | `Taskfile.local.yml` | **git に入れない**個人用の `local:deploy`（バージョンの伝播 → 焼き込みビルド → ビルド情報のコミット → タグ → 常用場所へコピー）。雛形と手順はスキル `ikkyoku-build`。⚠️ **`Taskfile.yml` の include の `optional: true` を外さない**（無い環境で全部のタスクが落ちる） |
 | `devbuild.go` / `prodbuild.go` | **ログをターミナルにも出すか**（`consoleLog`）。ビルドタグ `production` が無い（＝ `wails3 dev`）ときだけ出す。⚠️ **判定はビルドタグで**（配る exe は `-H windowsgui` で標準エラーの行き先が無い）。ログ本体は `log/AGENTS.md` |
@@ -94,6 +95,9 @@ CLI は無い。**
   名指しすること**（利用者が自分で直せる唯一のもの）・**panic のスタックを箱に全部載せない
   こと**・**直ったら ⚠ から消えること**・**帯の判定データは駒種の推論器と別の問題として
   出すこと**（直す場所を間違えないように）
+- `embedmodel_test.go`（`-tags embedmodel` のときだけ）— **焼き込んだ `model/` が実際に認識器として
+  組み立てられること**。go:embed はファイルがあれば通るので、中身が壊れていても（gzip でない・
+  版が違う）ビルドでは気づけない。**配布ビルドの前に `go test -tags embedmodel -skip Clipboard .`**
 - `recognizersource_test.go` — **認識器の 3 段**（2026-10-04。`recognizerOrder` と `loadRecognizer`）。
   ⚠️ 歯止めは —— **`auto` を「焼き込み優先」にしないこと**（開発中に焼き込みへ倒れると、
   **学習データを更新しても反映されない**という最も気づきにくい事故になる）・**置いてあるのに

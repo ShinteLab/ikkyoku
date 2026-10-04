@@ -1,64 +1,76 @@
 package recognize
 
 import (
-	"bytes"
-	"compress/gzip"
-	"fmt"
-	"io"
+	"errors"
+	"io/fs"
+	"sync"
 )
 
-// 認識器を**アプリのバイナリに焼き込む**ための口（ビルドタグ `embedmodel`）。
+// exe に焼き込んだ認識器（3 段の 3 段目。2026-10-04 に置き場所を変えた）。
 //
-// ⚠️ **既定の運用（`SutemeDataDir` から読む）を置き換えるものではない。**
-// 学習データは育て続けるものなので、開発中は suteme のリポジトリを直接指すのが正しい
-// （predictor.go の冒頭）。焼き込みが要るのは**配る**ときだけ
-// —— 配布先に suteme のリポジトリは無く、「exe の隣に .bin を 2 つ置いてください」は
-// 説明のいる運用になる。**exe 1 つで動く形**を選べるようにするのがこの口。
+// ⚠️ **焼き込むのはこのパッケージではない。** `go:embed` は `_cmd/ikkyoku` が持ち
+// （`_cmd/ikkyoku/model/` を `-tags embedmodel` のときだけ埋め込む）、ここへは
+// `SetEmbedded` で中身（fs.FS）を渡すだけ。以前は `recognize/model/` を埋め込んでいたが、
+// **焼き込むモデルはアプリ（exe）の持ち物**で、置き場所もアプリの横（wails3 で
+// ビルドする場所）が自然なので移した。`recognize` は埋め込まれたものを読むだけ。
 //
-// **データはこのリポジトリに置いていない**（`recognize/model/` は .gitignore）。
-// 10MB 級のバイナリを育てるたびにコミットすることになるため。`recognize/model/` が
-// 「手元のモデル」で、ビルドはそれをそのまま焼き込む（`_cmd/ikkyoku/Taskfile.yml`）:
+// 中身は**置いた配布モデルと同じ形**（suteme の配布用の書き出し。predictor.go）で、
+// 読む口も同じ（LoadPackFS）。
 //
-//	task model:update    # 手元を suteme の学習データから作り直す
-//	task build:embed     # 手元をそのまま焼き込む（MODEL_DIR=<フォルダ> で入れ替えてから）
-//
-// タグを付けずにビルドしたバイナリには**データが入らない**（`EmbeddedAvailable` が
-// false）。そのときは 3 段のうち焼き込みの段が無いだけ（predictor.go の冒頭）。
-// 分岐は `_cmd/ikkyoku/captureservice.go` の `loadRecognizer`。
+// ⚠️ **既定の運用（学習データから読む）を置き換えるものではない。** 学習データは
+// 育て続けるものなので、開発中は suteme のリポジトリを直接指すのが正しい。焼き込みが
+// 要るのは**配る**とき —— 配布先に suteme のリポジトリは無いので、**exe 1 つで動く形**にする。
 
-// EmbeddedAvailable は焼き込んだ認識器を持つビルドか。
-func EmbeddedAvailable() bool {
-	return len(embeddedPredictorGZ) > 0
+var (
+	embeddedMu sync.Mutex
+	embedded   fs.FS
+)
+
+// SetEmbedded は exe に焼き込んだ配布セットを渡す（`_cmd/ikkyoku` の main が起動時に 1 回）。
+// nil なら焼き込みは無い（タグなしのビルド）。
+func SetEmbedded(fsys fs.FS) {
+	embeddedMu.Lock()
+	defer embeddedMu.Unlock()
+	embedded = fsys
 }
 
-// EmbeddedSource は焼き込んだデータの出所（`model/source.txt` の中身）。
-// **観測用**で、どの版を焼いたのかを画面とログに出すためだけに使う
-// （焼き込むと元のファイル名が残らない。suteme の embed.go の `name` と同じ役目）。
+func embeddedFS() fs.FS {
+	embeddedMu.Lock()
+	defer embeddedMu.Unlock()
+	return embedded
+}
+
+// EmbeddedAvailable は焼き込んだ認識器を持つビルドか（学習データのファイルが埋まっているか）。
+func EmbeddedAvailable() bool {
+	fsys := embeddedFS()
+	return fsys != nil && len(packDataFiles(fsys)) > 0
+}
+
+// EmbeddedSource は焼き込んだものの説明（書き出しの日時・件数）。**観測用**で、画面とログに出す。
 func EmbeddedSource() string {
-	return cleanSource(embeddedSource)
+	fsys := embeddedFS()
+	if fsys == nil {
+		return ""
+	}
+	s := &Set{}
+	info := readExportInfo(fsys)
+	s.Date, s.Samples = info.Date, info.Samples
+	return s.Label()
 }
 
 // LoadEmbedded は焼き込んだ配布セットから 1 組を読む（`Use` で差し替える）。
-// **ダウンロードして置く配布モデル（LoadPack）と同じ形**なので、組み立ては共用。
 func LoadEmbedded() (*Set, error) {
-	if !EmbeddedAvailable() {
-		return nil, fmt.Errorf("ikkyoku/recognize: このビルドには認識器が焼き込まれていません")
+	fsys := embeddedFS()
+	if fsys == nil {
+		return nil, errors.New("ikkyoku/recognize: このビルドには認識器が焼き込まれていません")
 	}
-	s, err := loadPack(embeddedPredictorGZ, embeddedStripGZ, EmbeddedSource(), "embed")
+	s, err := LoadPackFS(fsys, "embed")
 	if err != nil {
 		return nil, err
 	}
-	if s.Source == "" {
-		s.Source = "焼き込み"
+	s.Source = "焼き込み"
+	if l := s.Label(); l != "" {
+		s.Source += "（" + l + "）"
 	}
 	return s, nil
-}
-
-// gunzip は焼き込んだ gzip を展開する Reader を返す。
-//
-// **gzip で持っているのは exe を太らせすぎないため**（実測: 生 23.2MB → 9.9MB）。
-// suteme の口が io.Reader を取る（`PredictorFrom` / `StripJudgeFrom`）ので、
-// 展開したバイト列を作らずにそのまま渡せる。
-func gunzip(b []byte) (io.Reader, error) {
-	return gzip.NewReader(bytes.NewReader(b))
 }

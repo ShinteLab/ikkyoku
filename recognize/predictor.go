@@ -1,11 +1,15 @@
 package recognize
 
 import (
+	"compress/gzip"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -16,7 +20,7 @@ import (
 // 認識器を**どこから読むか**（2026-10-04 に 3 段にした）。
 //
 //	1. 学習データ   … suteme の学習ディレクトリ（`SutemeDataDir`）。自分で育てたもの（LoadDir）
-//	2. 配布モデル   … ダウンロードして置いた配布セット（`SutemeModelDir`。LoadPack）
+//	2. 配布モデル   … 置いた配布セット（`SutemeModelDir`。LoadPack）
 //	3. 焼き込み     … exe に最初から入っている配布セット（`-tags embedmodel`。LoadEmbedded）
 //
 // どの段を使うかの判断は `_cmd/ikkyoku/captureservice.go` の `loadRecognizer`。
@@ -32,21 +36,22 @@ import (
 // exe の隣にデータを置く運用は取らない（Program Files には書けず、更新のたびに
 // コピーし直すことになる）。
 
-// 配布セットのファイル名（2026-10-04）。**焼き込み（`model/`）と、ダウンロードして置く
-// 配布モデルで同じ形**にしてある —— 焼き込みは「exe に最初から入っている配布セット」で、
-// 読む口が 1 本で済む。中身は suteme の「配布用に書き出す」（`training.ExportCompact`）の
-// 出力を gzip したもの（`_cmd/ikkyoku/build/model.ps1`）。
+// 配布セット（2 段目と 3 段目）は **suteme の配布用の書き出しそのもの**（2026-10-04）:
 //
-// ⚠️ **ファイル名に版を入れない**（`training_data_v8` → `predictor`）。版が上がるたびに
-// go:embed の行と置き場所の案内を書き換えることになるため。どの版かは `source.txt`。
-const (
-	PackPredictorFile = "predictor.bin.gz"
-	PackStripFile     = "strip.bin.gz"
-	PackSourceFile    = "source.txt"
-)
+//	training_data_v8.bin(.gz)   駒種の推論器（suteme.DefaultDataFile。版は exe に入っている suteme が決める）
+//	strip_data_v1.bin(.gz)      盤の縁の判定器（suteme.DefaultStripFile）
+//	export.json                 書き出しの記録（日時・件数。suteme の training.ExportInfo）
+//
+// `go run ./_cmd/suteme-training -export -gzip -out <場所>` が作る。**ikkyoku 独自の名前や形を
+// 持たない** —— 持つと、suteme の書き出しを ikkyoku の形へ変える手順が要る（以前はそうだった）。
+// ⚠️ **読めるファイル名は exe に入っている suteme の版で決まる**（`suteme.DefaultDataFile`）。
+// 新しい版の書き出しを古い exe に置いても名前が合わず、読めない段として下へ落ちる（版合わせ）。
 
-// ErrNoPack は配布セットが置かれていない（`predictor.bin.gz` が無い）。
-// **読めない（壊れている・形式が違う）とは区別する** —— 既定の置き場所に何も無いのは
+// ExportInfoFile は書き出しの記録の名前（suteme の training.ExportInfoFile と同じ）。
+const ExportInfoFile = "export.json"
+
+// ErrNoPack は配布セットが置かれていない（学習データのファイルが 1 つも無い）。
+// **読めない（壊れている・版が違う）とは区別する** —— 既定の置き場所に何も無いのは
 // 普通の状態で、⚠ に出すことではない。
 var ErrNoPack = errors.New("配布モデルが置かれていません")
 
@@ -54,9 +59,11 @@ var ErrNoPack = errors.New("配布モデルが置かれていません")
 type Set struct {
 	// Source は出所（ディレクトリのパス、または焼き込みのラベル）。画面とログに出す。
 	Source string
-	// Date は配布セットの日付（`source.txt` の「(yyyy-mm-dd)」）。読めなければゼロ。
+	// Date は書き出した日時（`export.json`）。読めなければゼロ。
 	// **焼き込みより古い配布モデルを使わない**ための比較に使う。
 	Date time.Time
+	// Samples は駒種の推論器のサンプル数（`export.json`。読めなければ 0）。
+	Samples int
 	// StripSamples は盤の縁の判定器のサンプル数（読めていなければ 0）。
 	StripSamples int
 	// StripErr は判定器が読めなかった理由。**推論器が読めていれば 1 組としては使う**
@@ -135,59 +142,58 @@ func LoadDir(dir string) (*Set, error) {
 	return s, nil
 }
 
-// LoadPack はダウンロードして置いた配布セット（`predictor.bin.gz` / `strip.bin.gz` /
-// `source.txt`）から 1 組を読む。置かれていなければ ErrNoPack。
-//
-// ⚠️ **形式の版が exe と合わなければ読めずにエラーになる**（suteme の読み込みが断る）。
-// 呼び出し側はそれを「読めなかった段」として下の段へ落とす。
+// LoadPack は置いた配布セット（suteme の配布用の書き出し）から 1 組を読む。
+// 置かれていなければ ErrNoPack。
 func LoadPack(dir string) (*Set, error) {
-	pred, err := os.ReadFile(filepath.Join(dir, PackPredictorFile))
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, ErrNoPack
-		}
-		return nil, fmt.Errorf("ikkyoku/recognize: %w", err)
+	if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
+		return nil, ErrNoPack
 	}
-	src, _ := os.ReadFile(filepath.Join(dir, PackSourceFile))
-	strip, stripErr := os.ReadFile(filepath.Join(dir, PackStripFile))
-	if stripErr != nil {
-		strip = nil
-	}
-	s, err := loadPack(pred, strip, cleanSource(string(src)), "model")
+	s, err := LoadPackFS(os.DirFS(dir), "model")
 	if err != nil {
 		return nil, err
 	}
 	s.Source = dir
-	if stripErr != nil {
-		s.StripErr = fmt.Errorf("ikkyoku/recognize: %w", stripErr)
-	}
 	return s, nil
 }
 
-// loadPack は配布セットの中身（gzip のまま）から 1 組を組み立てる。焼き込みと共用。
-func loadPack(predGZ, stripGZ []byte, source, kind string) (*Set, error) {
+// LoadPackFS は fsys の直下に置いた配布セットから 1 組を読む（置いたものと焼き込みで共用）。
+// kind は suteme に名乗るラベルの頭（`Result.Debug` に出る）。
+//
+// ⚠️ **形式の版が exe と合わなければ読めずにエラーになる**（名前が合わない・suteme の読み込みが断る）。
+// 呼び出し側はそれを「読めなかった段」として下の段へ落とす。
+func LoadPackFS(fsys fs.FS, kind string) (*Set, error) {
+	info := readExportInfo(fsys)
+	s := &Set{Date: info.Date, Samples: info.Samples}
 	label := kind
-	if source != "" {
-		label += ":" + firstLine(source)
+	if !info.Date.IsZero() {
+		label += ":" + info.Date.Format("2006-01-02")
 	}
-	r, err := gunzip(predGZ)
+
+	r, closeFn, err := openPackFile(fsys, suteme.DefaultDataFile)
 	if err != nil {
-		return nil, fmt.Errorf("ikkyoku/recognize: 学習データが読めません: %w", err)
+		if errors.Is(err, fs.ErrNotExist) {
+			if others := packDataFiles(fsys); len(others) > 0 {
+				// 学習データはあるが、この exe が読む版ではない。
+				return nil, fmt.Errorf("ikkyoku/recognize: この exe が読める %s がありません（%s があります。書き出した suteme とこの exe の版が合っていません）",
+					suteme.DefaultDataFile, strings.Join(others, " / "))
+			}
+			return nil, ErrNoPack
+		}
+		return nil, fmt.Errorf("ikkyoku/recognize: %w", err)
 	}
 	p, err := suteme.PredictorFrom(r, label+":predictor")
+	closeFn()
 	if err != nil {
 		return nil, fmt.Errorf("ikkyoku/recognize: %w", err)
 	}
-	s := &Set{Source: source, Date: sourceDate(source), predictor: p}
-	if len(stripGZ) == 0 {
-		s.StripErr = errors.New("ikkyoku/recognize: 帯の教師データ（" + PackStripFile + "）がありません")
-		return s, nil
-	}
-	sr, err := gunzip(stripGZ)
+	s.predictor = p
+
+	sr, closeStrip, err := openPackFile(fsys, suteme.DefaultStripFile)
 	if err != nil {
-		s.StripErr = fmt.Errorf("ikkyoku/recognize: 帯の教師データが読めません: %w", err)
+		s.StripErr = fmt.Errorf("ikkyoku/recognize: 盤の縁の判定データ（%s）がありません", suteme.DefaultStripFile)
 		return s, nil
 	}
+	defer closeStrip()
 	j, err := suteme.StripJudgeFrom(sr, label+":strip")
 	if err != nil {
 		s.StripErr = fmt.Errorf("ikkyoku/recognize: %w", err)
@@ -198,41 +204,68 @@ func loadPack(predGZ, stripGZ []byte, source, kind string) (*Set, error) {
 	return s, nil
 }
 
-// cleanSource は source.txt の中身を整える。⚠️ **BOM を落とすこと** —— 書き出しは
-// Windows PowerShell（`_cmd/ikkyoku/build/model.ps1`）で、`Set-Content -Encoding utf8` は BOM を付ける。
-func cleanSource(s string) string {
-	return strings.TrimSpace(strings.TrimPrefix(s, "\ufeff"))
-}
-
-// sourceDateRe は source.txt の末尾の「(yyyy-mm-dd)」（model.ps1 が書く）。
-var sourceDateRe = regexp.MustCompile(`\((\d{4}-\d{2}-\d{2})\)`)
-
-// sourceDate は source.txt から配布セットの日付を読む。読めなければゼロ
-// （**比べられないときは古いと見なさない**。呼び出し側の判断）。
-func sourceDate(source string) time.Time {
-	m := sourceDateRe.FindAllStringSubmatch(source, -1)
-	if len(m) == 0 {
-		return time.Time{}
+// openPackFile は name.gz（圧縮した書き出し）か name（圧縮しない書き出し）を開く。
+// **.gz を先に見る**（焼き込み向けに suteme が -gzip で書いたもの）。
+func openPackFile(fsys fs.FS, name string) (io.Reader, func(), error) {
+	if f, err := fsys.Open(name + ".gz"); err == nil {
+		zr, err := gzip.NewReader(f)
+		if err != nil {
+			f.Close()
+			return nil, nil, fmt.Errorf("%s.gz が読めません: %w", name, err)
+		}
+		return zr, func() { zr.Close(); f.Close() }, nil
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return nil, nil, err
 	}
-	t, err := time.Parse("2006-01-02", m[len(m)-1][1])
+	f, err := fsys.Open(name)
 	if err != nil {
-		return time.Time{}
+		return nil, nil, err
 	}
-	return t
+	return f, func() { f.Close() }, nil
 }
 
-// OlderThan は配布セットの日付が other より前か。**どちらかの日付が読めなければ false**
+// packDataFiles は置いてある学習データらしいファイルの名前（版違いの案内に使う）。
+func packDataFiles(fsys fs.FS) []string {
+	names, _ := fs.Glob(fsys, "training_data_v*")
+	sort.Strings(names)
+	return names
+}
+
+// exportInfo は suteme の training.ExportInfo のうち読むものだけ。
+type exportInfo struct {
+	Date    time.Time `json:"date"`
+	Samples int       `json:"samples"`
+}
+
+// readExportInfo は書き出しの記録を読む。無い・読めないならゼロ（**比べられないだけで、
+// 読めないとは見なさない**）。
+func readExportInfo(fsys fs.FS) exportInfo {
+	var info exportInfo
+	b, err := fs.ReadFile(fsys, ExportInfoFile)
+	if err != nil {
+		return info
+	}
+	_ = json.Unmarshal(b, &info)
+	return info
+}
+
+// Label は画面とログに出す短い説明（「2026-10-04 の書き出し・9233 サンプル」）。
+func (s *Set) Label() string {
+	var parts []string
+	if !s.Date.IsZero() {
+		parts = append(parts, s.Date.Format("2006-01-02 15:04")+" の書き出し")
+	}
+	if s.Samples > 0 {
+		parts = append(parts, fmt.Sprintf("%d サンプル", s.Samples))
+	}
+	return strings.Join(parts, "・")
+}
+
+// OlderThan は書き出した日時が other より前か。**どちらかの日時が読めなければ false**
 // （比べられないものを古いと決めつけて捨てない）。
 func (s *Set) OlderThan(other *Set) bool {
 	if s == nil || other == nil || s.Date.IsZero() || other.Date.IsZero() {
 		return false
 	}
 	return s.Date.Before(other.Date)
-}
-
-func firstLine(s string) string {
-	if i := strings.IndexAny(s, "\r\n"); i >= 0 {
-		return strings.TrimSpace(s[:i])
-	}
-	return s
 }

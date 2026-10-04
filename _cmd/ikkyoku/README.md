@@ -15,7 +15,7 @@ wails3 generate bindings -ts -i   # ⚠️ クローン直後・worktree では�
 wails3 build                      # frontend ビルド〜bindings 生成〜go build まで一括
 wails3 dev                        # 開発モード
 
-task model:update                 # 配布用: 手元のモデル(recognize/model)を suteme の学習データから作り直す
+# 手元のモデル(_cmd/ikkyoku/model)は suteme で作る: go run ./_cmd/suteme-training -export -gzip -out <ここの model>
 task build:embed                  # 配布用: 認識器を焼き込んだ exe
 ```
 

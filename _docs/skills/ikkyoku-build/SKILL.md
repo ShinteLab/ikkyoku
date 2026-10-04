@@ -86,26 +86,33 @@ npm run build      # 上の 2 つ + vite build
 
 ## 配る exe（認識器を焼き込む）
 
+**焼き込むのは手元のモデル `_cmd/ikkyoku/model/`。手元を作るのは suteme**（2026-10-04）:
+
 ```powershell
-cd ikkyoku\_cmd\ikkyoku
-wails3 task model:update                            # 手元のモデル(recognize/model/)を suteme の学習データから作り直す
-wails3 task build:embed                             # 手元のモデルをそのまま焼き込む（EXTRA_TAGS=embedmodel）
+cd ..\suteme                     # ikkyoku の隣の suteme（本体のチェックアウト。学習データがある）
+go run ./_cmd/suteme-training -export -gzip -out ..\ikkyoku\_cmd\ikkyoku\model   # 手元を作り直す
+cd ..\ikkyoku\_cmd\ikkyoku
+wails3 task build:embed                             # 手元をそのまま焼き込む（EXTRA_TAGS=embedmodel）
 wails3 task build:embed MODEL_DIR=D:/models/x       # 置いてある配布モデルを手元に写してから焼き込む
 wails3 task local:deploy MODEL_DIR=D:/models/x      # local:deploy にも同じ形で渡せる
 ```
 
-- ⚠️ **ビルドは手元の `recognize/model/` をそのまま焼き込む。suteme は見ない**（2026-10-04）。
-  以前はビルドのたびに `suteme/dist` を持ってきていたので、**何が焼き込まれるかがビルドした
-  瞬間の suteme の状態で決まっていた**。**手元を入れ替えるのは `model:update` か `MODEL_DIR` だけ。**
-  ビルドの頭で「焼き込むモデル: <source.txt>」を出すので、`local:deploy` の出力で何を配ったか分かる
-- ⚠️ **手元は git に入れない**（`.gitignore`。学習し直すたびに 10MB 級をコミットすることになる）。
-  手元が空なら `build:embed` が入れ方を出して止まる
-- **`MODEL_DIR` は配布モデルと同じ 3 ファイル**（`predictor.bin.gz` / `strip.bin.gz` / `source.txt`）の
-  フォルダ。`go:embed` はパッケージの外を指せないので、**手元に写してから**焼き込む
-  （＝以後の `build:embed` もそれを焼き込む）。⚠️ **3 つとも揃えて写す**（判定器だけ前のモデルが
-  残らないように。無ければ空のファイルを置き、読む側が「判定器なし」として扱う）
-- ⚠️ **`MODEL_DIR` / `SUTEME_DIST` は `KEY=VALUE` で渡す**（`wails3 task` は `--` の後ろを渡さない）。
+- ⚠️ **ビルドは手元をそのまま焼き込む。suteme は見ない。** 以前はビルドのたびに `suteme/dist` を
+  持ってきていたので、**何が焼き込まれるかがビルドした瞬間の suteme の状態で決まっていた**。
+  **手元を入れ替えるのは suteme で書き出したときと `MODEL_DIR` だけ。** ビルドの頭で
+  「焼き込むモデル: 2026-10-04 16:14 の書き出し・9233 サンプル」のように出すので、
+  `local:deploy` の出力で何を配ったか分かる。作り直すコマンドも一緒に出る
+- ⚠️ **手元はフォルダごと git に入れない**（`_cmd/ikkyoku/.gitignore` の `model/`）。
+  手元が空なら `build:embed` が suteme の書き出し方を出して止まる
+- 手元の形は **suteme の配布用の書き出しそのもの**（`training_data_v8.bin.gz` / `strip_data_v1.bin.gz` /
+  `export.json`）。ikkyoku 側で形を変える手順は無い
+- **`MODEL_DIR` は同じ形のフォルダ**（suteme の書き出し。圧縮しない `dist/` でもよい）。`go:embed` は
+  パッケージの外を指せないので、**手元を空にしてから写して**焼き込む（＝以後の `build:embed` も
+  それを焼き込む。前のモデルの判定器などが混ざらない）
+- ⚠️ **`MODEL_DIR` は `KEY=VALUE` で渡す**（`wails3 task` は `--` の後ろを渡さない）。
   CLI の変数は呼ばれた先のタスクまで届くので、`local:deploy` から `build:embed` へもそのまま届く
+- ⚠️ **suteme の `-export` を worktree で走らせない**（学習データ `*.bin` は gitignore なので無い）。
+  本体のチェックアウトで走らせる（`-out` は起動した場所からの相対でよい）
 
 - ⚠️ **`wails3 build` は焼き込まない**（タグが付かない）。配るのは `task build:embed`
 - ⚠️ **`BUILD_FLAGS` を上書きしないこと。** あちらには `-tags production` も
@@ -113,27 +120,20 @@ wails3 task local:deploy MODEL_DIR=D:/models/x      # local:deploy にも同じ�
 - ⚠️ **`wails3 dev` と `wails3 package` に `-tags` は無い。** 開発モードで焼き込みを
   試すなら `task build:embed` した exe を直接起動する
 - ⚠️ **ビルドが通ることでは足りない。** 中身が壊れていても `go:embed` は通るので、
-  配布ビルドの前に `go test -tags embedmodel ./recognize/` で
-  **実際に認識器として組み立てられること**を確かめる
-- **`model:update` は毎回 suteme に書き出させてから取り込む**（`go run ./_cmd/suteme-training -export
-  <suteme の場所>`。実測 1 秒弱）。「手元を今の学習データにする」操作なので、古い `dist/` を黙って
-  使わない。書き出せなかったとき（学習データが無い など）は、探した場所と手で書き出す手順を出して止まる
-- suteme を ikkyoku の隣に置いていないときは `wails3 task model:update SUTEME_DIST=D:/path/to/suteme/dist`
-  （**指定した `dist/` はそのまま使う**。無いときだけ書き出させる）。学習データの版は決め打ちしていない
-  （`training_data_v*.bin` のいちばん大きい版。2026-10-04 までは v7 決め打ちで、v8 になってから通らなくなっていた）
-- 旧名の `task model:copy` も `model:update` の別名として残してある
+  配布ビルドの前に `go test -tags embedmodel -skip Clipboard .`（`_cmd/ikkyoku` で。
+  `embedmodel_test.go`）で**実際に認識器として組み立てられること**を確かめる
 
-詳しくは `recognize/AGENTS.md` の「認識器は 3 段」。
+詳しくは `recognize/AGENTS.md` の「認識器は 3 段」「焼き込みの中身とビルド手順」。
 
 ### 配布モデルを置く（2026-10-04。今は手で置く）
 
 認識器は **学習データ → 配布モデル → 焼き込み** の 3 段（`_docs/design-capture.md` の
-「決定: 認識器は 3 段」）。**配布モデルは焼き込みと同じ 3 ファイル**なので、作り方も同じ:
+「決定: 認識器は 3 段」）。**配布モデルは焼き込みと同じ形（suteme の配布用の書き出し）**なので、
+手元をそのまま zip にすれば配れる:
 
 ```powershell
 cd _cmd\ikkyoku
-wails3 task model:update   # recognize/model/ に predictor.bin.gz / strip.bin.gz / source.txt ができる
-Compress-Archive ..\..\recognize\model\* -DestinationPath ikkyoku-model.zip   # .gitignore は入れなくてよい
+Compress-Archive model\* -DestinationPath ikkyoku-model.zip
 ```
 
 受け取った側は、zip を**既定の置き場所**に展開するだけで次の起動から使われる
@@ -145,9 +145,10 @@ Expand-Archive ikkyoku-model.zip -DestinationPath "$env:LOCALAPPDATA\ikkyoku\mod
 
 - 別の場所に置くなら設定タブ「盤面認識（suteme）」の「配布モデル」に指す（空なら既定の場所。
   欄が空のときは実際に探している場所が薄く出る）
-- ⚠️ **焼き込みより古い配布モデルは「自動」では使われない**（`source.txt` の日付で比べる）。
+- ⚠️ **焼き込みより古い配布モデルは「自動」では使われない**（書き出しの記録 `export.json` の日時で比べる）。
   使われていない理由は設定タブの読み込み元の下と、ツールバーの ⚠ に出る
-- ⚠️ **形式の版が exe と合わないモデルは読めずに下の段（焼き込み）で動く**（⚠ に出る）
+- ⚠️ **exe に入っている suteme と版が合わない書き出しは読めずに下の段（焼き込み）で動く**（⚠ に
+  「版が合っていません」と出る）
 - **今どこから読んでいるか**は設定タブの読み込み元の下（`RecognizerStatus` を写している）
 
 - `Taskfile.yml` の `includes` から `ios` / `android` を外してある（デスクトップ専用なので。`build/ios`・`build/android`・`build/docker` も削除済み）
