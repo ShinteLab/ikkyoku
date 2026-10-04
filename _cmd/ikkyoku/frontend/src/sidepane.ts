@@ -11,7 +11,7 @@
 // ⚠️ **局面も持たない。** 描くのは渡された `StudyState` そのもので、
 // 操作は Service を呼ぶだけ。どちらの窓から押しても、変わるのは Go 側の 1 つの手順。
 import { Events } from "@wailsio/runtime";
-import { FiRefreshCw, FiRadio } from "react-icons/fi";
+import { FiMessageSquare, FiRefreshCw, FiRadio } from "react-icons/fi";
 
 import {
   AnalyzeService,
@@ -88,6 +88,10 @@ export interface SidePaneHandle {
   // setWinRateEngine は**勝率バーに出しているエンジン**のカードに薄い枠を付ける
   // （2026-10-02。空なら外す）。⚠️ **選ぶのは盤の側**で、ここは印を付けるだけ。
   setWinRateEngine(id: string): void;
+  // setShowComment は**手順の下のコメント欄**を出すか（2026-10-04。設定から）。
+  // ⚠️ **入切は設定が持つ**（`AppSettings.showMoveComment`）。押したときも
+  // 保存した結果を `onSettings` で受け取り直す。
+  setShowComment(on: boolean): void;
 }
 
 export interface SidePaneOptions {
@@ -285,6 +289,18 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
                  画面から読めなかった。**ボタンを戻さないこと。** -->
             <div id="study-moves" class="study-moves side-part-moves"></div>
             <p id="study-move-status" class="note is-caution side-part-moves" hidden></p>
+            <!-- 手順の左下のボタンと、その下のコメント欄（2026-10-04）。
+                 欄に出すのは**今見ている手の棋譜のコメント**（開始局面なら開始局面の
+                 コメント）。⚠️ **無ければ欄は空のまま**（閉じない。手を辿るたびに
+                 欄が出たり消えたりすると、手順のリストの高さが跳ねる）。
+                 ⚠️ **入切は設定が持つ**（次の起動でも同じ形で始める）。
+                 ⚠️ **アイコンだけなので、意味は aria-label / title が持つ。** -->
+            <div class="study-move-foot side-part-moves" hidden>
+              <button id="study-comment-toggle" class="icon-btn" type="button"
+                      aria-pressed="false"
+                      aria-label="コメント欄">${iconMarkup(FiMessageSquare)}</button>
+            </div>
+            <div id="study-comment" class="study-comment side-part-moves" hidden></div>
 `;
   const q = <T extends Element>(sel: string) => host.querySelector<T>(sel)!;
 
@@ -337,6 +353,44 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
   const studyReload = q<HTMLButtonElement>("#study-reload");
   const kifuFollowBtn = q<HTMLButtonElement>("#study-kifu-follow");
   const studyMoveStatus = q<HTMLParagraphElement>("#study-move-status");
+  const studyMoveFoot = q<HTMLDivElement>(".study-move-foot");
+  const commentToggle = q<HTMLButtonElement>("#study-comment-toggle");
+  const studyComment = q<HTMLDivElement>("#study-comment");
+
+  // コメント欄（2026-10-04）。**出すかは設定**（`showMoveComment`）、**中身は今の局面**。
+  let commentShown = false;
+  let commentState: StudyState | null = null;
+  const paintComment = () => {
+    const loaded = !!commentState?.loaded;
+    studyMoveFoot.hidden = !loaded;
+    commentToggle.setAttribute("aria-pressed", String(commentShown));
+    commentToggle.title = commentShown ? "コメント欄をしまう" : "コメント欄を出す";
+    studyComment.hidden = !loaded || !commentShown;
+    if (!loaded || !commentShown) {
+      return;
+    }
+    // ⚠️ **相手は今見ている手**（光っている行）。0 は開始局面。
+    const at = commentState?.currentId ?? 0;
+    const text = at === 0
+      ? commentState?.rootComment ?? ""
+      : (commentState?.nodes ?? []).find((n) => n.id === at)?.comment ?? "";
+    studyComment.textContent = text;
+    // 手を移ったら先頭から読ませる（前の手で下までスクロールしていても）。
+    studyComment.scrollTop = 0;
+  };
+  commentToggle.addEventListener("click", () => {
+    // **先に見た目を変える**（保存の往復を待たない）。保存した結果は `onSettings` で
+    // 受け取り直すので、失敗したら設定の側に戻る。
+    commentShown = !commentShown;
+    paintComment();
+    void (async () => {
+      try {
+        onSettings(await SettingsService.SetShowMoveComment(commentShown));
+      } catch (err) {
+        setStatus(String(err instanceof Error ? err.message : err), true);
+      }
+    })();
+  });
 
   // fillWarnings は警告のリストを書き換える（`mainscreen.ts` にも同じものがある）。
   // ⚠️ **件数で高さを変えないこと**（出たり消えたりするたびに下が動く）。
@@ -2311,6 +2365,8 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
       // 局面があるため）。変な評価値が出たときの手掛かりになる。
       fillWarnings(studyWarnings, next?.warnings ?? []);
       moveListUI.render(loaded ? next : null);
+      commentState = next;
+      paintComment();
       // ⚠️ **局面が変わったら解析の可否と結果を追随させる。**
       if (!loaded) {
         // 空に戻った。**仕掛けた記録も捨てる** —— 同じ局面をもう一度採ったときに、
@@ -2450,6 +2506,13 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
       }
       winrateMarkId = id;
       paintWinRateMark();
+    },
+    setShowComment(on: boolean) {
+      if (on === commentShown) {
+        return;
+      }
+      commentShown = on;
+      paintComment();
     },
   };
 }

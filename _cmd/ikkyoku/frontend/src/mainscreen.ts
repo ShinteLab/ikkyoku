@@ -5539,6 +5539,8 @@ ${st.turnLabel}${n}`;
     hidePlayerNames: boolean;
     // 勝率バーの左右を入れ替えているか（2026-10-02。立っていれば左が先手）。
     flipWinRateBar: boolean;
+    // 手順の下のコメント欄を出しているか（2026-10-04。手順の左下のボタン）。
+    showMoveComment: boolean;
     // 画面の配色（2026-10-02。"dark" / "light" / "system"）。⚠️ **既定の解決は Go 側**
     // （`NormalizeTheme`）。"system" をどちらにするかだけは `theme.ts` が決める。
     theme: string;
@@ -5616,6 +5618,8 @@ ${st.turnLabel}${n}`;
     sidePane.setEngines(s.engines ?? [], s.engineColors ?? [], s.analyzeSeconds);
     // 棋譜の自動更新の間隔（設定ファイルだけで決まる。既定の解決は Go 側）。
     sidePane.setKifuFollowMinutes(s.kifuFollowMinutes);
+    // 手順の下のコメント欄（2026-10-04）。**起動直後にどちらで始まるかはここで決まる。**
+    sidePane.setShowComment(!!s.showMoveComment);
     showEngineList(s.engines ?? []);
     // 既定値の解決は Go 側(training パッケージ)が済ませて返す。**フロントに
     // 既定値を書かないこと**(2 か所に持つと、既定を変えたときに食い違う)。

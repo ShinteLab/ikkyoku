@@ -1029,3 +1029,32 @@ func testEnginePath(t *testing.T) string {
 	}
 	return p
 }
+
+// TestSetShowMoveComment は手順の下のコメント欄の出し入れを固定する（2026-10-04）。
+//
+// ⚠️ **一番の要点は「既定が出さないこと」。** この項目を知らない古い設定ファイルで
+// 開いたときに、手順の列が勝手に短くなって始まらないこと。
+func TestSetShowMoveComment(t *testing.T) {
+	s := newTestSettings(t, nil)
+
+	if s.Settings().ShowMoveComment {
+		t.Error("既定が「出す」になっています（触っていないのに手順が短くなります）")
+	}
+	st, err := s.SetShowMoveComment(true)
+	if err != nil {
+		t.Fatalf("SetShowMoveComment: %v", err)
+	}
+	if !st.ShowMoveComment {
+		t.Error("立っていません")
+	}
+	cfg, err := ikkyoku.LoadConfig(s.path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if !cfg.ShowMoveComment {
+		t.Error("保存されていません（次の起動で欄が閉じてしまう）")
+	}
+	if st, err = s.SetShowMoveComment(false); err != nil || st.ShowMoveComment {
+		t.Errorf("戻っていません: %v / %v", st.ShowMoveComment, err)
+	}
+}

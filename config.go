@@ -202,6 +202,15 @@ type Config struct {
 	// この項目を知らない古い設定ファイルでも、帯の向きが変わらずに始まる。
 	FlipWinRateBar bool `json:"flipWinRateBar"`
 
+	// ShowMoveComment は解析タブの**手順の下にコメント欄を出しているか**（2026-10-04）。
+	// 切り替えるのは**手順の左下のボタン**。欄には今見ている手の棋譜のコメントが出る。
+	//
+	// ⚠️ **既定は出さない**（ゼロ値 = 出さない）。手順の列は縦の取り合いが厳しく、
+	// コメントの無い棋譜（撮った局面・解析だけの検討）では欄が空のまま場所を取る。
+	// ⚠️ **画面の組み方の好みなので、次の起動でも同じ形で始める**
+	// （`HideWinRateBar` と同じ扱い）。
+	ShowMoveComment bool `json:"showMoveComment"`
+
 	// Training は訂正した局面を suteme の学習用サーバへ送る設定。
 	Training TrainingConfig `json:"training"`
 

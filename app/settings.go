@@ -71,6 +71,9 @@ type AppSettings struct {
 	// 立っていれば**左が先手・右が後手**。⚠️ **盤の視点とは別の設定**
 	// （`ikkyoku.Config.FlipWinRateBar`）。
 	FlipWinRateBar bool `json:"flipWinRateBar"`
+	// ShowMoveComment は解析タブの**手順の下にコメント欄を出しているか**（2026-10-04。
+	// 手順の左下のボタン）。⚠️ **既定は出さない**（`ikkyoku.Config.ShowMoveComment`）。
+	ShowMoveComment bool `json:"showMoveComment"`
 	// Theme は画面の配色（2026-10-02。"dark" / "light" / "system"。**既定は "dark"**）。
 	//
 	// ⚠️ **解決済みの値が返る**（`ikkyoku.NormalizeTheme`）。ただし "system" は
@@ -411,6 +414,7 @@ func (s *SettingsService) settings() AppSettings {
 		HideWinRateBar:    s.cfg.HideWinRateBar,
 		HidePlayerNames:   s.cfg.HidePlayerNames,
 		FlipWinRateBar:    s.cfg.FlipWinRateBar,
+		ShowMoveComment:   s.cfg.ShowMoveComment,
 		Theme:             ikkyoku.NormalizeTheme(s.cfg.Theme),
 		Themes:            ikkyoku.ThemeOptions,
 		Training:          trainingSettings(s.cfg.Training),
@@ -1255,6 +1259,15 @@ func (s *SettingsService) SetFlipWinRateBar(v bool) (AppSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.save(func(cfg *ikkyoku.Config) { cfg.FlipWinRateBar = v })
+}
+
+// SetShowMoveComment は解析タブの手順の下のコメント欄を出し入れして保存する（2026-10-04）。
+//
+// ⚠️ **効かせるのは画面だけ**。コメントは欄を閉じていても手順の行には出ている。
+func (s *SettingsService) SetShowMoveComment(v bool) (AppSettings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.save(func(cfg *ikkyoku.Config) { cfg.ShowMoveComment = v })
 }
 
 // SetTheme は画面の配色を切り替えて保存する（2026-10-02）。

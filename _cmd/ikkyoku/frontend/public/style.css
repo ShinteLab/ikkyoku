@@ -4610,6 +4610,42 @@ html.is-graph #app {
   margin-right: 6px;
 }
 
+/* 手順の左下のボタンの行（2026-10-04。コメント欄の出し入れ）。
+   ⚠️ **低く保つこと** —— この列は縦の取り合いが厳しく、高くしたぶん手順のリストが短くなる。 */
+.study-move-foot {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 6px;
+}
+
+/* 手順の下のコメント欄（2026-10-04）。**今見ている手の棋譜のコメント**を出す。
+   ⚠️ **高さは固定**（中身で伸び縮みさせない）—— 手を辿るたびに手順のリストの
+   高さが跳ねる。長いコメントは欄の中でスクロールする。
+   ⚠️ **改行はそのまま**（`pre-wrap`）。KIF のコメントは行に意味があることが多い。 */
+.study-comment {
+  flex: 0 0 auto;
+  height: calc(12.5px * 1.5 * 4 + 10px);
+  margin: 0 6px;
+  padding: 4px 6px;
+  overflow-y: auto;
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text-2c);
+  background: var(--surface-3);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+/* ⚠️ **`display` を持つ箱は `hidden` に負ける**ので打ち消す（`.icon-btn[hidden]` と同じ）。 */
+.study-move-foot[hidden],
+.study-comment[hidden] {
+  display: none;
+}
+
 /* 手順の 1 行 ＝ **[+/-] + 手**（2026-08-13）。
    ⚠️ **字下げは行に付けること。** chip に付けると、トグルだけ左に取り残される。
    ⚠️ **字下げの上限を付けること**（min）。深い枝で右へ流れ続けると、
