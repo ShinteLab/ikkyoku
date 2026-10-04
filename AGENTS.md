@@ -117,7 +117,7 @@ Claude Code でスキルとして使いたい人は、各自の `.claude/skills/
 | スキル **`ikkyoku-verify`**（`_docs/skills/`） | **実機で何を押すか**（未検証チェックリスト・確認済みの記録・確かめ方） | 実装が終わって実機で触るとき |
 | スキル **`ikkyoku-follow`**（`_docs/skills/`） | **中継の追従の調整とデバッグ**（症状から引く表・録画とログの読み方・ふるいの定数の詰め方・速さの実測） | 追従が進まないとき / 定数を詰めるとき |
 | スキル **`ikkyoku-handicap-mate`**（`_docs/skills/`） | **手合割（駒落ち）と詰将棋の全体像**（3 通りの解釈・4 つの入口・側の呼び名）と**詰将棋エンジンを繋ぐ手順**、⚠️ **どのエンジンが何を返すかの実測**（`references/engines.md`） | 駒落ち・詰将棋・詰み探索を触るとき |
-| スキル `wails3` | Wails3 全般。⚠️ **alpha2.117 前提なので beta.16 と食い違う** | Wails の API で詰まったとき |
+| スキル `wails3` | Wails3 全般。⚠️ **alpha2.117 前提なので beta.26 と食い違う** | Wails の API で詰まったとき |
 | **各パッケージの `AGENTS.md`** | **そのコードを触るときの制約**（`recognize` / `position` / `analyze` / `app` / `guide` / `piecefont` / `training` / `legal` / `usi` / `_cmd/ikkyoku`）。**テストが何の歯止めか**も、それぞれの「テスト」節 | そのディレクトリを触るとき（自動で読まれる） |
 | `_cmd/ikkyoku/frontend/src/AGENTS.md` | **画面（フロント）の地図と、崩さないこと 12 箇条** | フロントを触るとき（自動で読まれる） |
 | **`_docs/app-*.md` / `cmd-*.md` / `position-*.md`** | **大きすぎたパッケージの制約を話題ごとに分けたもの**（`app` = 棋譜を読む・手合割と詰将棋・棚・目線・エンジン・追従・指し継ぎ・控え / `cmd` = `_cmd/ikkyoku` のウィンドウ・枠・撮る / `position` = `Connect`・手の木）。⚠️ **自動では読まれない** —— 各パッケージの `AGENTS.md` の索引で引く | そのパッケージを触るとき（**触る前に開く**） |
@@ -263,7 +263,7 @@ go test ./...
 - ⚠️ **`frontend/bindings/` は生成物で git に入っていない。** クローン直後・worktree を作った直後は
   `wails3 generate bindings -ts -i` が要る（忘れると `Cannot find module '../bindings/...'` が延々と出る）
 - ⚠️ **配る exe は `task build:embed`**（`wails3 build` は認識器を焼き込まない）
-- ⚠️ **Wails は手元の CLI に追従している**（beta.16）。スキル `wails3` は alpha2.117 前提なので食い違う
+- ⚠️ **Wails は手元の CLI に追従している**（beta.26）。スキル `wails3` は alpha2.117 前提なので食い違う
 - ⚠️ **実装したら `ikkyoku-verify` の `checklist.md` に足すこと**（「触ってみて大丈夫だった」を根拠にしない）
 - go.mod・`go mod tidy`・worktree のジャンクションはスキル `ikkyoku-build`
 
