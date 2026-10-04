@@ -1,8 +1,10 @@
 package main
 
 import (
+	"strings"
+
+	"github.com/ShinteLab/ikkyoku"
 	ikkyokuapp "github.com/ShinteLab/ikkyoku/app"
-	"github.com/ShinteLab/ikkyoku/recognize"
 )
 
 // 起動はできたが足りないもの・できないことを `app.IssueService` へ載せる（2026-10-04）。
@@ -30,32 +32,45 @@ const (
 // recognizerEffect は認識器が無いときに何ができないか。
 const recognizerEffect = "撮った画像から盤面を読めません（撮ること・棋譜の読み込み・解析はできます）"
 
+// recognizerModeLabel は段の呼び名（画面に出す）。
+func recognizerModeLabel(mode string) string {
+	switch mode {
+	case ikkyoku.SutemeSourceDir:
+		return "学習データ"
+	case ikkyoku.SutemeSourceModel:
+		return "配布モデル"
+	case ikkyoku.SutemeSourceEmbed:
+		return "焼き込み"
+	}
+	return mode
+}
+
 // syncRecognizerIssue は認識器の読み込み結果を ⚠ に合わせる（読み直すたびに呼ぶ）。
 //
-// ⚠️ **既定の探索（Mode が空）は読み込みが撮るときまで走らない**ので、ここでデータが
-// 置いてあるかだけ前もって見る（`recognize.FindDefaultPredictor`）。見ないと、
-// **焼き込みの無い exe を別の端末へ持っていったときに、撮るまで気づけない。**
+// 認識器は 3 段（学習データ → 配布モデル → 焼き込み。2026-10-04）で、出すのは 3 つ:
+//
+//   - **どの段も読めない** … 赤。盤面が読めない
+//   - **置いてあるのに使えなかった段がある**（Skipped）… 黄。下の段で動いている
+//   - **盤の縁の判定データが無い** … 黄。盤の位置が 1 マス滑ることがある
 func syncRecognizerIssue(issues *ikkyokuapp.IssueService, st RecognizerStatus) {
 	switch {
-	case st.Error != "":
+	case !st.Ready:
 		issues.Set(ikkyokuapp.Issue{
 			Key: issueRecognizer, Level: ikkyokuapp.IssueError,
-			Title: "認識器を読み込めません", Effect: recognizerEffect, Detail: st.Error,
+			Title: "認識器がありません", Effect: recognizerEffect,
+			Detail: strings.Join(append([]string{st.Error}, st.Skipped...), "\n"),
 		})
-	case st.Mode == "":
-		if err := recognize.FindDefaultPredictor(); err != nil {
-			issues.Set(ikkyokuapp.Issue{
-				Key: issueRecognizer, Level: ikkyokuapp.IssueError,
-				Title: "認識器が見つかりません", Effect: recognizerEffect, Detail: err.Error(),
-			})
-		} else {
-			issues.Clear(issueRecognizer)
-		}
+	case len(st.Skipped) > 0:
+		issues.Set(ikkyokuapp.Issue{
+			Key: issueRecognizer, Level: ikkyokuapp.IssueWarn,
+			Title:  "指定した認識器を使えないので、" + recognizerModeLabel(st.Mode) + "で動いています",
+			Detail: strings.Join(st.Skipped, "\n"),
+		})
 	default:
 		issues.Clear(issueRecognizer)
 	}
 
-	if st.StripError != "" {
+	if st.Ready && st.StripError != "" {
 		issues.Set(ikkyokuapp.Issue{
 			Key: issueStrip, Level: ikkyokuapp.IssueWarn,
 			Title:  "盤の縁の判定データを読み込めません",

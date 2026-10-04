@@ -11,7 +11,7 @@
 | `Recognize(img image.Image, opts ...Option) (*Result, error)` | **画像 → 盤面。これが本命の継ぎ目。** 盤面・信頼度・駒数・検証結果まで 1 回で返る |
 | `LoadSFEN(img image.Image, opts ...Option) (string, error)` | 盤面文字列だけでよいとき。`Recognize` の薄い皮 |
 | `LoadPredictor(dir string) (Predictor, error)` | dir から駒種推論器を読む（下記） |
-| `SetPredictor(p Predictor)` | 以後の認識が使う推論器を差し替える。`nil` で既定探索に戻る |
+| `SetPredictor(p Predictor)` | 以後の認識が使う推論器を差し替える。`nil` で既定探索に戻る（⚠️ ikkyoku は既定探索を使わない。`FromImage` が手前で断る） |
 | `LoadStripData(path string) ([]StripSample, error)` / `NewStripJudge` | 盤の縁の帯の判定器を読む（下記） |
 | `SetStripJudge(j *StripJudge)` | 以後の検出が使う帯の判定器。⚠️ **`nil` は「使わない」**。既定探索に戻すのは `ResetStripJudge` |
 
@@ -43,8 +43,8 @@
 
 | ファイル | 読む先 | 無いとどうなるか |
 |---|---|---|
-| `training_data_v6.bin` / `model_v6.json` | `recognize.UsePredictorFrom` → `suteme.SetPredictor` | 駒種が読めない（致命的）|
-| `strip_data_v1.bin` | `recognize.UseStripJudgeFrom` → `suteme.SetStripJudge` | **盤の位置が 1マス滑ったまま信頼度 100% で返る**（下記）|
+| `training_data_v*.bin` / `model_v*.json` | `recognize.LoadDir` → `Set.Use` → `suteme.SetPredictor` | 駒種が読めない（その段は使えない）|
+| `strip_data_v1.bin` | 同じ `LoadDir` の 1 組 → `suteme.SetStripJudge` | **盤の位置が 1マス滑ったまま信頼度 100% で返る**（下記）|
 
 `LoadSFEN` は駒種推論器を必要とし、`suteme` は既定で
 **カレントディレクトリ → 実行ファイルのディレクトリ**の順に
@@ -53,7 +53,7 @@
 
 **実行ファイルの隣にコピーを置く運用は取らない。** 更新のたびにコピーし直す必要があり、
 古いデータで認識する事故が起きる。代わりに `ikkyoku.Config` の `SutemeDataDir` で
-場所を指し、`recognize.UsePredictorFrom` → `suteme.SetPredictor` で読み込む。
+場所を指し、`recognize.LoadDir` → `Set.Use` で読み込む。
 開発中は `suteme` のリポジトリを直接指しておけばよい:
 
 ```json
@@ -62,8 +62,8 @@
 
 （`os.UserConfigDir()/ikkyoku/config.json`。**JSON なのでパスはスラッシュ区切りで書く**）
 
-`SutemeDataDir` が空なら `suteme` 既定の探索に任せる。**配布するときは
-「バイナリに焼き込む」経路を使う**（次節）。
+`SutemeDataDir` が空ならこの段は無い（⚠️ **suteme 既定の探索には任せない**。2026-10-04）。
+**配布するときは「バイナリに焼き込む」経路を使う**（次節）。
 
 - **ファイルのシンボリックリンクで代用しようとしないこと。** Windows では管理者権限
   （または開発者モード）が要る。ジャンクションはディレクトリ専用で、`suteme` が探すのは
@@ -98,53 +98,59 @@
 開くと盤が合う、という食い違いがこれ。**ズレの原因を撮り方や認識器に求める前に、
 まず帯の判定器が読めているかを見ること**（メイン画面の「認識器」の行に出る）。
 
-- **帯の判定器は駒種推論器が読めなくても読む。** 盤の位置を合わせるだけなら
-  駒種は要らない（ガイド枠の自動フィット `recognize.DetectRegion` がそれ）
-- **読めなかったときに `suteme.SetStripJudge(nil)` を呼ばないこと。**
-  あれは「判定器を使わない」の意味で、`SetPredictor(nil)` のように既定探索へ
-  戻るのとは逆。既定探索まで止まる
+- ⚠️ **推論器と判定器は同じ段から 1 組で差し替える**（`recognize.Set.Use`。2026-10-04）。
+  **判定器が無い組では判定器を「使わない」にする**（`SetStripJudge(nil)`）—— 前の組の判定器を
+  残すとちぐはぐになり、既定の探索へ戻すと exe の隣やカレントディレクトリを見に行く。
+  判定器が無くても組としては使う（認識はできる。盤の位置が 1 マス滑ることがあるだけ）
+- どの段も読めないときは `recognize.Clear` で外す（判定器も外す。盤の位置合わせ
+  `DetectRegion` は判定器なしで動く）
 - 状態は `RecognizerStatus.StripSamples` / `StripError` で別に持つ。
   **`Ready` / `Error` にまとめない** —— まとめると帯データを置き忘れているのに
   「認識器: OK」と出て気づけない。画面では警告色（`.recognizer.is-warn`）で出す
 - 回帰テストは `recognize/predictor_test.go`
 
-## 認識器の読み込み元は 3 通り（**焼き込み / ディレクトリ / 既定探索**）
+## 認識器は 3 段（**学習データ / 配布モデル / 焼き込み**。2026-10-04）
 
-**exe 1 つで配れる形と、学習データを育てながら使う形の両方が要る。** 前節のとおり
-開発中はディレクトリを指すのが正しいが、**配る相手の環境に `suteme` のリポジトリは無い。**
-「exe の隣に .bin を 2 つ置いてください」は説明のいる運用なので、
-**配布ビルドは認識器をバイナリに焼き込む**（`-tags embedmodel`）。
+**決定の理由は `_docs/design-capture.md` の「決定: 認識器は 3 段」。** ここは触るときの制約。
 
-| 設定 `sutemeSource` | 読み込み元 |
-|---|---|
-| `"auto"`（既定。空も同じ）| `SutemeDataDir` があればそちら → 無ければ焼き込み → それも無ければ `suteme` 既定探索 |
-| `"dir"` | `SutemeDataDir`（焼き込みがあっても使わない）|
-| `"embed"` | 焼き込んだデータ（**焼き込みの無いビルドでは `dir` へ落ちる**）|
+| 段 | 読む口 | 設定 |
+|---|---|---|
+| 1. 学習データ（生の .bin） | `LoadDir` | `sutemeDataDir` |
+| 2. 配布モデル（`predictor.bin.gz` / `strip.bin.gz` / `source.txt`） | `LoadPack`（置かれていなければ `ErrNoPack`） | `sutemeModelDir`（空なら `%LOCALAPPDATA%\ikkyoku\model`） |
+| 3. 焼き込み（2 と同じ形） | `LoadEmbedded` | — |
+
+どれも**読んで 1 組（`Set`）を返すだけ**で、差し替えるのは `Set.Use`。どの段を使うかは
+`_cmd/ikkyoku/captureservice.go` の `loadRecognizer` / `recognizerOrder`。
+
+- ⚠️ **置かれていない（`ErrNoPack`）と読めないを分けること。** 既定の置き場所が空なのは
+  普通の状態で、⚠ に出すことではない
+- ⚠️ **配布モデルと焼き込みの組み立ては共用**（`loadPack`）。片方だけ直すと、置いたモデルと
+  焼き込みで振る舞いが変わる
+- ⚠️ **`source.txt` の日付は `(yyyy-mm-dd)` で読む**（`copy-model.ps1` が書く形）。
+  読めなければゼロで、**古いと見なさない**（`Set.OlderThan`）
+- ⚠️ **`FromImage` は認識器を差し替えていなければ suteme を呼ばない**（`ErrNoRecognizer`）。
+  呼ぶと suteme 既定の探索に落ちる
 
 切り替えは**設定タブ「認識器の読み込み元」**。変えたその場で読み直す
 （`SettingsService.SetSutemeSource` → `CaptureService.applyRecognizerSource`）。
 
 - ⚠️ **`auto` を「焼き込み優先」にしないこと。** 焼き込みは配布用に固定したデータ、
-  ディレクトリは育て続けるデータ。開発中（＝ディレクトリを指している状態）に
+  学習データは育て続けるデータ。開発中（＝学習データを指している状態）に
   焼き込みへ倒れると、**学習データを更新しても反映されない**という
   最も気づきにくい事故になる。指定してあるほうがユーザーの意思表示なのでそちらを採る
-- ⚠️ **`"embed"` を選んでいても、焼き込みの無いビルドでは `dir` へ落とす。**
+- ⚠️ **見始めた段から下を見たあと、上の段へも回る**（`recognizerOrder`）。「焼き込みから」を
+  選んでいても、焼き込みの無いビルドでは学習データ・配布モデルで動く。
   設定ファイル（`config.json`）は配布ビルドと開発ビルドで共用されるので、
   「焼き込みで動かす設定のまま `wails3 dev` を動かす」は普通に起きる
-- ⚠️ **既定探索は撮るまで読み込みが走らない**ので、起動時にデータが置いてあるかだけ
-  見る（`FindDefaultPredictor`。2026-10-04。ファイルがあるかを見るだけで読まない）。
-  無ければメイン画面のツールバーの ⚠ に「認識器が見つかりません」と出る
-  （`_cmd/ikkyoku/issues.go`）。見ないと、**焼き込みの無い exe を別の端末へ持っていった
-  ときに、撮るまで気づけない**
 - **どれも読めなくてもアプリは動く**（設計原則 3「段階的に劣化する」）。
   認識結果が空になるだけで、PNG の保存は成功したまま
 - 実際にどこから読んだかは `RecognizerStatus.Mode`。**画面にはこちらを出すこと**
   （設定の値そのものではない）。⚠️ 焼き込みのとき `Source` は出所のラベルであって
   パスではないので、「実際に使われた推論器」との突き合わせ（`showPredictor` の
   「※設定と別の場所」）は `mode === "dir"` のときだけにしてある
-- 解決は `resolveRecognizerSource`（`_cmd/ikkyoku/captureservice.go`）の 1 か所。
-  回帰テストは `_cmd/ikkyoku/recognizersource_test.go`（**タグの有無どちらでも通る**
-  ように、期待値を `recognize.EmbeddedAvailable()` で切り替えている）
+- 解決は `recognizerOrder` / `loadRecognizer`（`_cmd/ikkyoku/captureservice.go`）の 1 か所。
+  回帰テストは `_cmd/ikkyoku/recognizersource_test.go`（見る順と落ち方）と
+  `recognize/predictor_test.go`（1 組の読み方・`ErrNoPack`・日付・`FromImage` の門番）
 
 ### 焼き込みの中身とビルド手順
 
@@ -174,12 +180,14 @@ task build:embed        # model:copy + wails3 のビルド(EXTRA_TAGS=embedmodel
 
 | 置き場所 | 中身 |
 |---|---|
-| `recognize/model/predictor.bin.gz` | `suteme/dist/training_data_v7.bin` を gzip したもの |
+| `recognize/model/predictor.bin.gz` | `suteme/dist/training_data_v*.bin`（**版がいちばん大きいもの**。2026-10-04 に v7 決め打ちをやめた）を gzip したもの |
 | `recognize/model/strip.bin.gz` | `suteme/dist/strip_data_v1.bin` を gzip したもの |
 | `recognize/model/source.txt` | 出所（画面とログに出る。焼き込むと元のファイル名が残らないため）|
 
 - ⚠️ **`suteme` の `dist/` は「配布用に書き出す」（`training.ExportCompact`）が作るもの。**
-  リポジトリ直下の全件（`training_data_v7.bin`）ではなく、間引いた配布セットを配ること
+  リポジトリ直下の全件（`training_data_v*.bin`）ではなく、間引いた配布セットを配ること
+- **この 3 ファイルがそのまま配布モデル**（2 段目）。`recognize/model/` を zip にして配れば、
+  受け取った人は既定の置き場所に展開するだけで使える（手順はスキル `ikkyoku-build`）
 - **gzip で持つ。** 実測 生 23.2MB → 9.9MB。exe は **13.4MB → 23.3MB**（+9.9MB。
   `wails3 build` の配布ビルド。`go build` だけの素の exe なら 19.2MB → 29.2MB）。
   `suteme` 側の口が `io.Reader` を取る（`PredictorFrom` / `StripJudgeFrom`）ので、

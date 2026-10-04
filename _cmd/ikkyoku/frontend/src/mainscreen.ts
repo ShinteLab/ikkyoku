@@ -1469,23 +1469,25 @@ export function mountMainScreen(root: HTMLElement): void {
             動きます</strong>ので、普通に使うぶんには触らなくてかまいません。
             相手はどちらも suteme なので、片方だけ設定しても噛み合いません。
           </p>
-          <!-- 認識器の読み込み元（2026-08-27）。
+          <!-- 認識器の読み込み元（2026-08-27。2026-10-04 に 3 段にした）。
 
-               **exe 1 つで配れる形と、学習データを育てながら使う形の両方が要る。**
-               配布ビルド（-tags embedmodel）は認識器を焼き込んであるので、
-               suteme のリポジトリが無い環境でもそのまま動く。開発中は
-               ディレクトリを指しておけば、データを更新した結果がすぐ反映される。
+               **認識器は 3 段**: 学習データ（自分で育てたもの）→ 配布モデル（ダウンロードして
+               置いたもの）→ 焼き込み（exe に最初から入っているもの）。**基本は焼き込みで動き、
+               置いたもの・育てたものがあればそちらを使う。** 選ぶのは「どの段から見始めるか」で、
+               読めない段は飛ばして下の段で動く（そのときはツールバーの ⚠ に出る）。
 
-               ⚠️ **「自動」はディレクトリ優先。** 焼き込みは固定したデータなので、
+               ⚠️ **「自動」は学習データから。** 焼き込みは固定したデータなので、
                ここが焼き込みへ倒れると**学習データを更新しても反映されない**という
-               最も気づきにくい事故になる（Go 側 resolveRecognizerSource）。 -->
+               最も気づきにくい事故になる（Go 側 recognizerOrder）。
+               ⚠️ **今どこから読んでいるかは Go が返す**（RecognizerStatus）。設定の値から
+               ここで推し量らないこと（読めない段は飛ばされるので食い違う）。 -->
           <div class="setting-group">
             <div class="setting is-block">
               <span class="setting-body">
                 <span class="setting-title" data-hint="hint-sutemesource">認識器の読み込み元</span>
                 <span id="hint-sutemesource" class="setting-note is-hint">
-                  盤面認識に使う suteme の学習データをどこから読むかです。
-                  切り替えるとその場で読み直します。
+                  盤面認識に使うデータを、学習データ・配布モデル・焼き込みのどこから読むかです。
+                  読めないものは飛ばして次を使います。切り替えるとその場で読み直します。
                 </span>
               </span>
             </div>
@@ -1493,15 +1495,21 @@ export function mountMainScreen(root: HTMLElement): void {
               <label class="field">
                 <span class="field-label">読み込み元</span>
                 <select id="suteme-source">
-                  <option value="auto">自動（ディレクトリ優先）</option>
-                  <option value="dir">学習データのディレクトリ</option>
-                  <option value="embed">このアプリに焼き込んだデータ</option>
+                  <option value="auto">自動（学習データ → 配布モデル → 焼き込み）</option>
+                  <option value="dir">学習データから</option>
+                  <option value="model">配布モデルから</option>
+                  <option value="embed">焼き込みから</option>
                 </select>
               </label>
               <label class="field is-wide">
-                <span class="field-label">ディレクトリ</span>
+                <span class="field-label">学習データ</span>
                 <input id="suteme-data-dir" type="text" spellcheck="false"
-                       placeholder="(空なら suteme 既定の探索)" />
+                       placeholder="(空なら使わない)" />
+              </label>
+              <label class="field is-wide">
+                <span class="field-label">配布モデル</span>
+                <input id="suteme-model-dir" type="text" spellcheck="false"
+                       placeholder="(空なら既定の場所)" />
               </label>
             </div>
             <p id="suteme-source-note" class="setting-note"></p>
@@ -4885,6 +4893,9 @@ ${st.turnLabel}${n}`;
   // 動くのでエラーにはしないが、**黙って落とすと盤の位置が 1マス滑ったまま
   // 信頼度 100% で返る**ので警告として出す。
   const showRecognizer = (st: RecognizerStatus) => {
+    // 設定タブの「今どこから読んでいるか」も同じ結果から書く（更新の経路を 1 本にする）。
+    // ⚠️ showSutemeState は下で定義している。**呼ばれるのはいつも await のあと**なので届く。
+    showSutemeState(st);
     // ⚠️ **ディレクトリから読んだときだけ突き合わせの相手にする。**
     // 焼き込み（mode === "embed"）の source は出所のラベルであってパスではないので、
     // これを入れると `showPredictor` が毎回「※設定と別の場所」を出す。
@@ -4898,10 +4909,7 @@ ${st.turnLabel}${n}`;
     if (st.ready) {
       recognizer.textContent = `認識器: ${st.source}`;
     } else {
-      recognizer.textContent =
-        st.mode === "embed"
-          ? "認識器: 焼き込んだデータを読み込めませんでした"
-          : "認識器: suteme の既定の場所を探します";
+      recognizer.textContent = "認識器: ありません";
     }
     recognizer.className = "recognizer";
     if (st.stripError) {
@@ -4949,7 +4957,27 @@ ${st.turnLabel}${n}`;
   // （`sutemeEmbedAvailable`）。⚠️ **フロントで判定できない**（バイナリの中身の話）。
   const sutemeSource = root.querySelector<HTMLSelectElement>("#suteme-source")!;
   const sutemeDataDir = root.querySelector<HTMLInputElement>("#suteme-data-dir")!;
+  const sutemeModelDir = root.querySelector<HTMLInputElement>("#suteme-model-dir")!;
   const sutemeSourceNote = root.querySelector<HTMLParagraphElement>("#suteme-source-note")!;
+
+  // 認識器を今どこから読んでいるか（2026-10-04）。**Go が返した RecognizerStatus を写すだけ**
+  // —— 設定の値から推し量らないこと（読めない段は飛ばされるので食い違う）。
+  // ⚠️ **状態の行なので is-hint にしない**（frontend/src/AGENTS.md の 14）。
+  const recognizerModeLabel: Record<string, string> = {
+    dir: "学習データ",
+    model: "配布モデル",
+    embed: "焼き込み",
+  };
+  const showSutemeState = (st: RecognizerStatus) => {
+    // 配布モデルの欄が空なら、実際に探した既定の場所を薄く見せる（**組み立てるのは Go**）。
+    sutemeModelDir.placeholder = st.modelDir ? `(空なら ${st.modelDir})` : "(空なら既定の場所)";
+    const lines = st.ready
+      ? [`今は${recognizerModeLabel[st.mode] ?? st.mode}から読んでいます（${st.source}）。`]
+      : ["認識器がありません。撮った画像から盤面を読めません。"];
+    lines.push(...(st.skipped ?? []));
+    sutemeSourceNote.textContent = lines.join("\n");
+    sutemeSourceNote.classList.toggle("is-warn", !st.ready || (st.skipped ?? []).length > 0);
+  };
   const kifuDBPath = root.querySelector<HTMLInputElement>("#kifudb-path")!;
   const kifuDBBrowse = root.querySelector<HTMLButtonElement>("#kifudb-browse")!;
   const kifuDBNote = root.querySelector<HTMLParagraphElement>("#kifudb-note")!;
@@ -5496,37 +5524,25 @@ ${st.turnLabel}${n}`;
   const showSutemeSource = (s: {
     sutemeSource: string;
     sutemeDataDir: string;
+    sutemeModelDir: string;
     sutemeEmbedAvailable: boolean;
     sutemeEmbedSource: string;
   }) => {
     sutemeSource.value = s.sutemeSource;
     sutemeDataDir.value = s.sutemeDataDir;
+    sutemeModelDir.value = s.sutemeModelDir;
     const embedOption = sutemeSource.querySelector<HTMLOptionElement>('option[value="embed"]')!;
     // 焼き込みの無いビルドでは選ばせない。**選択肢ごと消さない** ——
     // 設定ファイルが "embed" のまま開かれることがあり、消すと選択が勝手に変わる。
     embedOption.disabled = !s.sutemeEmbedAvailable;
     embedOption.textContent = s.sutemeEmbedAvailable
-      ? `このアプリに焼き込んだデータ（${s.sutemeEmbedSource || "出所不明"}）`
-      : "このアプリに焼き込んだデータ（このビルドには入っていません）";
-    // ディレクトリ欄は「焼き込みだけを使う」ときも残す（戻すときに打ち直させない）。
+      ? `焼き込みから（${s.sutemeEmbedSource || "出所不明"}）`
+      : "焼き込みから（このビルドには入っていません）";
+    // 欄は「焼き込みから」のときも残す（戻すときに打ち直させない）。
     sutemeDataDir.disabled = false;
-    if (!s.sutemeEmbedAvailable && s.sutemeSource === "embed") {
-      sutemeSourceNote.textContent =
-        "このビルドには認識器が焼き込まれていないため、ディレクトリから読みます。";
-    } else if (s.sutemeSource === "embed") {
-      sutemeSourceNote.textContent =
-        "アプリに焼き込んだデータを使います。suteme のリポジトリが無くても動きます。";
-    } else if (s.sutemeSource === "dir") {
-      sutemeSourceNote.textContent = s.sutemeDataDir
-        ? "指定したディレクトリから読みます。データを更新したら「認識器を読み込み直す」で反映されます。"
-        : "ディレクトリが空なので、suteme 既定の探索（カレント → 実行ファイルの隣）に任せます。";
-    } else {
-      sutemeSourceNote.textContent = s.sutemeDataDir
-        ? "ディレクトリを指定してあるので、そちらから読みます。"
-        : s.sutemeEmbedAvailable
-          ? "ディレクトリが空なので、アプリに焼き込んだデータを使います。"
-          : "ディレクトリが空で焼き込みも無いため、suteme 既定の探索に任せます。";
-    }
+    sutemeModelDir.disabled = false;
+    // ⚠️ **今どこから読んでいるか（sutemeSourceNote）はここで書かない** —— 設定の値からは
+    // 決まらない。showSutemeState（Go の RecognizerStatus）が書く。
   };
 
   const showSettings = (s: {
@@ -5565,6 +5581,7 @@ ${st.turnLabel}${n}`;
     ponanzaConstant: number;
     sutemeSource: string;
     sutemeDataDir: string;
+    sutemeModelDir: string;
     sutemeEmbedAvailable: boolean;
     sutemeEmbedSource: string;
     kifuDbPath: string;
@@ -6367,6 +6384,25 @@ ${st.turnLabel}${n}`;
         }
       } finally {
         sutemeSource.disabled = false;
+      }
+    })();
+  });
+
+  // 配布モデルの置き場所（2026-10-04）。学習データの欄と同じく change で拾う。
+  sutemeModelDir.addEventListener("change", () => {
+    void (async () => {
+      const want = sutemeModelDir.value;
+      sutemeModelDir.disabled = true;
+      settingsStatus.textContent = "";
+      settingsStatus.classList.remove("is-error");
+      try {
+        showSettings(await SettingsService.SetSutemeModelDir(want));
+        await reloadRecognizerView();
+      } catch (err) {
+        settingsStatus.textContent = `設定を保存できませんでした: ${String(err)}`;
+        settingsStatus.classList.add("is-error");
+      } finally {
+        sutemeModelDir.disabled = false;
       }
     })();
   });

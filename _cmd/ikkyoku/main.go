@@ -131,7 +131,7 @@ func main() {
 			Title: "設定ファイルを読めません", Effect: effect, Detail: detail,
 		})
 	}
-	captureSvc := NewCaptureService(cfg.SutemeDataDir, cfg.SutemeSourceOr())
+	captureSvc := NewCaptureService(cfg.SutemeDataDir, cfg.SutemeModelDir, cfg.SutemeSourceOr())
 	positionSvc := ikkyokuapp.NewPositionService()
 	trainingSvc := ikkyokuapp.NewTrainingService(settingsSvc)
 	// 「駒の字」（設定タブ）。端末に入っているフォントから駒の字を焼く。
@@ -301,6 +301,7 @@ func main() {
 	captureSvc.initPaneDetached(cfg.EvalGraphDetached, cfg.StudyPaneDetached, cfg.MovePaneDetached)
 	settingsSvc.OnSutemeSource = captureSvc.applyRecognizerSource
 	settingsSvc.OnSutemeDataDir = captureSvc.applyRecognizerDir
+	settingsSvc.OnSutemeModelDir = captureSvc.applyRecognizerModelDir
 	captureSvc.applyClickThrough(cfg.ClickThrough)
 	// ⚠️ **評価値グラフの窓をここで出さないこと**（2026-09-08 に踏んだ）。
 	// **`app.Run()` の前の `Show()` は何もしない**（Wails の `WebviewWindow.Show` は

@@ -1487,6 +1487,16 @@ html.is-main #app {
    ⚠️ **状態を出す行（`#kifudb-note` / `#suteme-source-note` / `.status`）は
    `is-hint` を付けないこと。** あれは説明ではなく**今どうなっているか**で、
    隠すと開けていない理由が読めなくなる。 */
+/* 認識器を今どこから読んでいるか（2026-10-04。showSutemeState）。読めなかった段の理由を
+   1 行ずつ足すので改行を活かす。下の段で動いている・どれも読めないときは警告色。 */
+#suteme-source-note {
+  white-space: pre-line;
+}
+
+#suteme-source-note.is-warn {
+  color: var(--warn);
+}
+
 .setting-note.is-hint,
 .setting-section-note.is-hint {
   position: absolute;

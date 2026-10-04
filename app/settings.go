@@ -112,13 +112,18 @@ type AppSettings struct {
 	// ⚠️ **設定タブには出さない**（設定ファイルを手で書くだけ）。側の列が
 	// タイマーを刻むのに使う。
 	KifuFollowMinutes int `json:"kifuFollowMinutes"`
-	// SutemeSource は認識器の読み込み元（`ikkyoku.SutemeSourceAuto` / `Dir` / `Embed`）。
+	// SutemeSource は認識器の読み込み元（`ikkyoku.SutemeSourceAuto` / `Dir` / `Model` / `Embed`）。
+	// **どの段から見始めるか**（学習データ → 配布モデル → 焼き込み。2026-10-04）。
 	//
 	// **正規化済みで返る**（空は "auto"）。⚠️ **フロントで「空なら auto」を
 	// 書かないこと** —— 既定の解決を 2 か所に持たない。
 	SutemeSource string `json:"sutemeSource"`
-	// SutemeDataDir は学習データを置いたディレクトリ（"dir" のときの読み込み元）。
+	// SutemeDataDir は学習データを置いたディレクトリ（1 段目）。
 	SutemeDataDir string `json:"sutemeDataDir"`
+	// SutemeModelDir は配布モデルを置いたディレクトリ（2 段目。2026-10-04）。**設定の値そのまま**
+	// で、空なら既定の置き場所。⚠️ **既定の場所をフロントで組み立てないこと** —— 実際に
+	// 探した場所は `RecognizerStatus.ModelDir`（解決は `ikkyoku.Config.ModelDir` の 1 か所）。
+	SutemeModelDir string `json:"sutemeModelDir"`
 	// SutemeEmbedAvailable はこのビルドに認識器が焼き込まれているか
 	// （`-tags embedmodel`）。**false なら「焼き込み」は選ばせない。**
 	SutemeEmbedAvailable bool `json:"sutemeEmbedAvailable"`
@@ -345,6 +350,9 @@ type SettingsService struct {
 	// OnSutemeDataDir は学習データの置き場所を変えたときに呼ぶ（同じく読み直す）。
 	OnSutemeDataDir func(string)
 
+	// OnSutemeModelDir は配布モデルの置き場所を変えたときに呼ぶ（同じく読み直す。2026-10-04）。
+	OnSutemeModelDir func(string)
+
 	// OnKifuDBPath は棋譜データベースの場所を変えたときに呼ぶ
 	// （`KifuService.open`。その場で開き直す）。
 	// ⚠️ **SettingsService から DB を直に触らないこと**（棚を持っているのはあちら）。
@@ -467,6 +475,7 @@ func (s *SettingsService) settings() AppSettings {
 
 		SutemeSource:         s.cfg.SutemeSourceOr(),
 		SutemeDataDir:        s.cfg.SutemeDataDir,
+		SutemeModelDir:       s.cfg.SutemeModelDir,
 		SutemeEmbedAvailable: recognize.EmbeddedAvailable(),
 		SutemeEmbedSource:    recognize.EmbeddedSource(),
 
@@ -1333,7 +1342,7 @@ func (s *SettingsService) SetTheme(v string) (AppSettings, error) {
 //
 // **焼き込みの無いビルドで "embed" を弾いていない。** 設定ファイルは配布ビルドと
 // 開発ビルドで共用されるので、「焼き込みで使う」という意思表示は残せたほうがよい
-// （実際にどちらから読むかは `resolveRecognizerSource` が落としてくれる）。
+// （実際にどの段から読むかは `_cmd/ikkyoku` の `recognizerOrder` が上の段へも回して決める）。
 func (s *SettingsService) SetSutemeSource(v string) (AppSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1348,7 +1357,7 @@ func (s *SettingsService) SetSutemeSource(v string) (AppSettings, error) {
 }
 
 // SetSutemeDataDir は学習データの置き場所を変えて保存し、**その場で読み直す。**
-// 空にすると suteme 既定の探索（または焼き込み）へ落ちる。
+// 空にするとこの段が無くなり、配布モデル・焼き込みへ落ちる。
 func (s *SettingsService) SetSutemeDataDir(dir string) (AppSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1359,6 +1368,23 @@ func (s *SettingsService) SetSutemeDataDir(dir string) (AppSettings, error) {
 	}
 	if s.OnSutemeDataDir != nil {
 		s.OnSutemeDataDir(dir)
+	}
+	return st, nil
+}
+
+// SetSutemeModelDir は配布モデルの置き場所を変えて保存し、**その場で読み直す**（2026-10-04）。
+// **空にすると既定の置き場所**（`ikkyoku.DefaultModelDir`）。解決は `ikkyoku.Config.ModelDir`
+// の 1 か所なので、ここでは空をそのまま保存する。
+func (s *SettingsService) SetSutemeModelDir(dir string) (AppSettings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	dir = strings.TrimSpace(dir)
+	st, err := s.save(func(cfg *ikkyoku.Config) { cfg.SutemeModelDir = dir })
+	if err != nil {
+		return st, err
+	}
+	if s.OnSutemeModelDir != nil {
+		s.OnSutemeModelDir(dir)
 	}
 	return st, nil
 }

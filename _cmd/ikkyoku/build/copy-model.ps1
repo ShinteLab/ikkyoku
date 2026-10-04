@@ -40,11 +40,22 @@ if (-not $Dist -or -not (Test-Path $Dist)) {
 }
 
 # suteme 側のファイル名 → 焼き込み側の名前。
-# **焼き込み側は版を含まない名前にしてある**(training_data_v7 → predictor)。
+# **焼き込み側は版を含まない名前にしてある**(training_data_v8 → predictor)。
 # 版が上がるたびに go:embed の行を書き換えることになるため。
 # どの版を焼いたかは source.txt に残す(recognize.EmbeddedSource)。
+#
+# **学習データの版は決め打ちしない**(2026-10-04)。以前は training_data_v7.bin と書いてあり、
+# suteme の配布セットが v8 になったところで model:copy が通らなくなっていた。
+# dist にある training_data_v*.bin のうち版がいちばん大きいものを使う。
+$train = Get-ChildItem -Path $Dist -Filter 'training_data_v*.bin' |
+    Where-Object { $_.Name -match '^training_data_v(\d+)\.bin$' } |
+    Sort-Object { [int]([regex]::Match($_.Name, '\d+').Value) } -Descending |
+    Select-Object -First 1
+if (-not $train) {
+    throw "$Dist に training_data_v*.bin がありません。suteme の学習サーバで「配布用に書き出す」を実行してください。"
+}
 $pairs = @(
-    @{ From = 'training_data_v7.bin'; To = 'predictor.bin.gz' },
+    @{ From = $train.Name;            To = 'predictor.bin.gz' },
     @{ From = 'strip_data_v1.bin';    To = 'strip.bin.gz' }
 )
 

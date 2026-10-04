@@ -17,25 +17,20 @@ import (
 //	go test -tags embedmodel ./recognize/
 //
 // タグを付けないビルドでは丸ごと対象外(データが無いのが正しい状態)。
-func TestEmbeddedPredictor(t *testing.T) {
+func TestEmbeddedSet(t *testing.T) {
 	if !EmbeddedAvailable() {
 		t.Fatal("embedmodel タグ付きなのに焼き込みが空です")
 	}
-	if err := UsePredictorEmbedded(); err != nil {
-		t.Fatalf("焼き込んだ駒種推論器を組み立てられません: %v", err)
-	}
-	t.Cleanup(UseDefaultPredictor)
-}
-
-func TestEmbeddedStripJudge(t *testing.T) {
-	n, err := UseStripJudgeEmbedded()
+	s, err := LoadEmbedded()
 	if err != nil {
-		t.Fatalf("焼き込んだ帯の判定器を組み立てられません: %v", err)
+		t.Fatalf("焼き込んだ認識器を組み立てられません: %v", err)
 	}
-	if n == 0 {
-		t.Fatal("帯の教師データが空です")
+	if s.StripErr != nil || s.StripSamples == 0 {
+		t.Fatalf("焼き込んだ帯の判定器を組み立てられません: samples=%d err=%v", s.StripSamples, s.StripErr)
 	}
-	t.Cleanup(UseDefaultStripJudge)
+	if s.Date.IsZero() {
+		t.Errorf("source.txt から日付が読めません（配布モデルとの新旧を比べられない）: %q", s.Source)
+	}
 }
 
 // 出所のラベルは画面とログに出る。**BOM や改行が混ざらないこと**

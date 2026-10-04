@@ -657,6 +657,7 @@ func TestConfigSutemeSourceOr(t *testing.T) {
 		{"", SutemeSourceAuto},
 		{"auto", SutemeSourceAuto},
 		{"dir", SutemeSourceDir},
+		{"model", SutemeSourceModel},
 		{"embed", SutemeSourceEmbed},
 		{"EMBED", SutemeSourceAuto},
 		{"でたらめ", SutemeSourceAuto},
@@ -666,6 +667,26 @@ func TestConfigSutemeSourceOr(t *testing.T) {
 		if got := c.SutemeSourceOr(); got != tt.want {
 			t.Errorf("Config{SutemeSource: %q}.SutemeSourceOr() = %q, want %q", tt.in, got, tt.want)
 		}
+	}
+}
+
+// 配布モデルの置き場所（2026-10-04）。**空なら既定、指定があればそれ**で、既定は
+// **exe の隣ではない**こと（Program Files には書けない）・設定の %APPDATA% とも別の
+// %LOCALAPPDATA% の下であること。⚠️ ここが崩れると、置いたモデルを黙って読まなくなる。
+func TestConfigModelDir(t *testing.T) {
+	def, err := DefaultModelDir()
+	if err != nil {
+		t.Skip(err)
+	}
+	cache, _ := os.UserCacheDir()
+	if filepath.Dir(filepath.Dir(def)) != cache || filepath.Base(def) != "model" {
+		t.Fatalf("既定 = %q（%s の下の ikkyoku/model であること）", def, cache)
+	}
+	if got, _ := (Config{}).ModelDir(); got != def {
+		t.Fatalf("空なら既定: %q", got)
+	}
+	if got, _ := (Config{SutemeModelDir: "D:/models"}).ModelDir(); got != "D:/models" {
+		t.Fatalf("指定が効いていない: %q", got)
 	}
 }
 
