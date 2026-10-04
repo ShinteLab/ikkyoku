@@ -103,7 +103,18 @@ task build:embed        # model:copy + wails3 のビルド（EXTRA_TAGS=embedmod
   配布ビルドの前に `go test -tags embedmodel ./recognize/` で
   **実際に認識器として組み立てられること**を確かめる
 - ⚠️ **`suteme/dist` は suteme の学習サーバの「配布用に書き出す」が作る**（無ければ
-  `model:copy` が止まる）。学習データの版は決め打ちしていない（`training_data_v*.bin` の
+  `model:copy` が止まり、探した場所と作り方を出す）。作り方:
+
+  ```powershell
+  cd ..\suteme                      # ikkyoku の隣の suteme
+  go run ./_cmd/suteme-training     # 学習サーバ。http://localhost:8080
+  # ブラウザで「履歴」タブの下の「配布用に書き出す」→「書き出す」
+  # （またはサーバを起動したまま: Invoke-RestMethod -Method Post http://localhost:8080/api/export）
+  ```
+
+  suteme を ikkyoku の隣に置いていないときは `wails3 task model:copy SUTEME_DIST=D:/path/to/suteme/dist`
+  （`build:embed` / `local:deploy` にも同じ形で渡せる）。⚠️ **`-- -Dist ...` では渡らない**
+  （`wails3 task` は `--` の後ろを渡さない。`KEY=VALUE` だけ）。学習データの版は決め打ちしていない（`training_data_v*.bin` の
   いちばん大きい版。2026-10-04 までは v7 決め打ちで、v8 になってから通らなくなっていた）
 
 詳しくは `recognize/AGENTS.md` の「認識器は 3 段」。

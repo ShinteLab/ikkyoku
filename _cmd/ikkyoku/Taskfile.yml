@@ -30,8 +30,11 @@ tasks:
     # **-tags embedmodel でビルドする前に一度走らせる。** データはリポジトリに
     # 置いていないので、これを忘れると go:embed がファイルを見つけられず
     # ビルドが止まる(それが狙い。古いデータで配るより止まったほうがよい)。
+    # suteme を ikkyoku の隣に置いていないときは SUTEME_DIST で dist/ を指す
+    # (wails3 task model:copy SUTEME_DIST=D:/path/to/suteme/dist)。
+    # ⚠️ **-- の後ろの引数では渡せない**(wails3 task は CLI_ARGS を持たない。KEY=VALUE だけ)。
     cmds:
-      - powershell -NoProfile -ExecutionPolicy Bypass -File ./build/copy-model.ps1
+      - powershell -NoProfile -ExecutionPolicy Bypass -File ./build/copy-model.ps1{{if .SUTEME_DIST}} -Dist "{{.SUTEME_DIST}}"{{end}}
 
   build:embed:
     summary: 認識器を焼き込んだ配布ビルド(exe 1 つで動く)

@@ -27,16 +27,54 @@ $appDir = Split-Path -Parent $PSScriptRoot
 $root = Split-Path -Parent (Split-Path -Parent $appDir)
 $modelDir = Join-Path $root 'recognize\model'
 
-if (-not $Dist) {
+# 見つからないときに「何をすればいいか」を出して止まる(2026-10-04)。
+# **dist/ は suteme の学習サーバが書き出すもの**で、ここで作れるものではない。
+# 以前は「-Dist <パス> で指定してください」とだけ出していたが、task から呼ぶと
+# -Dist は渡せず(wails3 task は -- の後ろを渡さない)、作り方も分からなかった。
+function Stop-NoDist([string[]]$searched, [string]$suteme) {
+    $lines = @('', 'suteme の配布セット(dist/)がありません。焼き込むデータはここから持ってきます。', '')
+    $lines += '  探した場所:'
+    $lines += ($searched | ForEach-Object { "    $_" })
+    $lines += ''
+    if ($suteme) {
+        $lines += '  dist/ は suteme の学習サーバで書き出します:'
+        $lines += "    1. cd $suteme"
+        $lines += '       go run ./_cmd/suteme-training'
+        $lines += '    2. ブラウザで http://localhost:8080 を開き、「履歴」タブの下の「配布用に書き出す」→「書き出す」'
+        $lines += '       (サーバを起動したまま別のターミナルで  Invoke-RestMethod -Method Post http://localhost:8080/api/export  でもよい)'
+        $lines += '    3. もう一度 task model:copy'
+    } elseif ($Dist) {
+        $lines += '  指定した場所(SUTEME_DIST)にありません。dist/ は suteme のリポジトリの中に、'
+        $lines += '  学習サーバ(go run ./_cmd/suteme-training)の「履歴」タブ →「配布用に書き出す」で作られます。'
+    } else {
+        $lines += '  suteme のリポジトリが ikkyoku の隣に見つかりません(shinte/ikkyoku と shinte/suteme を並べる構成が前提)。'
+        $lines += '  別の場所にあるなら、その dist/ を指してください:'
+        $lines += '    wails3 task model:copy SUTEME_DIST=D:/path/to/suteme/dist'
+    }
+    $lines += ''
+    $lines | ForEach-Object { Write-Host $_ }
+    exit 1
+}
+
+$searched = @()
+$sutemeFound = $null
+if ($Dist) {
+    $searched = @($Dist)
+    # 指定した dist/ の親が suteme のリポジトリなら、書き出し方をそのまま案内できる。
+    $parent = Split-Path -Parent $Dist
+    if ($parent -and (Test-Path (Join-Path $parent 'go.mod'))) { $sutemeFound = $parent }
+} else {
     # 1 つめは 6 つを並べた通常の構成、2 つめはワークツリー
     # (<ikkyoku>/.claude/worktrees/<name>) から実行した場合。
     $workspace = Split-Path -Parent $root
     $wtWorkspace = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $root)))
-    $candidates = @((Join-Path $workspace 'suteme\dist'), (Join-Path $wtWorkspace 'suteme\dist'))
-    $Dist = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+    $sutemes = @((Join-Path $workspace 'suteme'), (Join-Path $wtWorkspace 'suteme'))
+    $searched = $sutemes | ForEach-Object { Join-Path $_ 'dist' }
+    $Dist = $searched | Where-Object { Test-Path $_ } | Select-Object -First 1
+    $sutemeFound = $sutemes | Where-Object { Test-Path (Join-Path $_ 'go.mod') } | Select-Object -First 1
 }
 if (-not $Dist -or -not (Test-Path $Dist)) {
-    throw "suteme の dist/ が見つかりません。-Dist <パス> で指定してください。"
+    Stop-NoDist $searched $sutemeFound
 }
 
 # suteme 側のファイル名 → 焼き込み側の名前。
@@ -52,7 +90,8 @@ $train = Get-ChildItem -Path $Dist -Filter 'training_data_v*.bin' |
     Sort-Object { [int]([regex]::Match($_.Name, '\d+').Value) } -Descending |
     Select-Object -First 1
 if (-not $train) {
-    throw "$Dist に training_data_v*.bin がありません。suteme の学習サーバで「配布用に書き出す」を実行してください。"
+    # dist/ はあるが中身が無い(書き出しの途中で止まった など)。作り方は同じ。
+    Stop-NoDist @("$Dist (training_data_v*.bin がありません)") (Split-Path -Parent $Dist)
 }
 $pairs = @(
     @{ From = $train.Name;            To = 'predictor.bin.gz' },
