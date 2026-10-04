@@ -287,19 +287,22 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
                  消えるのは**その手とその先**。ボタンは「今どこを見ているか」に
                  依存していて、戻って見ている最中に押すと何が消えるのか
                  画面から読めなかった。**ボタンを戻さないこと。** -->
-            <div id="study-moves" class="study-moves side-part-moves"></div>
-            <p id="study-move-status" class="note is-caution side-part-moves" hidden></p>
-            <!-- 手順の左下のボタンと、その下のコメント欄（2026-10-04）。
-                 欄に出すのは**今見ている手の棋譜のコメント**（開始局面なら開始局面の
-                 コメント）。⚠️ **無ければ欄は空のまま**（閉じない。手を辿るたびに
-                 欄が出たり消えたりすると、手順のリストの高さが跳ねる）。
-                 ⚠️ **入切は設定が持つ**（次の起動でも同じ形で始める）。
+            <!-- 手順のリストと、その左下に重ねるコメント欄のボタン（2026-10-04）。
+                 ⚠️ **ボタンに行を割かないこと**（一度ボタンだけの行を作って、
+                 手順が 1 行減るのを嫌われた）。**リストの左下に重ねる**（手数の列に
+                 被ってよい）。リストがスクロールしてもボタンは動かない（器が基準）。
                  ⚠️ **アイコンだけなので、意味は aria-label / title が持つ。** -->
-            <div class="study-move-foot side-part-moves" hidden>
-              <button id="study-comment-toggle" class="icon-btn" type="button"
-                      aria-pressed="false"
+            <div class="study-moves-box side-part-moves">
+              <div id="study-moves" class="study-moves side-part-moves"></div>
+              <button id="study-comment-toggle" class="icon-btn study-comment-toggle" type="button"
+                      hidden aria-pressed="false"
                       aria-label="コメント欄">${iconMarkup(FiMessageSquare)}</button>
             </div>
+            <p id="study-move-status" class="note is-caution side-part-moves" hidden></p>
+            <!-- コメント欄（2026-10-04）。出すのは**今見ている手の棋譜のコメント**
+                 （開始局面なら開始局面のコメント）。⚠️ **無ければ欄は空のまま**（閉じない。
+                 手を辿るたびに欄が出たり消えたりすると、手順のリストの高さが跳ねる）。
+                 ⚠️ **入切は設定が持つ**（次の起動でも同じ形で始める）。 -->
             <div id="study-comment" class="study-comment side-part-moves" hidden></div>
 `;
   const q = <T extends Element>(sel: string) => host.querySelector<T>(sel)!;
@@ -353,7 +356,6 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
   const studyReload = q<HTMLButtonElement>("#study-reload");
   const kifuFollowBtn = q<HTMLButtonElement>("#study-kifu-follow");
   const studyMoveStatus = q<HTMLParagraphElement>("#study-move-status");
-  const studyMoveFoot = q<HTMLDivElement>(".study-move-foot");
   const commentToggle = q<HTMLButtonElement>("#study-comment-toggle");
   const studyComment = q<HTMLDivElement>("#study-comment");
 
@@ -362,7 +364,7 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
   let commentState: StudyState | null = null;
   const paintComment = () => {
     const loaded = !!commentState?.loaded;
-    studyMoveFoot.hidden = !loaded;
+    commentToggle.hidden = !loaded;
     commentToggle.setAttribute("aria-pressed", String(commentShown));
     commentToggle.title = commentShown ? "コメント欄をしまう" : "コメント欄を出す";
     studyComment.hidden = !loaded || !commentShown;

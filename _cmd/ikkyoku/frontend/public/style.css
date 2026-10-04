@@ -4610,14 +4610,26 @@ html.is-graph #app {
   margin-right: 6px;
 }
 
-/* 手順の左下のボタンの行（2026-10-04。コメント欄の出し入れ）。
-   ⚠️ **低く保つこと** —— この列は縦の取り合いが厳しく、高くしたぶん手順のリストが短くなる。 */
-.study-move-foot {
-  flex: 0 0 auto;
+/* 手順のリストの器（2026-10-04）。**左下にコメント欄のボタンを重ねるための基準。**
+   ⚠️ **余りの高さはこの器がもらい、中のリストがそれを全部使う**（`.study-moves` の
+   `flex: 1 1 0` と同じ理由。`1 1 auto` にすると手が増えるたびにエンジンの枠を押し潰す）。 */
+.study-moves-box {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 0;
   display: flex;
-  align-items: center;
-  gap: 4px;
-  margin: 0 6px;
+  flex-direction: column;
+}
+
+/* コメント欄のボタン。**リストの左下に重ねる**（手数の列に被ってよい）。
+   ⚠️ **行を割かないこと** —— ボタンだけの行を作ったら手順が 1 行減るのを嫌われた。
+   ⚠️ **地を塗ること**（`.icon-btn` は透明）。下の手数が透けると押す場所に見えない。 */
+.study-comment-toggle {
+  position: absolute;
+  left: 8px;
+  bottom: 2px;
+  z-index: 1;
+  background: var(--surface-3);
 }
 
 /* 手順の下のコメント欄（2026-10-04）。**今見ている手の棋譜のコメント**を出す。
@@ -4641,7 +4653,6 @@ html.is-graph #app {
 }
 
 /* ⚠️ **`display` を持つ箱は `hidden` に負ける**ので打ち消す（`.icon-btn[hidden]` と同じ）。 */
-.study-move-foot[hidden],
 .study-comment[hidden] {
   display: none;
 }
