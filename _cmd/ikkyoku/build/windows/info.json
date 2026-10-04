@@ -6,7 +6,7 @@
 		"0000": {
 			"ProductVersion": "0.2.1",
 			"CompanyName": "ShinteLab",
-			"FileDescription": "ikkyoku",
+			"FileDescription": "Ikkyoku - Shogi broadcast analyzer",
 			"LegalCopyright": "(c)2026, ShinteLab",
 			"ProductName": "ikkyoku",
 			"Comments": "shogi broadcast region capture"

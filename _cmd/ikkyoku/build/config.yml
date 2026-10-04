@@ -8,7 +8,7 @@ info:
   companyName: "ShinteLab" # The name of the company
   productName: "ikkyoku" # The name of the application
   productIdentifier: "com.shintelab.ikkyoku" # The unique product identifier
-  description: "ikkyoku" # ⚠️ Windowsのタスクバー/タスクマネージャ表示名になる(wails3 skill pitfalls.md 14)
+  description: "Ikkyoku - Shogi broadcast analyzer" # ⚠️ Windowsのタスクバー/タスクマネージャ表示名になる(wails3 skill pitfalls.md 14)
   copyright: "(c)2026, ShinteLab" # Copyright text
   comments: "shogi broadcast region capture" # Comments
   version: "0.2.1" # The application version
