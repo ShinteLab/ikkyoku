@@ -89,9 +89,9 @@ npm run build      # 上の 2 つ + vite build
 **焼き込むのは手元のモデル `_cmd/ikkyoku/model/`。手元を作るのは suteme**（2026-10-04）:
 
 ```powershell
-cd ..\suteme                     # ikkyoku の隣の suteme（本体のチェックアウト。学習データがある）
-go run ./_cmd/suteme-training -export -gzip -out ..\ikkyoku\_cmd\ikkyoku\model   # 手元を作り直す
-cd ..\ikkyoku\_cmd\ikkyoku
+cd ../suteme                     # ikkyoku の隣の suteme（本体のチェックアウト。学習データがある）
+go run ./_cmd/suteme-training -export -gzip -out ../ikkyoku/_cmd/ikkyoku/model   # 手元を作り直す
+cd ../ikkyoku/_cmd/ikkyoku
 wails3 task build:embed                             # 手元をそのまま焼き込む（EXTRA_TAGS=embedmodel）
 wails3 task build:embed MODEL_DIR=D:/models/x       # 置いてある配布モデルを手元に写してから焼き込む
 wails3 task local:deploy MODEL_DIR=D:/models/x      # local:deploy にも同じ形で渡せる
@@ -111,6 +111,8 @@ wails3 task local:deploy MODEL_DIR=D:/models/x      # local:deploy にも同じ�
   それを焼き込む。前のモデルの判定器などが混ざらない）
 - ⚠️ **`MODEL_DIR` は `KEY=VALUE` で渡す**（`wails3 task` は `--` の後ろを渡さない）。
   CLI の変数は呼ばれた先のタスクまで届くので、`local:deploy` から `build:embed` へもそのまま届く
+- ⚠️ **パスはスラッシュで書く**（Git Bash では `\` が消え、`..ikkyoku_cmdikkyokumodel` という
+  フォルダが suteme の中にできる。2026-10-04 に実際に踏んだ）。スラッシュなら PowerShell でも cmd でも通る
 - ⚠️ **suteme の `-export` を worktree で走らせない**（学習データ `*.bin` は gitignore なので無い）。
   本体のチェックアウトで走らせる（`-out` は起動した場所からの相対でよい）
 

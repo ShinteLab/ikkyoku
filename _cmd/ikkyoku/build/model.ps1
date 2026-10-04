@@ -50,8 +50,9 @@ function Get-ExportHint {
     $wtWorkspace = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $root)))
     $suteme = @((Join-Path $workspace 'suteme'), (Join-Path $wtWorkspace 'suteme')) |
         Where-Object { Test-Path (Join-Path $_ 'go.mod') } | Select-Object -First 1
-    $cd = if ($suteme) { "cd $suteme" } else { 'cd <suteme のリポジトリ>' }
-    return @("    $cd", "    go run ./_cmd/suteme-training -export -gzip -out `"$modelDir`"")
+    # ⚠️ **スラッシュで出す**(Git Bash に貼ると \ が消え、suteme の中に変な名前のフォルダができる)。
+    $cd = if ($suteme) { "cd `"$($suteme -replace '\\', '/')`"" } else { 'cd <suteme のリポジトリ>' }
+    return @("    $cd", "    go run ./_cmd/suteme-training -export -gzip -out `"$($modelDir -replace '\\', '/')`"")
 }
 
 # ---- -Use: 配布モデルを手元に写す ------------------------------------------

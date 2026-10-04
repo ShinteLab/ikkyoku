@@ -167,12 +167,15 @@
 **手元のモデルを作るのは suteme**（ikkyoku のビルドは suteme を見ない）:
 
 ```powershell
-cd ..\suteme
-go run ./_cmd/suteme-training -export -gzip -out ..\ikkyoku\_cmd\ikkyoku\model   # 手元を作り直す
-cd ..\ikkyoku\_cmd\ikkyoku
+cd ../suteme
+go run ./_cmd/suteme-training -export -gzip -out ../ikkyoku/_cmd/ikkyoku/model   # 手元を作り直す
+cd ../ikkyoku/_cmd/ikkyoku
 wails3 task build:embed                        # 手元をそのまま焼き込む(EXTRA_TAGS=embedmodel)
 wails3 task build:embed MODEL_DIR=<フォルダ>     # 置いてある配布モデルを手元に写してから焼き込む
 ```
+
+⚠️ **パスはスラッシュで書くこと**（Git Bash では `\` が消えて `..ikkyoku_cmdikkyokumodel` という
+フォルダが suteme の中にできる。2026-10-04 に実際に踏んだ）。スラッシュなら PowerShell でも cmd でも通る。
 
 - ⚠️ **ビルドで suteme を見ないこと**（以前はビルドのたびに `suteme/dist` を持ってきていた）。
   何が焼き込まれるかがビルドした瞬間の suteme の状態で決まってしまう。**手元を入れ替えるのは
