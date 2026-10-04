@@ -2,6 +2,10 @@ github.com/Masterminds/semver/v3 v3.5.0 h1:kQceYJfbupGfZOKZQg0kou0DgAKhzDg2NZPAw
 github.com/Masterminds/semver/v3 v3.5.0/go.mod h1:4V+yj/TJE1HU9XfppCwVMZq3I84lprf4nC11bSS5beM=
 github.com/ShinteLab/core v0.2.0 h1:4euNvry5TDnZ7F+cx73jxWuV9XKio8JyDEHbIVhzWV0=
 github.com/ShinteLab/core v0.2.0/go.mod h1:QPvoFUYaiYPCSBLzdctbW3b7+yeGB+oDsrm6dQrIdkU=
+github.com/ShinteLab/engine v0.2.1 h1:+A2ngSF3GJjDlGhV205bp/2lT6XJEY7mqa9baDARWtA=
+github.com/ShinteLab/engine v0.2.1/go.mod h1:d7wpetvwK9RAbvamQr1sIuYq+LXvEd4DXCLYtAFYyUc=
+github.com/ShinteLab/kicho v0.2.1 h1:gz/FL3whYscgxWEaIqYk/rP5g84Reu2oEBSx3L48U1Q=
+github.com/ShinteLab/kicho v0.2.1/go.mod h1:z2lQL0Jm/jtceZxUoV95iNzcksHX6XsuSCiQ1BOOUMo=
 github.com/adrg/xdg v0.5.3 h1:xRnxJXne7+oWDatRhR1JLnvuccuIeCoBu2rtuLqQB78=
 github.com/adrg/xdg v0.5.3/go.mod h1:nlTsY+NNiCBGCK2tpm09vRqfVzrc2fLmXGpBLF0zlTQ=
 github.com/coder/websocket v1.8.14 h1:9L0p0iKiNOibykf283eHkKUHHrpG7f65OE3BhhO7v9g=

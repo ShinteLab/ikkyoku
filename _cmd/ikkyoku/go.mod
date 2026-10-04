@@ -28,8 +28,8 @@ require (
 )
 
 require (
-	github.com/ShinteLab/engine v0.0.0-20260725200156-de4523939d66 // indirect
-	github.com/ShinteLab/kicho v0.0.0-00010101000000-000000000000 // indirect
+	github.com/ShinteLab/engine v0.2.1 // indirect
+	github.com/ShinteLab/kicho v0.2.1 // indirect
 	github.com/adrg/xdg v0.5.3 // indirect
 	github.com/coder/websocket v1.8.14 // indirect
 	github.com/gen2brain/shm v0.1.0 // indirect
@@ -51,7 +51,3 @@ require (
 replace github.com/ShinteLab/ikkyoku => ../../
 
 replace github.com/ShinteLab/suteme => ../../../suteme
-
-replace github.com/ShinteLab/engine => ../../../engine
-
-replace github.com/ShinteLab/kicho => ../../../kicho

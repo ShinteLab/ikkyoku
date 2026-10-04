@@ -4,7 +4,7 @@ go 1.26.1
 
 require (
 	github.com/ShinteLab/core v0.2.0
-	github.com/ShinteLab/engine v0.0.0-20260725200156-de4523939d66
+	github.com/ShinteLab/engine v0.2.1
 	github.com/ShinteLab/suteme v0.0.0-00010101000000-000000000000
 	github.com/kbinani/screenshot v0.0.0-20250624051815-089614a94018
 	github.com/wenteasy/log v0.3.0
@@ -29,7 +29,7 @@ require (
 )
 
 require (
-	github.com/ShinteLab/kicho v0.0.0-00010101000000-000000000000
+	github.com/ShinteLab/kicho v0.2.1
 	github.com/gen2brain/shm v0.1.0 // indirect
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
 	github.com/goml/gobrain v0.0.0-20201212123421-2e2d98ca8249 // indirect
@@ -42,7 +42,3 @@ require (
 )
 
 replace github.com/ShinteLab/suteme => ../suteme
-
-replace github.com/ShinteLab/engine => ../engine
-
-replace github.com/ShinteLab/kicho => ../kicho
