@@ -46,7 +46,7 @@ const clickThroughPoll = 50 * time.Millisecond
 // まとめると、帯データを置き忘れているのに「認識器: OK」と出て気づけない。
 type RecognizerStatus struct {
 	// Source は実際に読んだ出所(学習データ・配布モデルはディレクトリのパス、焼き込みは
-	// source.txt のラベル)。読めていなければ空。
+	// 書き出しの日時と件数)。読めていなければ空。
 	Source string `json:"source"`
 	Ready  bool   `json:"ready"`
 	// Error は**どの段も読めなかった**ときの理由(このとき盤面は読めない)。
@@ -327,7 +327,7 @@ func (s *CaptureService) Recognizer() RecognizerStatus {
 // ⚠️ **駒種の推論器と盤の縁の判定器は同じ段から 1 組で差し替える**（recognize.Set.Use）。
 // 段ごとに別々に読むと「駒種は最新の学習データ、盤の位置合わせは学習前」になる。
 //
-// ⚠️ **自動（auto / dir）のときは、焼き込みより古い配布モデルを使わない**（source.txt の
+// ⚠️ **自動（auto / dir）のときは、焼き込みより古い配布モデルを使わない**（export.json の
 // 日付で比べる）。exe を更新したのに、昔置いたモデルが優先されて精度が下がるのを防ぐ。
 // 配布モデルから見始める設定（model）にしているときは、古くても使う（意思表示なので）。
 func (s *CaptureService) loadRecognizer() RecognizerStatus {

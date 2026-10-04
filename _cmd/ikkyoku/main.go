@@ -41,6 +41,7 @@ import (
 	ikkyokuapp "github.com/ShinteLab/ikkyoku/app"
 	"github.com/ShinteLab/ikkyoku/guide"
 	"github.com/ShinteLab/ikkyoku/log"
+	"github.com/ShinteLab/ikkyoku/recognize"
 )
 
 //go:embed all:frontend/dist
@@ -116,6 +117,10 @@ func main() {
 			Title: "前回は異常終了しました", Detail: prev,
 		})
 	}
+
+	// 焼き込んだ認識器（-tags embedmodel のときだけ。embedmodel_on.go）を recognize へ渡す。
+	// ⚠️ **認識器を読む（ReloadRecognizer）より前に**（3 段の 3 段目）。
+	recognize.SetEmbedded(embeddedModel())
 
 	settingsSvc := ikkyokuapp.NewSettingsService()
 	cfg := settingsSvc.Config()

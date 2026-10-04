@@ -8,6 +8,7 @@ import (
 	"image/color"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ShinteLab/ikkyoku/recognize"
@@ -57,12 +58,13 @@ func writeTrainingDir(t *testing.T, withStrip bool) string {
 	return dir
 }
 
-// writePack は学習ディレクトリの中身を gzip して、配布セットの形にする（copy-model.ps1 と同じ）。
-func writePack(t *testing.T, src string, source string, withStrip bool) string {
+// writePack は学習ディレクトリの中身を、suteme の配布用の書き出し（-export -gzip）と同じ形にする。
+// date が空なら書き出しの記録（export.json）を置かない。
+func writePack(t *testing.T, src string, date string, withStrip bool) string {
 	t.Helper()
 	dir := t.TempDir()
-	gz := func(from, to string) {
-		b, err := os.ReadFile(filepath.Join(src, from))
+	gz := func(name string) {
+		b, err := os.ReadFile(filepath.Join(src, name))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -70,17 +72,17 @@ func writePack(t *testing.T, src string, source string, withStrip bool) string {
 		w := gzip.NewWriter(&buf)
 		w.Write(b)
 		w.Close()
-		if err := os.WriteFile(filepath.Join(dir, to), buf.Bytes(), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, name+".gz"), buf.Bytes(), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	gz(suteme.DefaultDataFile, recognize.PackPredictorFile)
+	gz(suteme.DefaultDataFile)
 	if withStrip {
-		gz(suteme.DefaultStripFile, recognize.PackStripFile)
+		gz(suteme.DefaultStripFile)
 	}
-	if source != "" {
-		// copy-model.ps1 は BOM を付ける（Windows PowerShell の Set-Content -Encoding utf8）。
-		if err := os.WriteFile(filepath.Join(dir, recognize.PackSourceFile), []byte("\ufeff"+source+"\r\n"), 0o644); err != nil {
+	if date != "" {
+		info := `{"date": "` + date + `T10:00:00+09:00", "samples": 2}`
+		if err := os.WriteFile(filepath.Join(dir, recognize.ExportInfoFile), []byte(info), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -112,39 +114,60 @@ func TestLoadDir(t *testing.T) {
 	}
 }
 
-// 配布セットの歯止め。
+// 配布セット（suteme の配布用の書き出しそのもの）の歯止め。
 //
 //   - **置かれていないのは ErrNoPack**（読めないのとは別。既定の置き場所が空なのは普通の状態で、
-//     ⚠ に出すことではない）
-//   - **壊れていたら読めずにエラー**（下の段へ落とすため）
-//   - **source.txt の BOM を落とし、日付を読むこと**（焼き込みより古いモデルを使わない判断に使う）
+//     ⚠ に出すことではない）。**フォルダが無いのも同じ**
+//   - **圧縮した書き出しも、しない書き出しも読む**（-gzip の有無）
+//   - **版が違う書き出しは ErrNoPack ではなく、版が合わないと言って断る**（下の段へ落とし、⚠ に出す）
+//   - **壊れていたら読めずにエラー**
+//   - **書き出しの記録から日時を読む**（焼き込みより古いモデルを使わない判断に使う）
 func TestLoadPack(t *testing.T) {
 	if _, err := recognize.LoadPack(t.TempDir()); !errors.Is(err, recognize.ErrNoPack) {
 		t.Fatalf("空のディレクトリで %v（ErrNoPack であること）", err)
 	}
+	if _, err := recognize.LoadPack(filepath.Join(t.TempDir(), "missing")); !errors.Is(err, recognize.ErrNoPack) {
+		t.Fatalf("無いディレクトリで %v（ErrNoPack であること）", err)
+	}
 
 	train := writeTrainingDir(t, true)
-	dir := writePack(t, train, "suteme/dist training_data_v8.bin + strip_data_v1.bin (2026-10-01)", true)
+	dir := writePack(t, train, "2026-10-01", true)
 	s, err := recognize.LoadPack(dir)
 	if err != nil {
 		t.Fatalf("読めませんでした: %v", err)
 	}
-	if s.Source != dir || s.StripSamples != 2 {
+	if s.Source != dir || s.StripSamples != 2 || s.Samples != 2 {
 		t.Fatalf("組 = %+v", s)
 	}
 	if got := s.Date.Format("2006-01-02"); got != "2026-10-01" {
-		t.Fatalf("日付 = %s", got)
+		t.Fatalf("日時 = %s", got)
+	}
+
+	// 圧縮しない書き出し（suteme の既定の dist/）もそのまま読める。記録が無ければ日時はゼロ。
+	s, err = recognize.LoadPack(train)
+	if err != nil || s.StripSamples != 2 || !s.Date.IsZero() {
+		t.Fatalf("圧縮しない書き出し: s=%+v err=%v", s, err)
 	}
 
 	// 判定器が無くても組として読める。
 	s, err = recognize.LoadPack(writePack(t, train, "", false))
-	if err != nil || s.StripErr == nil || !s.Date.IsZero() {
+	if err != nil || s.StripErr == nil {
 		t.Fatalf("判定器なし: s=%+v err=%v", s, err)
+	}
+
+	// 版が違う（この exe の suteme が知らない名前しか無い）。
+	other := t.TempDir()
+	if err := os.WriteFile(filepath.Join(other, "training_data_v99.bin.gz"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err = recognize.LoadPack(other)
+	if err == nil || errors.Is(err, recognize.ErrNoPack) || !strings.Contains(err.Error(), "版") {
+		t.Fatalf("版違いで %v", err)
 	}
 
 	// 壊れている（gzip でない）なら ErrNoPack ではないエラー。
 	broken := t.TempDir()
-	if err := os.WriteFile(filepath.Join(broken, recognize.PackPredictorFile), []byte("not gzip"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(broken, suteme.DefaultDataFile+".gz"), []byte("not gzip"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := recognize.LoadPack(broken); err == nil || errors.Is(err, recognize.ErrNoPack) {
@@ -152,22 +175,47 @@ func TestLoadPack(t *testing.T) {
 	}
 }
 
-// 日付が読めないものは古いと見なさない（比べられないものを捨てない）。
+// 焼き込み（2026-10-04 から _cmd/ikkyoku が埋め込んで SetEmbedded で渡す）は、
+// **置いた配布モデルと同じ読み方**をすること。渡されていなければ焼き込みは無い。
+func TestEmbedded(t *testing.T) {
+	t.Cleanup(func() { recognize.SetEmbedded(nil) })
+	recognize.SetEmbedded(nil)
+	if recognize.EmbeddedAvailable() {
+		t.Fatal("渡していないのに焼き込みがあることになっている")
+	}
+	if _, err := recognize.LoadEmbedded(); err == nil {
+		t.Fatal("渡していないのに読めた")
+	}
+
+	recognize.SetEmbedded(os.DirFS(writePack(t, writeTrainingDir(t, true), "2026-10-02", true)))
+	if !recognize.EmbeddedAvailable() {
+		t.Fatal("渡したのに焼き込みが無いことになっている")
+	}
+	s, err := recognize.LoadEmbedded()
+	if err != nil || s.StripSamples != 2 || !strings.HasPrefix(s.Source, "焼き込み") {
+		t.Fatalf("焼き込み: s=%+v err=%v", s, err)
+	}
+	if !strings.Contains(recognize.EmbeddedSource(), "2026-10-02") {
+		t.Fatalf("出所に書き出しの日時が無い: %q", recognize.EmbeddedSource())
+	}
+}
+
+// 日時が読めないものは古いと見なさない（比べられないものを捨てない）。
 func TestSetOlderThan(t *testing.T) {
 	train := writeTrainingDir(t, false)
-	load := func(source string) *recognize.Set {
-		s, err := recognize.LoadPack(writePack(t, train, source, false))
+	load := func(date string) *recognize.Set {
+		s, err := recognize.LoadPack(writePack(t, train, date, false))
 		if err != nil {
 			t.Fatal(err)
 		}
 		return s
 	}
-	old, newer, undated := load("x (2026-09-01)"), load("x (2026-10-01)"), load("x")
+	old, newer, undated := load("2026-09-01"), load("2026-10-01"), load("")
 	if !old.OlderThan(newer) || newer.OlderThan(old) {
-		t.Fatal("日付の比較が逆")
+		t.Fatal("日時の比較が逆")
 	}
 	if undated.OlderThan(newer) || old.OlderThan(undated) {
-		t.Fatal("日付の無いものと比べて古いと言った")
+		t.Fatal("日時の無いものと比べて古いと言った")
 	}
 }
 

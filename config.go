@@ -31,8 +31,8 @@ type Config struct {
 	// 直接指しておけば、データを更新した結果がそのまま反映される。
 	SutemeDataDir string `json:"sutemeDataDir,omitempty"`
 
-	// SutemeModelDir はダウンロードした配布モデル(predictor.bin.gz / strip.bin.gz /
-	// source.txt)を置いたディレクトリ。認識器の 3 段の 2 段目(2026-10-04)。
+	// SutemeModelDir はダウンロードした配布モデル(suteme の配布用の書き出し: training_data_v*.bin(.gz) /
+	// strip_data_v1.bin(.gz) / export.json)を置いたディレクトリ。認識器の 3 段の 2 段目(2026-10-04)。
 	//
 	// **空なら既定の置き場所**(`DefaultModelDir`。%LOCALAPPDATA%\ikkyoku\model)。解決は ModelDir の 1 か所。
 	// ⚠️ **exe の隣を既定にしないこと** —— Program Files には書けず、exe を置き換えるたびに

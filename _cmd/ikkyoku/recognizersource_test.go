@@ -55,8 +55,8 @@ func trainingDir(t *testing.T) string {
 	return dir
 }
 
-// packDir は学習ディレクトリを配布セットの形（gzip + source.txt）にする。
-func packDir(t *testing.T, train, source string) string {
+// packDir は学習ディレクトリを配布セットの形（suteme の -export -gzip と同じ）にする。
+func packDir(t *testing.T, train, date string) string {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join(train, suteme.DefaultDataFile))
 	if err != nil {
@@ -67,10 +67,11 @@ func packDir(t *testing.T, train, source string) string {
 	w.Write(b)
 	w.Close()
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, recognize.PackPredictorFile), buf.Bytes(), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, suteme.DefaultDataFile+".gz"), buf.Bytes(), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, recognize.PackSourceFile), []byte(source), 0o644); err != nil {
+	info := `{"date": "` + date + `T10:00:00+09:00", "samples": 2}`
+	if err := os.WriteFile(filepath.Join(dir, recognize.ExportInfoFile), []byte(info), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return dir
@@ -88,7 +89,7 @@ func TestLoadRecognizerFallsThrough(t *testing.T) {
 		t.Skip("焼き込みのあるビルドでは最後の段が埋まるので、落ち方を確かめられない")
 	}
 	broken := t.TempDir() // 学習データとして指定したが、中身が無い
-	pack := packDir(t, trainingDir(t), "x (2026-10-01)")
+	pack := packDir(t, trainingDir(t), "2026-10-01")
 
 	s := NewCaptureService(broken, pack, ikkyoku.SutemeSourceAuto)
 	st := s.loadRecognizer()

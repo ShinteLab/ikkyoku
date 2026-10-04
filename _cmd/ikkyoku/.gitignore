@@ -11,3 +11,6 @@ build/android/
 build/docker/
 # 個人用の local:deploy（コピー先が人ごとに違うので git に入れない）
 Taskfile.local.yml
+# 焼き込む認識器（手元のモデル。suteme の書き出しをここへ出す）。**フォルダごと git に入れない**
+# （学習し直すたびに 10MB 級をコミットすることになる）。embedmodel_on.go が埋め込む
+model/
