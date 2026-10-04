@@ -155,10 +155,13 @@ wails3 task local:build-info                           # ビルド情報の反�
   **exe には入る**。リリースとして残すなら、先にコミットしてから deploy する
 - ⚠️ **同じコミットで deploy し直しても patch が上がる**（直前の deploy がタグを打っているため）。
   コピーだけやり直したいなら `bin\ikkyoku.exe` を手でコピーする
-- ⚠️ **ずっと `update build-assets` が走っていなかった**（2026-10-04 まで）。`info.json` などは
-  テンプレートのまま（会社名 `My Company`・説明 `My Product Description` = タスクマネージャの表示名）。
-  **最初の deploy でアプリの情報に置き換わり、それがコミットされる**（スクラッチで作り直して、
-  差分がアプリ情報の行だけなのを確かめた。CLI は beta.26。`build/ios/` も作られるが .gitignore 済み）。
+- ⚠️ **ずっと `update build-assets` が走っていなかった**（2026-10-04 まで）。生成物は
+  テンプレートのまま（会社名 `My Company`・製品名 `My Product`）。**`build/windows/info.json` だけは
+  2026-10-04 に手で直した**（`update build-assets` が config.yml から作るものと 1 バイトも違わない
+  ことを確かめてあるので、deploy で差分は出ない）。**残り（`Info.plist`・`wails_tools.nsh`・
+  マニフェスト・linux）は最初の deploy でアプリの情報に置き換わり、それがコミットされる**
+  （スクラッチで作り直して、差分がアプリ情報の行だけなのを確かめた。CLI は beta.26。
+  `build/ios/` も作られるが .gitignore 済み）。
   タスクマネージャに古い名前が残るのは Windows のキャッシュ（スキル `wails3` の pitfalls.md 14）
 
 ## ⚠️ git worktree では replace が解決できない
