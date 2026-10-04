@@ -25,21 +25,25 @@ includes:
   # ios / android は対象外なので includes から外してある(wails3 skill setup.md 参照)。
 
 tasks:
-  model:copy:
-    summary: 配布ビルド用に suteme の認識器(dist/)を recognize/model/ へ持ってくる
-    # **-tags embedmodel でビルドする前に一度走らせる。** データはリポジトリに
-    # 置いていないので、これを忘れると go:embed がファイルを見つけられず
-    # ビルドが止まる(それが狙い。古いデータで配るより止まったほうがよい)。
-    # suteme を ikkyoku の隣に置いていないときは SUTEME_DIST で dist/ を指す
-    # (wails3 task model:copy SUTEME_DIST=D:/path/to/suteme/dist)。
+  model:update:
+    summary: 焼き込む認識器(手元の recognize/model/)を suteme の学習データから作り直す
+    # **手元を入れ替えるのはこれ(と build:embed の MODEL_DIR)だけ。** ビルドは手元を
+    # そのまま焼き込み、suteme は見ない(何が焼き込まれるかをビルドの副作用で決めない)。
+    # suteme に書き出させて(suteme-training -export)取り込む。suteme を ikkyoku の隣に
+    # 置いていないときは SUTEME_DIST で dist/ を指す(wails3 task model:update SUTEME_DIST=D:/x/suteme/dist)。
     # ⚠️ **-- の後ろの引数では渡せない**(wails3 task は CLI_ARGS を持たない。KEY=VALUE だけ)。
+    aliases: [model:copy]
     cmds:
-      - powershell -NoProfile -ExecutionPolicy Bypass -File ./build/copy-model.ps1{{if .SUTEME_DIST}} -Dist "{{.SUTEME_DIST}}"{{end}}
+      - powershell -NoProfile -ExecutionPolicy Bypass -File ./build/model.ps1 -Update{{if .SUTEME_DIST}} -Dist "{{.SUTEME_DIST}}"{{end}}
 
   build:embed:
     summary: 認識器を焼き込んだ配布ビルド(exe 1 つで動く)
+    # **手元の recognize/model/ をそのまま焼き込む**(無ければ入れ方を出して止まる)。
+    # MODEL_DIR=<配布モデルのフォルダ> を付けたときだけ、それを手元に写してから焼き込む
+    # (wails3 task build:embed MODEL_DIR=D:/models/ikkyoku-20261004)。
+    # local:deploy にも同じ形で渡せる(CLI の変数は呼ばれた先のタスクまで届く)。
     cmds:
-      - task: model:copy
+      - powershell -NoProfile -ExecutionPolicy Bypass -File ./build/model.ps1{{if .MODEL_DIR}} -Use "{{.MODEL_DIR}}"{{end}} -Check
       # ⚠️ **BUILD_FLAGS を上書きしないこと。** あちらには -tags production や
       # -H windowsgui(コンソールを出さない)まで入っている。タグを足す口は EXTRA_TAGS。
       - task: "{{.GOOS}}:build"

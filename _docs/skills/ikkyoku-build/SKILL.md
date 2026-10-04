@@ -88,37 +88,40 @@ npm run build      # 上の 2 つ + vite build
 
 ```powershell
 cd ikkyoku\_cmd\ikkyoku
-task model:copy         # suteme/dist → recognize/model/*.gz + source.txt
-task build:embed        # model:copy + wails3 のビルド（EXTRA_TAGS=embedmodel）
+wails3 task model:update                            # 手元のモデル(recognize/model/)を suteme の学習データから作り直す
+wails3 task build:embed                             # 手元のモデルをそのまま焼き込む（EXTRA_TAGS=embedmodel）
+wails3 task build:embed MODEL_DIR=D:/models/x       # 置いてある配布モデルを手元に写してから焼き込む
+wails3 task local:deploy MODEL_DIR=D:/models/x      # local:deploy にも同じ形で渡せる
 ```
+
+- ⚠️ **ビルドは手元の `recognize/model/` をそのまま焼き込む。suteme は見ない**（2026-10-04）。
+  以前はビルドのたびに `suteme/dist` を持ってきていたので、**何が焼き込まれるかがビルドした
+  瞬間の suteme の状態で決まっていた**。**手元を入れ替えるのは `model:update` か `MODEL_DIR` だけ。**
+  ビルドの頭で「焼き込むモデル: <source.txt>」を出すので、`local:deploy` の出力で何を配ったか分かる
+- ⚠️ **手元は git に入れない**（`.gitignore`。学習し直すたびに 10MB 級をコミットすることになる）。
+  手元が空なら `build:embed` が入れ方を出して止まる
+- **`MODEL_DIR` は配布モデルと同じ 3 ファイル**（`predictor.bin.gz` / `strip.bin.gz` / `source.txt`）の
+  フォルダ。`go:embed` はパッケージの外を指せないので、**手元に写してから**焼き込む
+  （＝以後の `build:embed` もそれを焼き込む）。⚠️ **3 つとも揃えて写す**（判定器だけ前のモデルが
+  残らないように。無ければ空のファイルを置き、読む側が「判定器なし」として扱う）
+- ⚠️ **`MODEL_DIR` / `SUTEME_DIST` は `KEY=VALUE` で渡す**（`wails3 task` は `--` の後ろを渡さない）。
+  CLI の変数は呼ばれた先のタスクまで届くので、`local:deploy` から `build:embed` へもそのまま届く
 
 - ⚠️ **`wails3 build` は焼き込まない**（タグが付かない）。配るのは `task build:embed`
 - ⚠️ **`BUILD_FLAGS` を上書きしないこと。** あちらには `-tags production` も
   `-H windowsgui`（コンソールを出さない）も入っている。タグを足す口は `EXTRA_TAGS`
 - ⚠️ **`wails3 dev` と `wails3 package` に `-tags` は無い。** 開発モードで焼き込みを
   試すなら `task build:embed` した exe を直接起動する
-- ⚠️ **`task model:copy` を忘れるとビルドが止まる**（`go:embed` がファイルを
-  見つけられない）。**それが狙い** —— 古いデータや空のデータで配れてしまうより良い
 - ⚠️ **ビルドが通ることでは足りない。** 中身が壊れていても `go:embed` は通るので、
   配布ビルドの前に `go test -tags embedmodel ./recognize/` で
   **実際に認識器として組み立てられること**を確かめる
-- **`suteme/dist` が無ければ `model:copy` が suteme に書き出させる**（2026-10-04。
-  `go run ./_cmd/suteme-training -export <suteme の場所>`。実測 1 秒弱）。
-  ⚠️ **あるときは書き出し直さない** —— 中身は学習データのその時点の写しで、いつ作り直すかは
-  学習した人が決める。`model:copy` は使う `dist/` の日付と作り直し方を出すので、
-  **学習し直したあとは先に書き出し直す**:
-
-  ```powershell
-  cd ..\suteme                              # ikkyoku の隣の suteme（本体のチェックアウト）
-  go run ./_cmd/suteme-training -export     # dist/ を作り直す（画面の「配布用に書き出す」と同じ）
-  ```
-
-  書き出せなかったとき（学習データが無い など）は、探した場所と手で書き出す手順を出して止まる
-
-  suteme を ikkyoku の隣に置いていないときは `wails3 task model:copy SUTEME_DIST=D:/path/to/suteme/dist`
-  （`build:embed` / `local:deploy` にも同じ形で渡せる）。⚠️ **`-- -Dist ...` では渡らない**
-  （`wails3 task` は `--` の後ろを渡さない。`KEY=VALUE` だけ）。学習データの版は決め打ちしていない（`training_data_v*.bin` の
-  いちばん大きい版。2026-10-04 までは v7 決め打ちで、v8 になってから通らなくなっていた）
+- **`model:update` は毎回 suteme に書き出させてから取り込む**（`go run ./_cmd/suteme-training -export
+  <suteme の場所>`。実測 1 秒弱）。「手元を今の学習データにする」操作なので、古い `dist/` を黙って
+  使わない。書き出せなかったとき（学習データが無い など）は、探した場所と手で書き出す手順を出して止まる
+- suteme を ikkyoku の隣に置いていないときは `wails3 task model:update SUTEME_DIST=D:/path/to/suteme/dist`
+  （**指定した `dist/` はそのまま使う**。無いときだけ書き出させる）。学習データの版は決め打ちしていない
+  （`training_data_v*.bin` のいちばん大きい版。2026-10-04 までは v7 決め打ちで、v8 になってから通らなくなっていた）
+- 旧名の `task model:copy` も `model:update` の別名として残してある
 
 詳しくは `recognize/AGENTS.md` の「認識器は 3 段」。
 
@@ -129,7 +132,7 @@ task build:embed        # model:copy + wails3 のビルド（EXTRA_TAGS=embedmod
 
 ```powershell
 cd _cmd\ikkyoku
-task model:copy      # recognize/model/ に predictor.bin.gz / strip.bin.gz / source.txt ができる
+wails3 task model:update   # recognize/model/ に predictor.bin.gz / strip.bin.gz / source.txt ができる
 Compress-Archive ..\..\recognize\model\* -DestinationPath ikkyoku-model.zip   # .gitignore は入れなくてよい
 ```
 

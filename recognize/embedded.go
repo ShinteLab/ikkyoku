@@ -16,11 +16,11 @@ import (
 // 説明のいる運用になる。**exe 1 つで動く形**を選べるようにするのがこの口。
 //
 // **データはこのリポジトリに置いていない**（`recognize/model/` は .gitignore）。
-// 20MB 級のバイナリを育てるたびにコミットすることになるため。配布ビルドの前に
-// suteme の `dist/` から取ってくる（`_cmd/ikkyoku/Taskfile.yml` の `model:copy`）:
+// 10MB 級のバイナリを育てるたびにコミットすることになるため。`recognize/model/` が
+// 「手元のモデル」で、ビルドはそれをそのまま焼き込む（`_cmd/ikkyoku/Taskfile.yml`）:
 //
-//	task model:copy      # ../../../suteme/dist → recognize/model/*.gz
-//	wails3 build -tags embedmodel
+//	task model:update    # 手元を suteme の学習データから作り直す
+//	task build:embed     # 手元をそのまま焼き込む（MODEL_DIR=<フォルダ> で入れ替えてから）
 //
 // タグを付けずにビルドしたバイナリには**データが入らない**（`EmbeddedAvailable` が
 // false）。そのときは 3 段のうち焼き込みの段が無いだけ（predictor.go の冒頭）。

@@ -6,8 +6,8 @@ import _ "embed"
 
 // 配布ビルド（`-tags embedmodel`）でだけ認識器を焼き込む。
 //
-// ⚠️ **ファイルが無いとビルドが通らない。** それが狙いで、`task model:copy` を
-// 忘れたまま配布ビルドを作れてしまうより、ここで止まったほうがよい。
+// ⚠️ **ファイルが無いとビルドが通らない。** それが狙いで、手元のモデル（`task model:update`）を
+// 入れないまま配布ビルドを作れてしまうより、ここで止まったほうがよい。
 
 //go:embed model/predictor.bin.gz
 var embeddedPredictorGZ []byte

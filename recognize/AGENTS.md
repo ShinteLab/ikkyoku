@@ -126,7 +126,7 @@
   普通の状態で、⚠ に出すことではない
 - ⚠️ **配布モデルと焼き込みの組み立ては共用**（`loadPack`）。片方だけ直すと、置いたモデルと
   焼き込みで振る舞いが変わる
-- ⚠️ **`source.txt` の日付は `(yyyy-mm-dd)` で読む**（`copy-model.ps1` が書く形）。
+- ⚠️ **`source.txt` の日付は `(yyyy-mm-dd)` で読む**（`_cmd/ikkyoku/build/model.ps1` が書く形）。
   読めなければゼロで、**古いと見なさない**（`Set.OlderThan`）
 - ⚠️ **`FromImage` は認識器を差し替えていなければ suteme を呼ばない**（`ErrNoRecognizer`）。
   呼ぶと suteme 既定の探索に落ちる
@@ -155,22 +155,27 @@
 ### 焼き込みの中身とビルド手順
 
 **データはこのリポジトリに置いていない**（`recognize/model/` は `.gitignore`）。
-20MB 級のバイナリを、学習し直すたびにコミットすることになるため。
-配布ビルドの前に `suteme` の `dist/` から持ってくる:
+10MB 級のバイナリを、学習し直すたびにコミットすることになるため。
+**`recognize/model/` が「手元のモデル」で、ビルドはそれをそのまま焼き込む**（2026-10-04）:
 
 ```powershell
 cd ikkyoku\_cmd\ikkyoku
-task model:copy         # suteme/dist → recognize/model/*.gz + source.txt
-task build:embed        # model:copy + wails3 のビルド(EXTRA_TAGS=embedmodel)
+wails3 task model:update                       # 手元を suteme の学習データから作り直す（suteme に -export させる）
+wails3 task build:embed                        # 手元をそのまま焼き込む(EXTRA_TAGS=embedmodel)
+wails3 task build:embed MODEL_DIR=<フォルダ>     # 置いてある配布モデルを手元に写してから焼き込む
 ```
+
+⚠️ **ビルドで suteme を見ないこと**（以前はビルドのたびに `suteme/dist` を持ってきていた）。
+何が焼き込まれるかがビルドした瞬間の suteme の状態で決まってしまう。**手元を入れ替えるのは
+`model:update` か `MODEL_DIR` だけ**（手順はスキル `ikkyoku-build`）
 
 **タグを渡す口は 3 つある**（beta.3 で確認済み。どれも同じ
 `go build -tags production,embedmodel ... -ldflags="-w -s -H windowsgui"` になる）:
 
 | | 備考 |
 |---|---|
-| `task build:embed` | **これを使う。** `model:copy` が前に付くので忘れない |
-| `wails3 build -tags embedmodel` | CLI に `-tags`（カンマ区切り）がある。データのコピーは別途 |
+| `task build:embed` | **これを使う。** 頭で手元のモデルを確かめ、何を焼き込むかを出す |
+| `wails3 build -tags embedmodel` | CLI に `-tags`（カンマ区切り）がある。手元のモデルは確かめない |
 | `task build EXTRA_TAGS=embedmodel` | Taskfile の変数を直接渡す形 |
 
 - ⚠️ **`BUILD_FLAGS` を上書きしないこと。** あちらには `-tags production` も
@@ -185,7 +190,7 @@ task build:embed        # model:copy + wails3 のビルド(EXTRA_TAGS=embedmodel
 | `recognize/model/source.txt` | 出所（画面とログに出る。焼き込むと元のファイル名が残らないため）|
 
 - ⚠️ **`suteme` の `dist/` は「配布用に書き出す」（`training.ExportCompact`。画面か
-  `suteme-training -export`）が作るもの。** 無ければ `task model:copy` が `-export` を呼んで作る
+  `suteme-training -export`）が作るもの。** `task model:update` が `-export` を呼んで作り、取り込む
   リポジトリ直下の全件（`training_data_v*.bin`）ではなく、間引いた配布セットを配ること
 - **この 3 ファイルがそのまま配布モデル**（2 段目）。`recognize/model/` を zip にして配れば、
   受け取った人は既定の置き場所に展開するだけで使える（手順はスキル `ikkyoku-build`）
@@ -195,8 +200,8 @@ task build:embed        # model:copy + wails3 のビルド(EXTRA_TAGS=embedmodel
   展開したファイルを置く必要は無い（`recognize/embedded.go`）
 - **焼き込み側のファイル名に版を入れていない**（`training_data_v7` → `predictor`）。
   版が上がるたびに `go:embed` の行を書き換えることになるため。どの版かは `source.txt`
-- **`task model:copy` を忘れるとビルドが止まる**（`go:embed` がファイルを見つけられない）。
-  それが狙い。古いデータや空のデータで配れてしまうより止まったほうがよい
+- **手元が空ならビルドが止まる**（`build:embed` の頭で入れ方を出す。`wails3 build -tags embedmodel`
+  なら `go:embed` がファイルを見つけられずに止まる）。それが狙い。空のデータで配れてしまうより止まったほうがよい
 - **ビルドが通ることでは足りない。** 中身が壊れていても `go:embed` は通るので、
   配布ビルドの前に `go test -tags embedmodel ./recognize/` で
   **実際に認識器として組み立てられること**を確かめる

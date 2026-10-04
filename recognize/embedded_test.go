@@ -13,7 +13,7 @@ import (
 // 中身が壊れていても(gzip でない・空・別のファイルを入れた)気づけない。
 // **配布ビルドを作る前にここで止める**のが狙い:
 //
-//	task model:copy
+//	task model:update
 //	go test -tags embedmodel ./recognize/
 //
 // タグを付けないビルドでは丸ごと対象外(データが無いのが正しい状態)。
@@ -38,7 +38,7 @@ func TestEmbeddedSet(t *testing.T) {
 func TestEmbeddedSource(t *testing.T) {
 	src := EmbeddedSource()
 	if src == "" {
-		t.Fatal("source.txt が空です(copy-model.ps1 が書くはず)")
+		t.Fatal("source.txt が空です(_cmd/ikkyoku/build/model.ps1 が書くはず)")
 	}
 	if strings.ContainsAny(src, "\ufeff\r\n") {
 		t.Errorf("出所のラベルに BOM か改行が残っています: %q", src)

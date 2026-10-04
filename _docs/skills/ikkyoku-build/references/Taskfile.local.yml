@@ -6,11 +6,12 @@ version: '3'
 #   wails3 task local:deploy                            既定のコピー先へ
 #   wails3 task local:deploy DEPLOY_DEST="D:/tmp/ikkyoku"  コピー先を指定（-- の後ろの引数は渡らない）
 #   wails3 task local:build-info                        ビルド情報の反映だけ（bump・コミット・タグはしない）
+#   wails3 task local:deploy MODEL_DIR=D:/models/x      焼き込むモデルを入れ替えてから（build:embed へ届く）
 
 vars:
   DEPLOY_DEST: '{{.DEPLOY_DEST | default "D:/Program Files/ikkyoku"}}'
   # build-info とビルドが書き換える Git 管理下のファイル（_cmd/ikkyoku からの相対パス）。
-  # ⚠️ build/ を丸ごと指定しない（手で直している build/Taskfile.yml や copy-model.ps1 を巻き込む）。
+  # ⚠️ build/ を丸ごと指定しない（手で直している build/Taskfile.yml や model.ps1 を巻き込む）。
   BUILD_INFO_FILES: >-
     version
     build/config.yml

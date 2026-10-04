@@ -35,7 +35,7 @@ import (
 // 配布セットのファイル名（2026-10-04）。**焼き込み（`model/`）と、ダウンロードして置く
 // 配布モデルで同じ形**にしてある —— 焼き込みは「exe に最初から入っている配布セット」で、
 // 読む口が 1 本で済む。中身は suteme の「配布用に書き出す」（`training.ExportCompact`）の
-// 出力を gzip したもの（`_cmd/ikkyoku/build/copy-model.ps1`）。
+// 出力を gzip したもの（`_cmd/ikkyoku/build/model.ps1`）。
 //
 // ⚠️ **ファイル名に版を入れない**（`training_data_v8` → `predictor`）。版が上がるたびに
 // go:embed の行と置き場所の案内を書き換えることになるため。どの版かは `source.txt`。
@@ -199,12 +199,12 @@ func loadPack(predGZ, stripGZ []byte, source, kind string) (*Set, error) {
 }
 
 // cleanSource は source.txt の中身を整える。⚠️ **BOM を落とすこと** —— 書き出しは
-// Windows PowerShell（`build/copy-model.ps1`）で、`Set-Content -Encoding utf8` は BOM を付ける。
+// Windows PowerShell（`_cmd/ikkyoku/build/model.ps1`）で、`Set-Content -Encoding utf8` は BOM を付ける。
 func cleanSource(s string) string {
 	return strings.TrimSpace(strings.TrimPrefix(s, "\ufeff"))
 }
 
-// sourceDateRe は source.txt の末尾の「(yyyy-mm-dd)」（copy-model.ps1 が書く）。
+// sourceDateRe は source.txt の末尾の「(yyyy-mm-dd)」（model.ps1 が書く）。
 var sourceDateRe = regexp.MustCompile(`\((\d{4}-\d{2}-\d{2})\)`)
 
 // sourceDate は source.txt から配布セットの日付を読む。読めなければゼロ

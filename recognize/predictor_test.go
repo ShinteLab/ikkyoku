@@ -57,7 +57,7 @@ func writeTrainingDir(t *testing.T, withStrip bool) string {
 	return dir
 }
 
-// writePack は学習ディレクトリの中身を gzip して、配布セットの形にする（copy-model.ps1 と同じ）。
+// writePack は学習ディレクトリの中身を gzip して、配布セットの形にする（model.ps1 と同じ）。
 func writePack(t *testing.T, src string, source string, withStrip bool) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -79,7 +79,7 @@ func writePack(t *testing.T, src string, source string, withStrip bool) string {
 		gz(suteme.DefaultStripFile, recognize.PackStripFile)
 	}
 	if source != "" {
-		// copy-model.ps1 は BOM を付ける（Windows PowerShell の Set-Content -Encoding utf8）。
+		// model.ps1 は BOM を付ける（Windows PowerShell の Set-Content -Encoding utf8）。
 		if err := os.WriteFile(filepath.Join(dir, recognize.PackSourceFile), []byte("\ufeff"+source+"\r\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
