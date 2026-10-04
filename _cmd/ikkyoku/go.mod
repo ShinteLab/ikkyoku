@@ -5,6 +5,7 @@ go 1.26.1
 require (
 	github.com/ShinteLab/core v0.0.0-00010101000000-000000000000
 	github.com/ShinteLab/ikkyoku v0.0.0-00010101000000-000000000000
+	github.com/ShinteLab/suteme v0.0.0-00010101000000-000000000000
 	github.com/wailsapp/wails/v3 v3.0.0-beta.26
 	golang.org/x/sys v0.47.0
 )
@@ -29,7 +30,6 @@ require (
 require (
 	github.com/ShinteLab/engine v0.0.0-20260725200156-de4523939d66 // indirect
 	github.com/ShinteLab/kicho v0.0.0-00010101000000-000000000000 // indirect
-	github.com/ShinteLab/suteme v0.0.0-00010101000000-000000000000 // indirect
 	github.com/adrg/xdg v0.5.3 // indirect
 	github.com/coder/websocket v1.8.14 // indirect
 	github.com/gen2brain/shm v0.1.0 // indirect
