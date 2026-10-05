@@ -607,17 +607,20 @@ html.is-frame #app {
    **来なくなれば光らない**。⚠️ **長さ（1.2s）を変えたら `frame.ts` の `followBeatMs` も
    揃えること**（光が消えきる前に打ち直さないための下限。短いと 4Hz でチカチカする）。 */
 .frame-btn.is-beat {
-  animation: frame-follow-beat 1.2s ease-out 1;
+  animation: frame-follow-beat 1.2s ease-in-out 1;
 }
 
+/* フェードイン → フェードアウトの山型（2026-10-05）。始まりと終わりを元の色にしてあるので、
+   続けて打っても色が飛ばず、なめらかに波打つ（赤から始めると「消えたら次が点く」に見えた）。 */
 @keyframes frame-follow-beat {
-  0% {
-    color: #fff;
-    background: #ff4d4d;
-  }
+  0%,
   100% {
     color: var(--follow-ink);
     background: var(--follow-bg);
+  }
+  50% {
+    color: #fff;
+    background: #ff4d4d;
   }
 }
 
