@@ -23,6 +23,7 @@
 import { StudyService } from "../bindings/github.com/ShinteLab/ikkyoku/app";
 import type { StudyState } from "../bindings/github.com/ShinteLab/ikkyoku/app/models";
 import type { Move as LegalMove } from "../bindings/github.com/ShinteLab/ikkyoku/legal/models";
+import { confirmStopFollow } from "./followguard";
 import { openPopup, type PopupHandle } from "./popup";
 
 const RANK_KANJI = ["一", "二", "三", "四", "五", "六", "七", "八", "九"];
@@ -456,6 +457,15 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
     });
   };
 
+  // extendsMain は**ここで指すと本譜が伸びるか**（本譜の先端に居て、そこに続きが 1 手も無い）。
+  const extendsMain = (): boolean => {
+    if (!state) {
+      return false;
+    }
+    const tip = state.mainTip;
+    return state.currentId === tip && !(state.nodes ?? []).some((n) => n.parent === tip);
+  };
+
   // play は移動先が決まったときに 1 手指す。
   //
   // at は押した場所（成る / 成らずを聞くダイアログをそこに出す）。
@@ -467,7 +477,15 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
     const stay = dests.find((m) => !m.promote);
     const go = (move: string) => {
       pick = null;
-      void run(() => StudyService.Play(move));
+      void (async () => {
+        // ⚠️ **本譜の先端で指した手は本譜の続きになる**（続きが無いところで指すと
+        // `kids[0]` に入る）。中継を追っていると繋ぐ先がずれるので、聞いて止める
+        // （2026-10-05。`followguard.ts`）。先端以外で指した手は枝になるので聞かない。
+        if (extendsMain() && !(await confirmStopFollow("最新の局面で手を指す"))) {
+          return;
+        }
+        await run(() => StudyService.Play(move));
+      })();
     };
     if (promote && stay) {
       // ⚠️ **選ぶまで掴んだままにしておく**（光ったまま待つ）。ここで pick を

@@ -86,6 +86,8 @@ export function mountLibrary(
   opts: {
     // onAnalyze は「解析」を押したとき（解析タブへ移って描くのは呼び出し側）。
     onAnalyze: (load: KifuLoad) => void;
+    // confirmAnalyze は**送る前に聞く**（中継を追っているなら止めてよいか。偽ならやめる）。
+    confirmAnalyze?: () => Promise<boolean>;
   },
 ): LibraryHandle {
   const count = root.querySelector<HTMLElement>("#library-count")!;
@@ -299,6 +301,9 @@ export function mountLibrary(
   //
   // btn は押した相手（リンクもボタン）。⚠️ **送っているあいだ押せなくすること。**
   const analyze = async (id: string, btn: HTMLButtonElement) => {
+    if (opts.confirmAnalyze && !(await opts.confirmAnalyze())) {
+      return;
+    }
     setStatus("");
     btn.disabled = true;
     try {
