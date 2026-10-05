@@ -1485,9 +1485,15 @@ func followFrameName(number int, moves []string, guess bool) string {
 }
 
 // safeNameRune はファイル名に使ってよい字だけを通す（USI は英数字なので普通は素通り）。
+//
+// ⚠️ **打つ手の `*` は `@` にすること**（2026-10-05 に実機で踏んだ）。`*` は Windows の
+// ファイル名に使えないので、`P*4a` の画像が「ファイルの作成に失敗しました」で残らず、
+// **誤った打つ手の証拠が 1 枚も無かった。**
 func safeNameRune(r rune) rune {
 	switch {
-	case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '+', r == '*':
+	case r == '*':
+		return '@'
+	case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '+':
 		return r
 	default:
 		return -1
