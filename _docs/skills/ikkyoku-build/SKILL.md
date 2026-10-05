@@ -258,6 +258,14 @@ _cmd/ikkyoku/go.mod       replace github.com/ShinteLab/ikkyoku => ../../
 - ⚠️ **push する前に取りに行かないこと。** proxy.golang.org と sum.golang.org は「無い」という答えを
   しばらく覚えるので、push のあとでも 30 分ほど 404 が続く（2026-10-04 に core v0.2.0 で踏んだ）。
   先に `git ls-remote --tags origin` で上がっているのを確かめる
+- ⚠️ **タグを付け直さないこと。直したいなら次の版を打つ**（2026-10-06 に suteme v0.2.2 で踏んだ）。
+  proxy.golang.org と sum.golang.org は**最初に取られたときの中身を覚え続ける**（sum.golang.org は
+  書き換えられない）ので、付け直しても go の側には古い中身が来る。v0.2.2 は features を main に
+  入れる前のコミット（`5b4bc2a`）に打たれ、それが一度取られたあとで `e246816` へ付け直したが、
+  proxy は `5b4bc2a` を返し続けたので v0.2.3 を打ち直した。**待っても直らない**（404 の件とは別）。
+  ⚠️ **取りに行く前に、タグが目当てのコミットに付いているか確かめること**
+  （`git ls-remote --tags origin` のハッシュと、`git merge-base --is-ancestor <要るコミット> <タグ>`）。
+  proxy が何を返しているかは `curl https://proxy.golang.org/github.com/!shinte!lab/<名前>/@v/<版>.info` の `Hash` で見られる
 - **`_cmd/ikkyoku` にもルートと同じ require が要る。** path 置換されたモジュール自身の replace は
   無視される（`ikkyoku` を `../../` で参照している以上、`ikkyoku/go.mod` の replace は効かない）
 - ⚠️ **kicho の公開 API を変えたら、タグを打つ前に kicho 側で `.\check-consumers.ps1` を流すこと** ——

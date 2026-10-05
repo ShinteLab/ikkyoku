@@ -5,7 +5,7 @@ go 1.26.1
 require (
 	github.com/ShinteLab/core v0.2.0
 	github.com/ShinteLab/ikkyoku v0.0.0-00010101000000-000000000000
-	github.com/ShinteLab/suteme v0.2.2-0.20261005193623-e2468164be4f
+	github.com/ShinteLab/suteme v0.2.3
 	github.com/wailsapp/wails/v3 v3.0.0-beta.26
 	golang.org/x/sys v0.47.0
 )

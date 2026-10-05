@@ -6,8 +6,8 @@ github.com/ShinteLab/engine v0.2.1 h1:+A2ngSF3GJjDlGhV205bp/2lT6XJEY7mqa9baDARWt
 github.com/ShinteLab/engine v0.2.1/go.mod h1:d7wpetvwK9RAbvamQr1sIuYq+LXvEd4DXCLYtAFYyUc=
 github.com/ShinteLab/kicho v0.2.1 h1:gz/FL3whYscgxWEaIqYk/rP5g84Reu2oEBSx3L48U1Q=
 github.com/ShinteLab/kicho v0.2.1/go.mod h1:z2lQL0Jm/jtceZxUoV95iNzcksHX6XsuSCiQ1BOOUMo=
-github.com/ShinteLab/suteme v0.2.2-0.20261005193623-e2468164be4f h1:kHfC/PSZFyJSI1E/r2OW5xliYB0Cx5UGQHb5Z3vH0rE=
-github.com/ShinteLab/suteme v0.2.2-0.20261005193623-e2468164be4f/go.mod h1:zUIp+2tYGOhEOrVmtpuAfDZBUSKhmRkeRl8AHAEzqes=
+github.com/ShinteLab/suteme v0.2.3 h1:aFIZnfffLAQRRtCAnm8+dX65/u4dBU704PVu7vn9Ilo=
+github.com/ShinteLab/suteme v0.2.3/go.mod h1:zUIp+2tYGOhEOrVmtpuAfDZBUSKhmRkeRl8AHAEzqes=
 github.com/dlclark/regexp2/v2 v2.5.2 h1:HAsucWRhsqcDzl6Ua9aR8JwYOTzrZyPrF0/FNxJVAI0=
 github.com/dlclark/regexp2/v2 v2.5.2/go.mod h1:avUrQvPaLz2DrFNHJF0taWAFFX2C1GMSSoeiqFjcBmU=
 github.com/dop251/goja v0.0.0-20260723142020-b4aef50fa347 h1:RZr+96+PKQjn444QL1K9MtncwJ/PwfE+3TJLCYJL8es=
