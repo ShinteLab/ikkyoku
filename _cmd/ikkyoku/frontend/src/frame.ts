@@ -106,6 +106,12 @@ export function mountFrame(root: HTMLElement): void {
   // ⚠️ **枠側で状態を覚えないこと** —— メイン画面のボタンからも止められるので、
   // 2 か所が別々に覚えると食い違う（枠の「枠を表示」と同じ話）。
   followBtn.addEventListener("click", () => void Events.Emit("follow:toggle", null));
+  // followBeatMs は光らせる間隔の下限。⚠️ **CSS の `frame-follow-beat` の長さ（1.2s）と揃えること**。
+  // 読まずに回る周（長考中はほとんど）は 0.26 秒で 1 周するので、毎周打ち直すと
+  // **光が消えきる前に打ち直して 4Hz でチカチカする**（2026-10-05 に実機で気になると出た）。
+  // ⚠️ **間引くだけで、打つのはループのまま** —— 止まれば光らない性質は残る。
+  const followBeatMs = 1200;
+  let followBeatAt = 0;
   Events.On("follow:state", (e: { data: { on: boolean; text: string } }) => {
     const on = !!e.data?.on;
     followBtn.setAttribute("aria-pressed", on ? "true" : "false");
@@ -119,12 +125,20 @@ export function mountFrame(root: HTMLElement): void {
     // **ループが死んでも光り続ける**ので証明にならない（枠の時刻表示を外したのと
     // 同じ理由）。⚠️ **札に色の丸を足さないこと** —— 凡例が増えるだけで、
     // **見るところはボタン 1 つ**のほうが読める。
-    followBtn.classList.remove("is-beat");
-    if (on) {
-      // アニメーションを頭から流し直すには、一度外して**レイアウトを確定させる**。
-      void followBtn.offsetWidth;
-      followBtn.classList.add("is-beat");
+    if (!on) {
+      followBtn.classList.remove("is-beat");
+      followBeatAt = 0;
+      return;
     }
+    const now = Date.now();
+    if (now - followBeatAt < followBeatMs) {
+      return; // まだ前の光が消えきっていない（上の `followBeatMs`）
+    }
+    followBeatAt = now;
+    followBtn.classList.remove("is-beat");
+    // アニメーションを頭から流し直すには、一度外して**レイアウトを確定させる**。
+    void followBtn.offsetWidth;
+    followBtn.classList.add("is-beat");
   });
   const menuBtn = root.querySelector<HTMLButtonElement>("#frame-menu")!;
   const menu = root.querySelector<HTMLDivElement>("#frame-menu-items")!;
