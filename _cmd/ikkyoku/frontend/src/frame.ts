@@ -112,13 +112,15 @@ export function mountFrame(root: HTMLElement): void {
   // ⚠️ **間引くだけで、打つのはループのまま** —— 止まれば光らない性質は残る。
   const followBeatMs = 1200;
   let followBeatAt = 0;
-  Events.On("follow:state", (e: { data: { on: boolean; text: string } }) => {
+  Events.On("follow:state", (e: { data: { on: boolean; text: string; detail?: string } }) => {
     const on = !!e.data?.on;
     followBtn.setAttribute("aria-pressed", on ? "true" : "false");
     followBtn.classList.toggle("is-active", on);
     followBtn.title = on ? "中継の追跡を止める" : "中継を追う（撮り続けて、進んだ手を本譜に足します）";
     followState.hidden = !on;
     followState.textContent = e.data?.text ?? "";
+    // 補足（「別の盤」の理由など）はホバーで。⚠️ **本文に足さないこと**（札は狭い）。
+    followState.title = e.data?.detail ?? "";
     // ⚠️ **1 周ごとにボタンを打ち直すこと**（2026-09-15）。**これが動いている証明。**
     // このイベントは**追跡が 1 周するたびに来る**ので、**止まれば光らない**。
     // ⚠️ **CSS の `infinite` で点滅させないこと** —— 時計で回る点滅は
