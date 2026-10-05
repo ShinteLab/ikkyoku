@@ -121,6 +121,14 @@ type FollowProbe struct {
 	// `Was` が認識結果、`Now` が**本譜から辿るとそうなるはずの駒**なので、
 	// **そのまま直し方の指示になる。**
 	Mismatch []FollowFix `json:"mismatch"`
+	// Unsettled は**行き先が決まっていない候補**を並べたか（`fallbackFollow` だけが立てる）。
+	//
+	// ⚠️ **`FollowChoices` には 2 つの意味がある。** `Connect` の解（行き着く局面は同じで、
+	// 順番だけが決まらない）と、`Rank` の 1 手の候補（**行き着く局面がそれぞれ違う**）。
+	// **追従が聞かずに進んでよいのは前者だけ**（2026-10-05 に実機で踏んだ。指している手が
+	// 盤を覆っている 1 枚から、差が 1 マスぶんも無い 1 位を採って空想の手を足した）。
+	// 画面には出さない（手で繋ぐ側は、どちらでも人に選ばせる）。
+	Unsettled bool `json:"-"`
 }
 
 // FollowApplied は据えた結果。
@@ -439,7 +447,7 @@ func (s *StudyService) fallbackFollow(ranked position.RankResult, r position.Con
 		out.Reason = unreachableReason(out.Mismatch, r.NearDepth)
 		return out
 	}
-	out.Guess = true
+	out.Guess, out.Unsettled = true, true
 	out.Mismatch = followFixes(ranked.Candidates[0].Fixed)
 	for _, c := range ranked.Candidates {
 		if len(c.Moves) == 0 {
@@ -534,10 +542,17 @@ func (s *StudyService) FollowAuto(boardSFEN string, cellConfidence []float64) (a
 		// 残さない」こと**で、印が付いていればそれは守られている。
 		// ⚠️ **並べきれないとき（`More`）は進まない** —— 候補として出せないなら
 		// 行き先も確かめられていない。
+		// ⚠️ **`Rank` の候補を並べただけのとき（`Unsettled`）も進まない**
+		// （2026-10-05 に実機で踏んだ）。**候補ごとに行き先が違う**ので、上の
+		// 「行き着く局面は同じ」が成り立たない。**実機の症状**: 指している手が盤を
+		// 覆っている 1 枚（一致度 0.83・差 0.15 ＝ 1 マスぶんも無い）から ▲4八飛を
+		// 足し、次の 1 枚でそれを打ち消す ▲2八飛を足して、本当に指された
+		// ▲4五同銀を落とした。そこから先は 1 手も繋がらなくなった。
+		// **次の 1 枚（手がどいたあと）で決まる**ので、見送っても雪崩にはならない。
 		// ⚠️ **手で繋ぐ側（`FollowProbe`）は今までどおり人に聞く** ——
 		// **人が居るのに黙って選ぶ理由は無い。**
 		if p.Kind == FollowChoices {
-			if p.More {
+			if p.More || p.Unsettled {
 				break
 			}
 			a.Guess = true

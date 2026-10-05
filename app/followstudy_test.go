@@ -744,6 +744,45 @@ func TestFollowAutoCatchesUpFromOneFrame(t *testing.T) {
 	}
 }
 
+// ⚠️ **行き先が決まっていない候補から、追従が 1 本選んで足さないこと**（2026-10-05）。
+//
+// **実機の症状**: 指している手が盤を覆っている 1 枚から ▲4八飛を足し、次の 1 枚で
+// それを打ち消す ▲2八飛を足して、本当に指された手を落とした。`Rank` で差が付かず、
+// `Connect` も繋がらなかったので `fallbackFollow` が 1 手の候補を並べ、それを
+// 「順番が決まらないだけ（行き先は同じ）」として採っていた。
+//
+// ⚠️ **手で繋ぐ側（`FollowProbe`）が候補を出すことは変えない**（黙って無反応にしない）。
+func TestFollowAutoDoesNotPickUnsettled(t *testing.T) {
+	s, pos := following(t)
+	// 飛車が手で隠れて、まわりに香や玉の誤読が散った 1 枚（実機の 002 を写した形）。
+	const covered = "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPLPP/1B3l3/LNSGKGSkP"
+
+	// 前提: 手で繋ぐ側には「行き先の違う候補」として並ぶこと。
+	shotWith(t, pos, covered, evenConf(0.5))
+	p, err := s.FollowProbe()
+	if err != nil {
+		t.Fatalf("FollowProbe: %v", err)
+	}
+	if p.Kind != FollowChoices || !p.Unsettled || len(p.Candidates) < 2 {
+		t.Fatalf("前提が崩れています: kind=%q unsettled=%v 候補=%v", p.Kind, p.Unsettled, p.Candidates)
+	}
+
+	a, err := s.FollowAuto(covered, evenConf(0.5))
+	if err != nil {
+		t.Fatalf("FollowAuto: %v", err)
+	}
+	if a.Applied || a.Added != 0 {
+		t.Fatalf("行き先が決まっていないのに足しました: %v", a.Moves)
+	}
+	if n := len(s.State().Nodes); n != 0 {
+		t.Fatalf("手順 = %d, want 0", n)
+	}
+	// **見送った理由は返すこと**（フロントが「繋がらなかった周」として数えて画像を残す）。
+	if a.Kind != FollowChoices {
+		t.Errorf("Kind = %q, want %q", a.Kind, FollowChoices)
+	}
+}
+
 // ⚠️ **追いつき切ったら止まること**（無限に手を生やさない）。
 //
 // **盤面が本譜と同じなら 1 手も足さない** —— 繰り返しの終わり方がこれ。
