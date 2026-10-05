@@ -18,6 +18,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -490,7 +491,11 @@ func (s *StudyService) fallbackFollow(ranked position.RankResult, r position.Con
 // 残りを捨て、また 2 秒かけて撮り直すのは無駄でしかない。
 // ⚠️ **1 手ごとの判断の厳しさは変えていない** —— 同じ `followProbe` を
 // 同じ盤に対して繰り返すだけで、**決められなくなった時点で止まる**。
-func (s *StudyService) FollowAuto(boardSFEN string, cellConfidence []float64) (a FollowAuto, err error) {
+//
+// ⚠️ **1 枚だけでは足さない**（2026-10-05。`followPending`）。足せる手が見つかったら
+// 控えておき、**次の 1 枚が同じ答えを出したとき**（`FollowAuto`）か、**次の 1 枚が
+// 変わっていなかったとき**（`FollowConfirm`）に初めて足す。
+func (s *StudyService) FollowAuto(boardSFEN string, cellConfidence []float64) (FollowAuto, error) {
 	// ⚠️ **訂正タブを通さないこと**（2026-09-15 に実機で踏んだ）。
 	// 以前は呼び出し側が毎周 `PositionService.Load` を呼んでいたので、
 	// **人が訂正タブで作業していると 1 秒ごとに中継の盤で上書きされた**
@@ -501,6 +506,111 @@ func (s *StudyService) FollowAuto(boardSFEN string, cellConfidence []float64) (a
 	}
 	// ⚠️ **修復してよいのは費用表があるときだけ**（`followCost` と同じ約束）。
 	// 確信度が無ければ**どのマスを覆してよいかの根拠が無い**ので、厳密一致に倒す。
+	p, e := s.followProbe(board, cost, cost != nil, rotated)
+	if e != nil {
+		return FollowAuto{}, e
+	}
+	moves, ok := followAddable(p)
+	if !ok {
+		// **足せる手が無い 1 枚が来たら、控えは捨てる**（手が映った 1 枚の答えは
+		// 次の 1 枚で消えるのが普通で、それがこの形）。
+		s.setPending(nil)
+		return s.followFrom(board, cost, rotated)
+	}
+	if !s.takePendingIf(moves) {
+		// **初めて出た答え。** 控えて、次の 1 枚を待つ。
+		s.setPending(&followPending{tip: s.mainTip(), moves: moves, board: board, cost: cost, rotated: rotated})
+		return FollowAuto{Kind: p.Kind, Pending: true, Reason: "確かめています",
+			Guess: p.Guess, Fit: p.Fit, State: s.State()}, nil
+	}
+	// **2 枚続けて同じ答え。** ここから先は今までどおり（1 枚から取れるだけ取る）。
+	return s.followFrom(board, cost, rotated)
+}
+
+// FollowConfirm は**控えた答えを、撮り直した 1 枚が変わっていなかったことで確かめて**足す（2026-10-05）。
+//
+// 呼ぶのはフロントで、`CaptureQuiet` が「変わっていない」（`unchanged`）を返したとき。
+// ⚠️ **ふるいの「変わっていない」は、控えた 1 枚から何も変わっていないこと**（間に
+// 変化があれば、静止したところで読み直しになる）なので、**同じ画像を読み直したのと同じ**
+// （認識は同じ画像に同じ答えを返す）。読み直さないぶん、確かめは 1 周（約 0.25 秒）で済む。
+//
+// 控えが無ければ何もしない（`FollowSame`）。⚠️ **本譜の先端が控えたときから動いていたら捨てる**
+// （手で繋いだ・戻したなど。違う局面の先に繋がないため）。
+func (s *StudyService) FollowConfirm() (FollowAuto, error) {
+	s.mu.Lock()
+	pend := s.pending
+	s.pending = nil
+	s.mu.Unlock()
+	if pend == nil || pend.tip != s.mainTip() {
+		return FollowAuto{Kind: FollowSame, Reason: "盤面は変わっていません", State: s.State()}, nil
+	}
+	return s.followFrom(pend.board, pend.cost, pend.rotated)
+}
+
+// followPending は**1 枚目で見つけた、まだ足していない答え**（2026-10-05）。
+//
+// **実機の症状**: 指している手や頭が盤に映った 1 枚から、指していない手を足した
+// （▲4八飛・△6一玉・△4一歩打）。どれも**その 1 枚だけ**の読み違いで、次の 1 枚では
+// 消えていた。△4一歩打は撮った盤と完全に一致していたので、行き先の裏付け（`position.backed`）も
+// 行き先の決まらない候補（`Unsettled`）もすり抜けた。
+//
+// ⚠️ **ヒントであって動作条件ではない**（設計原則1）。控えが無くても、次の周で決まるだけ。
+// ⚠️ **比べるのは「本譜の先端」と「最初に足す手」**（`StudyState.Rev` ではない —— 手順を
+// クリックしただけで進むので、見ているあいだ永久に確かめられなくなる）。
+type followPending struct {
+	tip     int
+	moves   []string
+	board   *position.Board
+	cost    *position.CellCost
+	rotated bool
+}
+
+func (s *StudyService) setPending(p *followPending) {
+	s.mu.Lock()
+	s.pending = p
+	s.mu.Unlock()
+}
+
+// takePendingIf は控えが「今の先端から同じ手」なら取り出して真を返す（違えば何もしない）。
+func (s *StudyService) takePendingIf(moves []string) bool {
+	tip := s.mainTip()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.pending == nil || s.pending.tip != tip || !slices.Equal(s.pending.moves, moves) {
+		return false
+	}
+	s.pending = nil
+	return true
+}
+
+// mainTip は本譜の先端の節点 id（局面が無ければ -1）。
+func (s *StudyService) mainTip() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.study == nil {
+		return -1
+	}
+	return mainTipID(s.study)
+}
+
+// followAddable は下見の結果が**追従が足してよい形か**と、最初に足す手を返す。
+// ⚠️ **`followFrom` の繰り返しの判断と揃えること**（ずれると、控えたのに足さない／
+// 控えずに足す、が起きる）。
+func followAddable(p FollowProbe) ([]string, bool) {
+	if len(p.Candidates) == 0 {
+		return nil, false
+	}
+	switch {
+	case p.Kind == FollowUnique:
+	case p.Kind == FollowChoices && !p.More && !p.Unsettled:
+	default:
+		return nil, false
+	}
+	return p.Candidates[0].Moves, true
+}
+
+// followFrom は撮った 1 枚から**取れるだけ取って足す**（確かめが済んだあとの本体）。
+func (s *StudyService) followFrom(board *position.Board, cost *position.CellCost, rotated bool) (a FollowAuto, err error) {
 	// ⚠️ **先端を見ていたなら付いていく**（`tail -f` と同じ）。
 	// 戻って読んでいるなら**動かさない**（`mergeReloadLocked` と同じ約束）。
 	// ⚠️ **判定は繰り返しに入る前の 1 回だけ** —— 自分で足した手で先端が動くので、
@@ -639,6 +749,9 @@ type FollowAuto struct {
 	//
 	// ⚠️ **根拠を出すこと** —— 「目線が逆かも」とだけ言われても確かめようが無い。
 	FlipMove string `json:"flipMove"`
+	// Pending は**足せる手を見つけたが、まだ足していない**か（2026-10-05。`followPending`）。
+	// 次の 1 枚で確かめる。⚠️ **見送り（繋がらない）として数えないこと**。
+	Pending bool `json:"pending"`
 }
 
 // looksFlipped は**盤を 180 度回したら繋がるか**を見る（2026-09-15）。

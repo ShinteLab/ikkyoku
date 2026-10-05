@@ -465,6 +465,17 @@ func TestFollowProbeDoesNotGuessWhenUnclear(t *testing.T) {
 	}
 }
 
+// followAuto は追従に**同じ 1 枚を 2 回**渡す（2026-10-05 から、2 枚続けて同じ答えで初めて足す）。
+// 1 回目で控えなかった（足せる手が無かった）ならそれを返す。
+func followAuto(t *testing.T, s *StudyService, board string, conf []float64) (FollowAuto, error) {
+	t.Helper()
+	first, err := s.FollowAuto(board, conf)
+	if err != nil || !first.Pending {
+		return first, err
+	}
+	return s.FollowAuto(board, conf)
+}
+
 // ⚠️ **追従は人に判断させないこと**（2026-09-15）。
 //
 // **「訂正を挟むかどうか」をこちらが決めない**のが要点。繋がるなら聞かずに繋ぎ、
@@ -472,7 +483,7 @@ func TestFollowProbeDoesNotGuessWhenUnclear(t *testing.T) {
 func TestFollowAutoAdvances(t *testing.T) {
 	s, _ := following(t)
 	// ⚠️ **訂正タブに置かないこと** —— 追従は撮った 1 枚を直に受け取る。
-	a, err := s.FollowAuto("lnsgkgsnl/1r5b1/2ppppppp/9/4p4/2P6/PP1PPPPPP/1B5R1/LNSGKGSNL",
+	a, err := followAuto(t, s, "lnsgkgsnl/1r5b1/2ppppppp/9/4p4/2P6/PP1PPPPPP/1B5R1/LNSGKGSNL",
 		evenConf(0.5))
 	if err != nil {
 		t.Fatalf("FollowAuto: %v", err)
@@ -509,7 +520,7 @@ func TestFollowAutoKeepsPositionWhenBrowsing(t *testing.T) {
 	if _, err := s.GoTo(1); err != nil {
 		t.Fatalf("GoTo: %v", err)
 	}
-	a, err := s.FollowAuto(boardAfter(t, "7g7f", "3c3d", "2g2f"), nil)
+	a, err := followAuto(t, s, boardAfter(t, "7g7f", "3c3d", "2g2f"), nil)
 	if err != nil {
 		t.Fatalf("FollowAuto: %v", err)
 	}
@@ -662,7 +673,7 @@ func TestFollowAutoDoesNotTouchEditor(t *testing.T) {
 	}
 	before := pos.State()
 
-	a, err := s.FollowAuto(boardAfter(t, "7g7f"), evenConf(0.9))
+	a, err := followAuto(t, s, boardAfter(t, "7g7f"), evenConf(0.9))
 	if err != nil {
 		t.Fatalf("FollowAuto: %v", err)
 	}
@@ -719,7 +730,7 @@ func TestFollowAutoCatchesUpFromOneFrame(t *testing.T) {
 	// **互いに独立な 2 手は順番が決まらない**（`▲7六 △3四 ▲2六` と
 	// `▲2六 △3四 ▲7六` が同じ盤面になる）ので、**繋がらないのが正しい。**
 	want := []string{"7g7f", "3c3d"}
-	a, err := s.FollowAuto(boardAfter(t, want...), evenConf(0.9))
+	a, err := followAuto(t, s, boardAfter(t, want...), evenConf(0.9))
 	if err != nil {
 		t.Fatalf("FollowAuto: %v", err)
 	}
@@ -814,11 +825,11 @@ func TestFollowAutoDoesNotPickUnsettled(t *testing.T) {
 func TestFollowAutoStopsWhenCaughtUp(t *testing.T) {
 	s, _ := following(t)
 
-	if _, err := s.FollowAuto(boardAfter(t, "7g7f", "3c3d"), evenConf(0.9)); err != nil {
+	if _, err := followAuto(t, s, boardAfter(t, "7g7f", "3c3d"), evenConf(0.9)); err != nil {
 		t.Fatalf("FollowAuto: %v", err)
 	}
 	// **同じ盤面をもう一度渡す。** 追いつき済みなので 1 手も増えないこと。
-	a, err := s.FollowAuto(boardAfter(t, "7g7f", "3c3d"), evenConf(0.9))
+	a, err := followAuto(t, s, boardAfter(t, "7g7f", "3c3d"), evenConf(0.9))
 	if err != nil {
 		t.Fatalf("FollowAuto: %v", err)
 	}
@@ -869,7 +880,7 @@ func TestFollowAutoNoticesFlippedBoard(t *testing.T) {
 func TestFollowAutoDoesNotCryFlipWhenFine(t *testing.T) {
 	s, _ := following(t)
 
-	a, err := s.FollowAuto(boardAfter(t, "7g7f"), evenConf(0.9))
+	a, err := followAuto(t, s, boardAfter(t, "7g7f"), evenConf(0.9))
 	if err != nil {
 		t.Fatalf("FollowAuto: %v", err)
 	}
@@ -878,5 +889,96 @@ func TestFollowAutoDoesNotCryFlipWhenFine(t *testing.T) {
 	}
 	if a.Flipped {
 		t.Error("正しく繋がっているのに「目線が逆」と言いました")
+	}
+}
+
+// ⚠️ **1 枚だけでは足さず、2 枚続けて同じ答えで足すこと**（2026-10-05。`followPending`）。
+//
+// **実機の症状**: 指している手や頭が盤に映った 1 枚から、指していない手を足した
+// （▲4八飛・△6一玉・△4一歩打）。どれもその 1 枚だけの読み違いで、次の 1 枚では消えていた。
+func TestFollowAutoWaitsForSecondFrame(t *testing.T) {
+	s, _ := following(t)
+	board := boardAfter(t, "7g7f")
+
+	a, err := s.FollowAuto(board, evenConf(0.9))
+	if err != nil {
+		t.Fatalf("FollowAuto: %v", err)
+	}
+	if a.Applied || !a.Pending {
+		t.Fatalf("1 枚目で足しました（あるいは控えていません）: %+v", a)
+	}
+	if n := len(s.State().Nodes); n != 0 {
+		t.Fatalf("手順 = %d, want 0（まだ足さない）", n)
+	}
+
+	a, err = s.FollowAuto(board, evenConf(0.9))
+	if err != nil {
+		t.Fatalf("FollowAuto: %v", err)
+	}
+	if !a.Applied || a.Pending || len(a.Moves) != 1 || a.Moves[0] != "7g7f" {
+		t.Fatalf("2 枚続けて同じ答えなのに足していません: %+v", a)
+	}
+}
+
+// ⚠️ **間に「足せる手が無い」1 枚が挟まったら、控えは捨てること。**
+//
+// 手が映った 1 枚の答えは、次の 1 枚で消えるのが普通（それがこの形）。
+// 捨てないと、離れた 2 枚の読み違いが「続けて同じ答え」に数えられる。
+func TestFollowAutoDropsTransientFrame(t *testing.T) {
+	s, _ := following(t)
+	moved := boardAfter(t, "7g7f")
+
+	if a, _ := s.FollowAuto(moved, evenConf(0.9)); !a.Pending {
+		t.Fatalf("前提: 1 枚目は控えるはず: %+v", a)
+	}
+	// 手がどいて、何も指していない盤に戻った。
+	if a, err := s.FollowAuto(hirateBoard, evenConf(0.9)); err != nil || a.Applied || a.Pending {
+		t.Fatalf("何も指していない盤で足すか控えました: %+v（%v）", a, err)
+	}
+	// もう一度同じ盤が来ても、**控えは捨ててあるので 1 枚目の扱い**になること。
+	a, err := s.FollowAuto(moved, evenConf(0.9))
+	if err != nil {
+		t.Fatalf("FollowAuto: %v", err)
+	}
+	if a.Applied || !a.Pending {
+		t.Fatalf("捨てたはずの控えで足しました: %+v", a)
+	}
+}
+
+// ⚠️ **撮り直した 1 枚が変わっていなければ、それで確かめたことにする**（`FollowConfirm`）。
+//
+// 変わっていない画像を読み直しても同じ答えが返るだけなので、読み直さずに足す
+// （確かめが 1 周で済む）。⚠️ **控えが無いとき・本譜の先端が動いたときは何もしない。**
+func TestFollowConfirm(t *testing.T) {
+	s, _ := following(t)
+
+	if a, err := s.FollowConfirm(); err != nil || a.Applied || a.Kind != FollowSame {
+		t.Fatalf("控えが無いのに足しました: %+v（%v）", a, err)
+	}
+
+	if a, _ := s.FollowAuto(boardAfter(t, "7g7f"), evenConf(0.9)); !a.Pending {
+		t.Fatalf("前提: 1 枚目は控えるはず: %+v", a)
+	}
+	a, err := s.FollowConfirm()
+	if err != nil {
+		t.Fatalf("FollowConfirm: %v", err)
+	}
+	if !a.Applied || len(a.Moves) != 1 || a.Moves[0] != "7g7f" {
+		t.Fatalf("変わっていない 1 枚で確かめたのに足していません: %+v", a)
+	}
+	// 控えは使い切ること（もう一度呼んでも足さない）。
+	if a, _ := s.FollowConfirm(); a.Applied {
+		t.Fatalf("同じ控えで 2 回足しました: %+v", a)
+	}
+
+	// 本譜の先端が動いたら、控えは捨てる（違う局面の先に繋がないため）。
+	if a, _ := s.FollowAuto(boardAfter(t, "7g7f", "3c3d"), evenConf(0.9)); !a.Pending {
+		t.Fatalf("前提: 1 枚目は控えるはず: %+v", a)
+	}
+	if _, err := s.FollowApply([]string{"8c8d"}, s.State().Rev, false); err != nil {
+		t.Fatalf("FollowApply: %v", err)
+	}
+	if a, _ := s.FollowConfirm(); a.Applied {
+		t.Fatalf("先端が動いたのに控えで足しました: %+v", a)
 	}
 }

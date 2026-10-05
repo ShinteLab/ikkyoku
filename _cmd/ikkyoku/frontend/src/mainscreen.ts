@@ -2857,6 +2857,12 @@ ${st.turnLabel}${n}`;
   // **黙って「待機中」のまま何十手も過ぎる**（実機で 90 手ぶん無反応になった）。
   // **人が気づけるようにするのが目的**で、直す手立ては撮り直して繋ぎ直すこと。
   let followLost = 0;
+  // followPending は**Go 側が答えを控えていて、次の 1 枚で確かめる**ところか（2026-10-05。
+  // `FollowAuto.pending`）。⚠️ **立っているときに「変わっていない」が来たら `FollowConfirm`**
+  // （控えた 1 枚から何も変わっていない ＝ 同じ画像を読み直したのと同じ）。
+  // ⚠️ **読んだ周の後でしか確かめないこと** —— 別の盤・盤が無い・動いている周を挟んだら倒す
+  // （その後の「変わっていない」は、控えた 1 枚ではなく挟まった 1 枚との比較になる）。
+  let followPending = false;
 
   // ⚠️ **状態は枠へも流すこと**（2026-09-15。実機で「枠側が録画しているか
   // 分からない」と出た）。**追跡中に見ているのは中継**なので、
@@ -2887,6 +2893,7 @@ ${st.turnLabel}${n}`;
       window.clearInterval(followWatch);
       followWatch = undefined;
     }
+    followPending = false;
     if (on) {
       followTickAt = Date.now();
       followLost = 0;
@@ -2932,10 +2939,36 @@ ${st.turnLabel}${n}`;
     // ⚠️ **見送りとして数えないこと**。`followLost` も録画も
     // **「読んだけれど繋がらなかった」のためのもの**で、
     // 読んでいない周を混ぜると**長考のたびに「見失っています」になる**。
+    let got: Awaited<ReturnType<typeof StudyService.FollowAuto>>;
     if (shot.skipped) {
-      publishFollow(followNote("追跡中"));
-      return false;
+      if (shot.skipped !== "unchanged" || !followPending) {
+        followPending = false;
+        publishFollow(followNote("追跡中"));
+        return false;
+      }
+      // **控えた 1 枚から変わっていない** ＝ 確かめが済んだ。読み直さずに足す。
+      got = await StudyService.FollowConfirm();
+    } else {
+      const read = await followRead(shot);
+      if (!read) {
+        followPending = false;
+        return false;
+      }
+      got = read;
     }
+    followPending = !!got.pending;
+    showStudy(got.state);
+    if (got.pending) {
+      // ⚠️ **見送りとして数えないこと**（足せる手は見つかっている）。間を置かずに
+      // 次の 1 枚を撮って確かめる（変わっていなければ `FollowConfirm` で足す）。
+      publishFollow(followNote("確かめています"));
+      return true;
+    }
+    return followAfter(got);
+  };
+
+  // followRead は**読んだ 1 枚**を追従に渡す（別の盤・盤が無いなら見送って null）。
+  const followRead = async (shot: Awaited<ReturnType<typeof CaptureService.CaptureQuiet>>) => {
     // ⚠️ **別の盤を先に見ること**（2026-09-18）。盤の有無のふるいで落ちた周は
     // **読んでいないので SFEN が空**で、順番が逆だと
     // **大盤が映っているのに「盤が映っていません」**と出る。
@@ -2948,13 +2981,13 @@ ${st.turnLabel}${n}`;
       sidePane.setStatus(`別の盤が映っています（${shot.offBoardReason}）。待っています`);
       void CaptureService.SaveFollowMiss(followWaiting, "offboard");
       publishFollow(followNote("待機中（別の盤）"));
-      return false;
+      return null;
     }
     if (!shot.sfen) {
       // 盤が取れなかった（枠に盤が映っていない）。**黙って次へ。**
       void CaptureService.SaveFollowMiss(followWaiting, "noboard");
       publishFollow(followNote("待機中（盤が映っていません）"));
-      return false;
+      return null;
     }
     // ⚠️ **訂正タブへ流さないこと**（2026-09-15 に実機で踏んだ）。
     // 以前はここで `PositionService.Load` を呼んでいたので、
@@ -2963,8 +2996,11 @@ ${st.turnLabel}${n}`;
     //
     // ⚠️ **禁止事項で塞がないこと** —— 中継を観ながら学習データを作るのは
     // **正当な使い方**（訂正結果を学習に回すのは 2026-08-07 の決定）。
-    const got = await StudyService.FollowAuto(shot.sfen, cellConfidence(shot.debug) ?? null);
-    showStudy(got.state);
+    return await StudyService.FollowAuto(shot.sfen, cellConfidence(shot.debug) ?? null);
+  };
+
+  // followAfter は追従の結果（足した・足せなかった）を画面と録画に出す。戻り値は「すぐ次の 1 周へ行くか」。
+  const followAfter = (got: Awaited<ReturnType<typeof StudyService.FollowAuto>>): boolean => {
     if (got.applied) {
       const moves = got.text?.join(" ") || got.moves?.join(" ") || "";
       const mark = got.guess ? "（推測）" : "";
