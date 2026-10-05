@@ -1447,6 +1447,17 @@ html.is-main #app {
   text-align: right;
 }
 
+/* アプリの版（2026-10-05）。設定ファイルの場所の上に、同じ字で 1 行。 */
+.app-version {
+  display: block;
+  font-size: 11px;
+  color: var(--text-path);
+}
+
+.app-version[hidden] {
+  display: none;
+}
+
 /* 押すとフルパスがクリップボードに入る（撮った PNG のパスと同じ作法）。
    ⚠️ **ボタンらしく見せないこと** —— 設定の一部に見えてはいけないので、
    枠も背景も持たず、ホバーで初めて押せると分かる程度にする。 */

@@ -170,6 +170,9 @@
   **何かの設定に見える**。押すとフルパスがクリップボードに入る
   （撮った PNG のパスと同じ作法。⚠️ **`navigator.clipboard` ではなく
   Wails ランタイムの `Clipboard.SetText`**）。
+  **アプリの版も同じ場所**（パスの上に 1 行。「ikkyoku v0.2.3」。2026-10-05）。
+  ⚠️ **版の組み立ては Go 側**（`SettingsService.AppVersion` を `_cmd/ikkyoku` が差し込む。
+  開発ビルドの `+dev` は `appversion.go`）。フロントは来たものに `ikkyoku v` を付けて出すだけ
   **変えたその場で保存する**（適用ボタンを置かない。押し忘れて反映されないほうが
   分かりにくい）。テキスト欄は `change`（確定時）で拾うので 1 文字ごとには書かない。
   **「駒の字」と「解析エンジン」は畳んである**（2026-09-12。`<details class="setting-fold">`）
