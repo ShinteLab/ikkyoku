@@ -130,6 +130,12 @@ func Rank(from *Position, target *Board, opt ConnectOptions) (RankResult, error)
 			if err := next.ApplyMove(m.USI); err != nil {
 				continue
 			}
+			// ⚠️ **行き先に裏付けの無い手は候補にしない**（`backed`。2026-10-05 に実機で
+			// 踏んだ）。並べたままにすると、行き先がどうせ外れているマスなら
+			// **「空いた」だけで 1 位になる**（手で隠れた飛車が ▲4八飛になった）。
+			if !backed(from.Board, next.Board, target) {
+				continue
+			}
 			add([]string{m.USI}, next.Board)
 		}
 	}

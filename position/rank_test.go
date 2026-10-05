@@ -143,6 +143,79 @@ func TestRankWeightsByConfidence(t *testing.T) {
 	}
 }
 
+// ⚠️ **行き先に、指した側の駒が読めていない手を候補にしないこと**（`backed`。2026-10-05）。
+//
+// **実機の症状**: 指している手が 2八の飛車を隠して「空き」と読ませ、手の影が 4八の
+// 「後手の香」と読まれた 1 枚から ▲4八飛を採った。4八はどの候補でも外れるマスなので
+// 行き先にしても損が無く、**2八が空いたことだけで 1 位になっていた。**
+func TestRankNeedsArrivalEvidence(t *testing.T) {
+	from := mustPos(t, connectHirate)
+	covered := "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B3l3/LNSGKGSNL"
+	r, err := position.Rank(from, boardOf(t, covered), position.ConnectOptions{Cost: evenCost(1)})
+	if err != nil {
+		t.Fatalf("Rank: %v", err)
+	}
+	if len(r.Candidates[0].Moves) != 0 {
+		t.Fatalf("1 位 = %v, want 0 手（空いたことしか根拠が無い）", r.Candidates[0].Moves)
+	}
+	for _, c := range r.Candidates {
+		if len(c.Moves) == 1 && c.Moves[0] == "2h4h" {
+			t.Fatalf("行き先が後手の駒と読まれているのに ▲4八飛 が候補に残っています: %+v", r.Candidates)
+		}
+	}
+}
+
+// ⚠️ **行き先の駒の種類までは求めないこと**（先後が合えばよい）。
+//
+// 種類は認識が一番外すところで、**銀や飛車を香と読む中継が実際にある**（2026-10-05）。
+// 求めると正しい手まで落ちる。
+func TestRankIgnoresKindAtArrival(t *testing.T) {
+	from := mustPos(t, connectHirate)
+	// ▲7六歩。ただし 7六の歩を「先手の香」と読んでいる。
+	target := "lnsgkgsnl/1r5b1/ppppppppp/9/9/2L6/PP1PPPPPP/1B5R1/LNSGKGSNL"
+	r, err := position.Rank(from, boardOf(t, target), position.ConnectOptions{Cost: evenCost(1)})
+	if err != nil {
+		t.Fatalf("Rank: %v", err)
+	}
+	top := r.Candidates[0]
+	if len(top.Moves) != 1 || top.Moves[0] != "7g7f" {
+		t.Fatalf("1 位 = %v, want [7g7f]", top.Moves)
+	}
+	if !r.Decided(position.DefaultMinFit, position.DefaultMinMargin) {
+		t.Errorf("決め打てるはずが決められていません: fit=%v margin=%v", top.Fit, r.Margin)
+	}
+}
+
+// ⚠️ **取る手も同じ扱いであること**（行き先に指した側の駒が来る）。
+//
+// 取られた駒がそのまま読めているなら、取ったという根拠は無い。
+func TestRankCaptureNeedsArrivalEvidence(t *testing.T) {
+	// ▲7六歩 △3四歩 まで。次に ▲2二角成 で角を取れる。
+	from := mustPos(t, "lnsgkgsnl/1r5b1/pppppp1pp/6p2/9/2P6/PP1PPPPPP/1B5R1/LNSGKGSNL b - 3")
+
+	// 8八の角が消えただけで、2二は後手の角のまま読めている → 取ったことにしない。
+	stay := "lnsgkgsnl/1r5b1/pppppp1pp/6p2/9/2P6/PP1PPPPPP/7R1/LNSGKGSNL"
+	r, err := position.Rank(from, boardOf(t, stay), position.ConnectOptions{Cost: evenCost(1)})
+	if err != nil {
+		t.Fatalf("Rank: %v", err)
+	}
+	for _, c := range r.Candidates {
+		if len(c.Moves) == 1 && c.Moves[0] == "8h2b+" {
+			t.Fatalf("2二が後手の駒と読まれているのに ▲2二角成 が候補に残っています: %+v", r.Candidates)
+		}
+	}
+
+	// 2二に先手の駒（種類は外して銀）が読めている → 取った手が 1 位。
+	took := "lnsgkgsnl/1r5S1/pppppp1pp/6p2/9/2P6/PP1PPPPPP/7R1/LNSGKGSNL"
+	r, err = position.Rank(from, boardOf(t, took), position.ConnectOptions{Cost: evenCost(1)})
+	if err != nil {
+		t.Fatalf("Rank: %v", err)
+	}
+	if top := r.Candidates[0]; len(top.Moves) != 1 || top.Moves[0] != "8h2b+" && top.Moves[0] != "8h2b" {
+		t.Fatalf("1 位 = %v, want ▲2二角（成・不成）", top.Moves)
+	}
+}
+
 // 手番が未決なら断ること（1 手も指せないので並べようが無い）。
 func TestRankRefusesUnknownTurn(t *testing.T) {
 	p, err := position.FromBoardSFEN("lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL")

@@ -384,6 +384,27 @@ func TestConnectRepairsOneCell(t *testing.T) {
 	}
 }
 
+// ⚠️ **修復でも、行き先に裏付けの無い手順を繋がないこと**（`backed`。2026-10-05）。
+//
+// 2八が「空き」・4八が「後手の香」と読まれた 1 枚（指している手が飛車を隠した）は、
+// 4八を 1 マス覆せば ▲4八飛 で説明が付いてしまい、**「一意に繋がった」と返っていた。**
+// 根拠は 2八が空いたことだけで、4八には先手の駒が 1 つも読めていない。
+//
+// ⚠️ **種類だけが違うなら繋ぐこと**（4八を「先手の香」と読んでいれば ▲4八飛）。
+func TestConnectRepairNeedsArrivalEvidence(t *testing.T) {
+	from := mustPos(t, connectHirate)
+	covered := "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B3l3/LNSGKGSNL"
+	if r := connect(t, from, covered, position.ConnectOptions{Tolerance: 1}); r.Stop == position.StopFound {
+		t.Fatalf("行き先に先手の駒が無いのに繋がりました: %v（fixed=%+v）", r.Solutions, r.Fixed)
+	}
+
+	kind := "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B3L3/LNSGKGSNL"
+	r := connect(t, from, kind, position.ConnectOptions{Tolerance: 1})
+	if r.Stop != position.StopFound || !r.Unique || len(r.Moves) != 1 || r.Moves[0] != "2h4h" {
+		t.Fatalf("種類だけ違うなら ▲4八飛 で繋がるはず: %+v", r)
+	}
+}
+
 // ⚠️ **厳密一致を先に試すこと。** 認識と合法性が完全に一致したなら、それが
 // 一番強い証拠。**覆す余地があっても覆さない。**
 func TestConnectPrefersExact(t *testing.T) {

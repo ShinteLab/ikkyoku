@@ -744,21 +744,46 @@ func TestFollowAutoCatchesUpFromOneFrame(t *testing.T) {
 	}
 }
 
-// ⚠️ **行き先が決まっていない候補から、追従が 1 本選んで足さないこと**（2026-10-05）。
+// ⚠️ **指している手が盤を覆った 1 枚から、空想の手を足さないこと**（2026-10-05）。
 //
-// **実機の症状**: 指している手が盤を覆っている 1 枚から ▲4八飛を足し、次の 1 枚で
-// それを打ち消す ▲2八飛を足して、本当に指された手を落とした。`Rank` で差が付かず、
-// `Connect` も繋がらなかったので `fallbackFollow` が 1 手の候補を並べ、それを
-// 「順番が決まらないだけ（行き先は同じ）」として採っていた。
+// **実機の症状**: 手が 2八の飛車を隠して「空き」、手の影が 4八の「後手の香」に読まれた
+// 1 枚から ▲4八飛を足し、次の 1 枚でそれを打ち消す ▲2八飛を足して、本当に指された
+// ▲4五同銀を落とした。そこから先は 1 手も繋がらなくなった。
+//
+// **止めているのは `position` の `backed`**（行き先に、指した側の駒が読めていない手は
+// 採らない）。ここでは追従の入口から見て、**1 手も足さず「変わっていない」で見送る**ことを見る。
+func TestFollowAutoIgnoresCoveredBoard(t *testing.T) {
+	s, _ := following(t)
+	// 飛車が手で隠れて、まわりに香や玉の誤読が散った 1 枚（実機の 002 を写した形）。
+	const covered = "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPLPP/1B3l3/LNSGKGSkP"
+	a, err := s.FollowAuto(covered, evenConf(0.5))
+	if err != nil {
+		t.Fatalf("FollowAuto: %v", err)
+	}
+	if a.Applied || a.Added != 0 {
+		t.Fatalf("手で隠れた 1 枚から手を足しました: %v", a.Moves)
+	}
+	if a.Kind != FollowSame {
+		t.Errorf("Kind = %q, want %q（%s）", a.Kind, FollowSame, a.Reason)
+	}
+}
+
+// ⚠️ **行き先の違う候補（`Unsettled`）から、追従が 1 本選んで足さないこと**（2026-10-05）。
+//
+// `Rank` で差が付かず `Connect` も繋がらないと、`fallbackFollow` が 1 手の候補を
+// `FollowChoices` で並べる。**候補ごとに行き着く局面が違う**ので、「順番が決まらない
+// だけ（行き先は同じ）」として進んでよい `Connect` の解とは別物。
+// 実機ではこれを取り違えて、上の ▲4八飛を採っていた。
 //
 // ⚠️ **手で繋ぐ側（`FollowProbe`）が候補を出すことは変えない**（黙って無反応にしない）。
 func TestFollowAutoDoesNotPickUnsettled(t *testing.T) {
 	s, pos := following(t)
-	// 飛車が手で隠れて、まわりに香や玉の誤読が散った 1 枚（実機の 002 を写した形）。
-	const covered = "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPLPP/1B3l3/LNSGKGSkP"
+	// 先手の歩が 3 本進んでいる（後手は 1 筋の香で往復しただけ）。1 手では説明が付かず、
+	// 深さ 4 でも繋がらない。
+	board := boardAfter(t, "7g7f", "1a1b", "2g2f", "1b1a", "8g8f")
 
 	// 前提: 手で繋ぐ側には「行き先の違う候補」として並ぶこと。
-	shotWith(t, pos, covered, evenConf(0.5))
+	shotWith(t, pos, board, evenConf(0.5))
 	p, err := s.FollowProbe()
 	if err != nil {
 		t.Fatalf("FollowProbe: %v", err)
@@ -767,7 +792,7 @@ func TestFollowAutoDoesNotPickUnsettled(t *testing.T) {
 		t.Fatalf("前提が崩れています: kind=%q unsettled=%v 候補=%v", p.Kind, p.Unsettled, p.Candidates)
 	}
 
-	a, err := s.FollowAuto(covered, evenConf(0.5))
+	a, err := s.FollowAuto(board, evenConf(0.5))
 	if err != nil {
 		t.Fatalf("FollowAuto: %v", err)
 	}

@@ -341,7 +341,7 @@ func search(ctx context.Context, root *Position, target *Board, opt ConnectOptio
 		h = 1 // 0 手は呼ぶ前に弾いてある（`StopSame`）
 	}
 
-	s := &connect{ctx: ctx, target: target, maxNodes: opt.maxNodes(),
+	s := &connect{ctx: ctx, root: root.Board, target: target, maxNodes: opt.maxNodes(),
 		want: collect, cost: cost, tolerance: tolerance, bestCost: math.Inf(1)}
 	for limit := h; limit <= depth; limit++ {
 		s.limit = limit
@@ -380,7 +380,9 @@ func ConnectSFEN(ctx context.Context, from *Position, boardSFEN string, opt Conn
 
 // connect は 1 回の探索の作業領域。
 type connect struct {
-	ctx      context.Context
+	ctx context.Context
+	// root は繋ぐ元の盤（**行き先の裏付け**を見るため。`backed`）。
+	root     *Board
 	target   *Board
 	limit    int
 	maxNodes int
@@ -470,7 +472,9 @@ func (s *connect) dfs(pos *Position, g int) bool {
 	// ⚠️ **根そのものを解にしないこと**（`g > 0`）。修復探索では「1 手も指さずに
 	// 予算内」が起こりうるが、それは**何も起きていない**ということなので、
 	// 空の手順を据えるのではなく `StopSame` として扱う（呼び出し側）。
-	if g > 0 && d.cost <= s.tolerance+costEpsilon {
+	// ⚠️ **行き先に裏付けの無い手順は解にしない**（`backed`。2026-10-05）。厳密一致では
+	// 必ず通る（撮った盤とぴったり同じなので）。効くのは修復のときだけ。
+	if g > 0 && d.cost <= s.tolerance+costEpsilon && backed(s.root, pos.Board, s.target) {
 		s.sols = append(s.sols, solution{
 			moves: append([]string(nil), s.path...),
 			cost:  d.cost,
@@ -680,6 +684,35 @@ func (d *diff) fixes(cur, tgt *Board) []Fix {
 }
 
 func (d *diff) same() bool { return d.arrive == 0 && d.vacate == 0 }
+
+// backed は from から cand へ指したとき、**駒が来たマスがすべて、撮った盤（tgt）で
+// 同じ持ち主の駒として読めているか**を返す（2026-10-05）。
+//
+// **手を足す根拠は「駒が来た」ことでなければならない。「駒が消えた（空いた）」だけを
+// 根拠にしないこと。** 実機で、指している手が 2八の飛車を隠して「空き」と読ませ、
+// 手の影を 4八の「後手の香」と読ませた 1 枚から ▲4八飛を足した —— 4八はどの候補でも
+// 外れるマスなので行き先にしても損が無く、**2八が空いたことだけで 1 位になっていた。**
+// 空きは手や影で簡単に作られるが、**その側の駒が現れることは偶然では起きにくい。**
+//
+// ⚠️ **駒の種類までは見ないこと。** 種類は認識が一番外すところで（銀や飛車を香と読む
+// 中継がある）、求めると正しい手まで落ちる。先後は駒の種類とは別に読んでいる。
+// ⚠️ **見るのは根と最後の盤の差だけ**（途中で来て、また去ったマスは問わない）。
+// 取る手は行き先に指した側の駒が来るので、そのまま同じ扱いになる。
+func backed(from, cand, tgt *Board) bool {
+	for r := 0; r < 9; r++ {
+		for f := 0; f < 9; f++ {
+			c := cand.cells[r][f]
+			if c.IsEmpty() || c == from.cells[r][f] {
+				continue
+			}
+			t := tgt.cells[r][f]
+			if t.IsEmpty() || t.Black() != c.Black() {
+				return false
+			}
+		}
+	}
+	return true
+}
 
 // bound は「ここから最低何手要るか」（**admissible な下界**）。
 //

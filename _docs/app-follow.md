@@ -244,5 +244,7 @@ FollowProbe ─> Rank（候補から選ぶ。29µs）─┬─ 読めていな�
   ⚠️ **戻って読んでいる最中は見ている場所を動かさないこと**
   （**中継が進むたびに引き剥がされると検討そのものができない**）・
   ⚠️ **足せる手が無いときは黙って見送ること**（失敗にしない）・
+  ⚠️ **手で盤が隠れた 1 枚から手を足さず「変わっていない」で見送ること**
+  （`TestFollowAutoIgnoresCoveredBoard`。止めているのは `position.backed`。2026-10-05）・
   ⚠️ **行き先の違う候補（`Unsettled`）から 1 本選んで足さないこと**
-  （`TestFollowAutoDoesNotPickUnsettled`。手で盤が隠れた 1 枚から空想の手を足した。2026-10-05）
+  （`TestFollowAutoDoesNotPickUnsettled`）
