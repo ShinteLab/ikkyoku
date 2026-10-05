@@ -25,6 +25,8 @@ bash _docs/skills/ikkyoku-cloud/cloud.sh setup   # wails3・bindings・npm だ�
 - ⚠️ **クラウド以外では何もしない**（1 行出して終わる）
 - **リポジトリは触らない**（差し替えは `-overlay` の写し、`frontend/dist` は無ければ一時的に作って消す。
   bindings と node_modules は .gitignore 済み）
+- ⚠️ **`cloud.sh` を CRLF で保存しないこと**（クラウドの bash が `$'\r': command not found` で動かない）。
+  `.gitattributes` で固定する案は、`.gitignore` が `.*` を無視しているので入れていない
 
 ## なぜ使用量が減るのか
 
