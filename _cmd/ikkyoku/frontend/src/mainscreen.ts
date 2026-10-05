@@ -3377,6 +3377,11 @@ ${st.turnLabel}${n}`;
   // 畳む前の高さ。**畳んで開き直したときに元の高さへ戻すため**に覚えておく
   // （既定に戻すと、せっかく広げたのが畳むたびに失われる）。
   let evalGraphOpenH = EVAL_GRAPH_DEFAULT;
+  // 評価値グラフを別ウィンドウへ切り離しているか（下の「別ウィンドウへの切り離し」）。
+  // ⚠️ **null は「まだ決まっていない」。** 起動直後の 1 回だけは、値が同じでも
+  // 通してレイアウトを整える必要がある。
+  // ⚠️ **`setEvalGraphH` より前で宣言すること** —— あちらが読む。
+  let graphDetached: boolean | null = null;
 
   // 上限は窓の高さから決める。**盤が潰れるところまで伸ばさせない**
   // （`#panel-study` はスクロールしないので、伸ばしすぎると盤がはみ出す）。
@@ -3394,7 +3399,13 @@ ${st.turnLabel}${n}`;
       evalGraphOpenH = next;
     }
     // ⚠️ **`documentElement` に入れること**（`:root`）。盤の式が読む先はここ。
-    document.documentElement.style.setProperty("--eval-graph-h", `${next}px`);
+    // ⚠️ **切り離しているあいだは 0 のまま**（2026-10-05 に踏んだ）。覚える高さは
+    // 変えてよいが、盤の式に書き戻すと**行が無いのにそのぶん盤が小さくなり、
+    // 盤の下に何も無い帯が残る**（窓のリサイズが上限で詰め直す経路から来る）。
+    // 0 を入れるのは `applyGraphDetached` で、戻すときにここの値を入れ直す。
+    if (graphDetached !== true) {
+      document.documentElement.style.setProperty("--eval-graph-h", `${next}px`);
+    }
     const open = next > 0;
     evalGraphRow.classList.toggle("is-collapsed", !open);
     evalGraphToggle.innerHTML = iconMarkup(open ? FiChevronDown : FiChevronUp);
@@ -3462,13 +3473,20 @@ ${st.turnLabel}${n}`;
   // ⚠️ **横の遊びも取り直す**（窓の幅が変われば盤の上限に張り付く一点も動く）。
   // ⚠️ **窓が狭くて盤が潰れたら、幅の指定を捨てて取り直す** —— 盤が読めない
   // 大きさのまま残るより、まず盤を成立させる。
+  // ⚠️ **最小化（窓の大きさ 0）では何もしないこと**（2026-10-05）。上限が
+  // 下限まで落ちるので、**最小化して戻しただけでグラフが 86px に縮んだまま**になる。
   window.addEventListener("resize", () => {
+    if (window.innerWidth === 0 || window.innerHeight === 0) {
+      return;
+    }
     if (evalGraphH > 0) {
       setEvalGraphH(evalGraphH);
     }
     // ⚠️ **畳んでいるときは触らない**（0 を上書きすると、窓を動かしただけで
     // 勝手に開く）。畳んでいれば列は幅を取っていないので、そもそも起きない。
-    if (studySideW > 0 && boardW() > 0 && boardW() < STUDY_BOARD_MIN) {
+    // ⚠️ **両方とも切り離しているときも触らない**（2026-10-05）。列が無いのに
+    // 幅を予約すると、**そのぶん盤が小さいまま**になる（`applyPanes` の 0 を上書きする）。
+    if (!bothDetached() && studySideW > 0 && boardW() > 0 && boardW() < STUDY_BOARD_MIN) {
       studySideW = STUDY_SIDE_MIN;
       studySideOpenW = STUDY_SIDE_MIN;
       rawSide(STUDY_SIDE_MIN);
@@ -3503,10 +3521,7 @@ ${st.turnLabel}${n}`;
   // ⚠️ **畳んだ行の高さ（バー 8 + gap 2 + 逃げ 6 = 16px）を変えたら測り直すこと。**
   const EVAL_GRAPH_PAD_DETACHED = "8px";
 
-  // ⚠️ **null は「まだ決まっていない」。** 起動直後の 1 回だけは、値が同じでも
-  // 通してレイアウトを整える必要がある。
-  let graphDetached: boolean | null = null;
-
+  // ⚠️ **`graphDetached` は上（`setEvalGraphH` の前）で宣言している。**
   const applyGraphDetached = (on: boolean) => {
     if (graphDetached === on) {
       return;
