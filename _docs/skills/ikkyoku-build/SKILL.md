@@ -168,6 +168,11 @@ go run _cmd/version.go           # version の値で config.yml / package.json �
 go run _cmd/version.go -auto     # v+今のバージョンのタグがあれば patch を上げる（無ければ揃え直すだけ）
 ```
 
+- **`wails3 dev` など開発ビルドの起動ログは、patch を 1 つ上げて `+dev` を付けて名乗る**
+  （`version` が 0.2.3 なら `0.2.4+dev`。2026-10-05。`_cmd/ikkyoku/appversion.go`）。`version` は
+  `local:deploy` が上げてタグを打つので**最後に配った版**で、そのまま名乗ると配った exe のログと
+  見分けが付かないため。⚠️ **表示だけで、`version` ファイルは書き換えない**。
+  ⚠️ ブランチが最後の deploy のコミットを取り込んでいないと、配った版と同じ番号に `+dev` が付く
 - ⚠️ **`version` も `config.yml` の `info.version` も `package.json` も手で書き換えない。**
   ずれると exe に焼き込まれる値と、ファイルのプロパティに出る値が食い違う
 - ⚠️ **`build/windows/info.json` などは `version.go` が書かない。** `wails3 update build-assets` で

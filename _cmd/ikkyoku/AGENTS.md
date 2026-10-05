@@ -71,7 +71,7 @@ CLI は無い。**
 | `embedmodel_on.go` / `embedmodel_off.go` / `model/` | **認識器の焼き込み**（2026-10-04 に `recognize` から移した）。`-tags embedmodel` のときだけ `model/`（手元のモデル）を `go:embed` し、`main` が `recognize.SetEmbedded` で渡す。`model/` の中身は suteme の配布用の書き出し（`go run ./_cmd/suteme-training -export -gzip -out <ここの model>`）。⚠️ **`model/` はフォルダごと git に入れない**（`.gitignore`）・⚠️ **ビルドで suteme を見ない**（入れ替えは suteme で書き出すか `build:embed MODEL_DIR=`。`build/model.ps1`）。理由は `_docs/design-capture.md` の「決定: 認識器は 3 段」 |
 | `version` | **アプリのバージョン（唯一の正）**。`main.go` が `//go:embed` で焼き込み、起動時にログへ出す。⚠️ **手で書き換えない** —— ルートで `go run _cmd/version.go` を使う（`config.yml` と `package.json` へも伝播させる。手順はスキル `ikkyoku-build`） |
 | `Taskfile.local.yml` | **git に入れない**個人用の `local:deploy`（バージョンの伝播 → 焼き込みビルド → ビルド情報のコミット → タグ → 常用場所へコピー）。雛形と手順はスキル `ikkyoku-build`。⚠️ **`Taskfile.yml` の include の `optional: true` を外さない**（無い環境で全部のタスクが落ちる） |
-| `devbuild.go` / `prodbuild.go` | **ログをターミナルにも出すか**（`consoleLog`）。ビルドタグ `production` が無い（＝ `wails3 dev`）ときだけ出す。⚠️ **判定はビルドタグで**（配る exe は `-H windowsgui` で標準エラーの行き先が無い）。ログ本体は `log/AGENTS.md` |
+| `devbuild.go` / `prodbuild.go` | **ログをターミナルにも出すか**（`consoleLog`）と、**起動ログの版に `+dev` を付けるか**（`devBuild` → `appversion.go`。開発ビルドは patch を 1 つ上げて名乗る）。ビルドタグ `production` が無い（＝ `wails3 dev`）ときだけ出す。⚠️ **判定はビルドタグで**（配る exe は `-H windowsgui` で標準エラーの行き先が無い）。ログ本体は `log/AGENTS.md` |
 | `frontend/src/*.ts` | **画面。⚠️ 一覧と制約は `_cmd/ikkyoku/frontend/src/AGENTS.md`**（そこから `_docs/ui/*.md` を引く） |
 
 ## テスト（`go test ./...`）

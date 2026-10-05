@@ -9,3 +9,6 @@ package main
 // ⚠️ **判定をビルドタグでしていること**（環境変数や引数では見ない）。配る exe は
 // -H windowsgui で標準エラーの行き先が無いので、そちらで立てても意味が無い。
 const consoleLog = true
+
+// devBuild は配るビルドではないか。起動ログの版に `+dev` を付けるのに使う（`appVersion`）。
+const devBuild = true

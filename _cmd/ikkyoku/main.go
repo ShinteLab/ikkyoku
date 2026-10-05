@@ -91,7 +91,7 @@ func main() {
 	// ⚠️ **ここから下で panic したら、箱を出してから終わる**（fatal.go）。配る exe は
 	// 標準エラーの行き先が無いので、無いと**何も言わずに消える**。
 	defer recoverMain()
-	log.Info("ikkyoku を起動します", "version", strings.TrimSpace(version))
+	log.Info("ikkyoku を起動します", "version", appVersion())
 
 	// 起動はできたが足りないもの・できないこと（2026-10-04）。メイン画面のツールバーの ⚠ が
 	// 一覧にする。**どれも起動は止めない**（設計原則3）。載せ方は issues.go。
