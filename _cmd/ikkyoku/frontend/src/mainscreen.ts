@@ -1563,6 +1563,7 @@ export function mountMainScreen(root: HTMLElement): void {
              並んでいたため、**何かの設定に見えていた。**
              押すとフルパスがクリップボードに入る（撮った PNG のパスと同じ作法）。 -->
         <p class="setting-footer">
+          <span id="app-version" class="app-version" hidden></span>
           <button id="settings-path" class="path-btn" type="button"
                   title="押すとフルパスをクリップボードにコピーします">-</button>
         </p>
@@ -4987,6 +4988,8 @@ ${st.turnLabel}${n}`;
   const themeSelect = root.querySelector<HTMLSelectElement>("#theme-select")!;
   const themeFoldSum = root.querySelector<HTMLElement>("#fold-theme-sum")!;
   const settingsPath = root.querySelector<HTMLButtonElement>("#settings-path")!;
+  // アプリの版（2026-10-05）。設定ファイルの場所と同じく**設定の項目ではない**ので、隅に小さく出す。
+  const appVersion = root.querySelector<HTMLSpanElement>("#app-version")!;
   // ⚠️ **クリップボードは Wails ランタイム**（`navigator.clipboard` は secure context
   // 前提で、カスタムスキーム配信のこの webview では当てにできない）。
   settingsPath.addEventListener("click", () => {
@@ -5585,6 +5588,8 @@ ${st.turnLabel}${n}`;
     sutemeEmbedAvailable: boolean;
     sutemeEmbedSource: string;
     kifuDbPath: string;
+    // アプリの版（2026-10-05。開発ビルドは `0.2.4+dev`）。空なら出さない。
+    appVersion: string;
   }) => {
     fitOnStartup.checked = s.fitOnStartup;
     clickThrough.checked = s.clickThrough;
@@ -5615,6 +5620,9 @@ ${st.turnLabel}${n}`;
       : "設定ファイル: (保存先を決められませんでした)";
     settingsPath.dataset.path = s.path ?? "";
     settingsPath.disabled = !s.path;
+    // ⚠️ **版の組み立ては Go 側**（開発ビルドの `+dev` もあちら）。来たものを出すだけ。
+    appVersion.textContent = s.appVersion ? `ikkyoku v${s.appVersion}` : "";
+    appVersion.hidden = !s.appVersion;
     // エンジンの色（評価値グラフ・見出しの色見本）。**設定が唯一の出所**で、
     // 既定色の解決も Go 側が済ませてある（`EngineSettings.Color` は常に入っている）。
     // ⚠️ **評価値グラフの置き場所も設定から受け取る**（2026-09-08）。

@@ -138,6 +138,9 @@ type AppSettings struct {
 	// Path は設定ファイルの場所。**表示のためだけ。** 手で編集したくなったときに
 	// 探さずに済むよう出しておく(学習データの置き場所もこのファイルにある)。
 	Path string `json:"path"`
+	// AppVersion はアプリの版（`SettingsService.AppVersion`。2026-10-05）。**表示のためだけ。**
+	// 開発ビルドは `0.2.4+dev` の形で来る。空なら出さない。
+	AppVersion string `json:"appVersion"`
 }
 
 // TrainingSettings は「訂正盤面を suteme に登録する」の設定。
@@ -315,6 +318,11 @@ func engineSettings(e ikkyoku.EngineEntry, i int) EngineSettings {
 // CaptureService と分けてあるのは、あちらが「撮る」ことの責務だから。設定は
 // 起動時にも読むので、**main() が最初に作って、読み込み済みの Config を配る**役でもある。
 type SettingsService struct {
+	// AppVersion はアプリの版（設定タブの隅に出す。2026-10-05）。**`_cmd/ikkyoku` が差し込む** ——
+	// 版は exe に焼き込まれていて、開発ビルドかどうかもビルドタグでしか分からないので、
+	// こちらでは決められない（`_cmd/ikkyoku/appversion.go`）。起動前に 1 回入れるだけ。
+	AppVersion string
+
 	// PickFile はファイル選択ダイアログ。**`_cmd/ikkyoku` が差し込む。**
 	//
 	// ⚠️ **ここで Wails を import しないこと。** ダイアログは Wails の口だが、
@@ -483,7 +491,8 @@ func (s *SettingsService) settings() AppSettings {
 		// 解決できない環境では空のまま返す（画面には理由が別に出る）。
 		KifuDBPath: s.kifuDBPathLocked(),
 
-		Path: s.path,
+		Path:       s.path,
+		AppVersion: s.AppVersion,
 	}
 }
 

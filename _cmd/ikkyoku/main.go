@@ -123,6 +123,7 @@ func main() {
 	recognize.SetEmbedded(embeddedModel())
 
 	settingsSvc := ikkyokuapp.NewSettingsService()
+	settingsSvc.AppVersion = appVersion()
 	cfg := settingsSvc.Config()
 	if backup, err := settingsSvc.LoadProblem(); err != nil {
 		effect := "既定の設定で動いています。設定を変えると、読めなかったファイルは上書きされます"
