@@ -53,6 +53,8 @@ type StudyService struct {
 	Emit EventEmitter
 
 	mu sync.Mutex
+	// pending は追従が 1 枚目で見つけた、まだ足していない答え（`followPending`。2026-10-05）。
+	pending *followPending
 	// study は確定した局面を根にした検討（手順を含む）。まだ採っていなければ nil。
 	//
 	// ⚠️ **局面を単体で持たない。** 「今の局面」は根 + 手順から組み立てるもので、
