@@ -117,6 +117,7 @@ Claude Code でスキルとして使いたい人は、各自の `.claude/skills/
 | スキル **`ikkyoku-verify`**（`_docs/skills/`） | **実機で何を押すか**（未検証チェックリスト・確認済みの記録・確かめ方） | 実装が終わって実機で触るとき |
 | スキル **`ikkyoku-follow`**（`_docs/skills/`） | **中継の追従の調整とデバッグ**（症状から引く表・録画とログの読み方・ふるいの定数の詰め方・速さの実測） | 追従が進まないとき / 定数を詰めるとき |
 | スキル **`ikkyoku-handicap-mate`**（`_docs/skills/`） | **手合割（駒落ち）と詰将棋の全体像**（3 通りの解釈・4 つの入口・側の呼び名）と**詰将棋エンジンを繋ぐ手順**、⚠️ **どのエンジンが何を返すかの実測**（`references/engines.md`） | 駒落ち・詰将棋・詰み探索を触るとき |
+| スキル **`ikkyoku-cloud`**（`_docs/skills/`） | **クラウド（Linux コンテナ）で組む・テストする 1 コマンド**（`cloud.sh test` / `check`）と、使用量を抑える約束。⚠️ **`CLAUDE_CODE_REMOTE=true` のときだけ読む**（手元では要らない） | クラウドで動いているとき（**手探りで準備する前に**） |
 | スキル `wails3` | Wails3 全般。⚠️ **alpha2.117 前提なので beta.26 と食い違う** | Wails の API で詰まったとき |
 | **各パッケージの `AGENTS.md`** | **そのコードを触るときの制約**（`recognize` / `position` / `analyze` / `app` / `guide` / `piecefont` / `training` / `legal` / `usi` / `_cmd/ikkyoku`）。**テストが何の歯止めか**も、それぞれの「テスト」節 | そのディレクトリを触るとき（自動で読まれる） |
 | `_cmd/ikkyoku/frontend/src/AGENTS.md` | **画面（フロント）の地図と、崩さないこと 12 箇条** | フロントを触るとき（自動で読まれる） |
