@@ -469,11 +469,11 @@ func TestFollowProbeDoesNotGuessWhenUnclear(t *testing.T) {
 // 1 回目で控えなかった（足せる手が無かった）ならそれを返す。
 func followAuto(t *testing.T, s *StudyService, board string, conf []float64) (FollowAuto, error) {
 	t.Helper()
-	first, err := s.FollowAuto(board, conf)
+	first, err := s.FollowAuto(board, conf, nil)
 	if err != nil || !first.Pending {
 		return first, err
 	}
-	return s.FollowAuto(board, conf)
+	return s.FollowAuto(board, conf, nil)
 }
 
 // ⚠️ **追従は人に判断させないこと**（2026-09-15）。
@@ -549,7 +549,7 @@ func TestFollowAutoSkipsQuietly(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			s, _ := following(t)
 			before := s.State().Rev
-			a, err := s.FollowAuto(c.board, c.conf)
+			a, err := s.FollowAuto(c.board, c.conf, nil)
 			if err != nil {
 				t.Fatalf("FollowAuto: %v（見送りは失敗にしない）", err)
 			}
@@ -642,7 +642,7 @@ func TestFollowProbeSameDespiteNoise(t *testing.T) {
 	}
 	// 追従でも手が増えないこと。
 	a, err := s.FollowAuto("lnsgkgsnl/1r5b1/2ppppppp/9/4p4/9/PPPPPPPPP/1B5R1/LNSGKGSNL",
-		evenConf(0.5))
+		evenConf(0.5), nil)
 	if err != nil {
 		t.Fatalf("FollowAuto: %v", err)
 	}
@@ -767,7 +767,7 @@ func TestFollowAutoIgnoresCoveredBoard(t *testing.T) {
 	s, _ := following(t)
 	// 飛車が手で隠れて、まわりに香や玉の誤読が散った 1 枚（実機の 002 を写した形）。
 	const covered = "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPLPP/1B3l3/LNSGKGSkP"
-	a, err := s.FollowAuto(covered, evenConf(0.5))
+	a, err := s.FollowAuto(covered, evenConf(0.5), nil)
 	if err != nil {
 		t.Fatalf("FollowAuto: %v", err)
 	}
@@ -803,7 +803,7 @@ func TestFollowAutoDoesNotPickUnsettled(t *testing.T) {
 		t.Fatalf("前提が崩れています: kind=%q unsettled=%v 候補=%v", p.Kind, p.Unsettled, p.Candidates)
 	}
 
-	a, err := s.FollowAuto(board, evenConf(0.5))
+	a, err := s.FollowAuto(board, evenConf(0.5), nil)
 	if err != nil {
 		t.Fatalf("FollowAuto: %v", err)
 	}
@@ -858,7 +858,7 @@ func TestFollowAutoNoticesFlippedBoard(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FromSFEN: %v", err)
 	}
-	a, err := s.FollowAuto(flipped.Rotate180().SFEN(), evenConf(0.9))
+	a, err := s.FollowAuto(flipped.Rotate180().SFEN(), evenConf(0.9), nil)
 	if err != nil {
 		t.Fatalf("FollowAuto: %v", err)
 	}
@@ -900,7 +900,7 @@ func TestFollowAutoWaitsForSecondFrame(t *testing.T) {
 	s, _ := following(t)
 	board := boardAfter(t, "7g7f")
 
-	a, err := s.FollowAuto(board, evenConf(0.9))
+	a, err := s.FollowAuto(board, evenConf(0.9), nil)
 	if err != nil {
 		t.Fatalf("FollowAuto: %v", err)
 	}
@@ -911,7 +911,7 @@ func TestFollowAutoWaitsForSecondFrame(t *testing.T) {
 		t.Fatalf("手順 = %d, want 0（まだ足さない）", n)
 	}
 
-	a, err = s.FollowAuto(board, evenConf(0.9))
+	a, err = s.FollowAuto(board, evenConf(0.9), nil)
 	if err != nil {
 		t.Fatalf("FollowAuto: %v", err)
 	}
@@ -928,15 +928,15 @@ func TestFollowAutoDropsTransientFrame(t *testing.T) {
 	s, _ := following(t)
 	moved := boardAfter(t, "7g7f")
 
-	if a, _ := s.FollowAuto(moved, evenConf(0.9)); !a.Pending {
+	if a, _ := s.FollowAuto(moved, evenConf(0.9), nil); !a.Pending {
 		t.Fatalf("前提: 1 枚目は控えるはず: %+v", a)
 	}
 	// 手がどいて、何も指していない盤に戻った。
-	if a, err := s.FollowAuto(hirateBoard, evenConf(0.9)); err != nil || a.Applied || a.Pending {
+	if a, err := s.FollowAuto(hirateBoard, evenConf(0.9), nil); err != nil || a.Applied || a.Pending {
 		t.Fatalf("何も指していない盤で足すか控えました: %+v（%v）", a, err)
 	}
 	// もう一度同じ盤が来ても、**控えは捨ててあるので 1 枚目の扱い**になること。
-	a, err := s.FollowAuto(moved, evenConf(0.9))
+	a, err := s.FollowAuto(moved, evenConf(0.9), nil)
 	if err != nil {
 		t.Fatalf("FollowAuto: %v", err)
 	}
@@ -956,7 +956,7 @@ func TestFollowConfirm(t *testing.T) {
 		t.Fatalf("控えが無いのに足しました: %+v（%v）", a, err)
 	}
 
-	if a, _ := s.FollowAuto(boardAfter(t, "7g7f"), evenConf(0.9)); !a.Pending {
+	if a, _ := s.FollowAuto(boardAfter(t, "7g7f"), evenConf(0.9), nil); !a.Pending {
 		t.Fatalf("前提: 1 枚目は控えるはず: %+v", a)
 	}
 	a, err := s.FollowConfirm()
@@ -972,7 +972,7 @@ func TestFollowConfirm(t *testing.T) {
 	}
 
 	// 本譜の先端が動いたら、控えは捨てる（違う局面の先に繋がないため）。
-	if a, _ := s.FollowAuto(boardAfter(t, "7g7f", "3c3d"), evenConf(0.9)); !a.Pending {
+	if a, _ := s.FollowAuto(boardAfter(t, "7g7f", "3c3d"), evenConf(0.9), nil); !a.Pending {
 		t.Fatalf("前提: 1 枚目は控えるはず: %+v", a)
 	}
 	if _, err := s.FollowApply([]string{"8c8d"}, s.State().Rev, false); err != nil {

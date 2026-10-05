@@ -5,7 +5,7 @@ go 1.26.1
 require (
 	github.com/ShinteLab/core v0.2.0
 	github.com/ShinteLab/engine v0.2.1
-	github.com/ShinteLab/suteme v0.2.1
+	github.com/ShinteLab/suteme v0.2.2-0.20261005193623-e2468164be4f
 	github.com/kbinani/screenshot v0.0.0-20250624051815-089614a94018
 	github.com/wenteasy/log v0.3.0
 	golang.design/x/hotkey v0.6.1

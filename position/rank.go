@@ -109,12 +109,12 @@ func Rank(from *Position, target *Board, opt ConnectOptions) (RankResult, error)
 	}
 
 	cost := opt.Cost
-	out := RankResult{Total: totalCost(cost)}
+	out := RankResult{Total: totalCost(cost, opt.Unseen)}
 
 	// **何も指していない**も候補（中継がまだ進んでいないことは普通にある）。
 	add := func(moves []string, board *Board) {
-		d := newDiff(board, target, cost, 0)
-		c := Candidate{Moves: moves, Cost: d.cost, Fixed: d.fixes(board, target)}
+		d := newDiff(board, target, cost, 0, opt.Unseen)
+		c := Candidate{Moves: moves, Cost: d.cost, Fixed: d.fixes(board, target, opt.Unseen)}
 		if out.Total > 0 {
 			c.Fit = 1 - c.Cost/out.Total
 		}
@@ -133,7 +133,8 @@ func Rank(from *Position, target *Board, opt ConnectOptions) (RankResult, error)
 			// ⚠️ **行き先に裏付けの無い手は候補にしない**（`backed`。2026-10-05 に実機で
 			// 踏んだ）。並べたままにすると、行き先がどうせ外れているマスなら
 			// **「空いた」だけで 1 位になる**（手で隠れた飛車が ▲4八飛になった）。
-			if !backed(from.Board, next.Board, target) {
+			// ⚠️ **行き先が読めていないマス（`Unseen`）の手も同じ**（2026-10-06）。
+			if !backed(from.Board, next.Board, target, opt.Unseen) {
 				continue
 			}
 			add([]string{m.USI}, next.Board)
@@ -162,10 +163,16 @@ func (o ConnectOptions) rankCandidates() int {
 }
 
 // totalCost は全マスぶんの費用（`Fit` の分母）。
-func totalCost(c *CellCost) float64 {
+//
+// ⚠️ **読めていないマスは分母にも入れない**（食い違いに数えないマスを分母にだけ入れると、
+// 手や頭が被るほど一致度が良く見える）。
+func totalCost(c *CellCost, unseen *CellMask) float64 {
 	sum := 0.0
 	for r := 0; r < 9; r++ {
 		for f := 0; f < 9; f++ {
+			if unseen.at(r, f) {
+				continue
+			}
 			sum += c.at(r, f)
 		}
 	}

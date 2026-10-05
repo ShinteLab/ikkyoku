@@ -2630,6 +2630,27 @@ ${st.turnLabel}${n}`;
     return out;
   };
 
+  // cellHidden は**手や頭が被って見えないマス**を 81 個の並びにする（行優先。2026-10-06）。
+  //
+  // suteme が `CellDebug.Hidden` で返す印。⚠️ **判断は Go 側**（見えないマスを根拠にも
+  // 減点にもしない・行き先が見えない手は足さない）—— ここは形を整えるだけ。
+  // ⚠️ **1 つも立っていなければ undefined**（全部見えている。今までどおり）。
+  const cellHidden = (dbg: Debug | null | undefined): boolean[] | undefined => {
+    const cells = dbg?.cells;
+    if (!cells || cells.length === 0) {
+      return undefined;
+    }
+    const out = new Array<boolean>(81).fill(false);
+    let any = false;
+    for (const c of cells) {
+      if (c.hidden && c.row >= 0 && c.row < 9 && c.col >= 0 && c.col < 9) {
+        out[c.row * 9 + c.col] = true;
+        any = true;
+      }
+    }
+    return any ? out : undefined;
+  };
+
   // 訂正タブ → 解析タブ。**受け渡しはこの 1 か所だけ。**
   //
   // ⚠️ **確定しているかの判定は Go 側（StudyService.Adopt）に任せる。** 手番か
@@ -3015,7 +3036,11 @@ ${st.turnLabel}${n}`;
     //
     // ⚠️ **禁止事項で塞がないこと** —— 中継を観ながら学習データを作るのは
     // **正当な使い方**（訂正結果を学習に回すのは 2026-08-07 の決定）。
-    return await StudyService.FollowAuto(shot.sfen, cellConfidence(shot.debug) ?? null);
+    return await StudyService.FollowAuto(
+      shot.sfen,
+      cellConfidence(shot.debug) ?? null,
+      cellHidden(shot.debug) ?? null,
+    );
   };
 
   // followAfter は追従の結果（足した・足せなかった）を画面と録画に出す。戻り値は「すぐ次の 1 周へ行くか」。
@@ -3054,6 +3079,16 @@ ${st.turnLabel}${n}`;
           "訂正タブの「目線」を『後手が手前』にして、撮り直して" +
           "「この局面を解析する」からやり直してください",
       );
+      return false;
+    }
+    // ⚠️ **何かが盤に被っている周も迷子ではない**（2026-10-06）。手や頭がどけば次の 1 枚で
+    // 入るので**待つだけ**で、「見失っています」に数えない（頭が長く被ると誤って言い出す）。
+    // ⚠️ **「変わっていません」と言わないこと** —— 次にすることは同じ（待つ）でも理由が違う。
+    // 残す画像も「被っていた」と分かる名前にする（変わり目だけ。Go 側が間引く）。
+    if ((got.unseen ?? 0) > 0) {
+      void CaptureService.SaveFollowMiss(followWaiting, "covered");
+      followLost = 0;
+      publishFollow(followNote(`待機中（盤に何か被っています・${got.unseen} マス）`));
       return false;
     }
     // ⚠️ **「変わっていない」は迷子ではない**（長考中は毎周これ）。

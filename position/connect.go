@@ -85,6 +85,36 @@ func (c *CellCost) at(rank, file int) float64 {
 	return c[rank][file]
 }
 
+// CellMask は**読めていないマス**の印（rank, file の順。真 = 読めていない。2026-10-06）。
+//
+// 中継では、指している手や解説者の頭が盤に被った 1 枚が撮れる。そのマスの読みは
+// 「空き」か「どちらかの駒」に化けていて、**どちらにしても嘘**。
+// ⚠️ **読めていないマスは、どの候補の根拠にも減点にもしないこと**（食い違いに数えない）。
+// 減点にすると「本当は指されていない」側に倒れ、根拠にすると「指していない手」を足す。
+// ⚠️ **行き先が読めていないマスになる手は採らないこと**（`backed`）。手を足す根拠は
+// 「駒が来た」ことなので、来たかどうか見えないなら待つ。**反対側で指された手は入る**。
+//
+// ⚠️ **画像の概念を持ち込んでいない**（`CellCost` と同じ）。ここにあるのは 81 個の真偽で、
+// それが「手や頭が被った」ことに由来するのは呼び出し側の話（`app.PositionService.followFrame`）。
+type CellMask [9][9]bool
+
+func (m *CellMask) at(rank, file int) bool {
+	return m != nil && m[rank][file]
+}
+
+// Count は読めていないマスの数。
+func (m *CellMask) Count() int {
+	n := 0
+	for r := 0; r < 9; r++ {
+		for f := 0; f < 9; f++ {
+			if m.at(r, f) {
+				n++
+			}
+		}
+	}
+	return n
+}
+
 // Fix は**認識結果を覆した 1 マス**（修復探索でだけ出る）。
 //
 // ⚠️ **必ず画面に出すこと。** 黙って直すと、盤に出ている局面が
@@ -163,6 +193,11 @@ type ConnectOptions struct {
 	Tolerance float64
 	// Cost はマスごとの覆す費用（nil なら全マス 1.0 ＝「何マスまで」と同じ意味）。
 	Cost *CellCost
+	// Unseen は**読めていないマス**（nil なら全部読めている。`CellMask`）。
+	//
+	// ⚠️ **厳密一致にも効く** —— 読めていないマスは「一致」も「食い違い」も言えないので、
+	// 残りのマスがぴったり合えば厳密一致として扱う（修復の予算は使わない）。
+	Unseen *CellMask
 }
 
 func (o ConnectOptions) maxDepth() int {
@@ -272,7 +307,7 @@ func Connect(ctx context.Context, from *Position, target *Board, opt ConnectOpti
 
 	// 下界。**ここで落ちれば `legal.Moves` を 1 回も呼ばない。**
 	// 認識の誤りの大半（駒が何枚も湧いた・消えた）はここで即死する。
-	if newDiff(root.Board, target, nil, 0).same() {
+	if newDiff(root.Board, target, nil, 0, opt.Unseen).same() {
 		return ConnectResult{Depth: 0, Stop: StopSame}, nil
 	}
 
@@ -304,7 +339,7 @@ func Connect(ctx context.Context, from *Position, target *Board, opt ConnectOpti
 		// ⚠️ **手順が無く、かつ元の局面との違いが予算に収まるなら「変わっていない」。**
 		// 認識が数マス外しただけで盤は 1 手も進んでいなかった、という形。
 		// **空の手順を据えにいかないための逃げ道**（`dfs` が 0 手を解にしない）。
-		if newDiff(root.Board, target, opt.Cost, opt.Tolerance).cost <= opt.Tolerance+costEpsilon {
+		if newDiff(root.Board, target, opt.Cost, opt.Tolerance, opt.Unseen).cost <= opt.Tolerance+costEpsilon {
 			return ConnectResult{Depth: 0, Nodes: rep.Nodes, Stop: StopSame}, nil
 		}
 		// **厳密一致の側の理由を返す**（修復まで届かなかったことは言わない）。
@@ -323,11 +358,11 @@ func Connect(ctx context.Context, from *Position, target *Board, opt ConnectOpti
 func search(ctx context.Context, root *Position, target *Board, opt ConnectOptions,
 	cost *CellCost, tolerance float64, collect int) (ConnectResult, error) {
 	depth := opt.maxDepth()
-	d0 := newDiff(root.Board, target, cost, tolerance)
+	d0 := newDiff(root.Board, target, cost, tolerance, opt.Unseen)
 	if h := d0.bound(root.Turn); h > depth {
 		// ⚠️ **探索していなくても手掛かりは返すこと。** ここで落ちるのは
 		// 「隔たりが大きすぎる」ときなので、**どこが違うのかが一番知りたい。**
-		return ConnectResult{Stop: StopTooFar, Near: d0.fixes(root.Board, target),
+		return ConnectResult{Stop: StopTooFar, Near: d0.fixes(root.Board, target, opt.Unseen),
 			NearCost: d0.cost}, nil
 	}
 	h := d0.bound(root.Turn)
@@ -342,7 +377,7 @@ func search(ctx context.Context, root *Position, target *Board, opt ConnectOptio
 	}
 
 	s := &connect{ctx: ctx, root: root.Board, target: target, maxNodes: opt.maxNodes(),
-		want: collect, cost: cost, tolerance: tolerance, bestCost: math.Inf(1)}
+		want: collect, cost: cost, tolerance: tolerance, unseen: opt.Unseen, bestCost: math.Inf(1)}
 	for limit := h; limit <= depth; limit++ {
 		s.limit = limit
 		s.path = s.path[:0]
@@ -391,10 +426,12 @@ type connect struct {
 	// cost / tolerance は修復探索のとき。**厳密一致では両方ゼロ値。**
 	cost      *CellCost
 	tolerance float64
-	nodes     int
-	path      []string
-	seen      map[posKey]bool
-	sols      []solution
+	// unseen は読めていないマス（**厳密一致でも修復でも同じ表**。`ConnectOptions.Unseen`）。
+	unseen *CellMask
+	nodes  int
+	path   []string
+	seen   map[posKey]bool
+	sols   []solution
 	// best は**一番近づけた節点**（繋がらなかったときに「どこが説明できないか」
 	// を言うため）。⚠️ **厳密一致のときも取ること** —— 手掛かりが要るのは
 	// むしろそちら。
@@ -463,9 +500,9 @@ func (s *connect) dfs(pos *Position, g int) bool {
 	if s.ctx != nil && s.ctx.Err() != nil {
 		return true // 止めたのは呼び出し側。**到達不能ではない**ので打ち切り扱い
 	}
-	d := newDiff(pos.Board, s.target, s.cost, s.tolerance)
+	d := newDiff(pos.Board, s.target, s.cost, s.tolerance, s.unseen)
 	if d.cost < s.bestCost {
-		s.bestCost, s.bestFixes, s.bestDepth = d.cost, d.fixes(pos.Board, s.target), g
+		s.bestCost, s.bestFixes, s.bestDepth = d.cost, d.fixes(pos.Board, s.target, s.unseen), g
 	}
 	// ⚠️ **受理は「費用が予算に収まったか」。** 厳密一致では予算も費用も 0 なので、
 	// **1 マスでも違えば通らない**（今までどおり）。
@@ -474,11 +511,13 @@ func (s *connect) dfs(pos *Position, g int) bool {
 	// 空の手順を据えるのではなく `StopSame` として扱う（呼び出し側）。
 	// ⚠️ **行き先に裏付けの無い手順は解にしない**（`backed`。2026-10-05）。厳密一致では
 	// 必ず通る（撮った盤とぴったり同じなので）。効くのは修復のときだけ。
-	if g > 0 && d.cost <= s.tolerance+costEpsilon && backed(s.root, pos.Board, s.target) {
+	// ⚠️ **読めていないマスが混じると、厳密一致でも効く**（読めていないマスは食い違いに
+	// 数えないので、行き先をそこへ逃がした手順が費用 0 で通ってしまう）。
+	if g > 0 && d.cost <= s.tolerance+costEpsilon && backed(s.root, pos.Board, s.target, s.unseen) {
 		s.sols = append(s.sols, solution{
 			moves: append([]string(nil), s.path...),
 			cost:  d.cost,
-			fixed: d.fixes(pos.Board, s.target),
+			fixed: d.fixes(pos.Board, s.target, s.unseen),
 		})
 		return false
 	}
@@ -587,8 +626,10 @@ type diff struct {
 	forgive int
 }
 
-func newDiff(cur, tgt *Board, cost *CellCost, budget float64) *diff {
+// unseen のマスは**食い違いにも駒数にも数えない**（`CellMask`）。
+func newDiff(cur, tgt *Board, cost *CellCost, budget float64, unseen *CellMask) *diff {
 	d := &diff{}
+	hidden := false
 	// ⚠️ **厳密一致では 1 バイトも確保しないこと。** ここは節点ごとに呼ばれるので、
 	// 修復用の作業を素通しにすると**厳密一致のほうが目に見えて遅くなる**
 	// （実測で深さ 4 が 0.68ms → 1.18ms に落ちた）。
@@ -599,6 +640,11 @@ func newDiff(cur, tgt *Board, cost *CellCost, budget float64) *diff {
 	var curCount, tgtCount [2][16]int // [先後][ベース駒]
 	for r := 0; r < 9; r++ {
 		for f := 0; f < 9; f++ {
+			// ⚠️ **読めていないマスは丸ごと飛ばす**（一致とも食い違いとも言えない）。
+			if unseen.at(r, f) {
+				hidden = true
+				continue
+			}
 			c, t := cur.cells[r][f], tgt.cells[r][f]
 			if c != t {
 				// **食い違ったマスは A か D のどちらか一方**（両方には入らない）。
@@ -642,6 +688,13 @@ func newDiff(cur, tgt *Board, cost *CellCost, budget float64) *diff {
 	}
 	d.needBlack = blackDrops + whiteLost
 	d.needWhite = whiteDrops + blackLost
+	// ⚠️ **読めていないマスがあるときは、駒数からの下界を使わない**（admissible でなくなる）。
+	// 見えている範囲だけの駒数は、**読めていないマスから出入りした駒**でも変わるので、
+	// 「打った」「取った」の手数の下限にならない。マスの差分のほうは見えているマスだけでも
+	// 下限のまま（1 手で埋まる「来る」「空く」は高々 1 つずつ）。
+	if hidden {
+		d.needBlack, d.needWhite = 0, 0
+	}
 	d.forgive = forgivable(mismatch, budget)
 	return d
 }
@@ -668,13 +721,18 @@ func forgivable(mismatch []float64, budget float64) int {
 }
 
 // fixes は「認識結果を覆したマス」を並べる（**費用が 0 でないマスだけ**）。
-func (d *diff) fixes(cur, tgt *Board) []Fix {
+//
+// ⚠️ **読めていないマスは出さない**（覆したのではなく、もともと読めていない）。
+func (d *diff) fixes(cur, tgt *Board, unseen *CellMask) []Fix {
 	if d.arrive == 0 && d.vacate == 0 {
 		return nil
 	}
 	out := make([]Fix, 0, d.arrive+d.vacate)
 	for r := 0; r < 9; r++ {
 		for f := 0; f < 9; f++ {
+			if unseen.at(r, f) {
+				continue
+			}
 			if cur.cells[r][f] != tgt.cells[r][f] {
 				out = append(out, Fix{Rank: r, File: f, Was: tgt.cells[r][f], Now: cur.cells[r][f]})
 			}
@@ -698,12 +756,20 @@ func (d *diff) same() bool { return d.arrive == 0 && d.vacate == 0 }
 // 中継がある）、求めると正しい手まで落ちる。先後は駒の種類とは別に読んでいる。
 // ⚠️ **見るのは根と最後の盤の差だけ**（途中で来て、また去ったマスは問わない）。
 // 取る手は行き先に指した側の駒が来るので、そのまま同じ扱いになる。
-func backed(from, cand, tgt *Board) bool {
+//
+// ⚠️ **行き先が読めていないマス（unseen）なら裏付けは無い**（2026-10-06）。読めていない
+// マスは食い違いに数えないので、裏付けまで素通しにすると**行き先を手や頭の下へ逃がした
+// 手が費用 0 で通る**（髪が被った 3一 に △3一歩打）。**見えないなら待つ**（手がどけば次の
+// 1 枚で入る）。⚠️ **元のマス（空いた側）が読めていないのは構わない** —— 根拠は来た側にある。
+func backed(from, cand, tgt *Board, unseen *CellMask) bool {
 	for r := 0; r < 9; r++ {
 		for f := 0; f < 9; f++ {
 			c := cand.cells[r][f]
 			if c.IsEmpty() || c == from.cells[r][f] {
 				continue
+			}
+			if unseen.at(r, f) {
+				return false
 			}
 			t := tgt.cells[r][f]
 			if t.IsEmpty() || t.Black() != c.Black() {

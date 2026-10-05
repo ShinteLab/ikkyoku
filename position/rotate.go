@@ -77,3 +77,20 @@ func (t Turn) flip() Turn {
 	}
 	return TurnUnknown
 }
+
+// Rotate180 は読めていないマスの印も同じ向きに回す（`CellCost.Rotate180` と同じ約束）。
+//
+// ⚠️ **盤を回したら印も回すこと。** 忘れると**別のマスを読めていないことにする**
+// （手が被ったマスの読みを根拠にし、見えているマスを捨てる。画面からは気づけない）。
+func (m *CellMask) Rotate180() *CellMask {
+	if m == nil {
+		return nil
+	}
+	out := &CellMask{}
+	for r := 0; r < 9; r++ {
+		for f := 0; f < 9; f++ {
+			out[8-r][8-f] = m[r][f]
+		}
+	}
+	return out
+}

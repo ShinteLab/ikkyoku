@@ -163,7 +163,9 @@ func (s *StudyService) FollowProbe() (FollowProbe, error) {
 	// ⚠️ **修復は認識を通った盤のときだけ**（手合割・詰将棋では費用表が無い）。
 	// 人が並べた盤を機械が覆す理由は無いので、そちらは厳密一致のまま。
 	cost, fromImage := s.src.followCost()
-	return s.followProbe(p.Board, cost, fromImage, rotated)
+	// ⚠️ **見えないマスは渡さない**（nil）。訂正タブの盤は人が見て直したもので、
+	// 被っていたマスも人が決めている。
+	return s.followProbe(p.Board, cost, nil, fromImage, rotated)
 }
 
 // followProbe は下見の本体。**盤と費用表をもらうだけで、どこから来たかを知らない。**
@@ -174,7 +176,11 @@ func (s *StudyService) FollowProbe() (FollowProbe, error) {
 // **人が訂正タブで作業していると 1 秒ごとに中継の盤で上書きされた。**
 //
 // fromImage は**推測してよいか**（人が並べた盤を機械が推測で直す理由は無い）。
-func (s *StudyService) followProbe(board *position.Board, cost *position.CellCost, fromImage, rotated bool) (FollowProbe, error) {
+//
+// unseen は**手や頭が被って見えないマス**（nil なら全部見えている。2026-10-06）。
+// ⚠️ **推測するかどうか（fromImage）とは別に効かせること** —— 見えないマスは
+// 「覆す」話ではなく、そもそも根拠にも減点にもしないマス（`position.CellMask`）。
+func (s *StudyService) followProbe(board *position.Board, cost *position.CellCost, unseen *position.CellMask, fromImage, rotated bool) (FollowProbe, error) {
 	if board == nil {
 		return FollowProbe{}, fmt.Errorf("まだ局面がありません")
 	}
@@ -193,7 +199,7 @@ func (s *StudyService) followProbe(board *position.Board, cost *position.CellCos
 	s.mu.Unlock()
 
 	// ⚠️ **`fromImage` が「推測してよいか」の唯一の判断。**
-	opt := position.ConnectOptions{}
+	opt := position.ConnectOptions{Unseen: unseen}
 	if fromImage {
 		opt.Cost, opt.Tolerance = cost, position.DefaultTolerance
 	}
@@ -217,7 +223,8 @@ func (s *StudyService) followProbe(board *position.Board, cost *position.CellCos
 			top := got.Candidates[0]
 			out.Fit = top.Fit
 			log.Info("候補を並べました", "tip", tipID, "moves", top.Moves,
-				"fit", top.Fit, "margin", got.Margin, "cost", top.Cost, "rotated", rotated)
+				"fit", top.Fit, "margin", got.Margin, "cost", top.Cost, "rotated", rotated,
+				"unseen", unseen.Count())
 
 			// ⚠️ **盤として読めていないならここで終わり**（CM・解説の画面）。
 			// 深く探しても意味が無いので `Connect` へ進まない。
@@ -495,18 +502,22 @@ func (s *StudyService) fallbackFollow(ranked position.RankResult, r position.Con
 // ⚠️ **1 枚だけでは足さない**（2026-10-05。`followPending`）。足せる手が見つかったら
 // 控えておき、**次の 1 枚が同じ答えを出したとき**（`FollowAuto`）か、**次の 1 枚が
 // 変わっていなかったとき**（`FollowConfirm`）に初めて足す。
-func (s *StudyService) FollowAuto(boardSFEN string, cellConfidence []float64) (FollowAuto, error) {
+//
+// cellHidden は**手や頭が被って見えないマス**（suteme の `CellDebug.Hidden`。81 個・行優先。2026-10-06）。
+// 見えないマスは根拠にも減点にもせず、行き先が見えない手は足さずに待つ（`position.CellMask`）。
+// ⚠️ **無くても動くこと**（nil・数が合わない → 全部見えていることにする。今までどおり）。
+func (s *StudyService) FollowAuto(boardSFEN string, cellConfidence []float64, cellHidden []bool) (FollowAuto, error) {
 	// ⚠️ **訂正タブを通さないこと**（2026-09-15 に実機で踏んだ）。
 	// 以前は呼び出し側が毎周 `PositionService.Load` を呼んでいたので、
 	// **人が訂正タブで作業していると 1 秒ごとに中継の盤で上書きされた**
 	// （学習データを登録しようとして消えた）。**訂正タブは人の作業場。**
-	board, cost, rotated, e := s.src.followFrame(boardSFEN, cellConfidence)
+	board, cost, unseen, rotated, e := s.src.followFrame(boardSFEN, cellConfidence, cellHidden)
 	if e != nil {
 		return FollowAuto{}, e
 	}
 	// ⚠️ **修復してよいのは費用表があるときだけ**（`followCost` と同じ約束）。
 	// 確信度が無ければ**どのマスを覆してよいかの根拠が無い**ので、厳密一致に倒す。
-	p, e := s.followProbe(board, cost, cost != nil, rotated)
+	p, e := s.followProbe(board, cost, unseen, cost != nil, rotated)
 	if e != nil {
 		return FollowAuto{}, e
 	}
@@ -515,16 +526,17 @@ func (s *StudyService) FollowAuto(boardSFEN string, cellConfidence []float64) (F
 		// **足せる手が無い 1 枚が来たら、控えは捨てる**（手が映った 1 枚の答えは
 		// 次の 1 枚で消えるのが普通で、それがこの形）。
 		s.setPending(nil)
-		return s.followFrom(board, cost, rotated)
+		return s.followFrom(board, cost, unseen, rotated)
 	}
 	if !s.takePendingIf(moves) {
 		// **初めて出た答え。** 控えて、次の 1 枚を待つ。
-		s.setPending(&followPending{tip: s.mainTip(), moves: moves, board: board, cost: cost, rotated: rotated})
+		s.setPending(&followPending{tip: s.mainTip(), moves: moves, board: board, cost: cost,
+			unseen: unseen, rotated: rotated})
 		return FollowAuto{Kind: p.Kind, Pending: true, Reason: "確かめています",
-			Guess: p.Guess, Fit: p.Fit, State: s.State()}, nil
+			Guess: p.Guess, Fit: p.Fit, Unseen: unseen.Count(), State: s.State()}, nil
 	}
 	// **2 枚続けて同じ答え。** ここから先は今までどおり（1 枚から取れるだけ取る）。
-	return s.followFrom(board, cost, rotated)
+	return s.followFrom(board, cost, unseen, rotated)
 }
 
 // FollowConfirm は**控えた答えを、撮り直した 1 枚が変わっていなかったことで確かめて**足す（2026-10-05）。
@@ -544,7 +556,7 @@ func (s *StudyService) FollowConfirm() (FollowAuto, error) {
 	if pend == nil || pend.tip != s.mainTip() {
 		return FollowAuto{Kind: FollowSame, Reason: "盤面は変わっていません", State: s.State()}, nil
 	}
-	return s.followFrom(pend.board, pend.cost, pend.rotated)
+	return s.followFrom(pend.board, pend.cost, pend.unseen, pend.rotated)
 }
 
 // followPending は**1 枚目で見つけた、まだ足していない答え**（2026-10-05）。
@@ -562,6 +574,7 @@ type followPending struct {
 	moves   []string
 	board   *position.Board
 	cost    *position.CellCost
+	unseen  *position.CellMask
 	rotated bool
 }
 
@@ -610,7 +623,7 @@ func followAddable(p FollowProbe) ([]string, bool) {
 }
 
 // followFrom は撮った 1 枚から**取れるだけ取って足す**（確かめが済んだあとの本体）。
-func (s *StudyService) followFrom(board *position.Board, cost *position.CellCost, rotated bool) (a FollowAuto, err error) {
+func (s *StudyService) followFrom(board *position.Board, cost *position.CellCost, unseen *position.CellMask, rotated bool) (a FollowAuto, err error) {
 	// ⚠️ **先端を見ていたなら付いていく**（`tail -f` と同じ）。
 	// 戻って読んでいるなら**動かさない**（`mergeReloadLocked` と同じ約束）。
 	// ⚠️ **判定は繰り返しに入る前の 1 回だけ** —— 自分で足した手で先端が動くので、
@@ -620,7 +633,7 @@ func (s *StudyService) followFrom(board *position.Board, cost *position.CellCost
 	s.mu.Unlock()
 
 	for i := 0; i < followCatchUp; i++ {
-		p, e := s.followProbe(board, cost, cost != nil, rotated)
+		p, e := s.followProbe(board, cost, unseen, cost != nil, rotated)
 		if e != nil {
 			if a.Applied {
 				// 途中まで足せているなら、それは成果。**捨てない。**
@@ -631,7 +644,7 @@ func (s *StudyService) followFrom(board *position.Board, cost *position.CellCost
 		if !a.Applied {
 			// **1 周目の下見がこの周の「結果」**（見送った理由もここから出る）。
 			a = FollowAuto{Kind: p.Kind, Reason: p.Reason, Guess: p.Guess,
-				Fit: p.Fit, Fixed: p.Fixed, Mismatch: p.Mismatch}
+				Fit: p.Fit, Fixed: p.Fixed, Mismatch: p.Mismatch, Unseen: unseen.Count()}
 		}
 		if len(p.Candidates) == 0 || (p.Kind != FollowUnique && p.Kind != FollowChoices) {
 			// **足せる手が無い**（変わっていない／読めない／繋がらない）。
@@ -700,7 +713,7 @@ func (s *StudyService) followFrom(board *position.Board, cost *position.CellCost
 		// ⚠️ **黙って回さないこと**（`_docs/design-position.md` の「取り込みの向き」）——
 		// 盤の向きは**局面の解釈そのもの**で、手順の並びとは重みが違う。
 		// **人に言うところまで**にする。
-		a.Flipped, a.FlipMove = s.looksFlipped(board, cost, rotated)
+		a.Flipped, a.FlipMove = s.looksFlipped(board, cost, unseen, rotated)
 	}
 	if a.Added > 1 {
 		log.Info("1 枚から追いつきました", "moves", a.Moves, "guess", a.Guess)
@@ -752,6 +765,12 @@ type FollowAuto struct {
 	// Pending は**足せる手を見つけたが、まだ足していない**か（2026-10-05。`followPending`）。
 	// 次の 1 枚で確かめる。⚠️ **見送り（繋がらない）として数えないこと**。
 	Pending bool `json:"pending"`
+	// Unseen は**この 1 枚で見えなかったマスの数**（手や頭が被った。2026-10-06）。
+	//
+	// 足せなかった周の理由を言い分けるのに使う（「変わっていません」と「何かが被っている」は
+	// 次にすることが同じ —— 待つ —— でも、**出す言葉は違う**）。⚠️ **足したかどうかの
+	// 判断には使わないこと**（それは `position` がマスごとにやっている）。
+	Unseen int `json:"unseen"`
 }
 
 // looksFlipped は**盤を 180 度回したら繋がるか**を見る（2026-09-15）。
@@ -759,7 +778,7 @@ type FollowAuto struct {
 // ⚠️ **読むだけ。木も訂正タブも 1 つも触らない。**
 // ⚠️ **1 手も足せなかったときだけ呼ぶこと** —— 繋がっているのに疑う理由は無いし、
 // 毎周回すと**そのぶん追従が遅くなる**（`Rank` は 29µs だが、ただではない）。
-func (s *StudyService) looksFlipped(board *position.Board, cost *position.CellCost, rotated bool) (bool, string) {
+func (s *StudyService) looksFlipped(board *position.Board, cost *position.CellCost, unseen *position.CellMask, rotated bool) (bool, string) {
 	if board == nil {
 		return false, ""
 	}
@@ -767,7 +786,8 @@ func (s *StudyService) looksFlipped(board *position.Board, cost *position.CellCo
 	if cost != nil {
 		flipCost = cost.Rotate180()
 	}
-	p, err := s.followProbe(board.Rotate180(), flipCost, flipCost != nil, !rotated)
+	// ⚠️ **見えないマスも盤と一緒に回すこと**（費用表と同じ）。
+	p, err := s.followProbe(board.Rotate180(), flipCost, unseen.Rotate180(), flipCost != nil, !rotated)
 	if err != nil || p.Kind != FollowUnique || len(p.Candidates) == 0 {
 		return false, ""
 	}

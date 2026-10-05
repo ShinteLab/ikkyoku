@@ -584,12 +584,18 @@ func (s *PositionService) followCost() (*position.CellCost, bool) {
 // ⚠️ **`humanEditCost` は出てこない**（`followCost` との違い）。ここには
 // **人が直したマスという概念が無い**（誰も触っていない 1 枚なので）。
 // 人が直した盤で繋ぐのは訂正タブの「本譜に繋ぐ」＝ `followCost` の側。
-func (s *PositionService) followFrame(boardSFEN string, conf []float64) (*position.Board, *position.CellCost, bool, error) {
+//
+// hidden は**手や頭が被って見えないマス**（suteme の `CellDebug.Hidden`。81 個・行優先。2026-10-06）。
+// ⚠️ **費用表とは別に返すこと** —— 見えないマスを費用 0 にして表に混ぜると、
+// `minCellCost` の約束（ただで覆せるマスを作らない）と区別が付かなくなる。
+// ⚠️ **数が合わなければ nil に倒す**（全部見えていることにする。今までどおり）。
+func (s *PositionService) followFrame(boardSFEN string, conf []float64, hidden []bool) (*position.Board, *position.CellCost, *position.CellMask, bool, error) {
 	b, err := position.FromSFEN(boardSFEN)
 	if err != nil {
-		return nil, nil, false, err
+		return nil, nil, nil, false, err
 	}
 	grid := confGrid(conf)
+	unseen := hiddenMask(hidden)
 
 	s.mu.Lock()
 	rotate := s.nearWhite
@@ -616,8 +622,31 @@ func (s *PositionService) followFrame(boardSFEN string, conf []float64) (*positi
 		if cost != nil {
 			cost = cost.Rotate180()
 		}
+		// ⚠️ **見えないマスも盤と一緒に回すこと**（費用表と同じ。忘れると別のマスを捨てる）。
+		unseen = unseen.Rotate180()
 	}
-	return b, cost, rotate, nil
+	return b, cost, unseen, rotate, nil
+}
+
+// hiddenMask は 81 個の「見えない」を表にする（**行優先**。数が合わない・1 つも立っていなければ nil）。
+//
+// ⚠️ **1 つも立っていなければ nil を返すこと** —— nil は「全部見えている」で、
+// 今までの振る舞いと 1 ビットも変わらない（`position` 側も nil を一番安く通す）。
+func hiddenMask(v []bool) *position.CellMask {
+	if len(v) != 81 {
+		return nil
+	}
+	m := &position.CellMask{}
+	found := false
+	for i, h := range v {
+		if h {
+			m[i/9][i%9], found = true, true
+		}
+	}
+	if !found {
+		return nil
+	}
+	return m
 }
 
 // cellEdited はそのマスが読み込んだときから変わっているか（＝人が直したか）。

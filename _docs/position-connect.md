@@ -87,6 +87,27 @@
 - ⚠️ **画像の概念を持ち込んでいない。** `CellCost` はただの 81 個の数で、
   それが確信度に由来することは**呼び出し側の話**（`app.PositionService.followCost`）
 
+### 読めていないマス（`Unseen` / `CellMask`。2026-10-06）
+
+手や頭が盤に被ったマス（suteme の `CellDebug.Hidden`）。**読みは空きにも駒にも化けていて、
+どちらでも嘘**なので、`Connect`（厳密一致・修復とも）と `Rank` で次のように扱う。理由は `_docs/design-follow.md`。
+
+- ⚠️ **食い違いにも駒数にも数えないこと**（`newDiff` で丸ごと飛ばす）。減点にすると
+  「指されていない」側に倒れ、根拠にすると指していない手を足す。**厳密一致にも効く**
+  （残りのマスがぴったり合えば厳密一致。修復の予算は使わない）
+- ⚠️ **行き先が読めていないマスになる手は採らないこと**（`backed`）。読めていないマスは
+  食い違いに数えないので、裏付けまで素通しにすると**行き先を手の下へ逃がした手が費用 0 で通る**
+  （髪が被った 3一 に △3一歩打）。⚠️ **元のマス（空いた側）が読めていないのは構わない**
+- ⚠️ **読めていないマスがあるときは駒数の下界を使わないこと**。見えている範囲だけの駒数は
+  読めていないマスから出入りした駒でも変わるので、下界が過大になって**繋がる手を
+  「隔たりが大きすぎます」で落とす**。マスの差分の下界は見えているマスだけでも下限のまま
+- ⚠️ **一致度（`Fit`）の分母からも外すこと**（`totalCost`）。分母にだけ入れると、
+  被るほど一致度が良く見える
+- ⚠️ **`Fixed` / `Near` に出さないこと**（覆したのではなく、もともと読めていない）
+- ⚠️ **盤を回したら印も回すこと**（`CellMask.Rotate180`。`CellCost` と同じ）
+- ⚠️ **nil は「全部読めている」**で、今までと 1 ビットも変わらない。⚠️ **`CellCost` に 0 を入れて
+  代わりにしないこと** —— 「ただで覆せるマスを作らない」（`minCellCost`）と区別が付かなくなる
+
 **費用**（実測。⚠️ **これを前提に既定値を決めてある**）:
 `legal.Moves` 1 回が **約 7µs**（`legal.BenchmarkMoves`）、`Connect` の深さ 4 が
 **約 0.45ms**（`BenchmarkConnect`）、**修復は約 6ms**（`BenchmarkConnectRepair`。
@@ -182,4 +203,11 @@
   （`TestRankCaptureNeedsArrivalEvidence`）・⚠️ **種類が違っても先後が合えば 1 位に来ること**
   （`TestRankIgnoresKindAtArrival`。**厳しすぎないことの歯止め** —— 落ちたら先後より
   細かく見てしまっている）
+- `position/unseen_test.go` — **読めていないマス**（2026-10-06）。⚠️ **食い違いに数えないこと**
+  （`TestRankIgnoresUnseenCells`）・⚠️ **行き先が読めていない手を候補にも解にもしないこと**
+  （`TestRankRefusesUnseenArrival` / `TestConnectRefusesUnseenArrival`。**一番大事** —— 読みだけなら
+  完全に一致する形で、外すと △3一歩打 が戻ってくる）・⚠️ **一致度の分母から外すこと**
+  （`TestRankUnseenLeavesTotal`）・**頭が上辺に被っていても反対側の手順が繋がり、`Fixed` に出ないこと**
+  （`TestConnectIgnoresUnseenCells`）・⚠️ **駒数の下界を外していること**（`TestConnectUnseenDropsCountBound`。
+  外すと深さ 1 で「隔たりが大きすぎます」になる）・**印も回ること**（`TestCellMaskRotate180`）
   `BenchmarkRank` が**時間の歯止め**（撮るたびに走る）
