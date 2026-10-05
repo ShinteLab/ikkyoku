@@ -45,3 +45,7 @@ func copyImageToClipboard(img image.Image) error {
 func messageBox(title, text string) error {
 	return fmt.Errorf("ikkyoku: このOSでは未対応です(Windows専用)")
 }
+
+func placeBehind(hwnd, after unsafe.Pointer) error {
+	return fmt.Errorf("ikkyoku: このOSでは未対応です(Windows専用)")
+}

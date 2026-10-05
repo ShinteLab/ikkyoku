@@ -27,6 +27,7 @@ import (
 //	② 枠の素通し         … WS_EX_TRANSPARENT の付け外しとカーソルの位置
 //	③ クリップボード     … 画像を CF_DIB で載せる
 //	④ メッセージボックス … 画面を出す前に終わるときの最後の口（fatal.go）
+//	⑤ 重なりの順         … 窓をほかの窓のすぐ後ろへ回す（フォーカスは動かさない）
 
 // ---- ① ウィンドウの矩形 ---------------------------------------------------
 
@@ -415,4 +416,32 @@ func messageBox(title, text string) error {
 		windows.StringToUTF16Ptr(text), windows.StringToUTF16Ptr(title),
 		windows.MB_OK|windows.MB_ICONERROR|windows.MB_SETFOREGROUND|windows.MB_TOPMOST)
 	return err
+}
+
+// ---- ⑤ 重なりの順 ---------------------------------------------------------
+
+var procSetWindowPos = user32.NewProc("SetWindowPos")
+
+const (
+	swpNoSize         = 0x0001
+	swpNoMove         = 0x0002
+	swpNoActivate     = 0x0010
+	swpNoOwnerZOrder  = 0x0200
+	swpAsyncWindowPos = 0x4000
+)
+
+// placeBehind は hwnd の窓を after の窓の**すぐ後ろ**へ回す（位置も大きさも変えない）。
+//
+// ⚠️ **`SWP_NOACTIVATE` を外さないこと。** 外すと回した窓がアクティブになり、
+// **メイン画面からフォーカスを奪う**（キー操作が向こうへ行く）。
+// ⚠️ **`SWP_ASYNCWINDOWPOS` で頼むこと** —— 呼ぶのは Wails のイベントの
+// goroutine で、窓を持っている UI スレッドとは別。同期で送ると向こうの都合で待たされる。
+func placeBehind(hwnd, after unsafe.Pointer) error {
+	ret, _, callErr := procSetWindowPos.Call(
+		uintptr(hwnd), uintptr(after), 0, 0, 0, 0,
+		swpNoSize|swpNoMove|swpNoActivate|swpNoOwnerZOrder|swpAsyncWindowPos)
+	if ret == 0 {
+		return fmt.Errorf("ikkyoku: SetWindowPos に失敗しました: %w", callErr)
+	}
+	return nil
 }

@@ -335,6 +335,7 @@ func main() {
 	registerSideHooks(wins, state.Side, settingsSvc)
 	registerMovesHooks(wins, state.Moves, settingsSvc)
 	registerHotkey(app, captureSvc)
+	registerPaneRaise(wins)
 	registerVisibilityLog(wins)
 	diagSvc.Watch()
 
@@ -767,6 +768,42 @@ func registerMainHooks(app *application.App, wins *appWindows, st guide.Window, 
 		quit()
 		app.Quit()
 	})
+}
+
+// registerPaneRaise は、**メイン画面がアクティブになったら切り離した窓も手前へ連れてくる**
+// （2026-10-05）。切り離した窓がほかのアプリの窓の下に埋もれると探すのに手間取るため。
+//
+// ⚠️ **回す先は「メイン画面のすぐ後ろ」。** 最前面には出さない —— メイン画面に
+// 重ねて置いていても盤を覆わず、**メイン画面を押したら盤が見える**のは今までどおり。
+// ⚠️ **フォーカスは動かさない**（`placeBehind` の `SWP_NOACTIVATE`）。キー操作は
+// メイン画面に残る。⚠️ **`Focus()` / `Show()` で代用しないこと**（どちらも奪う・出す）。
+// ⚠️ **オーナー付きの窓にはしない** —— あれは常にメイン画面より手前に来るので、
+// 重ねて置くと盤を覆う。
+// ⚠️ **見るのは `Windows.WindowActive` / `WindowClickActive`**（WM_ACTIVATE）。
+// `Common.WindowFocus` は WM_SETFOCUS でも来るので、アクティブのまま何度も回すことになる。
+// ⚠️ **出ていない窓・畳んだ窓は触らない**（隠れているのは解析タブに居ないから。
+// `syncPaneWindows`）。
+func registerPaneRaise(wins *appWindows) {
+	raise := func(*application.WindowEvent) {
+		mainHwnd := wins.main.NativeWindow()
+		if mainHwnd == nil {
+			return
+		}
+		for _, w := range []*application.WebviewWindow{wins.graph, wins.side, wins.moves} {
+			if w == nil || !w.IsVisible() || w.IsMinimised() {
+				continue
+			}
+			hwnd := w.NativeWindow()
+			if hwnd == nil {
+				continue
+			}
+			if err := placeBehind(hwnd, mainHwnd); err != nil {
+				log.Debug("切り離した窓を手前へ回せませんでした", "window", w.Name(), "error", err)
+			}
+		}
+	}
+	wins.main.OnWindowEvent(events.Windows.WindowActive, raise)
+	wins.main.OnWindowEvent(events.Windows.WindowClickActive, raise)
 }
 
 // registerVisibilityLog は表示状態の変化(表示・非表示・最小化・復帰)をログに出す。
