@@ -23,6 +23,7 @@
 import { StudyService } from "../bindings/github.com/ShinteLab/ikkyoku/app";
 import type { StudyState } from "../bindings/github.com/ShinteLab/ikkyoku/app/models";
 import type { Move as LegalMove } from "../bindings/github.com/ShinteLab/ikkyoku/legal/models";
+import { isFollowing } from "./followguard";
 import { openPopup, type PopupHandle } from "./popup";
 
 const RANK_KANJI = ["一", "二", "三", "四", "五", "六", "七", "八", "九"];
@@ -456,6 +457,15 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
     });
   };
 
+  // extendsMain は**ここで指すと本譜が伸びるか**（本譜の先端に居て、そこに続きが 1 手も無い）。
+  const extendsMain = (): boolean => {
+    if (!state) {
+      return false;
+    }
+    const tip = state.mainTip;
+    return state.currentId === tip && !(state.nodes ?? []).some((n) => n.parent === tip);
+  };
+
   // play は移動先が決まったときに 1 手指す。
   //
   // at は押した場所（成る / 成らずを聞くダイアログをそこに出す）。
@@ -467,6 +477,24 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
     const stay = dests.find((m) => !m.promote);
     const go = (move: string) => {
       pick = null;
+      // ⚠️ **本譜の先端で指した手は本譜の続きになる**（続きが無いところで指すと
+      // `kids[0]` に入る）。中継を追っていると、その手から先へ繋ぐことになる。
+      // **聞くが、追跡は止めない**（2026-10-05。`followguard.ts`）—— 見失ったときに
+      // **抜けた手を人が補う**のがまさにこの操作で、補えば追従はそこから繋ぎ直す
+      // （実機で ▲9三歩成 を補ったら △8四飛 から追い直した）。先端以外で指した手は枝になるので聞かない。
+      if (isFollowing() && extendsMain()) {
+        closeAsk();
+        ask = openPopup(at.x, at.y, {
+          label: "本譜の手として指す（中継中のため、追跡が壊れる可能性があります）",
+          // ⚠️ **初期フォーカスは「やめる」**（削除の確認と同じ。Enter の連打で本譜を伸ばさない）。
+          focus: 1,
+          items: [
+            { label: "本譜の手として指す", kind: "primary", onPick: () => void run(() => StudyService.Play(move)) },
+            { label: "やめる", onPick: () => {} },
+          ],
+        });
+        return;
+      }
       void run(() => StudyService.Play(move));
     };
     if (promote && stay) {

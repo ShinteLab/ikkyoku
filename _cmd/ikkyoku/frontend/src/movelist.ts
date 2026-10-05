@@ -13,6 +13,7 @@
 // ⚠️ **畳み方だけはここが持つ**（画面だけの状態。Go には持たせない）。
 import { StudyService } from "../bindings/github.com/ShinteLab/ikkyoku/app";
 import type { StudyState } from "../bindings/github.com/ShinteLab/ikkyoku/app/models";
+import { confirmStopFollow, isFollowing } from "./followguard";
 import { openPopup, type PopupHandle, type PopupItem } from "./popup";
 
 export interface MoveListHandle {
@@ -381,11 +382,15 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
   };
 
   // askDrop は押した場所で「ここから消す」を聞く。
+  //
+  // ⚠️ **中継を追っているときに本譜を消すなら、そう添えること**（2026-10-05。`followguard.ts`）。
+  // **消しても追跡は止めない** —— 消したところから 4 手以内なら追従が繋ぎ直す（実機で確かめた）。
   const askDrop = (x: number, y: number, id: number, label: string, count: number) => {
     closeAsk();
     markDoomed(id);
+    const risky = isFollowing() && !!(state?.nodes ?? []).find((n) => n.id === id)?.main;
     ask = openPopup(x, y, {
-      label: "手順を消す",
+      label: risky ? "手順を消す（中継中のため、追跡が壊れる可能性があります）" : "手順を消す",
       // ⚠️ **初期フォーカスは「やめる」**（成る/成らずと逆）。こちらは消す操作なので、
       // Enter の連打で消えてしまわないほうを既定にする。
       focus: 1,
@@ -427,7 +432,9 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
   // 判断を 2 か所に書くと、片方だけ黙って消すようになる。
   const dropAt = (x: number, y: number, id: number, label: string) => {
     const count = countDrop(id);
-    if (count <= 1) {
+    // ⚠️ **中継中に本譜を消すなら 1 手でも聞く**（追跡が壊れうることを添えるため）。
+    const risky = isFollowing() && !!(state?.nodes ?? []).find((n) => n.id === id)?.main;
+    if (count <= 1 && !risky) {
       closeAsk();
       void run(() => StudyService.DropFrom(id));
       return;
@@ -453,7 +460,13 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
     if (o.canPromote) {
       items.push({
         label: "本線にする",
-        onPick: () => void run(() => StudyService.Promote(id)),
+        // ⚠️ **中継中は聞いて止める**（本譜の先端に続きを据えると、追従の繋ぐ先がずれる）。
+        onPick: () =>
+          void (async () => {
+            if (await confirmStopFollow("本線にする")) {
+              await run(() => StudyService.Promote(id));
+            }
+          })(),
       });
     }
     // 「分岐にする」は**本譜の手**と**本線に選んだ手**に出す（枝は既に分岐なので、

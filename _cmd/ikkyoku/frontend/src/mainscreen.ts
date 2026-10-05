@@ -109,6 +109,7 @@ import type { Stock } from "../bindings/github.com/ShinteLab/ikkyoku/position/mo
 // 認識の観測情報。**型を手で書き写さない**(Go 側は suteme の型をそのまま通しており、
 // ここで別に定義すると矩形の意味がずれても気づけない)。
 import type { Debug } from "../bindings/github.com/ShinteLab/suteme";
+import { confirmStopFollow, noteFollowing, setFollowStopper } from "./followguard";
 
 // 「撮れた」ことだけを伝えるイベントのペイロード（Go 側 CaptureShot / `capture:shot`）。
 //
@@ -2635,6 +2636,10 @@ ${st.turnLabel}${n}`;
   // 駒台の先後が未決ならエラーが返るので、そのまま訂正タブに出して留まる
   // （フロントで同じ判定を書くと 2 か所に散る）。
   const adoptToStudy = async () => {
+    // ⚠️ **根が入れ替わるので、中継を追っていたら聞いて止める**（`followguard.ts`）。
+    if (!(await confirmStopFollow("この局面を解析する"))) {
+      return;
+    }
     editStatus.textContent = "";
     editStatus.classList.remove("is-error");
     sidePane.setStatus("");
@@ -2868,6 +2873,7 @@ ${st.turnLabel}${n}`;
   // 分からない」と出た）。**追跡中に見ているのは中継**なので、
   // 状態も操作も**枠に無いと届かない**（メイン画面は裏に回っている）。
   const publishFollow = (text: string) => {
+    noteFollowing(followOn);
     void Events.Emit("follow:state", { on: followOn, text });
   };
 
@@ -2923,6 +2929,19 @@ ${st.turnLabel}${n}`;
       sidePane.setStatus(message);
     }
   };
+
+  // 追従を壊す操作に「はい」と答えたときの止め方（2026-10-05。`followguard.ts`）。
+  // ⚠️ **ボタンで止めたときと同じにすること**（追う盤も忘れる）。切り離した窓からは
+  // `follow:stop` で届く。
+  const followStopByGuard = () => {
+    if (!followOn) {
+      return;
+    }
+    void CaptureService.ClearBoardAnchor();
+    followStop("中継の追跡を止めました");
+  };
+  setFollowStopper(followStopByGuard);
+  Events.On("follow:stop", followStopByGuard);
 
   // followOnce は 1 周ぶん。**途中で return してよい**（次の予約は呼び出し側）。
   //
@@ -4063,6 +4082,7 @@ ${st.turnLabel}${n}`;
   //
   // ⚠️ **一覧も検索も Go 側（KifuService）が持つ。** ここは行き先を繋ぐだけ。
   const libraryUI = mountLibrary(root, {
+    confirmAnalyze: () => confirmStopFollow("棋譜を解析タブへ送る"),
     onAnalyze: (got) => {
       // ⚠️ **入力タブの棋譜読み込みと同じ描き方に合流させる**（`KifuLoad` を
       // 共有しているのはそのため）。**別の経路を作らないこと。**
@@ -4084,6 +4104,7 @@ ${st.turnLabel}${n}`;
   // URL からできることは「取得」だけで、解析も登録も**カード**の操作なので、
   // こちらが触るのは行き先（解析タブ・棋譜タブの一覧）だけ。
   mountFetchCards(root, {
+    confirmAnalyze: () => confirmStopFollow("棋譜を解析タブへ送る"),
     onAnalyze: (got) => {
       // 棚を通らない経路だが、**描き方は棚から送ったときと同じ**（KifuLoad）。
       selectTab(studyTab);
@@ -4808,6 +4829,9 @@ ${st.turnLabel}${n}`;
 
   newgameStart.addEventListener("click", () => {
     void (async () => {
+      if (!(await confirmStopFollow("新しい対局を始める"))) {
+        return;
+      }
       newgameStart.disabled = true;
       newgameStatus.hidden = false;
       newgameStatus.classList.remove("is-error");
@@ -4859,6 +4883,9 @@ ${st.turnLabel}${n}`;
   // **1 か所にまとめてある**（2 つに分けると、片方だけ直したときに挙動が食い違う）。
   // ⚠️ **違うのは返事の出し先だけ**（`report`）。
   const runKifuLoad = async (button: HTMLButtonElement, load: () => Promise<KifuLoad>) => {
+    if (!(await confirmStopFollow("棋譜を読み込む"))) {
+      return;
+    }
     button.disabled = true;
     kifuLoad.disabled = true;
     showKifuStatus("読み込んでいます…");

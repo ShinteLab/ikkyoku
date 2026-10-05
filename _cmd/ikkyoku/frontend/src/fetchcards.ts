@@ -136,6 +136,8 @@ export function mountFetchCards(
   opts: {
     // onAnalyze は「解析する」を押したとき（解析タブへ移って描くのは呼び出し側）。
     onAnalyze: (load: KifuLoad) => void;
+    // confirmAnalyze は**送る前に聞く**（中継を追っているなら止めてよいか。偽ならやめる）。
+    confirmAnalyze?: () => Promise<boolean>;
     // onSaved は棚に入れたとき（棋譜タブの一覧を取り直す）。
     onSaved: () => void;
   },
@@ -289,6 +291,9 @@ export function mountFetchCards(
   // 「いま画面に出ているこの内容」という約束（保存と同じ）で、
   // 最新手を追うのは「更新」か解析タブの「再読み込み」の役目。
   const analyze = async (card: FetchCard) => {
+    if (opts.confirmAnalyze && !(await opts.confirmAnalyze())) {
+      return;
+    }
     busyKeys.add(card.key);
     render();
     try {
