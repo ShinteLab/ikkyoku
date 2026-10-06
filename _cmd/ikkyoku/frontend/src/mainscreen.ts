@@ -2889,6 +2889,10 @@ ${st.turnLabel}${n}`;
   // ⚠️ **読んだ周の後でしか確かめないこと** —— 別の盤・盤が無い・動いている周を挟んだら倒す
   // （その後の「変わっていない」は、控えた 1 枚ではなく挟まった 1 枚との比較になる）。
   let followPending = false;
+  // followPendingCells は**控えた 1 枚の、比べる相手から変わったマス**（2026-10-07）。確かめの周
+  // （`unchanged` → `FollowConfirm`）は変わったマスを測らないので、足したあと `FrameFits` に渡すのはこちら。
+  // ⚠️ **落とすと、81 マスで読んだ手のあと比べる相手が替わらない**（実機で踏んだ。そこから先が全部 81 マスの読みになった）。
+  let followPendingCells: number[] | null = null;
 
   // ⚠️ **状態は枠へも流すこと**（2026-09-15。実機で「枠側が録画しているか
   // 分からない」と出た）。**追跡中に見ているのは中継**なので、
@@ -2991,6 +2995,8 @@ ${st.turnLabel}${n}`;
     // **「読んだけれど繋がらなかった」のためのもの**で、
     // 読んでいない周を混ぜると**長考のたびに「見失っています」になる**。
     let got: Awaited<ReturnType<typeof StudyService.FollowAuto>>;
+    // cells は**この周の 1 枚の、比べる相手から変わったマス**（測っていなければ null）。
+    let cells: number[] | null = shot.cells ?? null;
     if (shot.skipped) {
       if (shot.skipped !== "unchanged" || !followPending) {
         followPending = false;
@@ -2999,6 +3005,8 @@ ${st.turnLabel}${n}`;
       }
       // **控えた 1 枚から変わっていない** ＝ 確かめが済んだ。読み直さずに足す。
       got = await StudyService.FollowConfirm();
+      // 変わっていないので、変わったマスも控えた 1 枚と同じ。
+      cells = followPendingCells;
     } else if (shot.fast) {
       // **速い経路**（2026-10-07）。81 マスは読んでおらず、先端と合っていた 1 枚から変わったマスだけが来る。
       // ⚠️ **「盤が映っていない」と取り違えないこと**（SFEN が空なのは読んでいないから）。
@@ -3023,13 +3031,14 @@ ${st.turnLabel}${n}`;
       got = read;
     }
     followPending = !!got.pending;
+    followPendingCells = got.pending ? cells : null;
     showStudy(got.state);
     // ⚠️ **先端と合った 1 枚だけを、速い経路の比べる相手にする**（判断は Go 側）。81 マスの読みで
     // ぴったり合った（`atFrame`）か、比べる相手から変わったマスが足した手で説明できた（`FrameFits`）とき。
     // ⚠️ **控えているあいだは替えない**（先端とこの 1 枚が食い違っている）。
     let atFrame = !!got.atFrame;
-    if (!atFrame && !got.pending && shot.cells) {
-      atFrame = await StudyService.FrameFits(shot.cells);
+    if (!atFrame && !got.pending && cells) {
+      atFrame = await StudyService.FrameFits(cells);
     }
     if (atFrame) {
       void CaptureService.SetCellBase();
