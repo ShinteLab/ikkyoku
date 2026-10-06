@@ -959,6 +959,46 @@ func TestFollowAutoCatchesExchangeInOneFrame(t *testing.T) {
 	}
 }
 
+// ⚠️ **取り合いで同じ側の駒に入れ替わった 1 枚も見送らないこと**（2026-10-06）。
+//
+// **実機の症状**: ▲2四歩 のあと △同歩 ▲同飛 が続けて指され、撮った 1 枚では 2四 が
+// 先手の歩から先手の飛車に変わっただけ（先後は同じ）。残りは 2三・2八 が空いたことだけなので
+// 「駒が来た」に当たらず、「変わっていない」で見送り続けた。
+// **駒の種類が確かに変わり、しかも空いたマスがある**なら、何かは指されている。
+func TestFollowAutoCatchesRecaptureBySameSide(t *testing.T) {
+	s, _ := following(t)
+	opening := []string{"2g2f", "8c8d", "2f2e", "8d8e", "2e2d"}
+	if _, err := s.FollowApply(opening, s.State().Rev, false); err != nil {
+		t.Fatalf("FollowApply: %v", err)
+	}
+	board := boardAfter(t, append(opening, "2c2d", "2h2d")...)
+
+	a, err := followAuto(t, s, board, realConf(board, 0.9))
+	if err != nil {
+		t.Fatalf("FollowAuto: %v", err)
+	}
+	if !a.Applied || len(a.Moves) != 2 || a.Moves[0] != "2c2d" || a.Moves[1] != "2h2d" {
+		t.Fatalf("△同歩 ▲同飛 を足していません: kind=%q reason=%q moves=%v", a.Kind, a.Reason, a.Moves)
+	}
+}
+
+// ⚠️ **駒の種類を読み違えただけの 1 枚では、先を探しに行かないこと**（2026-10-06）。
+//
+// 中継は種類を外しやすい（銀を香と読む）。空いたマスが無いなら指された手は無いので、
+// 毎周深い探索を回して遅くしない（足さないのは今までどおり）。
+func TestFollowAutoKindMisreadStaysSame(t *testing.T) {
+	s, _ := following(t)
+	// 3九 の銀を香と読んだ 1 枚。
+	const misread = "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGLNL"
+	a, err := s.FollowAuto(misread, realConf(misread, 0.9), nil)
+	if err != nil {
+		t.Fatalf("FollowAuto: %v", err)
+	}
+	if a.Applied || a.Kind != FollowSame {
+		t.Fatalf("種類の読み違いだけで手を足したか、見送りの形が変わりました: %+v", a)
+	}
+}
+
 // ⚠️ **今の向きで「変わっていない」とぴったり合っているなら、「逆かも」と言わないこと**（2026-10-06）。
 //
 // **実機の症状**: ゲーム画面で後手を持ち、相手の ▲6八玉 のあとで目線を後手にして採った。
