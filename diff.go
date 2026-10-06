@@ -117,3 +117,65 @@ func lumaAt(img image.Image) func(x, y int) uint8 {
 func luma(r, g, b uint8) uint8 {
 	return uint8((299*int(r) + 587*int(g) + 114*int(b)) / 1000)
 }
+
+// CellLevel は CellDiff で「その画素が変わった」と見なす明るさの差（0〜255）。
+//
+// ⚠️ **`DiffLevel`（10）より大きいのはわざと。** あちらは「何か動いたか」を拾うふるいで、
+// こちらは「どのマスが変わったか」を言い切る側。録画の実測（2026-10-06）では、24 で
+// 指した手のマスが最小 0.72、ほかのマスが最大 0.077 と 10 倍近く離れた。
+const CellLevel = 24
+
+// CellDiff は 2 枚の画像を**マスごとに**比べ、マスの内側で明るさが変わった画素の割合を返す（2026-10-07）。
+//
+// cells はマスの矩形（認識が返したマス割り。ふつうは 81 個）、region は盤の矩形。
+// **追従の速い経路**（変わったマスと合法手を突き合わせて、81 マスを読まずに手を割り出す）が使う。
+//
+// ⚠️ **ここも測るだけ**（`FrameDiff` と同じ線引き）。「何割で変わったと見なすか」は呼ぶ側。
+// ⚠️ **露出の揺れを打ち消すこと**（盤全体の明るさの平均の差を引いてから比べる）。中継は 1 枚で
+// 盤の明るさが 15 変わることがあり、そのままだと盤じゅうのマスが「変わった」に化けた。
+// ⚠️ **マスの縁は見ない**（内側 70%。罫線と、隣のマスへのはみ出しを避ける）。
+//
+// ok が false なのは比べられなかったとき（大きさが違う・マスが無い）。
+func CellDiff(a, b image.Image, cells []image.Rectangle, region image.Rectangle) ([]float64, bool) {
+	if a == nil || b == nil || len(cells) == 0 || !a.Bounds().Eq(b.Bounds()) {
+		return nil, false
+	}
+	la, lb := lumaAt(a), lumaAt(b)
+	off := meanLuma(la, region.Intersect(a.Bounds())) - meanLuma(lb, region.Intersect(a.Bounds()))
+
+	out := make([]float64, len(cells))
+	for i, c := range cells {
+		mx, my := c.Dx()*15/100, c.Dy()*15/100
+		in := image.Rect(c.Min.X+mx, c.Min.Y+my, c.Max.X-mx, c.Max.Y-my).Intersect(a.Bounds())
+		over, n := 0, 0
+		for y := in.Min.Y; y < in.Max.Y; y++ {
+			for x := in.Min.X; x < in.Max.X; x++ {
+				d := float64(la(x, y)) - float64(lb(x, y)) - off
+				if d > CellLevel || d < -CellLevel {
+					over++
+				}
+				n++
+			}
+		}
+		if n > 0 {
+			out[i] = float64(over) / float64(n)
+		}
+	}
+	return out, true
+}
+
+// meanLuma は矩形の中の明るさの平均（1 画素おき）。
+func meanLuma(l func(x, y int) uint8, r image.Rectangle) float64 {
+	var sum float64
+	n := 0
+	for y := r.Min.Y; y < r.Max.Y; y += 2 {
+		for x := r.Min.X; x < r.Max.X; x += 2 {
+			sum += float64(l(x, y))
+			n++
+		}
+	}
+	if n == 0 {
+		return 0
+	}
+	return sum / float64(n)
+}

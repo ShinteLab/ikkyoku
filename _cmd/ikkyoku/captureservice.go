@@ -152,10 +152,16 @@ type CaptureService struct {
 	// ⚠️ **撮った時点ではまだ「その手を決めた画像」かどうか分からない** ——
 	// 決めるのは解析タブ側（`FollowAuto`）なので、**答えが返るまで持っておく**。
 	lastQuiet image.Image
-	// cellPrev は**追従で前に読んだ 1 枚**（マスごとの差の測定用。`celldiff.go`。2026-10-06）。
-	cellPrev image.Image
-	// cellBase は**追従で最後に手を足した 1 枚**（同じく測定用。追う盤を決めた 1 枚から始まる）。
+	// cellBase は**速い経路の比べる相手**（本譜の先端とぴったり合っていた 1 枚。`celldiff.go`。2026-10-07）。
+	// ⚠️ **入れるのは `SetCellBase` だけ**（解析タブ側が `FollowAuto.AtFrame` で「合っている」と言った 1 枚）。
 	cellBase image.Image
+	// cellRects / cellRegion は**最後に 81 マスを読んだときのマス割り**（速い経路はこれでマスを切る）。
+	// cellBounds はそのときの画像の大きさ（違えばマス割りは使えない）。
+	cellRects  []image.Rectangle
+	cellRegion image.Rectangle
+	cellBounds image.Rectangle
+	// gateRead は**ふるいが読む側へ倒した理由**（`gateReadSettled` など。速い経路を使ってよいかの判断）。
+	gateRead string
 	// lastShot は**直近に手で撮った（読み込んだ）1 枚**。
 	//
 	// ⚠️ **`lastQuiet`（追従が黙って撮る 1 枚）とは別物。** 混ぜると、
@@ -884,6 +890,10 @@ type CaptureResult struct {
 	// **2.1 秒かけて読んだうえで盤が無かった**で、こちらは**読んでいない**。
 	// 呼ぶ側は**黙って次の周へ行くだけ**（見送りとして数えない・録画も残さない）。
 	Skipped string `json:"skipped"`
+	// Cells は**速い経路で変わったマス**（撮った画像の向きの 81 マスの番号。2026-10-07）。
+	// 空でなければ**81 マスは読んでいない**（SFEN は空）。受ける側は `StudyService.FollowCells` に渡し、
+	// 手が決まらなければ `RecognizeQuiet` で同じ 1 枚を読む。⚠️ **「盤が映っていない」と混ぜないこと。**
+	Cells []int `json:"cells"`
 	// RecognizeError は「撮れたが認識できなかった」ときの理由。
 	// キャプチャ自体の失敗はこれではなく Capture のエラーで表す。
 	RecognizeError string `json:"recognizeError"`
@@ -976,6 +986,45 @@ func (s *CaptureService) CaptureQuiet() (CaptureResult, error) {
 		s.noteQuiet(result)
 		return result, nil
 	}
+	// ⚠️ **変わったマスだけで済むなら 81 マスを読まない**（速い経路。2026-10-07。`celldiff.go`）。
+	if cells, ok := s.fastCells(img); ok {
+		if len(cells) == 0 {
+			// 比べる相手から何も変わっていない（露出の揺れでふるいが動いただけ）。
+			result.Skipped = cellSkipSame
+		} else {
+			result.Cells = cells
+		}
+		s.noteQuiet(result)
+		return result, nil
+	}
+	return s.readQuiet(img, region, result), nil
+}
+
+// RecognizeQuiet は**直前に `CaptureQuiet` で撮った 1 枚を、81 マスで読む**（2026-10-07）。
+//
+// 速い経路（`CaptureResult.Cells`）で手が決まらなかったときに、フロントが呼ぶ。撮り直さないのは、
+// **変わったマスを測った 1 枚と、読む 1 枚を同じにするため**（間に次の手が指されると話が食い違う）。
+func (s *CaptureService) RecognizeQuiet() (CaptureResult, error) {
+	s.mu.Lock()
+	img := s.lastQuiet
+	s.mu.Unlock()
+	if img == nil {
+		return CaptureResult{}, errors.New("読み直す 1 枚がありません")
+	}
+	region, _, err := s.captureRegion()
+	if err != nil {
+		return CaptureResult{}, err
+	}
+	b := img.Bounds()
+	result := CaptureResult{
+		Width: b.Dx(), Height: b.Dy(), Source: ImageSourceScreen,
+		Warnings: []string{}, HandTotal: map[string]int{},
+	}
+	return s.readQuiet(img, region, result), nil
+}
+
+// readQuiet は**盤の有無を見て、81 マスを読み、追っている盤か確かめる**（`CaptureQuiet` の後段）。
+func (s *CaptureService) readQuiet(img image.Image, region ikkyoku.Region, result CaptureResult) CaptureResult {
 	// ⚠️ **盤の有無だけなら安い**（2026-09-18）。**大盤（解説用）が映っている
 	// あいだは画素が動き続ける**ので、上のふるいは素通りする ——
 	// そこを 2.1 秒かけて読んでから捨てていた。
@@ -990,7 +1039,7 @@ func (s *CaptureService) CaptureQuiet() (CaptureResult, error) {
 			result.OffBoard, result.OffBoardReason = true, why
 		}
 		s.noteQuiet(result)
-		return result, nil
+		return result
 	}
 	s.noteRead()
 	// ⚠️ **認識に失敗しても成功として返す**（設計原則3）。呼び出し側は
@@ -998,7 +1047,7 @@ func (s *CaptureService) CaptureQuiet() (CaptureResult, error) {
 	board, err := recognize.FromImage(img)
 	if err != nil {
 		result.RecognizeError = err.Error()
-		return result, nil
+		return result
 	}
 	result.SFEN = board.SFEN
 	result.Confidence = board.Confidence
@@ -1009,8 +1058,8 @@ func (s *CaptureService) CaptureQuiet() (CaptureResult, error) {
 		result.HandTotal = h
 	}
 	result.Debug = board.Debug
-	// **測るだけ**（ログに出す。追従の判断には使わない）。
-	s.noteCellDiff(img, board.Debug)
+	// 速い経路のマス割りを控える（`celldiff.go`）。
+	s.noteCellRects(img, board.Debug)
 
 	// ⚠️ **追っている盤かどうかを見る**（2026-09-15）。中継には**大盤**（解説用）が
 	// 映り、あちらは**将棋の局面としては矛盾しない**ので盤面だけでは弾けない ——
@@ -1027,6 +1076,8 @@ func (s *CaptureService) CaptureQuiet() (CaptureResult, error) {
 			if moved {
 				s.mu.Lock()
 				s.boardAnchor, s.anchorRegion = got, region
+				// ⚠️ **比べる相手も捨てること**（画像の中の座標が変わったので、もう比べられない）。
+				s.cellBase = nil
 				s.mu.Unlock()
 				log.Info("枠が動いたので追う盤を取り直しました", "board", got.Board)
 			} else if same, why := anchor.Matches(got); !same {
@@ -1038,7 +1089,7 @@ func (s *CaptureService) CaptureQuiet() (CaptureResult, error) {
 		}
 	}
 	s.noteQuiet(result)
-	return result, nil
+	return result
 }
 
 // ふるいの判断（2026-09-18）。⚠️ **どれも実測で決めた数ではない。**
@@ -1073,6 +1124,14 @@ const (
 	// 省いた理由（`CaptureResult.Skipped`）。
 	gateSkipUnchanged = "unchanged"
 	gateSkipMoving    = "moving"
+
+	// ふるいが読む側へ倒した理由（`gateRead`。2026-10-07）。**速い経路を使ってよいのは
+	// `gateReadSettled`（変化して止まった）だけ** —— 保険の 1 枚は 81 マスを読んで答え合わせを
+	// する役で、止まらないまま読む 1 枚は手や頭が動いている最中かもしれない。
+	gateReadFirst     = "first"
+	gateReadSettled   = "settled"
+	gateReadRestless  = "restless"
+	gateReadInsurance = "insurance"
 )
 
 // gate は**この 1 枚を認識するか**を決める（空なら認識する）。
@@ -1097,17 +1156,18 @@ func (s *CaptureService) gate(img image.Image) string {
 	// ⚠️ **ここで数えないこと**（2026-09-18）。この先に**盤の有無のふるい**
 	// （`detectGate`）があり、そこでも落ちる。**数えるのは実際に認識した 1 枚だけ**
 	// （`noteRead`）で、そうでないと省いた割合が実態より悪く見える。
-	read := func() string {
+	read := func(why string) string {
 		s.gateDirty, s.gateMoving = false, 0
 		s.gateSkipped, s.gateMaxSkip = 0, 0
+		s.gateRead = why
 		return ""
 	}
 	if anchor.Board.Dx() <= 0 || prev == nil {
-		return read()
+		return read(gateReadFirst)
 	}
 	ratio, ok := ikkyoku.FrameDiff(prev, img, anchor.Board)
 	if !ok {
-		return read()
+		return read(gateReadFirst)
 	}
 	if ratio >= gateChangedRatio {
 		s.gateDirty = true
@@ -1115,7 +1175,7 @@ func (s *CaptureService) gate(img image.Image) string {
 		if s.gateMoving < gateMovingMax {
 			return gateSkipMoving
 		}
-		return read() // 止まらないので、待つのをやめて読む
+		return read(gateReadRestless) // 止まらないので、待つのをやめて読む
 	}
 	if !s.gateDirty {
 		s.gateSkipped++
@@ -1131,9 +1191,9 @@ func (s *CaptureService) gate(img image.Image) string {
 			"省いた周", s.gateSkipped,
 			"いちばん大きかった差", fmt.Sprintf("%.5f", s.gateMaxSkip),
 			"しきい値", gateChangedRatio)
-		return read()
+		return read(gateReadInsurance)
 	}
-	return read() // 変化したあと静止した ＝ 読むならこの 1 枚
+	return read(gateReadSettled) // 変化したあと静止した ＝ 読むならこの 1 枚
 }
 
 // detectMissMax は**盤の有無のふるいで見送り続けてよい周の数**。
@@ -1241,9 +1301,14 @@ func (s *CaptureService) noteQuiet(r CaptureResult) {
 	// （`TODO.md` 4 の ③）。省いたのは**変わっていないから**で、正常そのもの。
 	case r.Skipped != "":
 		kind, msg = "skip:"+r.Skipped, "変わっていないので認識を省いています（追跡）"
-		if r.Skipped == gateSkipMoving {
+		switch r.Skipped {
+		case gateSkipMoving:
 			msg = "動いているので止まるのを待っています（追跡）"
+		case cellSkipSame:
+			msg = "先端と合っていた 1 枚から、どのマスも変わっていません（追跡）"
 		}
+	case len(r.Cells) > 0:
+		kind, msg = "cells", "変わったマスだけで手を割り出します（追跡）"
 	// ⚠️ **`OffBoard` を先に見ること**（2026-09-18）。盤の有無のふるいで落ちた周は
 	// **読んでいないので SFEN が空**で、順番が逆だと**別の盤を「盤が映っていません」**
 	// と言う（**原因が違うのに同じ顔で出る**、この追従で何度もやった壊れ方）。
@@ -1292,7 +1357,6 @@ func (s *CaptureService) AnchorBoard() (CaptureResult, error) {
 	}
 	s.mu.Lock()
 	s.boardAnchor, s.anchorRegion = sig, region
-	s.cellBase = s.lastQuiet // マスごとの差の測定（`celldiff.go`）
 	s.mu.Unlock()
 	log.Info("追う盤を決めました", "board", sig.Board, "color", sig.Color, "dir", dir)
 	return r, nil
@@ -1344,8 +1408,6 @@ func (s *CaptureService) SaveFollowFrame(number int, moves []string, guess bool)
 	s.mu.Lock()
 	dir, img := s.followDir, s.lastQuiet
 	s.mu.Unlock()
-	// **録画を残せなくても控える**（マスごとの差の測定。`celldiff.go`）。
-	s.noteCellBase(img)
 	if dir == "" || img == nil {
 		return ""
 	}
@@ -1516,7 +1578,7 @@ func (s *CaptureService) ClearBoardAnchor() {
 	// 前の回の続きに書き足すと**1 つのディレクトリに 2 局が混ざる**。
 	s.boardAnchor, s.anchorRegion, s.quietOutcome = recognize.Signature{}, ikkyoku.Region{}, ""
 	s.followDir, s.lastQuiet, s.followMisses, s.lastMissKind = "", nil, 0, ""
-	s.cellPrev, s.cellBase = nil, nil
+	s.cellBase, s.cellRects = nil, nil
 	// ⚠️ **ふるいがどれくらい効いたかを出す**（2026-09-18）。定数（変化のしきい値・
 	// 待つ周の上限・撮る間隔）は**どれも当て推量**なので、
 	// **実機の中継で詰めるための材料**が要る。

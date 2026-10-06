@@ -594,6 +594,11 @@ func (s *StudyService) FollowAuto(boardSFEN string, cellConfidence []float64, ce
 	}
 	moves, ok := followAddable(p)
 	if !ok {
+		// ⚠️ **控えと矛盾しない 1 枚なら、控えは捨てない**（2026-10-06 に実機で踏んだ。`pendingStillFits`）。
+		if s.pendingStillFits(board, cost, unseen) {
+			return FollowAuto{Kind: p.Kind, Pending: true, Reason: "確かめています",
+				Fit: p.Fit, Unseen: unseen.Count(), State: s.State()}, nil
+		}
 		// **足せる手が無い 1 枚が来たら、控えは捨てる**（手が映った 1 枚の答えは
 		// 次の 1 枚で消えるのが普通で、それがこの形）。
 		s.setPending(nil)
@@ -668,7 +673,168 @@ func (s *StudyService) FollowConfirm() (FollowAuto, error) {
 	if pend == nil || pend.tip != s.mainTip() {
 		return FollowAuto{Kind: FollowSame, Reason: "盤面は変わっていません", State: s.State()}, nil
 	}
+	if pend.board == nil {
+		// **速い経路で控えた手**（`FollowCells`）。読んだ盤は無いので、手順をそのまま足す。
+		return s.fastApply(pend.moves, true)
+	}
 	return s.followFrom(pend.board, pend.cost, pend.unseen, pend.rotated)
+}
+
+// followCellsDepth は速い経路で探す手数の上限（1 枚に写るのは、早指しでもふつう 2 手まで）。
+const followCellsDepth = 2
+
+// FollowCells は**変わったマスだけで手を割り出して**追従する（速い経路。2026-10-07）。
+//
+// changed は**撮った画像の向き**での 81 マスの番号（行優先。`CaptureResult.Cells`）。比べた相手は
+// 本譜の先端とぴったり合っていた 1 枚（`FollowAuto.AtFrame`）。81 マスの推論（2.1 秒）を回さないので、
+// **指されてから手が入るまでが「止まったのを確かめる 0.25〜0.5 秒」＋数ミリ秒**になる。
+//
+// ⚠️ **合う手順が 1 つに決まるときだけ進む**（`position.ChangedMoves`）。成・不成、打った駒の種類、
+// 手や頭が被った 1 枚など、決まらなければ何もせずに返す（`Applied` も `Pending` も偽）。
+// **フロントはそれを見て、同じ 1 枚を 81 マスで読む**（`CaptureService.RecognizeQuiet` → `FollowAuto`）。
+// ⚠️ **1 枚だけでは足さない**のは同じ（`followPending`）。次の 1 枚が変わっていなければ
+// `FollowConfirm` で足す。⚠️ **直前の手のマスは、見た目だけ変わってよい**（ゲーム画面の色付け）。
+func (s *StudyService) FollowCells(changed []int) (FollowAuto, error) {
+	mask := &position.CellMask{}
+	for _, i := range changed {
+		if i >= 0 && i < 81 {
+			mask[i/9][i%9] = true
+		}
+	}
+	// ⚠️ **撮った向きと解析の向きを揃えること**（後手目線で採った局面は 180 度回してある）。
+	if s.src.followRotated() {
+		mask = mask.Rotate180()
+	}
+
+	s.mu.Lock()
+	if s.study == nil {
+		s.mu.Unlock()
+		return FollowAuto{}, fmt.Errorf("解析タブにまだ局面がありません")
+	}
+	_, from, err := s.study.MainTip()
+	main := s.study.MainLine()
+	s.mu.Unlock()
+	if err != nil {
+		return FollowAuto{}, err
+	}
+
+	var extra *position.CellMask
+	if len(main) > 0 {
+		extra = usiCells(main[len(main)-1])
+	}
+	sols, err := position.ChangedMoves(from, mask, extra, followCellsDepth)
+	if err != nil || len(sols) != 1 {
+		log.Info("変わったマスでは手が決まりません（81 マスを読みます）",
+			"変わったマス", mask.Count(), "合う手順", len(sols), "error", err)
+		return FollowAuto{Kind: FollowUnreachable, Reason: "変わったマスでは手が決まりません", State: s.State()}, nil
+	}
+	moves := sols[0]
+	log.Info("変わったマスで手を割り出しました", "moves", moves)
+
+	k := s.takePendingPrefix(moves)
+	switch {
+	case k == 0:
+		// **初めて出た答え。** 控えて、次の 1 枚を待つ（読んだ盤は無い）。
+		s.setPending(&followPending{tip: s.mainTip(), moves: moves})
+		return FollowAuto{Kind: FollowUnique, Pending: true, Reason: "確かめています", State: s.State()}, nil
+	case k == len(moves):
+		return s.fastApply(moves, true)
+	default:
+		// **2 枚目のほうが先へ進んでいる**（`followConfirmed` と同じ）。揃った頭だけ足し、残りを控え直す。
+		a, err := s.fastApply(moves[:k], false)
+		if err != nil {
+			return a, err
+		}
+		s.setPending(&followPending{tip: s.mainTip(), moves: slices.Clone(moves[k:])})
+		a.Pending, a.Reason = true, "確かめています"
+		return a, nil
+	}
+}
+
+// fastApply は速い経路で決まった手順を本譜の先に足す。atFrame は「これでこの 1 枚とぴったり合う」か。
+func (s *StudyService) fastApply(moves []string, atFrame bool) (FollowAuto, error) {
+	s.mu.Lock()
+	if s.study == nil {
+		s.mu.Unlock()
+		return FollowAuto{}, fmt.Errorf("解析タブにまだ局面がありません")
+	}
+	atTip := s.study.CurrentID() == mainTipID(s.study)
+	rev, main, rootSfen := s.rev, s.study.MainLine(), rootSFEN(s.study)
+	s.mu.Unlock()
+
+	text := followText(rootSfen, main, moves)
+	applied, err := s.FollowApply(moves, rev, atTip)
+	if err != nil {
+		return FollowAuto{}, err
+	}
+	return FollowAuto{Kind: FollowUnique, Applied: true, Moves: slices.Clone(moves), Text: text,
+		Added: applied.Added, Guess: true, Fit: 1, Note: applied.Note, State: applied.State,
+		AtFrame: atFrame}, nil
+}
+
+// usiCells は USI の手が動かすマス（元と行き先。打つ手は行き先だけ）。読めなければ nil。
+func usiCells(mv string) *position.CellMask {
+	sq := func(s string) (int, int, bool) {
+		if len(s) != 2 || s[0] < '1' || s[0] > '9' || s[1] < 'a' || s[1] > 'i' {
+			return 0, 0, false
+		}
+		return int(s[1] - 'a'), 9 - int(s[0]-'0'), true
+	}
+	if len(mv) < 4 {
+		return nil
+	}
+	m := &position.CellMask{}
+	if mv[1] != '*' {
+		r, f, ok := sq(mv[0:2])
+		if !ok {
+			return nil
+		}
+		m[r][f] = true
+	}
+	r, f, ok := sq(mv[2:4])
+	if !ok {
+		return nil
+	}
+	m[r][f] = true
+	return m
+}
+
+// pendingStillFits は**足せる手が出なかった 1 枚が、控えた手順と矛盾しないか**を返す（2026-10-06）。
+//
+// 矛盾しないとは、**控えた手順を指した盤でこの 1 枚を説明しても、何も指していない盤より
+// 悪くならない**こと（`position.MatchCost` で比べる）。
+//
+// **実機の症状**: ゲーム画面で △1五歩 の歩が、明るさが細かく揺れるたびに「読める・読めない」を
+// 繰り返し（画素はほぼ同じ）、読めた 1 枚で控えても、次の読めない 1 枚で捨てていた。2 回続けて
+// 読めるまで 90 秒入らなかった。読めない 1 枚は 1四 が空いて 1五 も空き —— **「何も指していない」
+// とも「△1五歩」とも同じだけ食い違う**ので、控えを否定する材料になっていない。
+//
+// ⚠️ **手が映った 1 枚の空想の手は、今までどおり捨てられること**（`TestFollowAutoDropsTransientFrame`）。
+// 手がどいた 1 枚は「何も指していない」とぴったり合い、空想の手のほうが食い違うので、ここは偽になる。
+// ⚠️ **費用表が無いときは偽**（比べる根拠が無いので今までどおり捨てる）。
+func (s *StudyService) pendingStillFits(board *position.Board, cost *position.CellCost, unseen *position.CellMask) bool {
+	if board == nil || cost == nil {
+		return false
+	}
+	s.mu.Lock()
+	pend := s.pending
+	if pend == nil || s.study == nil || pend.tip != mainTipID(s.study) {
+		s.mu.Unlock()
+		return false
+	}
+	_, from, err := s.study.MainTip()
+	s.mu.Unlock()
+	if err != nil {
+		return false
+	}
+	after := from.Clone()
+	for _, m := range pend.moves {
+		if after.ApplyMove(m) != nil {
+			return false
+		}
+	}
+	opt := position.ConnectOptions{Cost: cost, Unseen: unseen}
+	return position.MatchCost(after.Board, board, opt) <= position.MatchCost(from.Board, board, opt)
 }
 
 // followPending は**1 枚目で見つけた、まだ足していない答え**（2026-10-05）。
@@ -776,6 +942,8 @@ func (s *StudyService) followFrom(board *position.Board, cost *position.CellCost
 		if len(p.Candidates) == 0 || (p.Kind != FollowUnique && p.Kind != FollowChoices) {
 			// **足せる手が無い**（変わっていない／読めない／繋がらない）。
 			// ⚠️ **2 手目以降なら、これが「追いつき切った」の正常な終わり方。**
+			// **ぴったり「変わっていない」で終わったなら、この 1 枚は先端そのもの**（速い経路の比べる相手）。
+			a.AtFrame = p.Kind == FollowSame && (cost == nil || p.Fit >= 1-1e-9)
 			break
 		}
 		// ⚠️ **順番が決まらなくても、行き先が決まっているなら進む**
@@ -907,6 +1075,11 @@ type FollowAuto struct {
 	// 次にすることが同じ —— 待つ —— でも、**出す言葉は違う**）。⚠️ **足したかどうかの
 	// 判断には使わないこと**（それは `position` がマスごとにやっている）。
 	Unseen int `json:"unseen"`
+	// AtFrame は**本譜の先端が、この 1 枚とぴったり合っているか**（2026-10-07）。
+	// 真なら、この 1 枚を**速い経路の比べる相手**にしてよい（フロントが `CaptureService.SetCellBase` を呼ぶ）。
+	// ⚠️ **ぴったり（一致度 1）のときだけ立てること。** 行き先の駒が読めていないだけの 1 枚
+	// （一致度 0.9965）を比べる相手にすると、その手のマスの変化が二度と見えなくなる。
+	AtFrame bool `json:"atFrame"`
 }
 
 // looksFlipped は**盤を 180 度回したら 1 手で説明が付くか**を見る（2026-09-15。2026-10-06 に見直した）。
