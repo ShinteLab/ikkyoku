@@ -1368,17 +1368,36 @@ func TestFollowCellsReadsTheCellToDecidePromotion(t *testing.T) {
 	if a.Applied || a.Pending || len(a.ReadCells) != 1 || a.ReadCells[0] != cellIdx("2b")[0] {
 		t.Fatalf("2二 だけを読むよう頼むはず: %+v", a)
 	}
-	// 読めなかったら決め打ちしない。
-	if a, _ := s.FollowCells(changed, []CellPiece{{Cell: cellIdx("2b")[0], Piece: "?"}}); a.Applied || a.Pending {
-		t.Fatalf("読めなかったのに決め打ちしました: %+v", a)
+	// 空きに読めたら決めない（手が被っているなど別の事情）。
+	if a, _ := s.FollowCells(changed, []CellPiece{{Cell: cellIdx("2b")[0], Piece: ""}}); a.Applied || a.Pending {
+		t.Fatalf("空きに読めたのに決め打ちしました: %+v", a)
 	}
-	// 馬と読めたら ▲2二角成。
-	if a, err := s.FollowCells(changed, []CellPiece{{Cell: cellIdx("2b")[0], Piece: "+B"}}); err != nil || !a.Pending {
-		t.Fatalf("馬と読めたのに控えていません: %+v（%v）", a, err)
+	// 角（成っていない姿）と読めたら ▲2二角不成。
+	if a, err := s.FollowCells(changed, []CellPiece{{Cell: cellIdx("2b")[0], Piece: "B"}}); err != nil || !a.Pending {
+		t.Fatalf("角と読めたのに控えていません: %+v（%v）", a, err)
 	}
-	a, err = s.FollowConfirm()
-	if err != nil || !a.Applied || a.Moves[0] != "8h2b+" {
-		t.Fatalf("▲2二角成 になっていません: %+v（%v）", a, err)
+	if a, err := s.FollowConfirm(); err != nil || !a.Applied || a.Moves[0] != "8h2b" {
+		t.Fatalf("▲2二角不成 になっていません: %+v（%v）", a, err)
+	}
+}
+
+// ⚠️ **成駒を読めなくても、動いた駒の成っていない姿と読めなければ成りと決めること**（2026-10-07。ユーザーの判断）。
+//
+// 実際の中継では成駒は滅多に出ず、学習データに入らないので読めないのが普通。**どの駒が動いたかは局面から
+// 分かる**ので、行き先が「その駒」と読めなければ成っている。⚠️ **将棋の見込みは使わない**（証拠だけ）。
+func TestFollowCellsPromotesWhenNotTheMovedPiece(t *testing.T) {
+	for _, read := range []string{"?", "+B", "S"} { // 読めない・馬と読めた・別の駒に読めた
+		s, _ := following(t)
+		if _, err := s.FollowApply([]string{"7g7f", "3c3d"}, s.State().Rev, false); err != nil {
+			t.Fatalf("FollowApply: %v", err)
+		}
+		changed := cellIdx("8h", "2b")
+		if a, err := s.FollowCells(changed, []CellPiece{{Cell: cellIdx("2b")[0], Piece: read}}); err != nil || !a.Pending {
+			t.Fatalf("%q と読めたとき、成りで控えていません: %+v（%v）", read, a, err)
+		}
+		if a, err := s.FollowConfirm(); err != nil || !a.Applied || a.Moves[0] != "8h2b+" {
+			t.Fatalf("%q と読めたとき ▲2二角成 になっていません: %+v（%v）", read, a, err)
+		}
 	}
 }
 
