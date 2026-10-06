@@ -1381,3 +1381,24 @@ func TestFollowCellsReadsTheCellToDecidePromotion(t *testing.T) {
 		t.Fatalf("▲2二角成 になっていません: %+v（%v）", a, err)
 	}
 }
+
+// ⚠️ **成ったかどうかが盤から消えた 1 枚では、控えた手と合う候補を採ること**（2026-10-07）。
+//
+// **実機の症状**: ▲3三角成 を 81 マスの読みで控えたあと △同金 が指され、3三 が金になって成・不成の
+// 2 通りが残り、速い経路で決まらずにもう一度 81 マス（8 秒）を読んだ。
+func TestFollowCellsUsesPendingWhenPromotionVanished(t *testing.T) {
+	s, _ := following(t)
+	if _, err := s.FollowApply([]string{"7g7f", "3c3d", "2g2f", "4a3b"}, s.State().Rev, false); err != nil {
+		t.Fatalf("FollowApply: %v", err)
+	}
+	// 81 マスの読みで ▲2二角成 を控えた（ここでは控えを直に置く）。
+	s.setPending(&followPending{tip: s.mainTip(), moves: []string{"8h2b+"}})
+	// 次の 1 枚: ▲2二角成 △同銀 —— 2二 は銀になり、成ったかどうかは見えない。
+	a, err := s.FollowCells(cellIdx("8h", "2b", "3a"), nil)
+	if err != nil {
+		t.Fatalf("FollowCells: %v", err)
+	}
+	if !a.Applied || len(a.Moves) == 0 || a.Moves[0] != "8h2b+" {
+		t.Fatalf("控えた ▲2二角成 で始まる答えを採っていません: %+v", a)
+	}
+}

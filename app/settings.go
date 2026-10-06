@@ -29,6 +29,8 @@ type AppSettings struct {
 	FitOnStartup bool `json:"fitOnStartup"`
 	// ClickThrough はガイド枠の内側のクリックを後ろの画面へ素通しするか（Windows のみ）。
 	ClickThrough bool `json:"clickThrough"`
+	// FollowFirst は中継を追っているあいだ、盤の読みを外部エンジンより優先するか（2026-10-07。Windows のみ）。
+	FollowFirst bool `json:"followFirst"`
 	// EvalGraphDetached は評価値グラフを**別ウィンドウに切り離しているか**
 	// （2026-09-08）。
 	//
@@ -350,6 +352,9 @@ type SettingsService struct {
 	// 実体は `CaptureService.applyClickThrough`（枠の HWND を触るのはあちらの仕事）。
 	// ⚠️ **SettingsService から枠を直に触らないこと**（ウィンドウを持っていない）。
 	OnClickThrough func(bool)
+	// OnFollowFirst は「中継を追うあいだは盤の読みを優先する」を切り替えたときに呼ぶ（2026-10-07）。
+	// ⚠️ **設定のロックを持ったまま呼ぶ**ので、先で `Config()` を呼び返さないこと（値は引数で渡す）。
+	OnFollowFirst func(bool)
 
 	// OnSutemeSource は「認識器の読み込み元」を切り替えたときに呼ぶ
 	// （`CaptureService.applyRecognizerSource`。その場で読み直す）。
@@ -464,6 +469,7 @@ func (s *SettingsService) settings() AppSettings {
 	return AppSettings{
 		FitOnStartup:      s.cfg.FitOnStartup,
 		ClickThrough:      s.cfg.ClickThrough,
+		FollowFirst:       s.cfg.FollowFirst,
 		EvalGraphDetached: s.cfg.EvalGraphDetached,
 		StudyPaneDetached: s.cfg.StudyPaneDetached,
 		MovePaneDetached:  s.cfg.MovePaneDetached,
@@ -1179,6 +1185,19 @@ func (s *SettingsService) SetAnalyzeSeconds(v int) (AppSettings, error) {
 		return s.settings(), fmt.Errorf("考える秒数は 0 以上で指定してください（0 は無制限）: %d", v)
 	}
 	return s.save(func(cfg *ikkyoku.Config) { cfg.AnalyzeSeconds = &v })
+}
+
+// SetFollowFirst は「中継を追うあいだは盤の読みを優先する」を切り替えて保存し、**その場で効かせる**
+// （`OnFollowFirst`。追っている最中に切り替えたら、次の読みを待たずにエンジンの優先度を変える）。
+// ⚠️ **保存できたときだけ効かせること**（`SetClickThrough` と同じ）。
+func (s *SettingsService) SetFollowFirst(v bool) (AppSettings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st, err := s.save(func(cfg *ikkyoku.Config) { cfg.FollowFirst = v })
+	if err == nil && s.OnFollowFirst != nil {
+		s.OnFollowFirst(v)
+	}
+	return st, err
 }
 
 // SetFitOnStartup は「起動時に盤面を探す」を切り替えて保存する。

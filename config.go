@@ -90,6 +90,16 @@ type Config struct {
 	// omitempty を付けていないのは FitOnStartup と同じ理由（切ってあること自体を残す）。
 	ClickThrough bool `json:"clickThrough"`
 
+	// FollowFirst は**中継を追っているあいだ、盤の読みを外部エンジンより優先するか**（2026-10-07）。
+	//
+	// **既定は false（解析を優先）。** 解析がこのアプリの本命なので、エンジンの CPU を勝手に削らない。
+	// 有効にすると、**追っているあいだだけ** ikkyoku が起動した外部エンジンのプロセスの優先度を
+	// 「通常以下」に下げ、81 マスの読み（エンジンと取り合うと 2 秒強が 8 秒に延びた）が先に CPU を
+	// 使えるようにする。エンジンは空いた CPU では今までどおり全力で回る。止めたら「通常」に戻す。
+	// ⚠️ **同梱エンジンには効かない**（ikkyoku と同じプロセスで動く）。
+	// omitempty を付けないのは FitOnStartup と同じ理由（切ってあること自体を残す）。
+	FollowFirst bool `json:"followFirst"`
+
 	// EvalGraphDetached は評価値グラフを**別ウィンドウに切り離しているか**
 	// （2026-09-08）。
 	//

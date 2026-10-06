@@ -276,6 +276,16 @@ func main() {
 	// **枠の HWND を触るのは CaptureService** なので、設定タブからの切り替えは
 	// ここで繋いだこのフックを通る（SettingsService はウィンドウを持っていない）。
 	settingsSvc.OnClickThrough = captureSvc.applyClickThrough
+	// 「中継を追うあいだは盤の読みを優先する」（2026-10-07。`enginepriority.go`）。
+	captureSvc.followFirst = cfg.FollowFirst
+	captureSvc.engineNames = func() []string {
+		var out []string
+		for _, e := range settingsSvc.Config().Engines {
+			out = append(out, e.Path) // 空は同梱（同じプロセスなので下げられない）
+		}
+		return out
+	}
+	settingsSvc.OnFollowFirst = captureSvc.applyFollowFirst
 	// 評価値グラフの切り離し（解析タブのスプリットバーのトグル / グラフ窓を閉じる）。
 	// **窓を出し入れするのは CaptureService**（SettingsService はウィンドウを持たない）。
 	settingsSvc.OnEvalGraphDetached = captureSvc.applyEvalGraphDetached

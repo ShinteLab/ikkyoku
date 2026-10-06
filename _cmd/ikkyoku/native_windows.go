@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"image"
 	"runtime"
+	"strings"
 	"time"
 	"unsafe"
 
@@ -444,4 +445,40 @@ func placeBehind(hwnd, after unsafe.Pointer) error {
 		return fmt.Errorf("ikkyoku: SetWindowPos に失敗しました: %w", callErr)
 	}
 	return nil
+}
+
+// setEnginePriority は**このプロセスの子のうち、実行ファイル名が names にあるもの**の優先度を変える（2026-10-07）。
+//
+// low なら「通常以下」（BELOW_NORMAL）、偽なら「通常」。変えた数を返す。names は小文字のファイル名。
+// ⚠️ **判断を書かないこと**（いつ変えるかは `enginepriority.go`）。⚠️ **名前で絞ること** ——
+// 子プロセスには WebView2（画面）も居るので、全部を下げると画面がもたつく。
+func setEnginePriority(names map[string]bool, low bool) (int, error) {
+	snap, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
+	if err != nil {
+		return 0, fmt.Errorf("ikkyoku: プロセスの一覧を取れません: %w", err)
+	}
+	defer windows.CloseHandle(snap)
+
+	class := uint32(windows.NORMAL_PRIORITY_CLASS)
+	if low {
+		class = windows.BELOW_NORMAL_PRIORITY_CLASS
+	}
+	self := windows.GetCurrentProcessId()
+	var pe windows.ProcessEntry32
+	pe.Size = uint32(unsafe.Sizeof(pe))
+	n := 0
+	for err = windows.Process32First(snap, &pe); err == nil; err = windows.Process32Next(snap, &pe) {
+		if pe.ParentProcessID != self || !names[strings.ToLower(windows.UTF16ToString(pe.ExeFile[:]))] {
+			continue
+		}
+		h, err := windows.OpenProcess(windows.PROCESS_SET_INFORMATION, false, pe.ProcessID)
+		if err != nil {
+			continue
+		}
+		if windows.SetPriorityClass(h, class) == nil {
+			n++
+		}
+		windows.CloseHandle(h)
+	}
+	return n, nil
 }

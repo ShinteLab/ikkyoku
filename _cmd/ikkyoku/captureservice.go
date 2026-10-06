@@ -160,6 +160,12 @@ type CaptureService struct {
 	cellRects  []image.Rectangle
 	cellRegion image.Rectangle
 	cellBounds image.Rectangle
+	// followFirst は設定「中継を追うあいだは盤の読みを優先する」（`enginepriority.go`。2026-10-07）。
+	followFirst bool
+	// enginesLowered は外部エンジンの優先度を下げているか（戻し忘れないため）。
+	enginesLowered bool
+	// engineNames は登録してある外部エンジンの実行ファイルのパス（`main` が差し込む。設定から読む）。
+	engineNames func() []string
 	// gateRead は**ふるいが読む側へ倒した理由**（`gateReadSettled` など。速い経路を使ってよいかの判断）。
 	gateRead string
 	// lastShot は**直近に手で撮った（読み込んだ）1 枚**。
@@ -1054,9 +1060,14 @@ func (s *CaptureService) readQuiet(img image.Image, region ikkyoku.Region, resul
 		return result
 	}
 	s.noteRead()
+	// 設定が有効なら、読む前にエンジンの優先度を合わせる（追っているあいだに起きたエンジンも下げる）。
+	s.syncEnginePriority()
 	// ⚠️ **認識に失敗しても成功として返す**（設計原則3）。呼び出し側は
 	// 盤面が空なら見送るだけで、**追従そのものは続く。**
+	started := time.Now()
 	board, err := recognize.FromImage(img)
+	// **かかった時間を毎回出す**（2026-10-07）。エンジンと CPU を取り合うと 2 秒強が 8 秒に延びた。
+	log.Info("81 マスを読みました（追跡）", "ms", time.Since(started).Milliseconds())
 	if err != nil {
 		result.RecognizeError = err.Error()
 		return result
@@ -1370,6 +1381,7 @@ func (s *CaptureService) AnchorBoard() (CaptureResult, error) {
 	s.mu.Lock()
 	s.boardAnchor, s.anchorRegion = sig, region
 	s.mu.Unlock()
+	go s.syncEnginePriority()
 	log.Info("追う盤を決めました", "board", sig.Board, "color", sig.Color, "dir", dir)
 	return r, nil
 }
@@ -1597,6 +1609,8 @@ func (s *CaptureService) ClearBoardAnchor() {
 	shots, reads := s.gateShots, s.gateReads
 	s.resetGate()
 	s.mu.Unlock()
+	// ⚠️ **エンジンの優先度を戻すこと**（追う盤を忘れたので「追っていない」になり、下げていれば戻す）。
+	s.syncEnginePriority()
 	if shots > 0 {
 		log.Info("追跡を止めました", "撮った枚数", shots, "認識した枚数", reads,
 			"省いた割合", fmt.Sprintf("%.0f%%", 100*float64(shots-reads)/float64(shots)))
