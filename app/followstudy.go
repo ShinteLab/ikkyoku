@@ -216,6 +216,8 @@ func (s *StudyService) followProbe(board *position.Board, cost *position.CellCos
 	// ⚠️ **厳密一致が弱くなるわけではない** —— ぴったり合う候補は費用 0 で必ず
 	// 1 位になる。`Connect` に残るのは**2 手以上飛んだとき**の仕事だけ。
 	var ranked position.RankResult
+	// arrived は「何も指していない」が 1 位なのに、駒が来たマスがあったので先を探しに行ったか。
+	arrived := false
 	if fromImage {
 		got, rerr := position.Rank(from, board, opt)
 		if rerr == nil && len(got.Candidates) > 0 {
@@ -243,11 +245,20 @@ func (s *StudyService) followProbe(board *position.Board, cost *position.CellCos
 			// ⚠️ **差が小さいからといって「決められない」に落とさないこと。**
 			// 動いていないのが一番よく合うなら、**手を足さないのが正解**で、
 			// 迷う余地は無い（**足す側にだけ差を要求する**）。
+			//
+			// ⚠️ **ただし駒が来たマスがあるなら、何かは指されている**（2026-10-06 に実機で踏んだ。
+			// `followArrived`）。指して 1 秒で取り返された 1 枚（▲2四歩 △同歩）は歩が 1 マス
+			// ずれたようにしか見えず、1 手の候補より「何も指していない」のほうがよく合う。
+			// そこで終えると 2 手先を探しに行かず、見送り続けて見失った。`Connect` へ進む。
 			if len(top.Moves) == 0 {
-				out.Kind, out.Reason = FollowSame, "盤面は変わっていません"
-				return out, nil
-			}
-			if got.Decided(position.DefaultMinFit, position.DefaultMinMargin) {
+				if !followArrived(top.Fixed, cost) {
+					out.Kind, out.Reason = FollowSame, "盤面は変わっていません"
+					return out, nil
+				}
+				arrived = true
+				log.Info("何も指していないが 1 位ですが、駒が来たマスがあるので先を探します",
+					"tip", tipID, "rotated", rotated)
+			} else if got.Decided(position.DefaultMinFit, position.DefaultMinMargin) {
 				// ⚠️ **費用 0 は推測ではない**（認識とぴったり合っている）。
 				out.Kind, out.Depth, out.Guess = FollowUnique, len(top.Moves), top.Cost > 0
 				out.Fixed = followFixes(top.Fixed)
@@ -279,6 +290,13 @@ func (s *StudyService) followProbe(board *position.Board, cost *position.CellCos
 		out.Kind, out.Reason = FollowSame, "盤面は変わっていません"
 		return out, nil
 	case position.StopBudget, position.StopTooFar, position.StopUnreachable:
+		// ⚠️ **駒が来たので探しに来ただけなら、繋がらなければ元の「変わっていない」に戻すこと**
+		// （`followArrived`）。読みの揺れで来たように見えただけの 1 枚を「繋がらない」にすると、
+		// 「見失っています」に数えられる。
+		if arrived {
+			out.Kind, out.Reason = FollowSame, "盤面は変わっていません"
+			return out, nil
+		}
 		// ⚠️ **ここで行き止まりにしないこと**（2026-09-15 に実機で踏んだ）。
 		// 打ち切り（`StopBudget`）でも**先に並べた候補は残っている**ので、それを出す。
 		// **黙って無反応になるのが一番たちが悪い。**
@@ -304,6 +322,37 @@ func (s *StudyService) followProbe(board *position.Board, cost *position.CellCos
 	out.Kind = FollowChoices
 	out.Reason = fmt.Sprintf("%d手ぶん進んだようですが、順番が決められません", r.Depth)
 	return out, nil
+}
+
+// followArrivedMinCost は「駒が来た」と言い切る、そのマスの読みの確かさ（費用表の値）の下限。
+//
+// suteme は空きを確信度 0（費用は下限の 0.15）で返し、駒のマスは駒の確信度で返す。
+// ⚠️ **当て推量**（2026-10-06）。下げすぎると、中継の読みの揺れのたびに深い探索
+// （`Connect`。打ち切りは `followTimeout`）を回すことになる。
+const followArrivedMinCost = 0.5
+
+// followArrived は「何も指していない」との食い違いに、**駒が来たマス**があるかを返す（2026-10-06）。
+//
+// 来たとは、読んだ盤では駒があるのに、今の局面では空きか相手の駒、のこと
+// （`position.backed` と同じく先後までで、駒の種類は問わない）。⚠️ **空いただけは数えない**
+// —— 空きは手や影で簡単に作られる。⚠️ **読みの確かでないマスは数えない**（`followArrivedMinCost`）。
+// 費用表が無いときは厳密一致の側なので、ここには来ない。
+func followArrived(fixed []position.Fix, cost *position.CellCost) bool {
+	if cost == nil {
+		return false
+	}
+	for _, f := range fixed {
+		if f.Was.IsEmpty() {
+			continue
+		}
+		if !f.Now.IsEmpty() && f.Now.Black() == f.Was.Black() {
+			continue
+		}
+		if cost[f.Rank][f.File] >= followArrivedMinCost {
+			return true
+		}
+	}
+	return false
 }
 
 // FollowApply は選んだ手順を**本譜の先**に据える。

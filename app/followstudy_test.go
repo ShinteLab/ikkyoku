@@ -892,6 +892,49 @@ func TestFollowAutoDoesNotCryFlipWhenFine(t *testing.T) {
 	}
 }
 
+// realConf は実機に近い確信度の表を作る（駒のマスは v、空きは 0 —— suteme は空きを確信度 0 で返す）。
+func realConf(board string, v float64) []float64 {
+	out := make([]float64, 0, 81)
+	for _, row := range strings.Split(board, "/") {
+		for _, ch := range row {
+			switch {
+			case ch >= '1' && ch <= '9':
+				for i := 0; i < int(ch-'0'); i++ {
+					out = append(out, 0)
+				}
+			case ch == '+':
+			default:
+				out = append(out, v)
+			}
+		}
+	}
+	return out
+}
+
+// ⚠️ **指して 1 秒で取り返された 1 枚を「変わっていない」で見送らないこと**（2026-10-06）。
+//
+// **実機の症状**: ゲーム画面で ▲2四歩 △同歩 が 1 秒のあいだに指され、撮った 1 枚は 2 手先だった。
+// 歩が 1 マスずれただけに見えるので、1 手の候補より「何も指していない」のほうがよく合い
+// （食い違いは 2五・2三 が空いたのと 2四 に後手の歩が来たこと）、`Rank` の 1 位が
+// 「何も指していない」になって、2 手先を探しに行かずに見送り続けた。
+// **駒が来たマスがあるなら、何かは指されている。**
+func TestFollowAutoCatchesExchangeInOneFrame(t *testing.T) {
+	s, _ := following(t)
+	opening := []string{"2g2f", "8c8d", "2f2e", "8d8e"}
+	if _, err := s.FollowApply(opening, s.State().Rev, false); err != nil {
+		t.Fatalf("FollowApply: %v", err)
+	}
+	board := boardAfter(t, append(opening, "2e2d", "2c2d")...)
+
+	a, err := followAuto(t, s, board, realConf(board, 0.9))
+	if err != nil {
+		t.Fatalf("FollowAuto: %v", err)
+	}
+	if !a.Applied || len(a.Moves) != 2 || a.Moves[0] != "2e2d" || a.Moves[1] != "2c2d" {
+		t.Fatalf("▲2四歩 △同歩 を足していません: kind=%q reason=%q moves=%v", a.Kind, a.Reason, a.Moves)
+	}
+}
+
 // ⚠️ **今の向きで「変わっていない」とぴったり合っているなら、「逆かも」と言わないこと**（2026-10-06）。
 //
 // **実機の症状**: ゲーム画面で後手を持ち、相手の ▲6八玉 のあとで目線を後手にして採った。
