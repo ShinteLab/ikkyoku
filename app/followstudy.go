@@ -573,7 +573,7 @@ func (s *StudyService) followConfirmed(p FollowProbe, k int, board *position.Boa
 		// ⚠️ **順番が決まらずに選んだ手は推測**（`followFrom` と同じ判断）。
 		Guess: p.Guess || p.Kind == FollowChoices,
 		Fit:   p.Fit, Fixed: p.Fixed, Mismatch: p.Mismatch, Unseen: unseen.Count(),
-		Note:  applied.Note, State: applied.State}
+		Note: applied.Note, State: applied.State}
 	if len(top.Text) >= k {
 		a.Text = slices.Clone(top.Text[:k])
 	}
