@@ -541,6 +541,13 @@ const (
 //
 // ⚠️ **`adoptPosition` と同じ向きに回して返すこと。** 盤だけ回して費用を回さないと、
 // **別のマスの確信度で判断する**ことになる（画面からは気づけない）。
+// followRotated は**撮った画像を解析の向きへ 180 度回して読むか**（後手目線。`followFrame` と同じ判断）。
+func (s *PositionService) followRotated() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.nearWhite
+}
+
 func (s *PositionService) followCost() (*position.CellCost, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

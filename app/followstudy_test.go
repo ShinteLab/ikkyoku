@@ -1188,3 +1188,89 @@ func TestFollowConfirm(t *testing.T) {
 		t.Fatalf("先端が動いたのに控えで足しました: %+v", a)
 	}
 }
+
+// cellIdx は USI のマス（"7g" など）を、撮った画像の向きの 81 マスの番号（行優先）にする。
+func cellIdx(sq ...string) []int {
+	out := make([]int, 0, len(sq))
+	for _, s := range sq {
+		out = append(out, int(s[1]-'a')*9+(9-int(s[0]-'0')))
+	}
+	return out
+}
+
+// ⚠️ **速い経路（変わったマスだけで割り出す）も、1 枚だけでは足さないこと**（2026-10-07）。
+// 変わったマスが 1 通りの手に決まったら控え、次の 1 枚が変わっていなければ（`FollowConfirm`）足す。
+// 足したら**この 1 枚は先端そのもの**なので `AtFrame` を立てる（次の比べる相手になる）。
+func TestFollowCellsPendsThenConfirms(t *testing.T) {
+	s, _ := following(t)
+	a, err := s.FollowCells(cellIdx("7g", "7f"))
+	if err != nil {
+		t.Fatalf("FollowCells: %v", err)
+	}
+	if a.Applied || !a.Pending {
+		t.Fatalf("1 枚目で足したか、控えていません: %+v", a)
+	}
+	a, err = s.FollowConfirm()
+	if err != nil {
+		t.Fatalf("FollowConfirm: %v", err)
+	}
+	if !a.Applied || len(a.Moves) != 1 || a.Moves[0] != "7g7f" || !a.AtFrame {
+		t.Fatalf("変わっていない 1 枚で確かめたのに足していないか、AtFrame が立っていません: %+v", a)
+	}
+}
+
+// ⚠️ **決まらなければ何もしないこと**（フロントが 81 マスを読み直す合図）。
+func TestFollowCellsFallsBackWhenUnclear(t *testing.T) {
+	s, _ := following(t)
+	a, err := s.FollowCells(cellIdx("5e", "4e", "5f", "4f")) // 手が被ったような 1 枚
+	if err != nil {
+		t.Fatalf("FollowCells: %v", err)
+	}
+	if a.Applied || a.Pending {
+		t.Fatalf("合う手が無いのに足すか控えました: %+v", a)
+	}
+}
+
+// ⚠️ **後手目線で採った局面では、撮った向きのマスを回してから割り出すこと。**
+func TestFollowCellsRotatesForGoteView(t *testing.T) {
+	pos := NewPositionService()
+	if _, err := pos.Load(hirateBoard, nil); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if _, err := pos.SetViewpoint(true); err != nil {
+		t.Fatalf("SetViewpoint: %v", err)
+	}
+	if _, err := pos.SetTurn(1); err != nil {
+		t.Fatalf("SetTurn: %v", err)
+	}
+	s := NewStudyService(pos)
+	if _, err := s.Adopt(); err != nil {
+		t.Fatalf("Adopt: %v", err)
+	}
+	// 画面では上下逆なので、▲7六歩 は 3三→3四 が変わったように見える。
+	if a, err := s.FollowCells(cellIdx("3c", "3d")); err != nil || !a.Pending {
+		t.Fatalf("FollowCells: %+v（%v）", a, err)
+	}
+	a, err := s.FollowConfirm()
+	if err != nil || !a.Applied || a.Moves[0] != "7g7f" {
+		t.Fatalf("▲7六歩 になっていません: %+v（%v）", a, err)
+	}
+}
+
+// ⚠️ **ぴったり「変わっていない」1 枚だけ AtFrame を立てること**（読めていないマスがある 1 枚は立てない）。
+func TestFollowAutoAtFrameOnlyWhenExact(t *testing.T) {
+	s, _ := following(t)
+	a, err := s.FollowAuto(hirateBoard, realConf(hirateBoard, 0.9), nil)
+	if err != nil || a.Kind != FollowSame || !a.AtFrame {
+		t.Fatalf("ぴったり合う 1 枚で AtFrame が立っていません: %+v（%v）", a, err)
+	}
+	// 7七 の歩が読めなかった 1 枚（行き先の読めない手の名残など）。
+	const missing = "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PP1PPPPPP/1B5R1/LNSGKGSNL"
+	a, err = s.FollowAuto(missing, realConf(missing, 0.9), nil)
+	if err != nil {
+		t.Fatalf("FollowAuto: %v", err)
+	}
+	if a.AtFrame {
+		t.Fatalf("読めていないマスがあるのに AtFrame が立ちました: %+v", a)
+	}
+}

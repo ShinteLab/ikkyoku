@@ -114,3 +114,64 @@ func TestFrameDiffNotComparable(t *testing.T) {
 		t.Fatalf("画像が無いのに比べられたことになっています")
 	}
 }
+
+// cellsOf は board を 9x9 に割ったマスの矩形（行優先）。
+func cellsOf(r image.Rectangle) []image.Rectangle {
+	out := make([]image.Rectangle, 0, 81)
+	w, h := r.Dx()/9, r.Dy()/9
+	for row := 0; row < 9; row++ {
+		for col := 0; col < 9; col++ {
+			x, y := r.Min.X+col*w, r.Min.Y+row*h
+			out = append(out, image.Rect(x, y, x+w, y+h))
+		}
+	}
+	return out
+}
+
+// ⚠️ **CellDiff の歯止めは 2 つ**（2026-10-07。追従の速い経路）:
+//   - **駒を描いたマスだけが変わったと出ること**（ほかのマスは 0）
+//   - **盤全体が明るくなっただけでは、どのマスも変わらないこと**（中継の露出の揺れ）
+func TestCellDiffFindsOnlyTheChangedCell(t *testing.T) {
+	a, b := testFrame(t), testFrame(t)
+	cells := cellsOf(board)
+	// 3 行目・5 列目のマスに「駒」（暗い四角）を描く。
+	c := cells[2*9+4]
+	for y := c.Min.Y + 3; y < c.Max.Y-3; y++ {
+		for x := c.Min.X + 3; x < c.Max.X-3; x++ {
+			b.Set(x, y, color.RGBA{R: 60, G: 40, B: 20, A: 255})
+		}
+	}
+	got, ok := CellDiff(a, b, cells, board)
+	if !ok {
+		t.Fatalf("比べられませんでした")
+	}
+	for i, v := range got {
+		if i == 2*9+4 {
+			if v < 0.5 {
+				t.Errorf("駒を描いたマスの変化が %.2f しかありません", v)
+			}
+			continue
+		}
+		if v != 0 {
+			t.Errorf("マス %d が %.2f 変わったことになっています", i, v)
+		}
+	}
+}
+
+func TestCellDiffIgnoresExposure(t *testing.T) {
+	a, b := testFrame(t), testFrame(t)
+	for y := 0; y < 300; y++ {
+		for x := 0; x < 400; x++ {
+			b.Set(x, y, color.RGBA{R: 230, G: 200, B: 150, A: 255}) // 全体が明るくなった
+		}
+	}
+	got, ok := CellDiff(a, b, cellsOf(board), board)
+	if !ok {
+		t.Fatalf("比べられませんでした")
+	}
+	for i, v := range got {
+		if v != 0 {
+			t.Fatalf("明るくなっただけなのに、マス %d が %.2f 変わったことになっています", i, v)
+		}
+	}
+}
