@@ -594,6 +594,11 @@ func (s *StudyService) FollowAuto(boardSFEN string, cellConfidence []float64, ce
 	}
 	moves, ok := followAddable(p)
 	if !ok {
+		// ⚠️ **控えと矛盾しない 1 枚なら、控えは捨てない**（2026-10-06 に実機で踏んだ。`pendingStillFits`）。
+		if s.pendingStillFits(board, cost, unseen) {
+			return FollowAuto{Kind: p.Kind, Pending: true, Reason: "確かめています",
+				Fit: p.Fit, Unseen: unseen.Count(), State: s.State()}, nil
+		}
 		// **足せる手が無い 1 枚が来たら、控えは捨てる**（手が映った 1 枚の答えは
 		// 次の 1 枚で消えるのが普通で、それがこの形）。
 		s.setPending(nil)
@@ -669,6 +674,44 @@ func (s *StudyService) FollowConfirm() (FollowAuto, error) {
 		return FollowAuto{Kind: FollowSame, Reason: "盤面は変わっていません", State: s.State()}, nil
 	}
 	return s.followFrom(pend.board, pend.cost, pend.unseen, pend.rotated)
+}
+
+// pendingStillFits は**足せる手が出なかった 1 枚が、控えた手順と矛盾しないか**を返す（2026-10-06）。
+//
+// 矛盾しないとは、**控えた手順を指した盤でこの 1 枚を説明しても、何も指していない盤より
+// 悪くならない**こと（`position.MatchCost` で比べる）。
+//
+// **実機の症状**: ゲーム画面で △1五歩 の歩が、明るさが細かく揺れるたびに「読める・読めない」を
+// 繰り返し（画素はほぼ同じ）、読めた 1 枚で控えても、次の読めない 1 枚で捨てていた。2 回続けて
+// 読めるまで 90 秒入らなかった。読めない 1 枚は 1四 が空いて 1五 も空き —— **「何も指していない」
+// とも「△1五歩」とも同じだけ食い違う**ので、控えを否定する材料になっていない。
+//
+// ⚠️ **手が映った 1 枚の空想の手は、今までどおり捨てられること**（`TestFollowAutoDropsTransientFrame`）。
+// 手がどいた 1 枚は「何も指していない」とぴったり合い、空想の手のほうが食い違うので、ここは偽になる。
+// ⚠️ **費用表が無いときは偽**（比べる根拠が無いので今までどおり捨てる）。
+func (s *StudyService) pendingStillFits(board *position.Board, cost *position.CellCost, unseen *position.CellMask) bool {
+	if board == nil || cost == nil {
+		return false
+	}
+	s.mu.Lock()
+	pend := s.pending
+	if pend == nil || s.study == nil || pend.tip != mainTipID(s.study) {
+		s.mu.Unlock()
+		return false
+	}
+	_, from, err := s.study.MainTip()
+	s.mu.Unlock()
+	if err != nil {
+		return false
+	}
+	after := from.Clone()
+	for _, m := range pend.moves {
+		if after.ApplyMove(m) != nil {
+			return false
+		}
+	}
+	opt := position.ConnectOptions{Cost: cost, Unseen: unseen}
+	return position.MatchCost(after.Board, board, opt) <= position.MatchCost(from.Board, board, opt)
 }
 
 // followPending は**1 枚目で見つけた、まだ足していない答え**（2026-10-05）。

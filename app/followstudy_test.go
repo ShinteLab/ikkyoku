@@ -1120,6 +1120,37 @@ func TestFollowAutoDropsTransientFrame(t *testing.T) {
 	}
 }
 
+// ⚠️ **行き先の駒が「読める・読めない」を繰り返しても、控えを捨てないこと**（2026-10-06）。
+//
+// **実機の症状**: ゲーム画面で △1五歩 の歩が、明るさの揺れで読める 1 枚と読めない 1 枚が交互に来て、
+// 読めない 1 枚のたびに控えを捨て、2 回続けて読めるまで 90 秒入らなかった。
+// 読めない 1 枚は「元のマスが空いて、行き先も空き」なので、何も指していないとも、控えた手とも
+// 同じだけ食い違う —— 控えを否定していない。
+func TestFollowAutoKeepsPendingThroughUnclearFrame(t *testing.T) {
+	s, _ := following(t)
+	moved := boardAfter(t, "7g7f")
+	// 7七 は空いたが、7六 の歩が読めなかった 1 枚。
+	const unclear = "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PP1PPPPPP/1B5R1/LNSGKGSNL"
+
+	if a, _ := s.FollowAuto(moved, realConf(moved, 0.9), nil); !a.Pending {
+		t.Fatalf("前提: 1 枚目は控えるはず: %+v", a)
+	}
+	a, err := s.FollowAuto(unclear, realConf(unclear, 0.9), nil)
+	if err != nil {
+		t.Fatalf("FollowAuto: %v", err)
+	}
+	if a.Applied || !a.Pending {
+		t.Fatalf("矛盾しない 1 枚で控えを捨てたか、足しました: %+v", a)
+	}
+	a, err = s.FollowAuto(moved, realConf(moved, 0.9), nil)
+	if err != nil {
+		t.Fatalf("FollowAuto: %v", err)
+	}
+	if !a.Applied || len(a.Moves) != 1 || a.Moves[0] != "7g7f" {
+		t.Fatalf("控えた手と同じ答えがもう一度来たのに足していません: %+v", a)
+	}
+}
+
 // ⚠️ **撮り直した 1 枚が変わっていなければ、それで確かめたことにする**（`FollowConfirm`）。
 //
 // 変わっていない画像を読み直しても同じ答えが返るだけなので、読み直さずに足す

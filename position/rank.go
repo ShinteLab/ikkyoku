@@ -85,6 +85,18 @@ func (r RankResult) Readable(minFit float64) bool {
 	return len(r.Candidates) > 0 && r.Candidates[0].Fit >= minFit
 }
 
+// MatchCost は**盤 cand を正しいとしたとき、撮った盤面 target との食い違いの費用**（2026-10-06）。
+//
+// `Rank` の候補 1 つぶんと同じ数え方（費用表・読めていないマスは opt から。`Tolerance` は見ない）。
+// 「控えた手順と何も指していないの、どちらがこの 1 枚をよく説明するか」のように、
+// **合法手の外から持ってきた 2 つの盤を比べる**ときに使う。
+func MatchCost(cand, target *Board, opt ConnectOptions) float64 {
+	if cand == nil || target == nil {
+		return 0
+	}
+	return newDiff(cand, target, opt.Cost, 0, opt.Unseen).cost
+}
+
 // Rank は from から**1 手で**行ける局面（と、何も指さない場合）を、
 // 撮った盤面をどれだけ説明できるかで並べる。
 //
