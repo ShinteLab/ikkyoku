@@ -892,6 +892,38 @@ func TestFollowAutoDoesNotCryFlipWhenFine(t *testing.T) {
 	}
 }
 
+// ⚠️ **今の向きで「変わっていない」とぴったり合っているなら、「逆かも」と言わないこと**（2026-10-06）。
+//
+// **実機の症状**: ゲーム画面で後手を持ち、相手の ▲6八玉 のあとで目線を後手にして採った。
+// 正しく追えていて「変わっていない」（一致度 1）なのに、盤を 180 度回すと玉の 2 マスを
+// 直せば △4二玉 で説明が付く（一致度 0.975）ので、「目線を後手が手前にして」と言われて止まった。
+// 逆向きの説明は、**今の向きより良く合うときだけ**採る。
+func TestFollowAutoDoesNotCryFlipWhenSameFits(t *testing.T) {
+	pos := NewPositionService()
+	board := boardAfter(t, "5i6h")
+	if _, err := pos.Load(board, nil); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if _, err := pos.SetTurn(2); err != nil {
+		t.Fatalf("SetTurn: %v", err)
+	}
+	s := NewStudyService(pos)
+	if _, err := s.Adopt(); err != nil {
+		t.Fatalf("Adopt: %v", err)
+	}
+
+	a, err := s.FollowAuto(board, evenConf(0.9), nil)
+	if err != nil {
+		t.Fatalf("FollowAuto: %v", err)
+	}
+	if a.Applied || a.Kind != FollowSame {
+		t.Fatalf("前提: 何も指していない 1 枚は「変わっていない」のはず: %+v", a)
+	}
+	if a.Flipped {
+		t.Fatalf("今の向きでぴったり合っているのに「目線が逆」と言いました（%s）", a.FlipMove)
+	}
+}
+
 // ⚠️ **1 枚だけでは足さず、2 枚続けて同じ答えで足すこと**（2026-10-05。`followPending`）。
 //
 // **実機の症状**: 指している手や頭が盤に映った 1 枚から、指していない手を足した
