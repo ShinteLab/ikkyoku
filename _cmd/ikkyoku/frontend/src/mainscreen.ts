@@ -3011,7 +3011,12 @@ ${st.turnLabel}${n}`;
     } else if (shot.fast) {
       // **速い経路**（2026-10-07）。81 マスは読んでおらず、先端と合っていた 1 枚から変わったマスだけが来る。
       // ⚠️ **「盤が映っていない」と取り違えないこと**（SFEN が空なのは読んでいないから）。
-      const fast = await StudyService.FollowCells(shot.cells ?? []);
+      let fast = await StudyService.FollowCells(shot.cells ?? [], null);
+      if (!fast.applied && !fast.pending && !fast.atFrame && fast.readCells && fast.readCells.length > 0) {
+        // 成・不成や打った駒の種類で分かれた。**違いの出るマスだけ読んで**もう一度（81 マスは読まない）。
+        const read = await CaptureService.ReadCells(fast.readCells);
+        fast = await StudyService.FollowCells(shot.cells ?? [], read);
+      }
       if (fast.applied || fast.pending || fast.atFrame) {
         got = fast;
       } else {

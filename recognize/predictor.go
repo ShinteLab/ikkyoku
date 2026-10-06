@@ -79,6 +79,8 @@ var (
 	// ready は ikkyoku が認識器を差し替えたか。false なら FromImage は suteme を呼ばない
 	// （呼ぶと suteme 既定の探索に落ちる）。
 	ready bool
+	// current は今使っている駒種の推論器（`ReadCells` がマス 1 つだけを読むのに使う。2026-10-07）。
+	current suteme.Predictor
 )
 
 // Use は 1 組をまとめて差し替える。⚠️ **判定器が無い組では判定器を「使わない」にする**
@@ -89,7 +91,7 @@ func (s *Set) Use() {
 	defer useMu.Unlock()
 	suteme.SetPredictor(s.predictor)
 	suteme.SetStripJudge(s.strip)
-	ready = true
+	ready, current = true, s.predictor
 }
 
 // Clear は認識器を外す（どの段も読めなかったとき）。以後の FromImage は断る。
@@ -99,7 +101,7 @@ func Clear() {
 	defer useMu.Unlock()
 	suteme.SetPredictor(nil)
 	suteme.SetStripJudge(nil)
-	ready = false
+	ready, current = false, nil
 }
 
 // Ready は認識器を差し替えてあるか。

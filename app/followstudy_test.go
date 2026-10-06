@@ -1203,7 +1203,7 @@ func cellIdx(sq ...string) []int {
 // 足したら**この 1 枚は先端そのもの**なので `AtFrame` を立てる（次の比べる相手になる）。
 func TestFollowCellsPendsThenConfirms(t *testing.T) {
 	s, _ := following(t)
-	a, err := s.FollowCells(cellIdx("7g", "7f"))
+	a, err := s.FollowCells(cellIdx("7g", "7f"), nil)
 	if err != nil {
 		t.Fatalf("FollowCells: %v", err)
 	}
@@ -1222,7 +1222,7 @@ func TestFollowCellsPendsThenConfirms(t *testing.T) {
 // ⚠️ **決まらなければ何もしないこと**（フロントが 81 マスを読み直す合図）。
 func TestFollowCellsFallsBackWhenUnclear(t *testing.T) {
 	s, _ := following(t)
-	a, err := s.FollowCells(cellIdx("5e", "4e", "5f", "4f")) // 手が被ったような 1 枚
+	a, err := s.FollowCells(cellIdx("5e", "4e", "5f", "4f"), nil) // 手が被ったような 1 枚
 	if err != nil {
 		t.Fatalf("FollowCells: %v", err)
 	}
@@ -1248,7 +1248,7 @@ func TestFollowCellsRotatesForGoteView(t *testing.T) {
 		t.Fatalf("Adopt: %v", err)
 	}
 	// 画面では上下逆なので、▲7六歩 は 3三→3四 が変わったように見える。
-	if a, err := s.FollowCells(cellIdx("3c", "3d")); err != nil || !a.Pending {
+	if a, err := s.FollowCells(cellIdx("3c", "3d"), nil); err != nil || !a.Pending {
 		t.Fatalf("FollowCells: %+v（%v）", a, err)
 	}
 	a, err := s.FollowConfirm()
@@ -1319,7 +1319,7 @@ func TestFollowCellsFromBaseWhenTipIsAhead(t *testing.T) {
 		t.Fatalf("FollowApply: %v", err)
 	}
 	// 平手の 1 枚から見ると、▲7六歩 △3四歩 の 4 マスが変わっている。
-	if a, err := s.FollowCells(cellIdx("7g", "7f", "3c", "3d")); err != nil || !a.Pending {
+	if a, err := s.FollowCells(cellIdx("7g", "7f", "3c", "3d"), nil); err != nil || !a.Pending {
 		t.Fatalf("残りの △3四歩 を控えていません: %+v（%v）", a, err)
 	}
 	a, err := s.FollowConfirm()
@@ -1345,7 +1345,39 @@ func TestFrameFits(t *testing.T) {
 		t.Fatal("▲7六歩 で説明が付くのに、比べる相手を替えませんでした")
 	}
 	// 替えたあとは、▲7六歩 のあとの局面から割り出す。
-	if a, err := s.FollowCells(cellIdx("3c", "3d")); err != nil || !a.Pending {
+	if a, err := s.FollowCells(cellIdx("3c", "3d"), nil); err != nil || !a.Pending {
 		t.Fatalf("新しい比べる相手から △3四歩 を控えていません: %+v（%v）", a, err)
+	}
+}
+
+// ⚠️ **成・不成で分かれたら、違いの出るマスだけを読んで決めること**（2026-10-07）。
+//
+// **実機の症状**: ShogiHome の 3 秒おきの再生で ▲3三角成 が速い経路で決まらず、81 マスの読み
+// （CPU が混んでいて 1 回 8 秒）を 2 回待って 16 秒遅れ、そのあいだに次の手が進んで見失いかけた。
+// ⚠️ **読めなければ（"?"）決め打ちしないこと**（81 マスを読む）。
+func TestFollowCellsReadsTheCellToDecidePromotion(t *testing.T) {
+	s, _ := following(t)
+	if _, err := s.FollowApply([]string{"7g7f", "3c3d"}, s.State().Rev, false); err != nil {
+		t.Fatalf("FollowApply: %v", err)
+	}
+	changed := cellIdx("8h", "2b") // 角が 2二 の角を取る（成・不成の両方が指せる）
+	a, err := s.FollowCells(changed, nil)
+	if err != nil {
+		t.Fatalf("FollowCells: %v", err)
+	}
+	if a.Applied || a.Pending || len(a.ReadCells) != 1 || a.ReadCells[0] != cellIdx("2b")[0] {
+		t.Fatalf("2二 だけを読むよう頼むはず: %+v", a)
+	}
+	// 読めなかったら決め打ちしない。
+	if a, _ := s.FollowCells(changed, []CellPiece{{Cell: cellIdx("2b")[0], Piece: "?"}}); a.Applied || a.Pending {
+		t.Fatalf("読めなかったのに決め打ちしました: %+v", a)
+	}
+	// 馬と読めたら ▲2二角成。
+	if a, err := s.FollowCells(changed, []CellPiece{{Cell: cellIdx("2b")[0], Piece: "+B"}}); err != nil || !a.Pending {
+		t.Fatalf("馬と読めたのに控えていません: %+v（%v）", a, err)
+	}
+	a, err = s.FollowConfirm()
+	if err != nil || !a.Applied || a.Moves[0] != "8h2b+" {
+		t.Fatalf("▲2二角成 になっていません: %+v（%v）", a, err)
 	}
 }

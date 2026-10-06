@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/ShinteLab/ikkyoku"
+	ikkyokuapp "github.com/ShinteLab/ikkyoku/app"
 	"github.com/ShinteLab/ikkyoku/log"
 	"github.com/ShinteLab/ikkyoku/recognize"
 )
@@ -41,6 +42,29 @@ func (s *CaptureService) SetCellBase() {
 	s.mu.Lock()
 	s.cellBase = s.lastQuiet
 	s.mu.Unlock()
+}
+
+// ReadCells は**直前に撮った 1 枚の、指定したマスの駒だけを読む**（2026-10-07）。
+//
+// 速い経路で成・不成や打った駒の種類が分かれたとき、フロントが `FollowAuto.ReadCells` を渡して呼ぶ。
+// 81 マスを読み直す（2 秒以上。CPU が混んでいると 7〜10 秒）代わりに、違いの出るマスだけを読む。
+// ⚠️ **撮り直さない**（変わったマスを測った 1 枚と同じ 1 枚を読む）。
+func (s *CaptureService) ReadCells(cells []int) ([]ikkyokuapp.CellPiece, error) {
+	s.mu.Lock()
+	img, rects, region := s.lastQuiet, s.cellRects, s.cellRegion
+	s.mu.Unlock()
+	pieces, err := recognize.ReadCells(img, region, rects, cells)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ikkyokuapp.CellPiece, len(cells))
+	names := make([]string, len(cells))
+	for i, c := range cells {
+		out[i] = ikkyokuapp.CellPiece{Cell: c, Piece: pieces[i]}
+		names[i] = cellName(c) + "=" + pieces[i]
+	}
+	log.Info("違いの出るマスを読みました（追跡）", "マス", strings.Join(names, ","))
+	return out, nil
 }
 
 // noteCellRects は 81 マスを読んだときのマス割りを控える（速い経路はこれでマスを切る）。
