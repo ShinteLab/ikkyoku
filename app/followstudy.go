@@ -837,6 +837,23 @@ func (s *StudyService) FollowCells(changed []int, read []CellPiece) (FollowAuto,
 		}
 	}
 	if len(rests) > 1 {
+		// ⚠️ **控えた手と合う候補があれば、それを採ること**（2026-10-07 に実機で踏んだ）。▲3三角成 を
+		// 81 マスの読みで控えたあと △同金 が指されると、3三 は金になって成ったかどうかが盤から消え、
+		// 成・不成の 2 通りが残る。控えは前の 1 枚で決めた答えなので、それと合う候補だけに絞る。
+		if pend := s.pendingMoves(); len(pend) > 0 && len(since) == 0 {
+			var keep [][]string
+			for _, r := range rests {
+				n := min(len(r), len(pend))
+				if n > 0 && slices.Equal(r[:n], pend[:n]) {
+					keep = append(keep, r)
+				}
+			}
+			if len(keep) > 0 {
+				rests = keep
+			}
+		}
+	}
+	if len(rests) > 1 {
 		// **成・不成や打った駒の種類で分かれた**（変わったマスの組は同じ）。違いの出るマスだけを読めば決まる。
 		diff := followDiffCells(base, since, rests)
 		if len(read) == 0 {
@@ -1048,6 +1065,17 @@ func usiCells(mv string) *position.CellMask {
 	}
 	m[r][f] = true
 	return m
+}
+
+// pendingMoves は**今の先端から控えている手順**（無ければ nil）。
+func (s *StudyService) pendingMoves() []string {
+	tip := s.mainTip()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.pending == nil || s.pending.tip != tip {
+		return nil
+	}
+	return slices.Clone(s.pending.moves)
 }
 
 // pendingStillFits は**足せる手が出なかった 1 枚が、控えた手順と矛盾しないか**を返す（2026-10-06）。
