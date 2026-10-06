@@ -1275,6 +1275,35 @@ func TestFollowAutoAtFrameOnlyWhenExact(t *testing.T) {
 	}
 }
 
+// ⚠️ **駒の種類の読み違いだけなら AtFrame を立てること**（2026-10-07。成った駒を少し読み違える
+// ゲーム画面で、比べる相手になれず速い経路が止まった）。
+func TestFollowAutoAtFrameDespiteKindMisread(t *testing.T) {
+	s, _ := following(t)
+	// 3九 の銀を香と読んだ 1 枚（駒の有無と先後は合っている）。
+	const misread = "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGLNL"
+	a, err := s.FollowAuto(misread, realConf(misread, 0.9), nil)
+	if err != nil || a.Kind != FollowSame || !a.AtFrame {
+		t.Fatalf("種類の読み違いだけなのに AtFrame が立っていません: %+v（%v）", a, err)
+	}
+}
+
+// ⚠️ **何かが被って見えないマスがある 1 枚は、ぴったり合っても AtFrame を立てないこと**（2026-10-07。
+// ShogiHome のダイアログが被った 1 枚が比べる相手になり、閉じたあと速い経路が二度と使えなくなった）。
+func TestFollowAutoNoAtFrameWhenCovered(t *testing.T) {
+	s, _ := following(t)
+	hidden := make([]bool, 81)
+	for i := 0; i < 81; i += 4 {
+		hidden[i] = true
+	}
+	a, err := s.FollowAuto(hirateBoard, realConf(hirateBoard, 0.9), hidden)
+	if err != nil {
+		t.Fatalf("FollowAuto: %v", err)
+	}
+	if a.AtFrame {
+		t.Fatalf("見えないマスがあるのに AtFrame が立ちました: %+v", a)
+	}
+}
+
 // ⚠️ **本譜の先端が比べる相手より先へ進んでいても、速い経路で残りの手を割り出すこと**（2026-10-07）。
 //
 // **実機の症状**: 81 マスの読みで手を足すと先端だけが進み、比べる相手は古いまま。変わったマスには
