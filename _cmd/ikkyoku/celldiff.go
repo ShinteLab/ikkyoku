@@ -60,19 +60,23 @@ func (s *CaptureService) noteCellRects(img image.Image, d *recognize.Debug) {
 	s.mu.Unlock()
 }
 
-// fastCells は**速い経路を使えるなら**、比べる相手から変わったマスの番号を返す（ok が偽なら 81 マスを読む）。
-func (s *CaptureService) fastCells(img image.Image) ([]int, bool) {
+// fastCells は比べる相手から変わったマスの番号を返す（2026-10-07）。
+//
+// comparable は比べられたか（比べる相手とマス割りがあり、画像の大きさが同じ）。fast は**速い経路で扱ってよいか**
+// —— ふるいが「変化して止まった」と言った 1 枚で、変わったマスが `cellFastMax` 以下のときだけ真。
+// 偽なら 81 マスを読む（そのときも cells は `FrameFits` のために返す）。
+func (s *CaptureService) fastCells(img image.Image) (cells []int, comparable, fast bool) {
 	s.mu.Lock()
 	base, rects, region, bounds, why := s.cellBase, s.cellRects, s.cellRegion, s.cellBounds, s.gateRead
 	s.mu.Unlock()
-	if why != gateReadSettled || base == nil || len(rects) != 81 || !bounds.Eq(img.Bounds()) {
-		return nil, false
+	if base == nil || len(rects) != 81 || !bounds.Eq(img.Bounds()) {
+		return nil, false, false
 	}
 	ratios, ok := ikkyoku.CellDiff(base, img, rects, region)
 	if !ok {
-		return nil, false
+		return nil, false, false
 	}
-	var cells []int
+	cells = []int{}
 	var names []string
 	for i, v := range ratios {
 		if v >= cellChanged {
@@ -80,14 +84,17 @@ func (s *CaptureService) fastCells(img image.Image) ([]int, bool) {
 			names = append(names, cellName(i))
 		}
 	}
+	if why != gateReadSettled {
+		return cells, true, false
+	}
 	if len(cells) > cellFastMax {
 		log.Info("変わったマスが多いので 81 マスを読みます（追跡）", "変わったマス", len(cells))
-		return nil, false
+		return cells, true, false
 	}
 	if len(cells) > 0 {
 		log.Info("変わったマス（先端と合っていた 1 枚と）", "マス", strings.Join(names, ","))
 	}
-	return cells, true
+	return cells, true, true
 }
 
 // cellName は 81 マスの番号を、撮った画像の向きの USI のマス（"7g"）にする（ログ用）。

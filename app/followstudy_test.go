@@ -1274,3 +1274,49 @@ func TestFollowAutoAtFrameOnlyWhenExact(t *testing.T) {
 		t.Fatalf("読めていないマスがあるのに AtFrame が立ちました: %+v", a)
 	}
 }
+
+// ⚠️ **本譜の先端が比べる相手より先へ進んでいても、速い経路で残りの手を割り出すこと**（2026-10-07）。
+//
+// **実機の症状**: 81 マスの読みで手を足すと先端だけが進み、比べる相手は古いまま。変わったマスには
+// 足し済みの手のマスも入るので、先端から突き合わせて「合う手順 0」が続き、速い経路がほとんど効かなかった。
+func TestFollowCellsFromBaseWhenTipIsAhead(t *testing.T) {
+	s, _ := following(t)
+	// 平手の 1 枚が先端とぴったり合った ＝ 比べる相手になる。
+	if a, err := s.FollowAuto(hirateBoard, realConf(hirateBoard, 0.9), nil); err != nil || !a.AtFrame {
+		t.Fatalf("前提: 平手の 1 枚で AtFrame が立つはず: %+v（%v）", a, err)
+	}
+	// 81 マスの読みで ▲7六歩 を足した（比べる相手は平手の 1 枚のまま）。
+	if _, err := s.FollowApply([]string{"7g7f"}, s.State().Rev, false); err != nil {
+		t.Fatalf("FollowApply: %v", err)
+	}
+	// 平手の 1 枚から見ると、▲7六歩 △3四歩 の 4 マスが変わっている。
+	if a, err := s.FollowCells(cellIdx("7g", "7f", "3c", "3d")); err != nil || !a.Pending {
+		t.Fatalf("残りの △3四歩 を控えていません: %+v（%v）", a, err)
+	}
+	a, err := s.FollowConfirm()
+	if err != nil || !a.Applied || len(a.Moves) != 1 || a.Moves[0] != "3c3d" {
+		t.Fatalf("△3四歩 を足していません: %+v（%v）", a, err)
+	}
+}
+
+// ⚠️ **足した手で変わったマスの説明が付くなら、比べる相手を今の 1 枚に替えること**（`FrameFits`）。
+// ⚠️ **説明が付かない変化があれば替えないこと**（読めていない手が残っている 1 枚を相手にしない）。
+func TestFrameFits(t *testing.T) {
+	s, _ := following(t)
+	if a, _ := s.FollowAuto(hirateBoard, realConf(hirateBoard, 0.9), nil); !a.AtFrame {
+		t.Fatalf("前提: 平手の 1 枚で AtFrame が立つはず: %+v", a)
+	}
+	if _, err := s.FollowApply([]string{"7g7f"}, s.State().Rev, false); err != nil {
+		t.Fatalf("FollowApply: %v", err)
+	}
+	if s.FrameFits(cellIdx("7g", "7f", "3c")) {
+		t.Fatal("足していない変化（3三）があるのに、比べる相手を替えました")
+	}
+	if !s.FrameFits(cellIdx("7g", "7f")) {
+		t.Fatal("▲7六歩 で説明が付くのに、比べる相手を替えませんでした")
+	}
+	// 替えたあとは、▲7六歩 のあとの局面から割り出す。
+	if a, err := s.FollowCells(cellIdx("3c", "3d")); err != nil || !a.Pending {
+		t.Fatalf("新しい比べる相手から △3四歩 を控えていません: %+v（%v）", a, err)
+	}
+}

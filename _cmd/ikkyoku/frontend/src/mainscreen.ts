@@ -2999,11 +2999,11 @@ ${st.turnLabel}${n}`;
       }
       // **控えた 1 枚から変わっていない** ＝ 確かめが済んだ。読み直さずに足す。
       got = await StudyService.FollowConfirm();
-    } else if (shot.cells && shot.cells.length > 0) {
+    } else if (shot.fast) {
       // **速い経路**（2026-10-07）。81 マスは読んでおらず、先端と合っていた 1 枚から変わったマスだけが来る。
       // ⚠️ **「盤が映っていない」と取り違えないこと**（SFEN が空なのは読んでいないから）。
-      const fast = await StudyService.FollowCells(shot.cells);
-      if (fast.applied || fast.pending) {
+      const fast = await StudyService.FollowCells(shot.cells ?? []);
+      if (fast.applied || fast.pending || fast.atFrame) {
         got = fast;
       } else {
         // 手が決まらなかった（成・不成・打った駒・手が被った 1 枚など）。**同じ 1 枚を 81 マスで読む。**
@@ -3024,8 +3024,14 @@ ${st.turnLabel}${n}`;
     }
     followPending = !!got.pending;
     showStudy(got.state);
-    // ⚠️ **先端とぴったり合った 1 枚だけを、速い経路の比べる相手にする**（`atFrame`。判断は Go 側）。
-    if (got.atFrame) {
+    // ⚠️ **先端と合った 1 枚だけを、速い経路の比べる相手にする**（判断は Go 側）。81 マスの読みで
+    // ぴったり合った（`atFrame`）か、比べる相手から変わったマスが足した手で説明できた（`FrameFits`）とき。
+    // ⚠️ **控えているあいだは替えない**（先端とこの 1 枚が食い違っている）。
+    let atFrame = !!got.atFrame;
+    if (!atFrame && !got.pending && shot.cells) {
+      atFrame = await StudyService.FrameFits(shot.cells);
+    }
+    if (atFrame) {
       void CaptureService.SetCellBase();
     }
     // ⚠️ **足したうえで残りを控えた周（`applied` かつ `pending`）は足した側として出す**

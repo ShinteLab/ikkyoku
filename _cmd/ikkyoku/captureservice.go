@@ -890,10 +890,14 @@ type CaptureResult struct {
 	// **2.1 秒かけて読んだうえで盤が無かった**で、こちらは**読んでいない**。
 	// 呼ぶ側は**黙って次の周へ行くだけ**（見送りとして数えない・録画も残さない）。
 	Skipped string `json:"skipped"`
-	// Cells は**速い経路で変わったマス**（撮った画像の向きの 81 マスの番号。2026-10-07）。
-	// 空でなければ**81 マスは読んでいない**（SFEN は空）。受ける側は `StudyService.FollowCells` に渡し、
-	// 手が決まらなければ `RecognizeQuiet` で同じ 1 枚を読む。⚠️ **「盤が映っていない」と混ぜないこと。**
+	// Cells は**比べる相手の 1 枚から変わったマス**（撮った画像の向きの 81 マスの番号。2026-10-07）。
+	// 比べる相手が無い・比べられないときは nil。81 マスを読んだ周でも入る —— 受ける側は読んだ結果のあと
+	// `StudyService.FrameFits` に渡し、合えば比べる相手を今の 1 枚に替える（`SetCellBase`）。
 	Cells []int `json:"cells"`
+	// Fast は**速い経路で扱う 1 枚か**（真なら**81 マスは読んでいない**。SFEN は空）。受ける側は
+	// `StudyService.FollowCells(Cells)` に渡し、手が決まらなければ `RecognizeQuiet` で同じ 1 枚を読む。
+	// ⚠️ **「盤が映っていない」と混ぜないこと。**
+	Fast bool `json:"fast"`
 	// RecognizeError は「撮れたが認識できなかった」ときの理由。
 	// キャプチャ自体の失敗はこれではなく Capture のエラーで表す。
 	RecognizeError string `json:"recognizeError"`
@@ -987,12 +991,16 @@ func (s *CaptureService) CaptureQuiet() (CaptureResult, error) {
 		return result, nil
 	}
 	// ⚠️ **変わったマスだけで済むなら 81 マスを読まない**（速い経路。2026-10-07。`celldiff.go`）。
-	if cells, ok := s.fastCells(img); ok {
+	cells, comparable, fast := s.fastCells(img)
+	if comparable {
+		result.Cells = cells
+	}
+	if fast {
 		if len(cells) == 0 {
 			// 比べる相手から何も変わっていない（露出の揺れでふるいが動いただけ）。
 			result.Skipped = cellSkipSame
 		} else {
-			result.Cells = cells
+			result.Fast = true
 		}
 		s.noteQuiet(result)
 		return result, nil
@@ -1019,6 +1027,10 @@ func (s *CaptureService) RecognizeQuiet() (CaptureResult, error) {
 	result := CaptureResult{
 		Width: b.Dx(), Height: b.Dy(), Source: ImageSourceScreen,
 		Warnings: []string{}, HandTotal: map[string]int{},
+	}
+	// 比べる相手からの変わったマスは添えたまま（読んだ結果のあと `FrameFits` に使う）。
+	if cells, comparable, _ := s.fastCells(img); comparable {
+		result.Cells = cells
 	}
 	return s.readQuiet(img, region, result), nil
 }
@@ -1307,7 +1319,7 @@ func (s *CaptureService) noteQuiet(r CaptureResult) {
 		case cellSkipSame:
 			msg = "先端と合っていた 1 枚から、どのマスも変わっていません（追跡）"
 		}
-	case len(r.Cells) > 0:
+	case r.Fast:
 		kind, msg = "cells", "変わったマスだけで手を割り出します（追跡）"
 	// ⚠️ **`OffBoard` を先に見ること**（2026-09-18）。盤の有無のふるいで落ちた周は
 	// **読んでいないので SFEN が空**で、順番が逆だと**別の盤を「盤が映っていません」**
