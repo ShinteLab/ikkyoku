@@ -954,8 +954,17 @@ func followDiffCells(base *position.Position, since []string, rests [][]string) 
 
 // followPickByRead は**読んだマスと合う候補だけ**を残す（2026-10-07）。
 //
-// ⚠️ **比べるのは駒の種類と成りだけ**（先後は候補どうしで同じ —— 指した側の駒）。向きの読み違いで
-// 落とさないため。⚠️ **読めなかったマス（"?"）は比べない**（それで絞れなければ 81 マスを読む）。
+// 1 マスごとの合い方（`followCellFits`）:
+//
+//   - **成っていない駒の候補**: 読んだ駒がその駒そのもの（種類が同じ・成っていない）なら合う
+//   - **成駒の候補**: 読んだ駒が**その駒の成っていない姿でなければ**合う（読めない "?" も合う）
+//
+// ⚠️ **成駒を読めることを前提にしないこと**（2026-10-07。ユーザーの判断）。実際の中継では成駒は
+// 滅多に出ないので学習データに入らず、読めないのが普通。**どの駒が動いたかは局面から分かる**ので、
+// 行き先が「その駒の成っていない姿」と読めなければ成っている、で決める。⚠️ **将棋の見込み
+// （角・飛・歩はほぼ成る、など）は使わない**（ユーザーの判断。証拠だけで決める）。
+// ⚠️ **行き先が空きに読めたら、どの候補とも合わない**（手が被っているなど別の事情。81 マスを読む）。
+// ⚠️ **比べるのは駒の種類と成りだけ**（先後は候補どうしで同じ —— 指した側の駒）。向きの読み違いで落とさない。
 func followPickByRead(base *position.Position, since []string, rests [][]string, read []CellPiece, rotated bool) [][]string {
 	var out [][]string
 	for _, r := range rests {
@@ -965,7 +974,7 @@ func followPickByRead(base *position.Position, since []string, rests [][]string,
 		}
 		ok, used := true, false
 		for _, cp := range read {
-			if cp.Piece == "?" || cp.Cell < 0 || cp.Cell >= 81 {
+			if cp.Cell < 0 || cp.Cell >= 81 {
 				continue
 			}
 			i := cp.Cell
@@ -973,7 +982,7 @@ func followPickByRead(base *position.Position, since []string, rests [][]string,
 				i = 80 - i // 撮った画像の向き → 解析の向き
 			}
 			c, err := b.At(i/9, i%9)
-			if err != nil || !strings.EqualFold(c.Mark(), cp.Piece) {
+			if err != nil || !followCellFits(c, cp.Piece) {
 				ok = false
 				break
 			}
@@ -984,6 +993,18 @@ func followPickByRead(base *position.Position, since []string, rests [][]string,
 		}
 	}
 	return out
+}
+
+// followCellFits は候補の盤のマス c が、読んだ駒 piece（撮った画像の向きの SFEN。空は ""、読めない "?"）と合うか。
+func followCellFits(c position.Cell, piece string) bool {
+	if piece == "" || c.IsEmpty() {
+		return piece == "" && c.IsEmpty()
+	}
+	if !c.Promoted() {
+		return strings.EqualFold(c.Mark(), piece)
+	}
+	// **成駒の候補**: 成っていない姿と読めたら合わない。それ以外（成駒と読めた・別の駒・読めない）は合う。
+	return !strings.EqualFold(strings.TrimPrefix(c.Mark(), "+"), piece)
 }
 
 // FrameFits は**比べる相手の 1 枚から今の 1 枚までに変わったマスが、その間に本譜へ足した手で
