@@ -86,6 +86,18 @@ func ChangedMoves(from *Position, changed, extra *CellMask, maxDepth int) ([][]s
 	return nil, nil
 }
 
+// ChangedFits は**盤 from から盤 to への変化が、変わったマスの組とぴったり合うか**を返す（2026-10-07）。
+//
+// 「比べる相手の 1 枚から今の 1 枚までに変わったマスを、その間に足した手で説明できるか」を確かめる
+// （説明できれば、今の 1 枚は本譜の先端と合っている）。合うの意味は `ChangedMoves` と同じ。
+// ⚠️ **何も変わっていなければ（from と to が同じ）偽**。そちらは呼び出し側が「変わったマスが無い」で見る。
+func ChangedFits(from, to *Board, changed, extra *CellMask) bool {
+	if from == nil || to == nil {
+		return false
+	}
+	return changedFits(from, to, changed, extra)
+}
+
 // changedFits は from → to で中身の変わるマスが、変わったマスの組とぴったり合うか。
 func changedFits(from, to *Board, changed, extra *CellMask) bool {
 	seen := false

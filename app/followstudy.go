@@ -602,7 +602,7 @@ func (s *StudyService) FollowAuto(boardSFEN string, cellConfidence []float64, ce
 		// **足せる手が無い 1 枚が来たら、控えは捨てる**（手が映った 1 枚の答えは
 		// 次の 1 枚で消えるのが普通で、それがこの形）。
 		s.setPending(nil)
-		return s.followFrom(board, cost, unseen, rotated)
+		return s.baseIf(s.followFrom(board, cost, unseen, rotated))
 	}
 	k := s.takePendingPrefix(moves)
 	if k == 0 {
@@ -615,7 +615,7 @@ func (s *StudyService) FollowAuto(boardSFEN string, cellConfidence []float64, ce
 	if k == len(moves) {
 		// **2 枚続けて同じ答え**（控えのほうが長ければ、その先は 2 枚目で消えた）。
 		// ここから先は今までどおり（1 枚から取れるだけ取る）。
-		return s.followFrom(board, cost, unseen, rotated)
+		return s.baseIf(s.followFrom(board, cost, unseen, rotated))
 	}
 	// **2 枚目のほうが先へ進んでいる**（2026-10-06）。2 枚で揃った頭の k 手だけ足し、
 	// 残りは控え直して次の 1 枚で確かめる。
@@ -677,59 +677,155 @@ func (s *StudyService) FollowConfirm() (FollowAuto, error) {
 		// **速い経路で控えた手**（`FollowCells`）。読んだ盤は無いので、手順をそのまま足す。
 		return s.fastApply(pend.moves, true)
 	}
-	return s.followFrom(pend.board, pend.cost, pend.unseen, pend.rotated)
+	return s.baseIf(s.followFrom(pend.board, pend.cost, pend.unseen, pend.rotated))
 }
 
-// followCellsDepth は速い経路で探す手数の上限（1 枚に写るのは、早指しでもふつう 2 手まで）。
+// followCellsDepth は速い経路で**新しく**探す手数の上限（1 枚に写るのは、早指しでもふつう 2 手まで）。
 const followCellsDepth = 2
 
-// FollowCells は**変わったマスだけで手を割り出して**追従する（速い経路。2026-10-07）。
+// followCellsBehind は、比べる相手の局面より本譜の先端が何手先まで進んでいても速い経路を使うか。
+// これより先へ進んでいたら 81 マスを読む（探す手数が増えて遅くなる・合わない見込みが高い）。
+const followCellsBehind = 2
+
+// followBase は**速い経路の比べる相手の 1 枚が、どの局面だったか**（2026-10-07）。
 //
-// changed は**撮った画像の向き**での 81 マスの番号（行優先。`CaptureResult.Cells`）。比べた相手は
-// 本譜の先端とぴったり合っていた 1 枚（`FollowAuto.AtFrame`）。81 マスの推論（2.1 秒）を回さないので、
-// **指されてから手が入るまでが「止まったのを確かめる 0.25〜0.5 秒」＋数ミリ秒**になる。
-//
-// ⚠️ **合う手順が 1 つに決まるときだけ進む**（`position.ChangedMoves`）。成・不成、打った駒の種類、
-// 手や頭が被った 1 枚など、決まらなければ何もせずに返す（`Applied` も `Pending` も偽）。
-// **フロントはそれを見て、同じ 1 枚を 81 マスで読む**（`CaptureService.RecognizeQuiet` → `FollowAuto`）。
-// ⚠️ **1 枚だけでは足さない**のは同じ（`followPending`）。次の 1 枚が変わっていなければ
-// `FollowConfirm` で足す。⚠️ **直前の手のマスは、見た目だけ変わってよい**（ゲーム画面の色付け）。
-func (s *StudyService) FollowCells(changed []int) (FollowAuto, error) {
-	mask := &position.CellMask{}
-	for _, i := range changed {
+// 比べる相手（`CaptureService.cellBase`）を入れたときの、根と本譜の手順を覚える。
+// ⚠️ **本譜の先端は比べる相手より先へ進むことがある**（81 マスの読みで手を足したとき）。そのとき
+// 変わったマスは「比べる相手 → 今の 1 枚」の分なので、**比べる相手の局面から突き合わせる**。
+type followBase struct {
+	root string
+	line []string
+}
+
+// markBase は**今の本譜の先端を、比べる相手の局面として覚える**（`AtFrame` を返すときに呼ぶ）。
+func (s *StudyService) markBase() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.study == nil {
+		s.cellBase = nil
+		return
+	}
+	s.cellBase = &followBase{root: rootSFEN(s.study), line: slices.Clone(s.study.MainLine())}
+}
+
+// baseIf は a が `AtFrame` なら比べる相手の局面を覚えて、a をそのまま返す。
+func (s *StudyService) baseIf(a FollowAuto, err error) (FollowAuto, error) {
+	if err == nil && a.AtFrame {
+		s.markBase()
+	}
+	return a, err
+}
+
+// followFromBase は**比べる相手の局面**と、そこから本譜の先端までに足した手順、比べる相手の 1 枚の
+// 色付けのマス（そこへ至った手）を返す。覚えていない・根が変わった・本譜が食い違ったなら ok は偽。
+func (s *StudyService) followFromBase() (base *position.Position, since []string, extra *position.CellMask, ok bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cb := s.cellBase
+	if cb == nil || s.study == nil || rootSFEN(s.study) != cb.root {
+		return nil, nil, nil, false
+	}
+	cur := s.study.MainLine()
+	if len(cur) < len(cb.line) || !slices.Equal(cur[:len(cb.line)], cb.line) {
+		return nil, nil, nil, false
+	}
+	base = s.study.Root().Clone()
+	for _, m := range cb.line {
+		if base.ApplyMove(m) != nil {
+			return nil, nil, nil, false
+		}
+	}
+	if len(cb.line) > 0 {
+		extra = usiCells(cb.line[len(cb.line)-1])
+	}
+	return base, slices.Clone(cur[len(cb.line):]), extra, true
+}
+
+// cellsMask は撮った画像の向きのマスの番号を、解析の向きの CellMask にする（後手目線なら回す）。
+func (s *StudyService) cellsMask(cells []int) *position.CellMask {
+	m := &position.CellMask{}
+	for _, i := range cells {
 		if i >= 0 && i < 81 {
-			mask[i/9][i%9] = true
+			m[i/9][i%9] = true
 		}
 	}
 	// ⚠️ **撮った向きと解析の向きを揃えること**（後手目線で採った局面は 180 度回してある）。
 	if s.src.followRotated() {
-		mask = mask.Rotate180()
+		m = m.Rotate180()
 	}
+	return m
+}
 
-	s.mu.Lock()
-	if s.study == nil {
+// FollowCells は**変わったマスだけで手を割り出して**追従する（速い経路。2026-10-07）。
+//
+// changed は**撮った画像の向き**での 81 マスの番号（行優先。`CaptureResult.Cells`）で、比べた相手は
+// 本譜の先端と合っていた 1 枚（`AtFrame` / `FrameFits`）。81 マスの推論（2.1 秒）を回さないので、
+// **指されてから手が入るまでが「止まったのを確かめる 0.25〜0.5 秒」＋数ミリ秒**になる。
+//
+// ⚠️ **比べる相手の局面から突き合わせること**（`followFromBase`）。81 マスの読みで手を足したあとは
+// 先端のほうが先へ進んでいて、変わったマスには足し済みの手のマスも入っている（2026-10-07 に実機で
+// 踏んだ。先端から突き合わせて「合う手順 0」が続いた）。足し済みの手順で始まる答えだけを採り、残りを足す。
+// ⚠️ **合う手順が 1 つに決まるときだけ進む**（`position.ChangedMoves`）。成・不成、打った駒の種類、
+// 手や頭が被った 1 枚など、決まらなければ何もせずに返す（`Applied` も `Pending` も `AtFrame` も偽）。
+// **フロントはそれを見て、同じ 1 枚を 81 マスで読む**（`CaptureService.RecognizeQuiet` → `FollowAuto`）。
+// 残りが無ければ（今の 1 枚が先端そのもの）`AtFrame` だけを立てて返す。
+// ⚠️ **1 枚だけでは足さない**のは同じ（`followPending`）。次の 1 枚が変わっていなければ
+// `FollowConfirm` で足す。⚠️ **比べる相手の 1 枚に至った手のマスは、見た目だけ変わってよい**（色付け）。
+func (s *StudyService) FollowCells(changed []int) (FollowAuto, error) {
+	mask := s.cellsMask(changed)
+
+	base, since, extra, ok := s.followFromBase()
+	if !ok {
+		// 比べる相手の局面を覚えていない。先端から突き合わせる。
+		s.mu.Lock()
+		if s.study == nil {
+			s.mu.Unlock()
+			return FollowAuto{}, fmt.Errorf("解析タブにまだ局面がありません")
+		}
+		_, tip, err := s.study.MainTip()
+		main := s.study.MainLine()
 		s.mu.Unlock()
-		return FollowAuto{}, fmt.Errorf("解析タブにまだ局面がありません")
+		if err != nil {
+			return FollowAuto{}, err
+		}
+		base, since = tip, nil
+		if len(main) > 0 {
+			extra = usiCells(main[len(main)-1])
+		}
 	}
-	_, from, err := s.study.MainTip()
-	main := s.study.MainLine()
-	s.mu.Unlock()
-	if err != nil {
-		return FollowAuto{}, err
-	}
-
-	var extra *position.CellMask
-	if len(main) > 0 {
-		extra = usiCells(main[len(main)-1])
-	}
-	sols, err := position.ChangedMoves(from, mask, extra, followCellsDepth)
-	if err != nil || len(sols) != 1 {
+	unclear := func(n int, err error) (FollowAuto, error) {
 		log.Info("変わったマスでは手が決まりません（81 マスを読みます）",
-			"変わったマス", mask.Count(), "合う手順", len(sols), "error", err)
+			"変わったマス", mask.Count(), "足し済み", len(since), "合う手順", n, "error", err)
 		return FollowAuto{Kind: FollowUnreachable, Reason: "変わったマスでは手が決まりません", State: s.State()}, nil
 	}
-	moves := sols[0]
-	log.Info("変わったマスで手を割り出しました", "moves", moves)
+	if len(since) > followCellsBehind {
+		return unclear(0, nil)
+	}
+	sols, err := position.ChangedMoves(base, mask, extra, len(since)+followCellsDepth)
+	if err != nil {
+		return unclear(0, err)
+	}
+	// **足し済みの手順で始まる答え**だけを採り、残り（これから足す手）で数える。
+	var rests [][]string
+	for _, sol := range sols {
+		if len(sol) < len(since) || !slices.Equal(sol[:len(since)], since) {
+			continue
+		}
+		rest := sol[len(since):]
+		if !slices.ContainsFunc(rests, func(r []string) bool { return slices.Equal(r, rest) }) {
+			rests = append(rests, rest)
+		}
+	}
+	if len(rests) != 1 {
+		return unclear(len(rests), nil)
+	}
+	moves := rests[0]
+	if len(moves) == 0 {
+		// **今の 1 枚は先端そのもの**（足し済みの手で説明が付いた）。比べる相手にしてよい。
+		return s.baseIf(FollowAuto{Kind: FollowSame, Reason: "盤面は変わっていません", Fit: 1,
+			AtFrame: true, State: s.State()}, nil)
+	}
+	log.Info("変わったマスで手を割り出しました", "moves", moves, "足し済み", len(since))
 
 	k := s.takePendingPrefix(moves)
 	switch {
@@ -751,6 +847,39 @@ func (s *StudyService) FollowCells(changed []int) (FollowAuto, error) {
 	}
 }
 
+// FrameFits は**比べる相手の 1 枚から今の 1 枚までに変わったマスが、その間に本譜へ足した手で
+// ぴったり説明できるか**を返す（2026-10-07）。説明できれば今の 1 枚は先端と合っているので、
+// 比べる相手の局面を覚え直して真を返す（フロントは `CaptureService.SetCellBase` を呼ぶ）。
+//
+// ⚠️ **81 マスの読みの一致度には頼らない。** ゲーム画面は色付けのマスの読み違いなどで一致度 1 に
+// なりにくく、それだけを条件にしていたら比べる相手が古いまま残り、速い経路がほとんど効かなかった
+// （2026-10-07 に実機で踏んだ。変わったマスが 10 → 34 と増え続けた）。**画素の変化と、足した手の
+// 動かすマスが合うか**で確かめる（`position.ChangedFits`）。
+// cells は撮った画像の向きのマスの番号（`CaptureResult.Cells`）。
+func (s *StudyService) FrameFits(cells []int) bool {
+	base, since, extra, ok := s.followFromBase()
+	if !ok {
+		return false
+	}
+	mask := s.cellsMask(cells)
+	if len(since) == 0 {
+		// 何も足していない。何も変わっていなければ（露出の揺れだけ）合っている。
+		return mask.Count() == 0
+	}
+	to := base.Clone()
+	for _, m := range since {
+		if to.ApplyMove(m) != nil {
+			return false
+		}
+	}
+	if !position.ChangedFits(base.Board, to.Board, mask, extra) {
+		return false
+	}
+	s.markBase()
+	log.Info("比べる相手を今の 1 枚に替えました（足した手で変わったマスの説明が付いた）", "足した手", len(since))
+	return true
+}
+
 // fastApply は速い経路で決まった手順を本譜の先に足す。atFrame は「これでこの 1 枚とぴったり合う」か。
 func (s *StudyService) fastApply(moves []string, atFrame bool) (FollowAuto, error) {
 	s.mu.Lock()
@@ -767,9 +896,9 @@ func (s *StudyService) fastApply(moves []string, atFrame bool) (FollowAuto, erro
 	if err != nil {
 		return FollowAuto{}, err
 	}
-	return FollowAuto{Kind: FollowUnique, Applied: true, Moves: slices.Clone(moves), Text: text,
+	return s.baseIf(FollowAuto{Kind: FollowUnique, Applied: true, Moves: slices.Clone(moves), Text: text,
 		Added: applied.Added, Guess: true, Fit: 1, Note: applied.Note, State: applied.State,
-		AtFrame: atFrame}, nil
+		AtFrame: atFrame}, nil)
 }
 
 // usiCells は USI の手が動かすマス（元と行き先。打つ手は行き先だけ）。読めなければ nil。

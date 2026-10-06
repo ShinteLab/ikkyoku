@@ -30,7 +30,7 @@ func fastService() *CaptureService {
 func TestFastCellsNeedsBase(t *testing.T) {
 	s := fastService()
 	s.gateRead = gateReadSettled
-	if _, ok := s.fastCells(gateMoved(0)); ok {
+	if _, comparable, fast := s.fastCells(gateMoved(0)); comparable || fast {
 		t.Fatal("比べる相手が無いのに速い経路を使いました")
 	}
 }
@@ -41,8 +41,13 @@ func TestFastCellsOnlyWhenSettled(t *testing.T) {
 	s.SetCellBase()
 	for _, why := range []string{gateReadFirst, gateReadRestless, gateReadInsurance} {
 		s.gateRead = why
-		if _, ok := s.fastCells(gateMoved(0)); ok {
+		cells, comparable, fast := s.fastCells(gateMoved(0))
+		if fast {
 			t.Fatalf("ふるいの理由が %q なのに速い経路を使いました", why)
+		}
+		// ⚠️ **変わったマスは返すこと**（81 マスを読んだあと `FrameFits` に使う）。
+		if !comparable || !slices.Equal(cells, []int{1*9 + 1}) {
+			t.Fatalf("ふるいの理由が %q のとき、変わったマスを返していません: %v（%v）", why, cells, comparable)
 		}
 	}
 }
@@ -53,15 +58,15 @@ func TestFastCellsFindsTheChangedCell(t *testing.T) {
 	s.SetCellBase()
 	s.gateRead = gateReadSettled
 	// gateMoved(0) は (120,80)-(140,100) ＝ 2 行目・2 列目のマス。
-	cells, ok := s.fastCells(gateMoved(0))
-	if !ok {
+	cells, _, fast := s.fastCells(gateMoved(0))
+	if !fast {
 		t.Fatal("速い経路を使いませんでした")
 	}
 	if !slices.Equal(cells, []int{1*9 + 1}) {
 		t.Fatalf("変わったマス = %v, want [10]", cells)
 	}
 	// 何も変わっていなければ空（ok は真。呼ぶ側は「同じ」として省く）。
-	if cells, ok := s.fastCells(gateFrame()); !ok || len(cells) != 0 {
-		t.Fatalf("何も変わっていないのに %v（ok=%v）", cells, ok)
+	if cells, _, fast := s.fastCells(gateFrame()); !fast || len(cells) != 0 {
+		t.Fatalf("何も変わっていないのに %v（fast=%v）", cells, fast)
 	}
 }
