@@ -1,12 +1,14 @@
 package app
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/ShinteLab/ikkyoku/analyze"
 	"github.com/ShinteLab/ikkyoku/position"
+	"github.com/ShinteLab/ikkyoku/recognize"
 )
 
 // following は「初期局面を採った解析タブ」と「撮った局面を置く訂正タブ」を返す。
@@ -1198,19 +1200,82 @@ func cellIdx(sq ...string) []int {
 	return out
 }
 
-// ⚠️ **速い経路（変わったマスだけで割り出す）も、1 枚だけでは足さないこと**（2026-10-07）。
-// 変わったマスが 1 通りの手に決まったら控え、次の 1 枚が変わっていなければ（`FollowConfirm`）足す。
-// 足したら**この 1 枚は先端そのもの**なので `AtFrame` を立てる（次の比べる相手になる）。
-func TestFollowCellsPendsThenConfirms(t *testing.T) {
-	s, _ := following(t)
-	a, err := s.FollowCells(cellIdx("7g", "7f"), nil)
+// readAfter は**平手から moves を指した盤を撮った 1 枚**の、マス idx（撮った画像の向き）を読んだことにする
+// （`CaptureService.ReadCells` の代わり）。rotated は後手目線（撮った画像は解析の向きを 180 度回したもの）。
+// 撮った画像の向きなので、手前側の駒が大文字で `Side` が up になる。
+func readAfter(t *testing.T, rotated bool, idx []int, moves ...string) []CellPiece {
+	t.Helper()
+	p, err := position.FromFullSFEN(hirateBoard + " b - 1")
+	if err != nil {
+		t.Fatalf("FromFullSFEN: %v", err)
+	}
+	for _, m := range moves {
+		if err := p.ApplyMove(m); err != nil {
+			t.Fatalf("ApplyMove(%q): %v", m, err)
+		}
+	}
+	out := make([]CellPiece, 0, len(idx))
+	for _, c := range idx {
+		i := c
+		if rotated {
+			i = 80 - c
+		}
+		cell, err := p.Board.At(i/9, i%9)
+		if err != nil {
+			t.Fatalf("At(%d): %v", i, err)
+		}
+		cp := CellPiece{Cell: c}
+		if !cell.IsEmpty() {
+			up := cell.Black() != rotated
+			l := strings.TrimPrefix(cell.Mark(), "+")
+			if up {
+				l = strings.ToUpper(l)
+			} else {
+				l = strings.ToLower(l)
+			}
+			if cell.Promoted() {
+				l = "+" + l
+			}
+			cp.Piece, cp.Side = l, recognize.SideDown
+			if up {
+				cp.Side = recognize.SideUp
+			}
+		}
+		out = append(out, cp)
+	}
+	return out
+}
+
+// followCellsRead は `FollowCells` を、フロントと同じく**頼まれたマスを 1 回だけ読んで**もう一度呼ぶ。
+// 読むのは平手から moves を指した盤（＝撮った 1 枚。`readAfter`）。⚠️ 1 回目で控えたり足したりしたら失敗にする
+// （行き先を読まずに決めている）。
+func followCellsRead(t *testing.T, s *StudyService, changed []int, rotated bool, moves ...string) FollowAuto {
+	t.Helper()
+	a, err := s.FollowCells(changed, nil)
 	if err != nil {
 		t.Fatalf("FollowCells: %v", err)
 	}
+	if a.Applied || a.Pending || len(a.ReadCells) == 0 {
+		t.Fatalf("行き先を読むよう頼まずに決めました: %+v", a)
+	}
+	a, err = s.FollowCells(changed, readAfter(t, rotated, a.ReadCells, moves...))
+	if err != nil {
+		t.Fatalf("FollowCells: %v", err)
+	}
+	return a
+}
+
+// ⚠️ **速い経路（変わったマスだけで割り出す）も、1 枚だけでは足さないこと**（2026-10-07）。
+// 変わったマスが 1 通りの手に決まったら控え、次の 1 枚が変わっていなければ（`FollowConfirm`）足す。
+// 足したら**この 1 枚は先端そのもの**なので `AtFrame` を立てる（次の比べる相手になる）。
+// 控える前に行き先（7六）を読んで確かめる（`followCellsRead`。確かめそのものは `TestFollowCellsArrival*`）。
+func TestFollowCellsPendsThenConfirms(t *testing.T) {
+	s, _ := following(t)
+	a := followCellsRead(t, s, cellIdx("7g", "7f"), false, "7g7f")
 	if a.Applied || !a.Pending {
 		t.Fatalf("1 枚目で足したか、控えていません: %+v", a)
 	}
-	a, err = s.FollowConfirm()
+	a, err := s.FollowConfirm()
 	if err != nil {
 		t.Fatalf("FollowConfirm: %v", err)
 	}
@@ -1248,8 +1313,9 @@ func TestFollowCellsRotatesForGoteView(t *testing.T) {
 		t.Fatalf("Adopt: %v", err)
 	}
 	// 画面では上下逆なので、▲7六歩 は 3三→3四 が変わったように見える。
-	if a, err := s.FollowCells(cellIdx("3c", "3d"), nil); err != nil || !a.Pending {
-		t.Fatalf("FollowCells: %+v（%v）", a, err)
+	// 撮った画像では、来た先手の歩は向こう向き（"p"・down）に見える（readAfter が回して読む）。
+	if a := followCellsRead(t, s, cellIdx("3c", "3d"), true, "7g7f"); !a.Pending {
+		t.Fatalf("FollowCells: %+v", a)
 	}
 	a, err := s.FollowConfirm()
 	if err != nil || !a.Applied || a.Moves[0] != "7g7f" {
@@ -1319,8 +1385,8 @@ func TestFollowCellsFromBaseWhenTipIsAhead(t *testing.T) {
 		t.Fatalf("FollowApply: %v", err)
 	}
 	// 平手の 1 枚から見ると、▲7六歩 △3四歩 の 4 マスが変わっている。
-	if a, err := s.FollowCells(cellIdx("7g", "7f", "3c", "3d"), nil); err != nil || !a.Pending {
-		t.Fatalf("残りの △3四歩 を控えていません: %+v（%v）", a, err)
+	if a := followCellsRead(t, s, cellIdx("7g", "7f", "3c", "3d"), false, "7g7f", "3c3d"); !a.Pending {
+		t.Fatalf("残りの △3四歩 を控えていません: %+v", a)
 	}
 	a, err := s.FollowConfirm()
 	if err != nil || !a.Applied || len(a.Moves) != 1 || a.Moves[0] != "3c3d" {
@@ -1345,8 +1411,8 @@ func TestFrameFits(t *testing.T) {
 		t.Fatal("▲7六歩 で説明が付くのに、比べる相手を替えませんでした")
 	}
 	// 替えたあとは、▲7六歩 のあとの局面から割り出す。
-	if a, err := s.FollowCells(cellIdx("3c", "3d"), nil); err != nil || !a.Pending {
-		t.Fatalf("新しい比べる相手から △3四歩 を控えていません: %+v（%v）", a, err)
+	if a := followCellsRead(t, s, cellIdx("3c", "3d"), false, "7g7f", "3c3d"); !a.Pending {
+		t.Fatalf("新しい比べる相手から △3四歩 を控えていません: %+v", a)
 	}
 }
 
@@ -1386,13 +1452,15 @@ func TestFollowCellsReadsTheCellToDecidePromotion(t *testing.T) {
 // 実際の中継では成駒は滅多に出ず、学習データに入らないので読めないのが普通。**どの駒が動いたかは局面から
 // 分かる**ので、行き先が「その駒」と読めなければ成っている。⚠️ **将棋の見込みは使わない**（証拠だけ）。
 func TestFollowCellsPromotesWhenNotTheMovedPiece(t *testing.T) {
-	for _, read := range []string{"?", "+B", "S"} { // 読めない・馬と読めた・別の駒に読めた
+	// 読めない・馬と読めた・別の駒に読めた。⚠️ "?" でも向き（手前向き ＝ 先手）は読めている
+	// （`recognize.ReadCells` は種類が読めなくても向きを返す。行き先の確かめはそれで通る）。
+	for _, read := range []string{"?", "+B", "S"} {
 		s, _ := following(t)
 		if _, err := s.FollowApply([]string{"7g7f", "3c3d"}, s.State().Rev, false); err != nil {
 			t.Fatalf("FollowApply: %v", err)
 		}
 		changed := cellIdx("8h", "2b")
-		if a, err := s.FollowCells(changed, []CellPiece{{Cell: cellIdx("2b")[0], Piece: read}}); err != nil || !a.Pending {
+		if a, err := s.FollowCells(changed, []CellPiece{{Cell: cellIdx("2b")[0], Piece: read, Side: recognize.SideUp}}); err != nil || !a.Pending {
 			t.Fatalf("%q と読めたとき、成りで控えていません: %+v（%v）", read, a, err)
 		}
 		if a, err := s.FollowConfirm(); err != nil || !a.Applied || a.Moves[0] != "8h2b+" {
@@ -1412,12 +1480,157 @@ func TestFollowCellsUsesPendingWhenPromotionVanished(t *testing.T) {
 	}
 	// 81 マスの読みで ▲2二角成 を控えた（ここでは控えを直に置く）。
 	s.setPending(&followPending{tip: s.mainTip(), moves: []string{"8h2b+"}})
-	// 次の 1 枚: ▲2二角成 △同銀 —— 2二 は銀になり、成ったかどうかは見えない。
-	a, err := s.FollowCells(cellIdx("8h", "2b", "3a"), nil)
+	// 次の 1 枚: ▲2二角成 △同銀 —— 2二 は銀になり、成ったかどうかは見えない（行き先の 2二 は後手の銀と読む）。
+	a := followCellsRead(t, s, cellIdx("8h", "2b", "3a"), false, "7g7f", "3c3d", "2g2f", "4a3b", "8h2b+", "3a2b")
+	if !a.Applied || len(a.Moves) == 0 || a.Moves[0] != "8h2b+" {
+		t.Fatalf("控えた ▲2二角成 で始まる答えを採っていません: %+v", a)
+	}
+}
+
+// ---- 速い経路の行き先の確かめ（`followBackedByRead`。2026-10-07）----------------------------
+//
+// ⚠️ **ここが守っているのは「速い経路でも、行き先に指した側の駒が読めてから足す」こと**
+// （`position.backed` と同じ約束）。変わったマスの組だけで 1 通りに決まっても、画像の行き先に
+// 相手の駒が居るなら、その手順は指されていない。
+
+// ⚠️ **行き先に相手の駒が読めたら、1 通りに決まった手順でも控えも足しもしないこと**（2026-10-07 に実機で踏んだ）。
+//
+// **実機の症状**（ゲーム画面の 47 手目）: 変わったマスは 8f・8g・7h で、実際は後手の飛車が 8g へ成っただけ
+// （7h は先手の駒が別の先手の駒に見えた）。速い経路は [8f8g 7h8g]（8g で先手が取り返す）を 1 通りと
+// 割り出して足し、画像の 8g に居た後手の龍を見ていなかった。ここでは同じ形を ▲2四歩 の局面で作る:
+// 実際は △2四同歩 だけで 2h は見た目だけ変わった 1 枚 —— 変わったマスの組だけなら [2c2d 2h2d]
+// （▲同飛）が 1 通りに決まるが、2四 には後手の歩が居る。
+func TestFollowCellsRejectsPhantomRecapture(t *testing.T) {
+	s, _ := following(t)
+	played := []string{"2g2f", "8c8d", "2f2e", "8d8e", "2e2d"}
+	if _, err := s.FollowApply(played, s.State().Rev, false); err != nil {
+		t.Fatalf("FollowApply: %v", err)
+	}
+	changed := cellIdx("2c", "2d", "2h")
+	a, err := s.FollowCells(changed, nil)
 	if err != nil {
 		t.Fatalf("FollowCells: %v", err)
 	}
-	if !a.Applied || len(a.Moves) == 0 || a.Moves[0] != "8h2b+" {
-		t.Fatalf("控えた ▲2二角成 で始まる答えを採っていません: %+v", a)
+	if a.Applied || a.Pending || !slices.Equal(a.ReadCells, cellIdx("2d")) {
+		t.Fatalf("前提: [2c2d 2h2d] に決まり、行き先の 2四 を読むよう頼むはず: %+v", a)
+	}
+	// 撮った 1 枚は △2四同歩 のあと（2四 は後手の歩）。
+	read := readAfter(t, false, a.ReadCells, append(slices.Clone(played), "2c2d")...)
+	a, err = s.FollowCells(changed, read)
+	if err != nil {
+		t.Fatalf("FollowCells: %v", err)
+	}
+	if a.Applied || a.Pending || len(a.ReadCells) > 0 {
+		t.Fatalf("行き先に後手の歩が居るのに ▲同飛 を控えたか足しました: %+v", a)
+	}
+	if p := s.pendingMoves(); p != nil {
+		t.Fatalf("控えが残っています: %v", p)
+	}
+	if n := len(s.study.MainLine()); n != len(played) {
+		t.Fatalf("本譜が動きました: %d 手", n)
+	}
+}
+
+// ⚠️ **行き先が空き・切り出せない（向きも無い "?"）なら決めないこと**（81 マスを読む）。
+// ⚠️ **種類が読めない "?" でも、向きが読めていれば先後で確かめること**（成駒は読めないのが普通）。
+func TestFollowCellsArrivalMustBeReadable(t *testing.T) {
+	to := cellIdx("7f")[0]
+	for _, tc := range []struct {
+		name string
+		read CellPiece
+		ok   bool
+	}{
+		{"空き", CellPiece{Cell: to, Piece: ""}, false},
+		{"切り出せない", CellPiece{Cell: to, Piece: "?"}, false},
+		{"向きだけ読めて相手の駒", CellPiece{Cell: to, Piece: "?", Side: recognize.SideDown}, false},
+		{"向きだけ読めて指した側の駒", CellPiece{Cell: to, Piece: "?", Side: recognize.SideUp}, true},
+	} {
+		s, _ := following(t)
+		a, err := s.FollowCells(cellIdx("7g", "7f"), []CellPiece{tc.read})
+		if err != nil {
+			t.Fatalf("%s: FollowCells: %v", tc.name, err)
+		}
+		if a.Pending != tc.ok || a.Applied || len(a.ReadCells) > 0 {
+			t.Fatalf("%s: 控えた = %v, want %v: %+v", tc.name, a.Pending, tc.ok, a)
+		}
+	}
+}
+
+// ⚠️ **行き先の駒の種類は比べないこと**（`position.backed` と同じ。種類は認識が一番外すところで、
+// 求めると正しい手まで落ちる）。▲7六歩 の 7六 を「先手の香」と読んでも ▲7六歩 を控える。
+func TestFollowCellsArrivalIgnoresKind(t *testing.T) {
+	s, _ := following(t)
+	a, err := s.FollowCells(cellIdx("7g", "7f"), []CellPiece{{Cell: cellIdx("7f")[0], Piece: "L", Side: recognize.SideUp}})
+	if err != nil || !a.Pending {
+		t.Fatalf("先後が合っているのに控えていません: %+v（%v）", a, err)
+	}
+	if a, err := s.FollowConfirm(); err != nil || !a.Applied || a.Moves[0] != "7g7f" {
+		t.Fatalf("▲7六歩 になっていません: %+v（%v）", a, err)
+	}
+}
+
+// ⚠️ **後手目線では、撮った画像の手前側が後手**（先後を入れ替えて比べること）。
+// 画面では上下逆なので、▲7六歩 は 3三→3四 が変わったように見え、来た先手の歩は向こう向き（"p"）に読める。
+func TestFollowCellsArrivalSideWhenRotated(t *testing.T) {
+	for _, tc := range []struct {
+		read CellPiece
+		ok   bool
+	}{
+		{CellPiece{Cell: cellIdx("3d")[0], Piece: "p", Side: recognize.SideDown}, true},
+		{CellPiece{Cell: cellIdx("3d")[0], Piece: "P", Side: recognize.SideUp}, false},
+	} {
+		pos := NewPositionService()
+		if _, err := pos.Load(hirateBoard, nil); err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if _, err := pos.SetViewpoint(true); err != nil {
+			t.Fatalf("SetViewpoint: %v", err)
+		}
+		if _, err := pos.SetTurn(1); err != nil {
+			t.Fatalf("SetTurn: %v", err)
+		}
+		s := NewStudyService(pos)
+		if _, err := s.Adopt(); err != nil {
+			t.Fatalf("Adopt: %v", err)
+		}
+		a, err := s.FollowCells(cellIdx("3c", "3d"), []CellPiece{tc.read})
+		if err != nil {
+			t.Fatalf("FollowCells: %v", err)
+		}
+		if a.Pending != tc.ok || a.Applied {
+			t.Fatalf("%q（%s）と読んだとき 控えた = %v, want %v: %+v", tc.read.Piece, tc.read.Side, a.Pending, tc.ok, a)
+		}
+	}
+}
+
+// ⚠️ **手が分かれたときは、違いの出るマスと、どの候補の行き先も 1 回で頼むこと**（フロントが読むのは 1 回だけ）。
+// ⚠️ **選ぶのには違いの出るマスの読みだけを使うこと** —— 行き先の読みまで渡すと、駒の種類まで比べる
+// `followCellFits` が、種類を読み違えた行き先で正しい手まで落とす。
+// ▲2二角成（成・不成で分かれる）△3二金: 違いの出るマスは 2二、行き先は 2二 と 3二。3二 の金を銀と読み違えても決まる。
+func TestFollowCellsAsksDiffAndArrivalsTogether(t *testing.T) {
+	s, _ := following(t)
+	if _, err := s.FollowApply([]string{"7g7f", "3c3d"}, s.State().Rev, false); err != nil {
+		t.Fatalf("FollowApply: %v", err)
+	}
+	changed := cellIdx("8h", "2b", "4a", "3b")
+	a, err := s.FollowCells(changed, nil)
+	if err != nil {
+		t.Fatalf("FollowCells: %v", err)
+	}
+	if a.Applied || a.Pending || !slices.Equal(a.ReadCells, cellIdx("3b", "2b")) {
+		t.Fatalf("違いの出る 2二 と行き先の 3二 を頼むはず: %+v", a)
+	}
+	read := readAfter(t, false, a.ReadCells, "7g7f", "3c3d", "8h2b+", "4a3b")
+	for i := range read {
+		if read[i].Cell == cellIdx("3b")[0] {
+			read[i].Piece = "s" // 後手の金を後手の銀と読み違えた（先後は合っている）
+		}
+	}
+	a, err = s.FollowCells(changed, read)
+	if err != nil || !a.Pending {
+		t.Fatalf("行き先の種類の読み違いで決まりませんでした: %+v（%v）", a, err)
+	}
+	if a, err := s.FollowConfirm(); err != nil || !a.Applied || !slices.Equal(a.Moves, []string{"8h2b+", "4a3b"}) {
+		t.Fatalf("▲2二角成 △3二金 になっていません: %+v（%v）", a, err)
 	}
 }

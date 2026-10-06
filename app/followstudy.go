@@ -25,6 +25,7 @@ import (
 	"github.com/ShinteLab/core/kifu"
 	"github.com/ShinteLab/ikkyoku/log"
 	"github.com/ShinteLab/ikkyoku/position"
+	"github.com/ShinteLab/ikkyoku/recognize"
 )
 
 // followTimeout は経路探索に使ってよい時間。
@@ -788,6 +789,10 @@ func (s *StudyService) cellsMask(cells []int) *position.CellMask {
 // 手や頭が被った 1 枚など、決まらなければ何もせずに返す（`Applied` も `Pending` も `AtFrame` も偽）。
 // **フロントはそれを見て、同じ 1 枚を 81 マスで読む**（`CaptureService.RecognizeQuiet` → `FollowAuto`）。
 // 残りが無ければ（今の 1 枚が先端そのもの）`AtFrame` だけを立てて返す。
+// ⚠️ **1 通りに決まっても、行き先に指した側の駒が読めるまで控えも足しもしない**（2026-10-07。
+// `followBackedByRead`）。read が行き先を読んでいなければ `ReadCells` に行き先を入れて返し
+// （フロントが `CaptureService.ReadCells` で読んでもう一度呼ぶ）、読めて先後が違えば何もせずに返す（81 マスを読む）。
+// 手が分かれたときに頼むマスは、**違いの出るマスとどの候補の行き先も合わせたもの**（フロントが読むのは 1 回だけ）。
 // ⚠️ **1 枚だけでは足さない**のは同じ（`followPending`）。次の 1 枚が変わっていなければ
 // `FollowConfirm` で足す。⚠️ **比べる相手の 1 枚に至った手のマスは、見た目だけ変わってよい**（色付け）。
 func (s *StudyService) FollowCells(changed []int, read []CellPiece) (FollowAuto, error) {
@@ -860,17 +865,24 @@ func (s *StudyService) FollowCells(changed []int, read []CellPiece) (FollowAuto,
 			if len(diff) == 0 || len(diff) > followReadMax {
 				return unclear(len(rests), nil)
 			}
-			idx := make([]int, 0, len(diff))
-			for _, i := range diff {
-				if rotated {
-					i = 80 - i // 解析の向き → 撮った画像の向き
+			// ⚠️ **どの候補の行き先も一緒に頼むこと**（フロントが読むのは 1 回だけ。下の行き先の確かめに使う）。
+			// 上限（`followReadMax`）は違いの出るマスだけに掛ける —— 行き先は手数ぶんしか増えない。
+			want := slices.Clone(diff)
+			for _, r := range rests {
+				for _, i := range followArrivals(base, since, r) {
+					if !slices.Contains(want, i) {
+						want = append(want, i)
+					}
 				}
-				idx = append(idx, i)
 			}
+			slices.Sort(want)
+			idx := followImageCells(want, rotated)
 			log.Info("変わったマスでは手が分かれました（違いの出るマスだけ読みます）", "候補", len(rests), "読むマス", len(idx))
 			return FollowAuto{Kind: FollowChoices, Reason: "違いの出るマスを読みます", ReadCells: idx, State: s.State()}, nil
 		}
-		rests = followPickByRead(base, since, rests, read, rotated)
+		// ⚠️ **選ぶのに使うのは違いの出るマスの読みだけ**（行き先の読みまで渡すと、駒の種類まで比べる
+		// `followCellFits` が、種類を読み違えた行き先で正しい手まで落とす）。
+		rests = followPickByRead(base, since, rests, followReadOnly(read, diff, rotated), rotated)
 		if len(rests) != 1 {
 			return unclear(len(rests), nil)
 		}
@@ -884,6 +896,19 @@ func (s *StudyService) FollowCells(changed []int, read []CellPiece) (FollowAuto,
 		// **今の 1 枚は先端そのもの**（足し済みの手で説明が付いた）。比べる相手にしてよい。
 		return s.baseIf(FollowAuto{Kind: FollowSame, Reason: "盤面は変わっていません", Fit: 1,
 			AtFrame: true, State: s.State()}, nil)
+	}
+	// ⚠️ **行き先に指した側の駒が読めてから控える・足すこと**（2026-10-07。`followBackedByRead`）。
+	// 変わったマスの組だけで決めると「駒が来た」ことを確かめないまま手を足す。確かめは控える周にも
+	// 確かめの周（もう一度ここへ来たとき）にも掛かる。読むのは数マスなので数ミリ秒。
+	arrivals := followArrivals(base, since, moves)
+	if !followReadCovers(read, arrivals, rotated) {
+		idx := followImageCells(arrivals, rotated)
+		log.Info("変わったマスで手を割り出しました（行き先を読んで確かめます）", "moves", moves, "読むマス", len(idx))
+		return FollowAuto{Kind: FollowChoices, Reason: "行き先のマスを読みます", ReadCells: idx, State: s.State()}, nil
+	}
+	if ok, bad, got := followBackedByRead(base, since, moves, read, rotated); !ok {
+		log.Info("行き先に指した側の駒が読めません（81 マスを読みます）", "moves", moves, "マス", bad, "読んだ駒", got)
+		return FollowAuto{Kind: FollowUnreachable, Reason: "行き先に指した側の駒が読めません", State: s.State()}, nil
 	}
 	log.Info("変わったマスで手を割り出しました", "moves", moves, "足し済み", len(since))
 
@@ -912,10 +937,141 @@ const followReadMax = 4
 
 // CellPiece は**マス 1 つの読み**（`CaptureService.ReadCells` が返し、`FollowCells` が受ける。2026-10-07）。
 // Cell は撮った画像の向きの 81 マスの番号、Piece は撮った画像の向きの SFEN の駒（手前側が大文字。
-// 空は ""、読めなければ "?"）。
+// 空は ""、読めなければ "?"）。Side は駒の向き（`recognize.SideUp` = 手前向き / `SideDown` = 向こう向き /
+// "" = 空き・切り出せない）。⚠️ **Piece が "?" でも Side は入っていることがある**（成駒は種類が読めないのが
+// 普通だが、向きは読める。`recognize.CellRead`）。
 type CellPiece struct {
 	Cell  int    `json:"cell"`
 	Piece string `json:"piece"`
+	Side  string `json:"side"`
+}
+
+// followImageCells は解析の向きのマスの番号を、撮った画像の向きの番号にする（後手目線なら回す）。
+func followImageCells(cells []int, rotated bool) []int {
+	out := make([]int, 0, len(cells))
+	for _, i := range cells {
+		if rotated {
+			i = 80 - i // 解析の向き → 撮った画像の向き
+		}
+		out = append(out, i)
+	}
+	return out
+}
+
+// followReadAt は read のうち、解析の向きのマス i を読んだものを返す。
+func followReadAt(read []CellPiece, i int, rotated bool) (CellPiece, bool) {
+	if rotated {
+		i = 80 - i // 解析の向き → 撮った画像の向き
+	}
+	for _, cp := range read {
+		if cp.Cell == i {
+			return cp, true
+		}
+	}
+	return CellPiece{}, false
+}
+
+// followReadOnly は read のうち、解析の向きのマス cells を読んだものだけを返す。
+func followReadOnly(read []CellPiece, cells []int, rotated bool) []CellPiece {
+	var out []CellPiece
+	for _, i := range cells {
+		if cp, ok := followReadAt(read, i, rotated); ok {
+			out = append(out, cp)
+		}
+	}
+	return out
+}
+
+// followReadCovers は read が解析の向きのマス cells をすべて読んでいるか。
+func followReadCovers(read []CellPiece, cells []int, rotated bool) bool {
+	for _, i := range cells {
+		if _, ok := followReadAt(read, i, rotated); !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// followArrivals は**手順 moves で駒が来たマス**（解析の向きの 81 マスの番号。昇順）を返す（2026-10-07）。
+//
+// どれかの手の行き先で、base から since と moves を指し終えた盤に駒が載っているマス。
+// `position.backed` の見るマス（指したあとの盤で駒があり、指す前の盤と中身が違うマス）は必ずここに
+// 含まれる —— 駒が新しく現れるのは行き先だけなので。⚠️ **中身の差だけで拾わないこと**: 取って
+// 同じ種類の駒で取り返す手順（▲同金 の金が元から居た金と同じ）は行き先の中身が指す前と同じになり、
+// 確かめるマスが 1 つも残らない（2026-10-07 の幻の手 [8f8g 7h8g] も、8g に元から 7h と同じ種類の
+// 先手の駒が居ればこの形になる）。指し終えた盤で空いている行き先（来てまた動いた）は見ない（来た跡が残らない）。
+func followArrivals(base *position.Position, since, moves []string) []int {
+	final := followBoard(base, since, moves)
+	if final == nil {
+		return nil
+	}
+	var out []int
+	for _, mv := range moves {
+		if len(mv) < 4 || mv[2] < '1' || mv[2] > '9' || mv[3] < 'a' || mv[3] > 'i' {
+			continue
+		}
+		r, f := int(mv[3]-'a'), 9-int(mv[2]-'0')
+		if c, err := final.At(r, f); err != nil || c.IsEmpty() {
+			continue
+		}
+		if i := r*9 + f; !slices.Contains(out, i) {
+			out = append(out, i)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// followBackedByRead は**手順 moves の行き先（`followArrivals`）に、指した側の駒が読めているか**を返す
+// （2026-10-07）。偽なら、確かめられなかったマス（「８七」）と読んだ駒（"駒/向き"）を添える。
+//
+// **実機の症状**（2026-10-07。ゲーム画面の 47 手目）: 変わったマスは 8f・8g・7h（解析の向き）で、
+// 実際は後手の飛車が 8f→8g と成った（8g に後手の龍）だけ。7h は先手の駒が別の先手の駒に見えただけだった。
+// 速い経路は変わったマスの組だけで [8f8g 7h8g]（8g で先手が取り返す）を 1 通りと割り出して足した
+// —— 画像の 8g には後手の龍がはっきり居た。直前の 81 マスの読みは [8f8g] だけだった。
+// 81 マスの読みは「行き先に指した側の駒が読めていない手は採らない」（`position.backed`）を守って
+// いたが、速い経路は行き先を 1 マスも読んでいなかった。
+//
+// ⚠️ **見るのは先後まで**（`position.backed` と同じ。駒の種類は認識が一番外すところで、求めると
+// 正しい手まで落ちる）。⚠️ **空きと、向きも読めない "?"（切り出せない）は偽**（手が被っているなど。
+// 81 マスを読む）。⚠️ **種類が読めない "?" でも、向きが読めていれば見る**（成駒は種類が読めないのが
+// 普通。向きまで捨てると、成る手が毎回 81 マスの読みに落ちる）。
+// read は撮った画像の向き（手前側が大文字・`Side` が up）なので、後手目線なら先後を入れ替えて比べる。
+func followBackedByRead(base *position.Position, since, moves []string, read []CellPiece, rotated bool) (ok bool, bad, got string) {
+	final := followBoard(base, since, moves)
+	if final == nil {
+		return false, "", ""
+	}
+	for _, i := range followArrivals(base, since, moves) {
+		c, err := final.At(i/9, i%9)
+		if err != nil {
+			return false, squareText(i/9, i%9), ""
+		}
+		cp, found := followReadAt(read, i, rotated)
+		up, readable := cellPieceUp(cp)
+		// 撮った画像の手前側は、後手目線なら後手。
+		if !found || !readable || (up != rotated) != c.Black() {
+			return false, squareText(i/9, i%9), cp.Piece + "/" + cp.Side
+		}
+	}
+	return true, "", ""
+}
+
+// cellPieceUp は読んだ駒が**撮った画像の手前向きか**を返す。readable が偽なら向きが読めていない
+// （空き・切り出せなかった "?"）。向き（`Side`）があればそれを、無ければ駒の字の大小で決める。
+func cellPieceUp(cp CellPiece) (up, readable bool) {
+	switch {
+	case cp.Piece == "":
+		return false, false
+	case cp.Side == recognize.SideUp:
+		return true, true
+	case cp.Side == recognize.SideDown:
+		return false, true
+	case cp.Piece == "?":
+		return false, false
+	}
+	l := strings.TrimPrefix(cp.Piece, "+")
+	return l != "" && l == strings.ToUpper(l), true
 }
 
 // followBoard は base から since と rest を指した盤を返す（指せなければ nil）。
@@ -1385,7 +1541,8 @@ type FollowAuto struct {
 	// ⚠️ **ぴったり（一致度 1）のときだけ立てること。** 行き先の駒が読めていないだけの 1 枚
 	// （一致度 0.9965）を比べる相手にすると、その手のマスの変化が二度と見えなくなる。
 	AtFrame bool `json:"atFrame"`
-	// ReadCells は**速い経路で手が分かれたとき、読めば決まるマス**（撮った画像の向きの番号。2026-10-07）。
+	// ReadCells は**速い経路で、読めば決まる・確かめられるマス**（撮った画像の向きの番号。2026-10-07）。
+	// 手が分かれたときの違いの出るマスと、決まった手順の行き先（指した側の駒が来たかを確かめる）。
 	// 空でなければフロントは `CaptureService.ReadCells` で読み、結果を添えて `FollowCells` をもう一度呼ぶ。
 	ReadCells []int `json:"readCells"`
 }

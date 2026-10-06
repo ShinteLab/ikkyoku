@@ -2,6 +2,7 @@ package main
 
 import (
 	"image"
+	"slices"
 	"strings"
 
 	"github.com/ShinteLab/ikkyoku"
@@ -17,7 +18,14 @@ import (
 // どの手かを決めるのは解析タブ側（`StudyService.FollowCells`）で、決まらなければフロントが
 // 同じ 1 枚を 81 マスで読む（`RecognizeQuiet`）。理由は `_docs/design-follow.md` の「速い経路」。
 //
-// ⚠️ **使ってよいのは、ふるいが「変化して止まった」と言った 1 枚だけ**（`gateReadSettled`）。
+// ⚠️ **使ってよいのは、ふるいが「変化して止まった」と言った 1 枚だけ**。止まったと見なすのは 2 通り:
+// 盤全体の画素が止まった（`gateReadSettled`）か、**変わったマスの組が 2 枚続けて同じ**（`gateReadCells`。
+// 2026-10-07。ゲーム画面は駒を掴むと行き先が光り、「技有」の演出や盤の減光が重なって、盤全体の画素は
+// 止まらないまま指し手のマスだけが落ち着く）。手が盤の上を動いているあいだは変わったマスも毎周変わるので、
+// どちらでも弾ける。⚠️ **手が止まって被った 1 枚は通りうる** —— それを足さないのは解析タブ側の
+// 行き先の確かめ（`FollowCells`。行き先に指した側の駒が読めるか）と、2 枚で確かめる控え（`followPending`）。
+// ⚠️ **速い経路で決まらなかった組は、もう「止まった」と見なさない**（`cellsFailed`）。駒を掴んだまま
+// 行き先が光り続けると同じ組が続くので、見なすと 0.5 秒ごとに 81 マスを読むことになる。
 // ⚠️ **比べる相手は解析タブが「先端と合っている」と言った 1 枚だけ**（`SetCellBase`）。
 // 前に読んだ 1 枚と比べると、それが手の被った 1 枚だったとき残像が混ざる（2026-10-06 に実測）。
 // ⚠️ **変わったマスが多ければ 81 マスを読む**（`cellFastMax`。手や頭が被った 1 枚）。
@@ -40,7 +48,69 @@ const (
 // 返したときだけ。⚠️ **ここで「合っているか」を判断しないこと**（局面を知らない層なので）。
 func (s *CaptureService) SetCellBase() {
 	s.mu.Lock()
-	s.cellBase = s.lastQuiet
+	s.setCellBaseLocked(s.lastQuiet)
+	s.mu.Unlock()
+}
+
+// setCellBaseLocked は比べる相手を img に替える（nil なら捨てる）。s.mu を持って呼ぶこと。
+//
+// ⚠️ **前の相手と比べた変わったマスの組は捨てること**（`gateCells` / `cellsFailed`）。相手が違えば
+// 同じ組でも意味が違う —— 残すと、替えた直後の 1 枚が「2 枚続けて同じ」と見なされたり、
+// 決まらなかった組の印が別の相手の組に掛かったりする。版（`cellGen`）も進める（測っている最中に
+// 替わった 1 枚を、ふるいが前の版の組と比べないため）。
+func (s *CaptureService) setCellBaseLocked(img image.Image) {
+	s.cellBase = img
+	s.cellGen++
+	s.gateCells, s.cellsFailed = frameCells{}, frameCells{}
+}
+
+// frameCells は**1 枚の、比べる相手から変わったマス**（撮った画像の向きの 81 マスの番号。`cellsOf`。2026-10-07）。
+type frameCells struct {
+	cells []int
+	// ok は比べられたか（比べる相手とマス割りがあり、画像の大きさが同じ）。偽なら cells は nil。
+	ok bool
+	// gen は比べた相手の版（`CaptureService.cellGen`）。
+	gen int
+}
+
+// same は a と b が**同じ相手と比べた、同じ組**か（どちらかが比べられていなければ偽）。
+func (a frameCells) same(b frameCells) bool {
+	return a.ok && b.ok && a.gen == b.gen && slices.Equal(a.cells, b.cells)
+}
+
+// cellsOf は**比べる相手から変わったマスを測る**（測るだけ。ログも判断もしない。数ミリ秒）。
+//
+// 1 枚につき 1 回だけ測り、ふるい（`gate`。2 枚続けて同じ組か）と速い経路（`fastCells`）の両方に渡す。
+func (s *CaptureService) cellsOf(img image.Image) frameCells {
+	s.mu.Lock()
+	base, rects, region, bounds, gen := s.cellBase, s.cellRects, s.cellRegion, s.cellBounds, s.cellGen
+	s.mu.Unlock()
+	if img == nil || base == nil || len(rects) != 81 || !bounds.Eq(img.Bounds()) {
+		return frameCells{}
+	}
+	ratios, ok := ikkyoku.CellDiff(base, img, rects, region)
+	if !ok {
+		return frameCells{}
+	}
+	cells := []int{}
+	for i, v := range ratios {
+		if v >= cellChanged {
+			cells = append(cells, i)
+		}
+	}
+	return frameCells{cells: cells, ok: true, gen: gen}
+}
+
+// markCellsFailed は fc を**速い経路で決まらなかった組**として覚える（`cellsFailed`）。
+//
+// 覚えておくと、同じ組が 2 枚続いてもふるいは「止まった」と見なさない（盤全体が止まるか、組が変わるか、
+// 待つ上限 `gateMovingMax` で読むまで待つ）。⚠️ **比べる相手を替えたら忘れる**（`setCellBaseLocked`）。
+func (s *CaptureService) markCellsFailed(fc frameCells) {
+	if !fc.ok {
+		return
+	}
+	s.mu.Lock()
+	s.cellsFailed = frameCells{cells: slices.Clone(fc.cells), ok: true, gen: fc.gen}
 	s.mu.Unlock()
 }
 
@@ -48,7 +118,9 @@ func (s *CaptureService) SetCellBase() {
 //
 // 速い経路で成・不成や打った駒の種類が分かれたとき、フロントが `FollowAuto.ReadCells` を渡して呼ぶ。
 // 81 マスを読み直す（2 秒以上。CPU が混んでいると 7〜10 秒）代わりに、違いの出るマスだけを読む。
+// 手順が 1 通りに決まったときも、行き先に指した側の駒が来たかを確かめるために呼ばれる（同日。`app.FollowCells`）。
 // ⚠️ **撮り直さない**（変わったマスを測った 1 枚と同じ 1 枚を読む）。
+// ⚠️ **駒の向き（`CellPiece.Side`）を落とさないこと**（種類が読めない "?" でも向きで先後を確かめる）。
 func (s *CaptureService) ReadCells(cells []int) ([]ikkyokuapp.CellPiece, error) {
 	s.mu.Lock()
 	img, rects, region := s.lastQuiet, s.cellRects, s.cellRegion
@@ -60,8 +132,11 @@ func (s *CaptureService) ReadCells(cells []int) ([]ikkyokuapp.CellPiece, error) 
 	out := make([]ikkyokuapp.CellPiece, len(cells))
 	names := make([]string, len(cells))
 	for i, c := range cells {
-		out[i] = ikkyokuapp.CellPiece{Cell: c, Piece: pieces[i]}
-		names[i] = cellName(c) + "=" + pieces[i]
+		out[i] = ikkyokuapp.CellPiece{Cell: c, Piece: pieces[i].Piece, Side: pieces[i].Side}
+		names[i] = cellName(c) + "=" + pieces[i].Piece
+		if pieces[i].Piece == "?" && pieces[i].Side != "" {
+			names[i] += "(" + pieces[i].Side + ")" // 種類は読めないが向きは読めた
+		}
 	}
 	log.Info("違いの出るマスを読みました（追跡）", "マス", strings.Join(names, ","))
 	return out, nil
@@ -84,41 +159,35 @@ func (s *CaptureService) noteCellRects(img image.Image, d *recognize.Debug) {
 	s.mu.Unlock()
 }
 
-// fastCells は比べる相手から変わったマスの番号を返す（2026-10-07）。
+// fastCells は**この 1 枚を速い経路で扱ってよいか**を返す（2026-10-07）。fc は `cellsOf` で測ったもの。
 //
-// comparable は比べられたか（比べる相手とマス割りがあり、画像の大きさが同じ）。fast は**速い経路で扱ってよいか**
-// —— ふるいが「変化して止まった」と言った 1 枚で、変わったマスが `cellFastMax` 以下のときだけ真。
-// 偽なら 81 マスを読む（そのときも cells は `FrameFits` のために返す）。
-func (s *CaptureService) fastCells(img image.Image) (cells []int, comparable, fast bool) {
+// 真になるのは、比べられて（`fc.ok`）、ふるいが「変化して止まった」と言った 1 枚（`gateReadSettled` か
+// `gateReadCells`）で、変わったマスが `cellFastMax` 以下のときだけ。偽なら 81 マスを読む
+// （そのときも呼ぶ側は `fc.cells` を `FrameFits` のために返す）。
+// ⚠️ **多すぎて 81 マスへ回した組は `cellsFailed` に覚える**（同じ組が続いても「止まった」と見なさない）。
+func (s *CaptureService) fastCells(fc frameCells) bool {
+	if !fc.ok {
+		return false
+	}
 	s.mu.Lock()
-	base, rects, region, bounds, why := s.cellBase, s.cellRects, s.cellRegion, s.cellBounds, s.gateRead
+	why := s.gateRead
 	s.mu.Unlock()
-	if base == nil || len(rects) != 81 || !bounds.Eq(img.Bounds()) {
-		return nil, false, false
+	if why != gateReadSettled && why != gateReadCells {
+		return false
 	}
-	ratios, ok := ikkyoku.CellDiff(base, img, rects, region)
-	if !ok {
-		return nil, false, false
+	if len(fc.cells) > cellFastMax {
+		log.Info("変わったマスが多いので 81 マスを読みます（追跡）", "変わったマス", len(fc.cells))
+		s.markCellsFailed(fc)
+		return false
 	}
-	cells = []int{}
-	var names []string
-	for i, v := range ratios {
-		if v >= cellChanged {
-			cells = append(cells, i)
+	if len(fc.cells) > 0 {
+		names := make([]string, 0, len(fc.cells))
+		for _, i := range fc.cells {
 			names = append(names, cellName(i))
 		}
+		log.Info("変わったマス（先端と合っていた 1 枚と）", "マス", strings.Join(names, ","), "ふるい", why)
 	}
-	if why != gateReadSettled {
-		return cells, true, false
-	}
-	if len(cells) > cellFastMax {
-		log.Info("変わったマスが多いので 81 マスを読みます（追跡）", "変わったマス", len(cells))
-		return cells, true, false
-	}
-	if len(cells) > 0 {
-		log.Info("変わったマス（先端と合っていた 1 枚と）", "マス", strings.Join(names, ","))
-	}
-	return cells, true, true
+	return true
 }
 
 // cellName は 81 マスの番号を、撮った画像の向きの USI のマス（"7g"）にする（ログ用）。

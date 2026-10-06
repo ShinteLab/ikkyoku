@@ -50,24 +50,29 @@ func gateService() *CaptureService {
 	return s
 }
 
+// gateImg は 1 枚をふるいに掛ける（`CaptureQuiet` と同じく、比べる相手から変わったマスを測ってから）。
+func (s *CaptureService) gateImg(img image.Image) string {
+	return s.gate(img, s.cellsOf(img))
+}
+
 // ⚠️ **追う盤が決まっていない / 比べる相手が無いなら読む。**
 // 見落とすより 1 枚余分に読むほうが軽い。
 func TestGateReadsWithoutAnchorOrPrev(t *testing.T) {
 	bare := &CaptureService{}
-	if got := bare.gate(gateFrame()); got != "" {
+	if got := bare.gateImg(gateFrame()); got != "" {
 		t.Fatalf("追う盤が決まっていないのに省きました: %q", got)
 	}
 	s := gateService()
-	if got := s.gate(gateFrame()); got != "" {
+	if got := s.gateImg(gateFrame()); got != "" {
 		t.Fatalf("1 枚目なのに省きました: %q", got)
 	}
 }
 
 func TestGateSkipsUnchanged(t *testing.T) {
 	s := gateService()
-	s.gate(gateFrame()) // 1 枚目（必ず読む）
+	s.gateImg(gateFrame()) // 1 枚目（必ず読む）
 	for i := 0; i < 3; i++ {
-		if got := s.gate(gateFrame()); got != gateSkipUnchanged {
+		if got := s.gateImg(gateFrame()); got != gateSkipUnchanged {
 			t.Fatalf("変わっていないのに %q（認識を呼んでいます）", got)
 		}
 	}
@@ -79,15 +84,15 @@ func TestGateSkipsUnchanged(t *testing.T) {
 // ⚠️ **変化した周ではなく、その次の「止まった」周で読むこと。**
 func TestGateWaitsForStill(t *testing.T) {
 	s := gateService()
-	s.gate(gateFrame())
-	if got := s.gate(gateMoved(0)); got != gateSkipMoving {
+	s.gateImg(gateFrame())
+	if got := s.gateImg(gateMoved(0)); got != gateSkipMoving {
 		t.Fatalf("動いた周で %q（止まる前に読んでいます）", got)
 	}
-	if got := s.gate(gateMoved(0)); got != "" {
+	if got := s.gateImg(gateMoved(0)); got != "" {
 		t.Fatalf("止まった周で %q（ここで読まないと手を見落とす）", got)
 	}
 	// 読んだあとは元に戻ること（次の変化まで省く）。
-	if got := s.gate(gateMoved(0)); got != gateSkipUnchanged {
+	if got := s.gateImg(gateMoved(0)); got != gateSkipUnchanged {
 		t.Fatalf("読んだ次の周で %q", got)
 	}
 }
@@ -95,13 +100,13 @@ func TestGateWaitsForStill(t *testing.T) {
 // ⚠️ **止まらなくても、いつかは読むこと。**
 func TestGateReadsWhenNeverStill(t *testing.T) {
 	s := gateService()
-	s.gate(gateFrame())
+	s.gateImg(gateFrame())
 	for i := 1; i < gateMovingMax; i++ {
-		if got := s.gate(gateMoved(i)); got != gateSkipMoving {
+		if got := s.gateImg(gateMoved(i)); got != gateSkipMoving {
 			t.Fatalf("%d 周目で %q（まだ待つはず）", i, got)
 		}
 	}
-	if got := s.gate(gateMoved(gateMovingMax)); got != "" {
+	if got := s.gateImg(gateMoved(gateMovingMax)); got != "" {
 		t.Fatalf("上限まで動き続けたのに %q（永久に読まない壊れ方）", got)
 	}
 }
@@ -113,13 +118,13 @@ func TestGateReadsWhenNeverStill(t *testing.T) {
 // **しきい値をどう詰めても、外したら永久に止まる作りにしないこと。**
 func TestGateReadsWhenSkippedTooLong(t *testing.T) {
 	s := gateService()
-	s.gate(gateFrame())
+	s.gateImg(gateFrame())
 	for i := 1; i < gateSkipMax; i++ {
-		if got := s.gate(gateFrame()); got != gateSkipUnchanged {
+		if got := s.gateImg(gateFrame()); got != gateSkipUnchanged {
 			t.Fatalf("%d 周目で %q（まだ省くはず）", i, got)
 		}
 	}
-	if got := s.gate(gateFrame()); got != "" {
+	if got := s.gateImg(gateFrame()); got != "" {
 		t.Fatalf("省き続けたのに %q（ふるいが外したら二度と読まない）", got)
 	}
 	// 読んだら数え直すこと（次の 10 秒がまた始まる）。
@@ -131,8 +136,8 @@ func TestGateReadsWhenSkippedTooLong(t *testing.T) {
 // ⚠️ **枚数は追跡ごとに 0 から。** 前の対局と混ぜると何を測ったのか分からない。
 func TestResetGate(t *testing.T) {
 	s := gateService()
-	s.gate(gateFrame())
-	s.gate(gateFrame())
+	s.gateImg(gateFrame())
+	s.gateImg(gateFrame())
 	s.resetGate()
 	if s.gateShots != 0 || s.gateReads != 0 || s.gateFrame != nil || s.gateDirty {
 		t.Fatalf("白紙に戻っていません: shots=%d reads=%d dirty=%v", s.gateShots, s.gateReads, s.gateDirty)
@@ -187,7 +192,7 @@ func TestDetectMissGivesUp(t *testing.T) {
 // 盤の有無のふるいでも落ちるので、混ぜると**省いた割合が実態より悪く見える**。
 func TestNoteReadCountsOnlyRecognized(t *testing.T) {
 	s := gateService()
-	s.gate(gateFrame()) // 読むと決めた（まだ数えない）
+	s.gateImg(gateFrame()) // 読むと決めた（まだ数えない）
 	if s.gateReads != 0 {
 		t.Fatalf("gate が数えています: %d", s.gateReads)
 	}
