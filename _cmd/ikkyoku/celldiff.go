@@ -1,145 +1,96 @@
 package main
 
 import (
-	"fmt"
 	"image"
-	"sort"
 	"strings"
 
+	"github.com/ShinteLab/ikkyoku"
 	"github.com/ShinteLab/ikkyoku/log"
 	"github.com/ShinteLab/ikkyoku/recognize"
 )
 
-// マスごとの差の**測定**（2026-10-06。`TODO.md` 4「変わったマスだけ見て手を割り出す案」）。
+// 追従の**速い経路**の撮る側（2026-10-07）。
 //
-// 追従で**読んだ 1 枚ごとに、前に読んだ 1 枚とマスごとに比べてログに出すだけ**。
-// ⚠️ **追従の振る舞いには一切使わないこと**（測り終えるまでは判断材料ではない）。
-// 録画には手を足したときの静止した 1 枚しか残らないので、**手や頭が被った 1 枚で
-// 変わったマスがどう見えるか**はこれでないと測れない。
-// ⚠️ **測り終えたら消すこと**（足すなら作りを決めてから書き直す）。
+// 81 マスの推論（2.1 秒）を回さず、**本譜の先端とぴったり合っていた 1 枚**（`cellBase`）と
+// 今の 1 枚を**マスごとに**比べて（`ikkyoku.CellDiff`。数ミリ秒）、変わったマスの番号だけを返す。
+// どの手かを決めるのは解析タブ側（`StudyService.FollowCells`）で、決まらなければフロントが
+// 同じ 1 枚を 81 マスで読む（`RecognizeQuiet`）。理由は `_docs/design-follow.md` の「速い経路」。
+//
+// ⚠️ **使ってよいのは、ふるいが「変化して止まった」と言った 1 枚だけ**（`gateReadSettled`）。
+// ⚠️ **比べる相手は解析タブが「先端と合っている」と言った 1 枚だけ**（`SetCellBase`）。
+// 前に読んだ 1 枚と比べると、それが手の被った 1 枚だったとき残像が混ざる（2026-10-06 に実測）。
+// ⚠️ **変わったマスが多ければ 81 マスを読む**（`cellFastMax`。手や頭が被った 1 枚）。
 const (
-	// cellDiffLevel は「変わった画素」と見なす明るさの差（0〜255）。
-	cellDiffLevel = 24
-	// cellDiffChanged は「変わったマス」と見なす、変わった画素の割合。
-	// 録画の実測で、指した手のマスは最小 0.72、ほかのマスは最大 0.077 だった。
-	cellDiffChanged = 0.3
-	// cellDiffMargin はマスの縁から内側へ削る割合（罫線を避ける）。
-	cellDiffMargin = 15
+	// cellChanged は「変わったマス」と見なす、マスの内側で変わった画素の割合。
+	// 録画の実測（2026-10-06）で、指した手のマスは最小 0.72、ほかのマスは最大 0.077 だった。
+	cellChanged = 0.3
+	// cellFastMax は速い経路で扱う変わったマスの数の上限（2 手で 4 マス + 前の手の色付け 2 マス + 余裕）。
+	cellFastMax = 8
+
+	// cellSkipSame は**比べる相手から、どのマスも変わっていない**（`CaptureResult.Skipped`）。
+	// ⚠️ **`unchanged`（前の 1 枚と同じ）とは別物。** フロントは `unchanged` で控えた手を確かめる
+	// （`FollowConfirm`）ので、混ぜると「先端に戻った」1 枚で控えた手を足してしまう。
+	cellSkipSame = "same"
 )
 
-// noteCellDiff は読んだ 1 枚を**2 つの相手**とマスごとに比べてログに出し、今の 1 枚を控える。
+// SetCellBase は**直前に撮った 1 枚を、速い経路の比べる相手にする**（2026-10-07）。
 //
-//   - **前に読んだ 1 枚**（`cellPrev`）
-//   - **最後に手を足した 1 枚**（`cellBase`。追う盤を決めた 1 枚から始まる。2026-10-06）。
-//     前に読んだ 1 枚が手の被った 1 枚だと、手がどいたあとの 1 枚にも**手の残像**が
-//     混ざる（実機の中継で、指した 2 マスに手が掛かったマスが毎回 1〜2 個付いた）。
-//     作るときに比べる相手は**局面が確かめられた 1 枚**なので、そちらでも測る
-//
-// マス割りは**今の 1 枚の認識結果**（`Debug.Cells` の矩形）を両方に当てる。
-// 比べる相手が無い・大きさが違う・マス割りが無いときは出さない。
-func (s *CaptureService) noteCellDiff(img image.Image, d *recognize.Debug) {
+// 呼ぶのはフロントで、解析タブ側が `FollowAuto.AtFrame`（本譜の先端がこの 1 枚とぴったり合う）を
+// 返したときだけ。⚠️ **ここで「合っているか」を判断しないこと**（局面を知らない層なので）。
+func (s *CaptureService) SetCellBase() {
 	s.mu.Lock()
-	prev, base := s.cellPrev, s.cellBase
-	s.cellPrev = img
+	s.cellBase = s.lastQuiet
 	s.mu.Unlock()
+}
+
+// noteCellRects は 81 マスを読んだときのマス割りを控える（速い経路はこれでマスを切る）。
+func (s *CaptureService) noteCellRects(img image.Image, d *recognize.Debug) {
 	if d == nil || len(d.Cells) != 81 {
 		return
 	}
-	logCellDiff("マスごとの差（前に読んだ 1 枚と）", prev, img, d)
-	if base != prev {
-		logCellDiff("マスごとの差（最後に手を足した 1 枚と）", base, img, d)
+	rects := make([]image.Rectangle, 81)
+	for _, c := range d.Cells {
+		if c.Row < 0 || c.Row > 8 || c.Col < 0 || c.Col > 8 {
+			return
+		}
+		rects[c.Row*9+c.Col] = c.Rect
 	}
-}
-
-// noteCellBase は**最後に手を足した 1 枚**を控える（`SaveFollowFrame` / `AnchorBoard` が呼ぶ）。
-func (s *CaptureService) noteCellBase(img image.Image) {
 	s.mu.Lock()
-	s.cellBase = img
+	s.cellRects, s.cellRegion, s.cellBounds = rects, d.Region, img.Bounds()
 	s.mu.Unlock()
 }
 
-// logCellDiff は 2 枚をマスごとに比べて 1 行出す。
-func logCellDiff(msg string, prev, img image.Image, d *recognize.Debug) {
-	if prev == nil || prev.Bounds() != img.Bounds() {
-		return
+// fastCells は**速い経路を使えるなら**、比べる相手から変わったマスの番号を返す（ok が偽なら 81 マスを読む）。
+func (s *CaptureService) fastCells(img image.Image) ([]int, bool) {
+	s.mu.Lock()
+	base, rects, region, bounds, why := s.cellBase, s.cellRects, s.cellRegion, s.cellBounds, s.gateRead
+	s.mu.Unlock()
+	if why != gateReadSettled || base == nil || len(rects) != 81 || !bounds.Eq(img.Bounds()) {
+		return nil, false
 	}
-	// ⚠️ **露出の揺れを打ち消すこと**（録画で 1 枚に 15 変わった組があり、
-	// そのままだと盤じゅうのマスが「変わった」に化けた）。
-	off := meanLuma(prev, d.Region) - meanLuma(img, d.Region)
-
-	type cell struct {
-		name   string
-		ratio  float64
-		hidden bool
+	ratios, ok := ikkyoku.CellDiff(base, img, rects, region)
+	if !ok {
+		return nil, false
 	}
-	cells := make([]cell, 0, 81)
-	for _, c := range d.Cells {
-		cells = append(cells, cell{
-			name:   fmt.Sprintf("%d%c", 9-c.Col, 'a'+c.Row), // USI のマス（9筋が Col 0）
-			ratio:  cellChanged(prev, img, c.Rect, off),
-			hidden: c.Hidden,
-		})
-	}
-	sort.SliceStable(cells, func(i, j int) bool { return cells[i].ratio > cells[j].ratio })
-
-	var changed, top, hidden []string
-	for i, c := range cells {
-		if c.ratio >= cellDiffChanged {
-			changed = append(changed, c.name)
-		}
-		if i < 6 {
-			top = append(top, fmt.Sprintf("%s:%.2f", c.name, c.ratio))
-		}
-		if c.hidden {
-			hidden = append(hidden, c.name)
+	var cells []int
+	var names []string
+	for i, v := range ratios {
+		if v >= cellChanged {
+			cells = append(cells, i)
+			names = append(names, cellName(i))
 		}
 	}
-	log.Info(msg,
-		"変わったマス", len(changed), "マス", strings.Join(changed, ","),
-		"上位", strings.Join(top, " "),
-		"見えないマス", strings.Join(hidden, ","),
-		"明るさの差", fmt.Sprintf("%.1f", off))
+	if len(cells) > cellFastMax {
+		log.Info("変わったマスが多いので 81 マスを読みます（追跡）", "変わったマス", len(cells))
+		return nil, false
+	}
+	if len(cells) > 0 {
+		log.Info("変わったマス（先端と合っていた 1 枚と）", "マス", strings.Join(names, ","))
+	}
+	return cells, true
 }
 
-// cellChanged はマスの内側で、明るさの差（露出の差 off を引いたもの）が
-// `cellDiffLevel` を超えた画素の割合。
-func cellChanged(a, b image.Image, r image.Rectangle, off float64) float64 {
-	mx, my := r.Dx()*cellDiffMargin/100, r.Dy()*cellDiffMargin/100
-	in := image.Rect(r.Min.X+mx, r.Min.Y+my, r.Max.X-mx, r.Max.Y-my).Intersect(a.Bounds())
-	over, n := 0, 0
-	for y := in.Min.Y; y < in.Max.Y; y++ {
-		for x := in.Min.X; x < in.Max.X; x++ {
-			d := luma(a, x, y) - luma(b, x, y) - off
-			if d > cellDiffLevel || d < -cellDiffLevel {
-				over++
-			}
-			n++
-		}
-	}
-	if n == 0 {
-		return 0
-	}
-	return float64(over) / float64(n)
-}
-
-// meanLuma は矩形の中の明るさの平均（1 画素おき）。
-func meanLuma(img image.Image, r image.Rectangle) float64 {
-	r = r.Intersect(img.Bounds())
-	var sum float64
-	n := 0
-	for y := r.Min.Y; y < r.Max.Y; y += 2 {
-		for x := r.Min.X; x < r.Max.X; x += 2 {
-			sum += luma(img, x, y)
-			n++
-		}
-	}
-	if n == 0 {
-		return 0
-	}
-	return sum / float64(n)
-}
-
-func luma(img image.Image, x, y int) float64 {
-	r, g, b, _ := img.At(x, y).RGBA()
-	return (0.299*float64(r) + 0.587*float64(g) + 0.114*float64(b)) / 257
+// cellName は 81 マスの番号を、撮った画像の向きの USI のマス（"7g"）にする（ログ用）。
+func cellName(i int) string {
+	return string([]byte{byte('9' - i%9), byte('a' + i/9)})
 }
