@@ -27,6 +27,7 @@
 
 | オプション | 使うか |
 |---|---|
+| `ClassifyCellFor` / `Predictor.Predict` / `BoardRegion.ExtractCell` / `BoardColor` / `Rotate180` / `ClassToBaseLabel` | **マス 1 つだけを読む**（`ReadCells`。2026-10-07。追従の速い経路で成・不成や打った駒を決める）。⚠️ **向きは `ClassifyCellFor`（回転照合）で決める** —— 素の `ClassifyCellWith` だと 81 マスを読んだ結果と食い違う。⚠️ **後手（下向き）は `Rotate180` してから推論する**（学習データは手前向きに揃えてある）。⚠️ **確信度が `ReadCellMinConf` 未満なら "?"**（決め打ちさせない） |
 | `WithErrorOn(c sfen.Check)` / `WithStrict()` | **使わない。** 違反をエラーにすると「撮ったのに何も出ない」になる |
 | `WithHandTo(side)` | **使わない。** 先後の割り振りは盤面から決まらない（設計原則5）。人間が決める |
 | `WithTurn` / `WithMoveNumber` | 未使用。手番を持つのは Phase 3 の局面矯正層の仕事 |

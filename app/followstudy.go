@@ -698,8 +698,9 @@ func (s *StudyService) FollowConfirm() (FollowAuto, error) {
 	return s.baseIf(s.followFrom(pend.board, pend.cost, pend.unseen, pend.rotated))
 }
 
-// followCellsDepth は速い経路で**新しく**探す手数の上限（1 枚に写るのは、早指しでもふつう 2 手まで）。
-const followCellsDepth = 2
+// followCellsDepth は速い経路で**新しく**探す手数の上限。
+// 2 では足りなかった（2026-10-07。▲3三角成 △同金 ▲7七銀 が 1 枚に写った）。動かしてよいマスで枝を刈るので 3 でも軽い。
+const followCellsDepth = 3
 
 // followCellsBehind は、比べる相手の局面より本譜の先端が何手先まで進んでいても速い経路を使うか。
 // これより先へ進んでいたら 81 マスを読む（探す手数が増えて遅くなる・合わない見込みが高い）。
@@ -789,8 +790,9 @@ func (s *StudyService) cellsMask(cells []int) *position.CellMask {
 // 残りが無ければ（今の 1 枚が先端そのもの）`AtFrame` だけを立てて返す。
 // ⚠️ **1 枚だけでは足さない**のは同じ（`followPending`）。次の 1 枚が変わっていなければ
 // `FollowConfirm` で足す。⚠️ **比べる相手の 1 枚に至った手のマスは、見た目だけ変わってよい**（色付け）。
-func (s *StudyService) FollowCells(changed []int) (FollowAuto, error) {
+func (s *StudyService) FollowCells(changed []int, read []CellPiece) (FollowAuto, error) {
 	mask := s.cellsMask(changed)
+	rotated := s.src.followRotated()
 
 	base, since, extra, ok := s.followFromBase()
 	if !ok {
@@ -834,6 +836,29 @@ func (s *StudyService) FollowCells(changed []int) (FollowAuto, error) {
 			rests = append(rests, rest)
 		}
 	}
+	if len(rests) > 1 {
+		// **成・不成や打った駒の種類で分かれた**（変わったマスの組は同じ）。違いの出るマスだけを読めば決まる。
+		diff := followDiffCells(base, since, rests)
+		if len(read) == 0 {
+			if len(diff) == 0 || len(diff) > followReadMax {
+				return unclear(len(rests), nil)
+			}
+			idx := make([]int, 0, len(diff))
+			for _, i := range diff {
+				if rotated {
+					i = 80 - i // 解析の向き → 撮った画像の向き
+				}
+				idx = append(idx, i)
+			}
+			log.Info("変わったマスでは手が分かれました（違いの出るマスだけ読みます）", "候補", len(rests), "読むマス", len(idx))
+			return FollowAuto{Kind: FollowChoices, Reason: "違いの出るマスを読みます", ReadCells: idx, State: s.State()}, nil
+		}
+		rests = followPickByRead(base, since, rests, read, rotated)
+		if len(rests) != 1 {
+			return unclear(len(rests), nil)
+		}
+		log.Info("マスを読んで手を決めました", "moves", rests[0])
+	}
 	if len(rests) != 1 {
 		return unclear(len(rests), nil)
 	}
@@ -863,6 +888,85 @@ func (s *StudyService) FollowCells(changed []int) (FollowAuto, error) {
 		a.Pending, a.Reason = true, "確かめています"
 		return a, nil
 	}
+}
+
+// followReadMax は「違いの出るマスだけ読む」で読むマスの上限（多ければ 81 マスを読む）。
+const followReadMax = 4
+
+// CellPiece は**マス 1 つの読み**（`CaptureService.ReadCells` が返し、`FollowCells` が受ける。2026-10-07）。
+// Cell は撮った画像の向きの 81 マスの番号、Piece は撮った画像の向きの SFEN の駒（手前側が大文字。
+// 空は ""、読めなければ "?"）。
+type CellPiece struct {
+	Cell  int    `json:"cell"`
+	Piece string `json:"piece"`
+}
+
+// followBoard は base から since と rest を指した盤を返す（指せなければ nil）。
+func followBoard(base *position.Position, since, rest []string) *position.Board {
+	p := base.Clone()
+	for _, m := range append(slices.Clone(since), rest...) {
+		if p.ApplyMove(m) != nil {
+			return nil
+		}
+	}
+	return p.Board
+}
+
+// followDiffCells は候補ごとに**行き着く盤が違うマス**（解析の向きの 81 マスの番号）を返す。
+func followDiffCells(base *position.Position, since []string, rests [][]string) []int {
+	boards := make([]*position.Board, 0, len(rests))
+	for _, r := range rests {
+		b := followBoard(base, since, r)
+		if b == nil {
+			return nil
+		}
+		boards = append(boards, b)
+	}
+	var out []int
+	for i := 0; i < 81; i++ {
+		first, _ := boards[0].At(i/9, i%9)
+		for _, b := range boards[1:] {
+			if c, _ := b.At(i/9, i%9); c != first {
+				out = append(out, i)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// followPickByRead は**読んだマスと合う候補だけ**を残す（2026-10-07）。
+//
+// ⚠️ **比べるのは駒の種類と成りだけ**（先後は候補どうしで同じ —— 指した側の駒）。向きの読み違いで
+// 落とさないため。⚠️ **読めなかったマス（"?"）は比べない**（それで絞れなければ 81 マスを読む）。
+func followPickByRead(base *position.Position, since []string, rests [][]string, read []CellPiece, rotated bool) [][]string {
+	var out [][]string
+	for _, r := range rests {
+		b := followBoard(base, since, r)
+		if b == nil {
+			continue
+		}
+		ok, used := true, false
+		for _, cp := range read {
+			if cp.Piece == "?" || cp.Cell < 0 || cp.Cell >= 81 {
+				continue
+			}
+			i := cp.Cell
+			if rotated {
+				i = 80 - i // 撮った画像の向き → 解析の向き
+			}
+			c, err := b.At(i/9, i%9)
+			if err != nil || !strings.EqualFold(c.Mark(), cp.Piece) {
+				ok = false
+				break
+			}
+			used = true
+		}
+		if ok && used {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // FrameFits は**比べる相手の 1 枚から今の 1 枚までに変わったマスが、その間に本譜へ足した手で
@@ -1232,6 +1336,9 @@ type FollowAuto struct {
 	// ⚠️ **ぴったり（一致度 1）のときだけ立てること。** 行き先の駒が読めていないだけの 1 枚
 	// （一致度 0.9965）を比べる相手にすると、その手のマスの変化が二度と見えなくなる。
 	AtFrame bool `json:"atFrame"`
+	// ReadCells は**速い経路で手が分かれたとき、読めば決まるマス**（撮った画像の向きの番号。2026-10-07）。
+	// 空でなければフロントは `CaptureService.ReadCells` で読み、結果を添えて `FollowCells` をもう一度呼ぶ。
+	ReadCells []int `json:"readCells"`
 }
 
 // looksFlipped は**盤を 180 度回したら 1 手で説明が付くか**を見る（2026-09-15。2026-10-06 に見直した）。
