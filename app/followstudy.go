@@ -130,6 +130,10 @@ type FollowProbe struct {
 	// 盤を覆っている 1 枚から、差が 1 マスぶんも無い 1 位を採って空想の手を足した）。
 	// 画面には出さない（手で繋ぐ側は、どちらでも人に選ばせる）。
 	Unsettled bool `json:"-"`
+	// Unexplained は**駒が来たマスがあるのに、今の向きでは何手先まで探しても説明が付かなかった**か
+	// （`followArrived` で先を探し、繋がらずに「変わっていない」へ戻したときだけ立つ。2026-10-06）。
+	// ⚠️ **「盤が上下逆」を疑うのはこのときだけ**（`looksFlipped`）。画面には出さない。
+	Unexplained bool `json:"-"`
 }
 
 // FollowApplied は据えた結果。
@@ -285,18 +289,21 @@ func (s *StudyService) followProbe(board *position.Board, cost *position.CellCos
 		"cost", r.Cost, "fixed", len(r.Fixed), "rotated", rotated)
 
 	out.Depth = r.Depth
+	// ⚠️ **駒が来たので探しに来ただけなら、足せる答えが出なければ元の「変わっていない」に戻すこと**
+	// （`followArrived`）。読みの揺れで来たように見えただけの 1 枚を「繋がらない」にすると、
+	// 「見失っています」に数えられる。⚠️ **「何手か進んだが順番が多すぎる」（`More`）も同じ** ——
+	// 盤が上下逆に映っていると、片側が行って戻る手を挟んで説明が付いてしまい、これになる。
+	// そのときは `Unexplained` を立てる（「盤が上下逆」を疑う合図。`looksFlipped`）。
+	if arrived && (r.Stop != position.StopFound || r.More) {
+		out.Kind, out.Reason, out.Unexplained = FollowSame, "盤面は変わっていません", true
+		out.Depth = 0
+		return out, nil
+	}
 	switch r.Stop {
 	case position.StopSame:
 		out.Kind, out.Reason = FollowSame, "盤面は変わっていません"
 		return out, nil
 	case position.StopBudget, position.StopTooFar, position.StopUnreachable:
-		// ⚠️ **駒が来たので探しに来ただけなら、繋がらなければ元の「変わっていない」に戻すこと**
-		// （`followArrived`）。読みの揺れで来たように見えただけの 1 枚を「繋がらない」にすると、
-		// 「見失っています」に数えられる。
-		if arrived {
-			out.Kind, out.Reason = FollowSame, "盤面は変わっていません"
-			return out, nil
-		}
 		// ⚠️ **ここで行き止まりにしないこと**（2026-09-15 に実機で踏んだ）。
 		// 打ち切り（`StopBudget`）でも**先に並べた候補は残っている**ので、それを出す。
 		// **黙って無反応になるのが一番たちが悪い。**
@@ -733,6 +740,8 @@ func (s *StudyService) followFrom(board *position.Board, cost *position.CellCost
 	atTip := s.study != nil && s.study.CurrentID() == mainTipID(s.study)
 	s.mu.Unlock()
 
+	// unexplained は 1 周目の下見が「駒が来たのに説明が付かない」だったか（`looksFlipped` を呼ぶ条件）。
+	unexplained := false
 	for i := 0; i < followCatchUp; i++ {
 		p, e := s.followProbe(board, cost, unseen, cost != nil, rotated)
 		if e != nil {
@@ -741,6 +750,9 @@ func (s *StudyService) followFrom(board *position.Board, cost *position.CellCost
 				break
 			}
 			return FollowAuto{}, e
+		}
+		if i == 0 {
+			unexplained = p.Unexplained
 		}
 		if !a.Applied {
 			// **1 周目の下見がこの周の「結果」**（見送った理由もここから出る）。
@@ -814,7 +826,16 @@ func (s *StudyService) followFrom(board *position.Board, cost *position.CellCost
 		// ⚠️ **黙って回さないこと**（`_docs/design-position.md` の「取り込みの向き」）——
 		// 盤の向きは**局面の解釈そのもの**で、手順の並びとは重みが違う。
 		// **人に言うところまで**にする。
-		a.Flipped, a.FlipMove = s.looksFlipped(board, cost, unseen, rotated, a.Fit)
+		//
+		// ⚠️ **疑うのは「駒が来たのに今の向きでは説明が付かない」1 枚だけ**（`FollowProbe.Unexplained`。
+		// 2026-10-06 に見直した）。逆に映っていれば、相手の手は「来るはずのない側の駒が来た」に
+		// 見えるので必ずここに入る。それ以外（変わっていない・読めない・盤が無い・手が被っている）で
+		// 疑う理由は無く、以前は毎周回して 1 周に約 1 秒足していたうえ、正しく追えているのに
+		// 「逆」と言って止めた。⚠️ **費用表が無いとき**は「来た」が判定できないので、今までどおり毎回見る
+		// （`Rank` だけなので安い）。
+		if cost == nil || unexplained {
+			a.Flipped, a.FlipMove = s.looksFlipped(board, cost, unseen, a.Fit)
+		}
 	}
 	if a.Added > 1 {
 		log.Info("1 枚から追いつきました", "moves", a.Moves, "guess", a.Guess)
@@ -874,33 +895,51 @@ type FollowAuto struct {
 	Unseen int `json:"unseen"`
 }
 
-// looksFlipped は**盤を 180 度回したら繋がるか**を見る（2026-09-15）。
+// looksFlipped は**盤を 180 度回したら 1 手で説明が付くか**を見る（2026-09-15。2026-10-06 に見直した）。
 //
 // ⚠️ **読むだけ。木も訂正タブも 1 つも触らない。**
-// ⚠️ **1 手も足せなかったときだけ呼ぶこと** —— 繋がっているのに疑う理由は無いし、
-// 毎周回すと**そのぶん追従が遅くなる**（`Rank` は 29µs だが、ただではない）。
+// ⚠️ **呼ぶのは「駒が来たのに今の向きでは説明が付かない」ときだけ**（呼び出し側の `Unexplained`）。
 //
-// fit は**今の向きでの一致度**（`FollowProbe.Fit`）。⚠️ **逆向きの説明はそれより良く合うときだけ採ること**
-// （2026-10-06 に実機で踏んだ）。ゲーム画面で後手を持ち、▲6八玉 のあとで目線を後手にして採ると、
-// 今の向きでは「変わっていない」とぴったり合う（1.0）のに、回すと玉の 2 マスを直して
-// △4二玉 で説明が付き（0.975）、正しく追えているのに止められた。
-// 平手から 1 手しか違わない局面は、回しても 1 手ぶんの直しで説明が付いてしまう。
-func (s *StudyService) looksFlipped(board *position.Board, cost *position.CellCost, unseen *position.CellMask, rotated bool, fit float64) (bool, string) {
+// ⚠️ **`Rank`（1 手）だけで見ること。`Connect` は回さない。** 以前は回した盤で下見を丸ごと
+// やり直しており、何手先まで探す分（約 1 秒）が毎周乗っていた。逆に映っているのは追い始めた
+// ときからなので、**相手が 1 手指した最初の 1 枚で必ず 1 手の答えが出る**（その 1 枚を逃しても
+// 次の手でまた出る）。
+//
+// ⚠️ **言い切れるときだけ「逆」と言う**（`Decided`。差の付かない 1 位では言わない）。
+// fit は**今の向きでの一致度**（`FollowProbe.Fit`）で、⚠️ **回した説明はそれより良く合うときだけ採る**
+// （2026-10-06 に実機で踏んだ。▲6八玉 のあとで目線を後手にして採ると、回した盤が
+// 玉の 2 マスを直して △4二玉 で説明が付いてしまい、正しく追えているのに止められた）。
+func (s *StudyService) looksFlipped(board *position.Board, cost *position.CellCost, unseen *position.CellMask, fit float64) (bool, string) {
 	if board == nil {
 		return false, ""
 	}
-	var flipCost *position.CellCost
+	s.mu.Lock()
+	if s.study == nil {
+		s.mu.Unlock()
+		return false, ""
+	}
+	_, from, err := s.study.MainTip()
+	main, rootSfen := s.study.MainLine(), rootSFEN(s.study)
+	s.mu.Unlock()
+	if err != nil {
+		return false, ""
+	}
+
+	// ⚠️ **費用表も見えないマスも盤と一緒に回すこと**（回し忘れると別のマスで比べる）。
+	opt := position.ConnectOptions{Unseen: unseen.Rotate180()}
 	if cost != nil {
-		flipCost = cost.Rotate180()
+		opt.Cost, opt.Tolerance = cost.Rotate180(), position.DefaultTolerance
 	}
-	// ⚠️ **見えないマスも盤と一緒に回すこと**（費用表と同じ）。
-	p, err := s.followProbe(board.Rotate180(), flipCost, unseen.Rotate180(), flipCost != nil, !rotated)
-	if err != nil || p.Kind != FollowUnique || len(p.Candidates) == 0 {
+	got, err := position.Rank(from, board.Rotate180(), opt)
+	if err != nil || !got.Decided(position.DefaultMinFit, position.DefaultMinMargin) {
 		return false, ""
 	}
-	// 一致度は費用表があるときだけ出る（無ければ厳密一致なので、繋がったこと自体が根拠）。
-	if cost != nil && p.Fit <= fit {
+	top := got.Candidates[0]
+	if len(top.Moves) == 0 || top.Fit <= fit {
 		return false, ""
 	}
-	return true, strings.Join(p.Candidates[0].Text, " ")
+	text := strings.Join(followText(rootSfen, main, top.Moves), " ")
+	log.Info("盤を回すと 1 手で説明が付きます（目線が逆かもしれません）",
+		"moves", top.Moves, "fit", top.Fit, "margin", got.Margin, "今の向きの一致度", fit)
+	return true, text
 }

@@ -874,6 +874,30 @@ func TestFollowAutoNoticesFlippedBoard(t *testing.T) {
 	}
 }
 
+// ⚠️ **実機に近い確信度（空きは 0）でも、上下逆に気づくこと**（2026-10-06 に見直した）。
+//
+// 「逆」を疑うのは「駒が来たのに今の向きでは説明が付かない」1 枚だけになったので、
+// 逆に映った相手の手がそこへ入ることを見る。今の向きのまま先を探すと、先手が行って
+// 戻る手を挟んで「何手か進んだが順番が多すぎる」になるが、それも説明が付かない側に数える。
+func TestFollowAutoNoticesFlippedBoardWithRealConfidence(t *testing.T) {
+	s, _ := following(t)
+	flipped, err := position.FromSFEN(boardAfter(t, "7g7f"))
+	if err != nil {
+		t.Fatalf("FromSFEN: %v", err)
+	}
+	board := flipped.Rotate180().SFEN()
+	a, err := s.FollowAuto(board, realConf(board, 0.9), nil)
+	if err != nil {
+		t.Fatalf("FollowAuto: %v", err)
+	}
+	if a.Applied {
+		t.Fatalf("上下逆なのに手を足しました: %+v", a.Moves)
+	}
+	if !a.Flipped || a.FlipMove == "" {
+		t.Fatalf("目線が逆だと気づいていません: kind=%q reason=%q flipMove=%q", a.Kind, a.Reason, a.FlipMove)
+	}
+}
+
 // ⚠️ **繋がっているときに「逆かも」と言わないこと。**
 //
 // 正しく追えているのに疑いを出すと、**本当に逆のときに信じてもらえない。**
