@@ -152,6 +152,8 @@ type CaptureService struct {
 	// ⚠️ **撮った時点ではまだ「その手を決めた画像」かどうか分からない** ——
 	// 決めるのは解析タブ側（`FollowAuto`）なので、**答えが返るまで持っておく**。
 	lastQuiet image.Image
+	// cellPrev は**追従で前に読んだ 1 枚**（マスごとの差の測定用。`celldiff.go`。2026-10-06）。
+	cellPrev image.Image
 	// lastShot は**直近に手で撮った（読み込んだ）1 枚**。
 	//
 	// ⚠️ **`lastQuiet`（追従が黙って撮る 1 枚）とは別物。** 混ぜると、
@@ -1005,6 +1007,8 @@ func (s *CaptureService) CaptureQuiet() (CaptureResult, error) {
 		result.HandTotal = h
 	}
 	result.Debug = board.Debug
+	// **測るだけ**（ログに出す。追従の判断には使わない）。
+	s.noteCellDiff(img, board.Debug)
 
 	// ⚠️ **追っている盤かどうかを見る**（2026-09-15）。中継には**大盤**（解説用）が
 	// 映り、あちらは**将棋の局面としては矛盾しない**ので盤面だけでは弾けない ——
@@ -1507,6 +1511,7 @@ func (s *CaptureService) ClearBoardAnchor() {
 	// 前の回の続きに書き足すと**1 つのディレクトリに 2 局が混ざる**。
 	s.boardAnchor, s.anchorRegion, s.quietOutcome = recognize.Signature{}, ikkyoku.Region{}, ""
 	s.followDir, s.lastQuiet, s.followMisses, s.lastMissKind = "", nil, 0, ""
+	s.cellPrev = nil
 	// ⚠️ **ふるいがどれくらい効いたかを出す**（2026-09-18）。定数（変化のしきい値・
 	// 待つ周の上限・撮る間隔）は**どれも当て推量**なので、
 	// **実機の中継で詰めるための材料**が要る。
