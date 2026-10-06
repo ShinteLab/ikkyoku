@@ -27,19 +27,42 @@ const (
 	cellDiffMargin = 15
 )
 
-// noteCellDiff は読んだ 1 枚を前に読んだ 1 枚とマスごとに比べてログに出し、今の 1 枚を控える。
+// noteCellDiff は読んだ 1 枚を**2 つの相手**とマスごとに比べてログに出し、今の 1 枚を控える。
+//
+//   - **前に読んだ 1 枚**（`cellPrev`）
+//   - **最後に手を足した 1 枚**（`cellBase`。追う盤を決めた 1 枚から始まる。2026-10-06）。
+//     前に読んだ 1 枚が手の被った 1 枚だと、手がどいたあとの 1 枚にも**手の残像**が
+//     混ざる（実機の中継で、指した 2 マスに手が掛かったマスが毎回 1〜2 個付いた）。
+//     作るときに比べる相手は**局面が確かめられた 1 枚**なので、そちらでも測る
 //
 // マス割りは**今の 1 枚の認識結果**（`Debug.Cells` の矩形）を両方に当てる。
-// 比べる相手が無い・大きさが違う・マス割りが無いときは控えるだけ。
+// 比べる相手が無い・大きさが違う・マス割りが無いときは出さない。
 func (s *CaptureService) noteCellDiff(img image.Image, d *recognize.Debug) {
 	s.mu.Lock()
-	prev := s.cellPrev
+	prev, base := s.cellPrev, s.cellBase
 	s.cellPrev = img
 	s.mu.Unlock()
-	if prev == nil || d == nil || len(d.Cells) != 81 || prev.Bounds() != img.Bounds() {
+	if d == nil || len(d.Cells) != 81 {
 		return
 	}
+	logCellDiff("マスごとの差（前に読んだ 1 枚と）", prev, img, d)
+	if base != prev {
+		logCellDiff("マスごとの差（最後に手を足した 1 枚と）", base, img, d)
+	}
+}
 
+// noteCellBase は**最後に手を足した 1 枚**を控える（`SaveFollowFrame` / `AnchorBoard` が呼ぶ）。
+func (s *CaptureService) noteCellBase(img image.Image) {
+	s.mu.Lock()
+	s.cellBase = img
+	s.mu.Unlock()
+}
+
+// logCellDiff は 2 枚をマスごとに比べて 1 行出す。
+func logCellDiff(msg string, prev, img image.Image, d *recognize.Debug) {
+	if prev == nil || prev.Bounds() != img.Bounds() {
+		return
+	}
 	// ⚠️ **露出の揺れを打ち消すこと**（録画で 1 枚に 15 変わった組があり、
 	// そのままだと盤じゅうのマスが「変わった」に化けた）。
 	off := meanLuma(prev, d.Region) - meanLuma(img, d.Region)
@@ -71,7 +94,7 @@ func (s *CaptureService) noteCellDiff(img image.Image, d *recognize.Debug) {
 			hidden = append(hidden, c.name)
 		}
 	}
-	log.Info("マスごとの差（前に読んだ 1 枚と）",
+	log.Info(msg,
 		"変わったマス", len(changed), "マス", strings.Join(changed, ","),
 		"上位", strings.Join(top, " "),
 		"見えないマス", strings.Join(hidden, ","),

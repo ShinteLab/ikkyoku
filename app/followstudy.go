@@ -765,7 +765,7 @@ func (s *StudyService) followFrom(board *position.Board, cost *position.CellCost
 		// ⚠️ **黙って回さないこと**（`_docs/design-position.md` の「取り込みの向き」）——
 		// 盤の向きは**局面の解釈そのもの**で、手順の並びとは重みが違う。
 		// **人に言うところまで**にする。
-		a.Flipped, a.FlipMove = s.looksFlipped(board, cost, unseen, rotated)
+		a.Flipped, a.FlipMove = s.looksFlipped(board, cost, unseen, rotated, a.Fit)
 	}
 	if a.Added > 1 {
 		log.Info("1 枚から追いつきました", "moves", a.Moves, "guess", a.Guess)
@@ -830,7 +830,13 @@ type FollowAuto struct {
 // ⚠️ **読むだけ。木も訂正タブも 1 つも触らない。**
 // ⚠️ **1 手も足せなかったときだけ呼ぶこと** —— 繋がっているのに疑う理由は無いし、
 // 毎周回すと**そのぶん追従が遅くなる**（`Rank` は 29µs だが、ただではない）。
-func (s *StudyService) looksFlipped(board *position.Board, cost *position.CellCost, unseen *position.CellMask, rotated bool) (bool, string) {
+//
+// fit は**今の向きでの一致度**（`FollowProbe.Fit`）。⚠️ **逆向きの説明はそれより良く合うときだけ採ること**
+// （2026-10-06 に実機で踏んだ）。ゲーム画面で後手を持ち、▲6八玉 のあとで目線を後手にして採ると、
+// 今の向きでは「変わっていない」とぴったり合う（1.0）のに、回すと玉の 2 マスを直して
+// △4二玉 で説明が付き（0.975）、正しく追えているのに止められた。
+// 平手から 1 手しか違わない局面は、回しても 1 手ぶんの直しで説明が付いてしまう。
+func (s *StudyService) looksFlipped(board *position.Board, cost *position.CellCost, unseen *position.CellMask, rotated bool, fit float64) (bool, string) {
 	if board == nil {
 		return false, ""
 	}
@@ -841,6 +847,10 @@ func (s *StudyService) looksFlipped(board *position.Board, cost *position.CellCo
 	// ⚠️ **見えないマスも盤と一緒に回すこと**（費用表と同じ）。
 	p, err := s.followProbe(board.Rotate180(), flipCost, unseen.Rotate180(), flipCost != nil, !rotated)
 	if err != nil || p.Kind != FollowUnique || len(p.Candidates) == 0 {
+		return false, ""
+	}
+	// 一致度は費用表があるときだけ出る（無ければ厳密一致なので、繋がったこと自体が根拠）。
+	if cost != nil && p.Fit <= fit {
 		return false, ""
 	}
 	return true, strings.Join(p.Candidates[0].Text, " ")

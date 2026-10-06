@@ -154,6 +154,8 @@ type CaptureService struct {
 	lastQuiet image.Image
 	// cellPrev は**追従で前に読んだ 1 枚**（マスごとの差の測定用。`celldiff.go`。2026-10-06）。
 	cellPrev image.Image
+	// cellBase は**追従で最後に手を足した 1 枚**（同じく測定用。追う盤を決めた 1 枚から始まる）。
+	cellBase image.Image
 	// lastShot は**直近に手で撮った（読み込んだ）1 枚**。
 	//
 	// ⚠️ **`lastQuiet`（追従が黙って撮る 1 枚）とは別物。** 混ぜると、
@@ -1290,6 +1292,7 @@ func (s *CaptureService) AnchorBoard() (CaptureResult, error) {
 	}
 	s.mu.Lock()
 	s.boardAnchor, s.anchorRegion = sig, region
+	s.cellBase = s.lastQuiet // マスごとの差の測定（`celldiff.go`）
 	s.mu.Unlock()
 	log.Info("追う盤を決めました", "board", sig.Board, "color", sig.Color, "dir", dir)
 	return r, nil
@@ -1341,6 +1344,8 @@ func (s *CaptureService) SaveFollowFrame(number int, moves []string, guess bool)
 	s.mu.Lock()
 	dir, img := s.followDir, s.lastQuiet
 	s.mu.Unlock()
+	// **録画を残せなくても控える**（マスごとの差の測定。`celldiff.go`）。
+	s.noteCellBase(img)
 	if dir == "" || img == nil {
 		return ""
 	}
@@ -1511,7 +1516,7 @@ func (s *CaptureService) ClearBoardAnchor() {
 	// 前の回の続きに書き足すと**1 つのディレクトリに 2 局が混ざる**。
 	s.boardAnchor, s.anchorRegion, s.quietOutcome = recognize.Signature{}, ikkyoku.Region{}, ""
 	s.followDir, s.lastQuiet, s.followMisses, s.lastMissKind = "", nil, 0, ""
-	s.cellPrev = nil
+	s.cellPrev, s.cellBase = nil, nil
 	// ⚠️ **ふるいがどれくらい効いたかを出す**（2026-09-18）。定数（変化のしきい値・
 	// 待つ周の上限・撮る間隔）は**どれも当て推量**なので、
 	// **実機の中継で詰めるための材料**が要る。
