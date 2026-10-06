@@ -2893,10 +2893,20 @@ ${st.turnLabel}${n}`;
   // ⚠️ **状態は枠へも流すこと**（2026-09-15。実機で「枠側が録画しているか
   // 分からない」と出た）。**追跡中に見ているのは中継**なので、
   // 状態も操作も**枠に無いと届かない**（メイン画面は裏に回っている）。
-  const publishFollow = (text: string) => {
+  //
+  // ⚠️ **毎周の状態は手順の下（`sidePane.setStatus`）に出さないこと**（2026-10-06）。
+  // あの行は出入りと折り返しで**手順のリストの高さを変える**ので、1 周ごとに書き換えると
+  // **手順がガクガクして何を見ていたか分からなくなる**（実機で出た）。毎周の状態は札、
+  // 足した手は手順そのものが知らせる。手順の下は**人が何かするべきとき**だけ
+  // （見失った・止めた・始められなかった）。
+  // detail は札のホバーに出す補足（「別の盤」の理由など。札は狭いので本文に入れない）。
+  const publishFollow = (text: string, detail = "") => {
     noteFollowing(followOn);
-    void Events.Emit("follow:state", { on: followOn, text });
+    void Events.Emit("follow:state", { on: followOn, text, detail });
   };
+  // followLostShown は「見失っています」を手順の下に出しているか。**繋がり直したら 1 回だけ消す**
+  // （足した手で上書きしなくなったので、消さないと直ったあとも残る）。
+  let followLostShown = false;
 
   // followNote は状態に**次に来るはずの手数**を添える。
   //
@@ -2921,6 +2931,7 @@ ${st.turnLabel}${n}`;
       followWatch = undefined;
     }
     followPending = false;
+    followLostShown = false;
     if (on) {
       followTickAt = Date.now();
       followLost = 0;
@@ -3020,9 +3031,9 @@ ${st.turnLabel}${n}`;
     // **その手をそのまま棋譜に足してしまう。**
     if (shot.offBoard) {
       // ⚠️ **止めないこと。** 大盤はすぐ本物へ戻るので、**待てばよい**。
-      sidePane.setStatus(`別の盤が映っています（${shot.offBoardReason}）。待っています`);
+      // 理由は札のホバーへ（手順の下に出さない。`publishFollow`）。
       void CaptureService.SaveFollowMiss(followWaiting, "offboard");
-      publishFollow(followNote("待機中（別の盤）"));
+      publishFollow(followNote("待機中（別の盤）"), `別の盤が映っています（${shot.offBoardReason}）`);
       return null;
     }
     if (!shot.sfen) {
@@ -3049,9 +3060,13 @@ ${st.turnLabel}${n}`;
   const followAfter = (got: Awaited<ReturnType<typeof StudyService.FollowAuto>>): boolean => {
     if (got.applied) {
       const moves = got.text?.join(" ") || got.moves?.join(" ") || "";
-      // ⚠️ **文に「（推測）」を付けないこと**（2026-10-06）。追従が足す手は全部
+      // ⚠️ **「足しました」を手順の下に出さないこと**（足した手は手順に出る。`publishFollow`）。
+      // ⚠️ **札の文に「（推測）」を付けないこと**（2026-10-06）。追従が足す手は全部
       // 推測の印（`Node.Guess`）が付くので、付けても情報にならない。印は手順の橙の丸だけ。
-      sidePane.setStatus(`${moves} を足しました`);
+      if (followLostShown) {
+        followLostShown = false;
+        sidePane.setStatus("");
+      }
       // ⚠️ **手を決めた 1 枚だけを残す**（2026-09-15。デバッグ用の「録画」）。
       // 中継には**棋士の手が映り込む**ので、誤認識したときに
       // **「手が被ったのか、認識器が弱いのか」を切り分ける手掛かり**が要る。
@@ -3112,11 +3127,14 @@ ${st.turnLabel}${n}`;
     // 90 手ぶん止まったとき、**止まった瞬間の証拠だけが残っていなかった。**
     void CaptureService.SaveFollowMiss(followWaiting, got.kind ?? "miss");
     if (followLost >= followLostLimit) {
-      sidePane.setStatus(
-        `本譜に繋がらない状態が続いています（${got.reason || got.kind}）。` +
-          "撮って「この局面を解析する」で繋ぎ直してください",
-      );
-      publishFollow(followNote("見失っています"));
+      // ⚠️ **手順の下に書くのは見失った最初の 1 回だけ**（理由は周ごとに変わるので、
+      // 毎周書くと文の長さで手順の高さが揺れる）。続いている間は札が「見失っています」を出す。
+      const reason = `本譜に繋がらない状態が続いています（${got.reason || got.kind}）`;
+      if (!followLostShown) {
+        followLostShown = true;
+        sidePane.setStatus(`${reason}。撮って「この局面を解析する」で繋ぎ直してください`);
+      }
+      publishFollow(followNote("見失っています"), reason);
       return false;
     }
     publishFollow(followNote("追跡中"));
@@ -3179,7 +3197,9 @@ ${st.turnLabel}${n}`;
         if (!followOn) {
           return;
         }
-        sidePane.setStatus("中継を追っています（止めるにはもう一度押してください）");
+        // 始まったら消す（追っていることはボタンと札が出す。以後は手順の下を毎周は使わないので、
+        // 書いたままだと止めるまで残る。`publishFollow`）。
+        sidePane.setStatus("");
         void followTick();
       })
       .catch((err) => {
