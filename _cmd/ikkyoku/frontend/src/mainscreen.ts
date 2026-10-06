@@ -2985,8 +2985,9 @@ ${st.turnLabel}${n}`;
   // 見送りの `return` が予約を飛ばしていて、**盤が映らなかった最初の 1 回で
   // ループが死んでいた** —— 大盤解説で死に、盤に戻っても復活しなかった。
   // **「1 周やる」と「回し続ける」を同じ関数に混ぜない。**
-  const followOnce = async (): Promise<boolean> => {
-    const shot = await CaptureService.CaptureQuiet();
+  // given は**既に撮って読んだ 1 枚**（「追う」を押したときの 1 枚。2026-10-07）。無ければ撮る。
+  const followOnce = async (given?: Awaited<ReturnType<typeof CaptureService.CaptureQuiet>>): Promise<boolean> => {
+    const shot = given ?? (await CaptureService.CaptureQuiet());
     // ⚠️ **読まなかった周は何もしない**（2026-09-18）。Go 側のふるいが
     // **変わっていない / まだ動いている**と判断したときで、
     // **長考中はほとんどの周がこれ**（認識 2.1 秒を丸々省いている）。
@@ -3196,14 +3197,14 @@ ${st.turnLabel}${n}`;
     }
   };
 
-  const followTick = async () => {
+  const followTick = async (given?: Awaited<ReturnType<typeof CaptureService.CaptureQuiet>>) => {
     if (!followOn) {
       return;
     }
     followTickAt = Date.now();
     let soon = false;
     try {
-      soon = await followOnce();
+      soon = await followOnce(given);
     } catch (err) {
       // ⚠️ **枠が出ていない等はここに来る。** 黙って回し続けると理由が読めないので
       // **止めて理由を出す**（設計原則3 は「落ちない」であって「黙る」ではない）。
@@ -3227,14 +3228,17 @@ ${st.turnLabel}${n}`;
     setFollowing(true);
     sidePane.setStatus("追う盤を決めています…");
     void CaptureService.AnchorBoard()
-      .then(() => {
+      .then((first) => {
         if (!followOn) {
           return;
         }
         // 始まったら消す（追っていることはボタンと札が出す。以後は手順の下を毎周は使わないので、
         // 書いたままだと止めるまで残る。`publishFollow`）。
         sidePane.setStatus("");
-        void followTick();
+        // ⚠️ **押したときに読んだ 1 枚を、最初の 1 周として流すこと**（2026-10-07）。捨てると、
+        // 速い経路の比べる相手が決まるまで次の 81 マスの読み（重いときは 7〜10 秒）を待つことになり、
+        // そのあいだに 2 秒おきの手が 4〜5 手進んで初手から置いていかれた（ShogiHome の自動再生で踏んだ）。
+        void followTick(first);
       })
       .catch((err) => {
         followStop(String(err instanceof Error ? err.message : err));
