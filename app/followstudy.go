@@ -134,6 +134,9 @@ type FollowProbe struct {
 	// （`followArrived` で先を探し、繋がらずに「変わっていない」へ戻したときだけ立つ。2026-10-06）。
 	// ⚠️ **「盤が上下逆」を疑うのはこのときだけ**（`looksFlipped`）。画面には出さない。
 	Unexplained bool `json:"-"`
+	// KindOnly は「変わっていない」のとき、**食い違いが駒の種類だけ**か（駒の有無と先後は全部合っている。2026-10-07）。
+	// ⚠️ **速い経路の比べる相手にしてよいかの判断にだけ使う**（`FollowAuto.AtFrame`）。画面には出さない。
+	KindOnly bool `json:"-"`
 }
 
 // FollowApplied は据えた結果。
@@ -257,6 +260,7 @@ func (s *StudyService) followProbe(board *position.Board, cost *position.CellCos
 			if len(top.Moves) == 0 {
 				if !followArrived(top.Fixed, cost) {
 					out.Kind, out.Reason = FollowSame, "盤面は変わっていません"
+					out.KindOnly = followKindOnly(top.Fixed)
 					return out, nil
 				}
 				arrived = true
@@ -329,6 +333,20 @@ func (s *StudyService) followProbe(board *position.Board, cost *position.CellCos
 	out.Kind = FollowChoices
 	out.Reason = fmt.Sprintf("%d手ぶん進んだようですが、順番が決められません", r.Depth)
 	return out, nil
+}
+
+// followKindOnly は「何も指していない」との食い違いが**駒の種類だけ**か（駒の有無と先後は全部合っている）。
+//
+// 速い経路の比べる相手にしてよいかの判断（`FollowAuto.AtFrame`）。⚠️ **駒の有無の食い違いがあれば偽** ——
+// 「元のマスは空いたのに行き先の駒が読めていない」1 枚（まだ足していない手の名残）を相手にすると、
+// その手のマスの変化が二度と見えなくなる。
+func followKindOnly(fixed []position.Fix) bool {
+	for _, f := range fixed {
+		if f.Was.IsEmpty() || f.Now.IsEmpty() || f.Was.Black() != f.Now.Black() {
+			return false
+		}
+	}
+	return true
 }
 
 // followArrivedMinCost は「駒が来た」と言い切る、そのマスの読みの確かさ（費用表の値）の下限。
@@ -1072,7 +1090,12 @@ func (s *StudyService) followFrom(board *position.Board, cost *position.CellCost
 			// **足せる手が無い**（変わっていない／読めない／繋がらない）。
 			// ⚠️ **2 手目以降なら、これが「追いつき切った」の正常な終わり方。**
 			// **ぴったり「変わっていない」で終わったなら、この 1 枚は先端そのもの**（速い経路の比べる相手）。
-			a.AtFrame = p.Kind == FollowSame && (cost == nil || p.Fit >= 1-1e-9)
+			// ⚠️ **見えないマスがある 1 枚は相手にしないこと**（2026-10-07 に実機で踏んだ。ShogiHome の
+			// ダイアログが盤の右半分に被った 1 枚が、残りのマスでぴったり合ったので相手になり、閉じたあと
+			// 33〜54 マスが変わって見えて速い経路が二度と使えなくなった）。
+			// ⚠️ **駒の種類の読み違いは問わない**（`KindOnly`。比べる相手に要るのは駒の有無と先後で、
+			// 成った駒を少し読み違えるだけで相手になれず、速い経路が止まっていた）。
+			a.AtFrame = p.Kind == FollowSame && (cost == nil || p.KindOnly) && unseen.Count() == 0
 			break
 		}
 		// ⚠️ **順番が決まらなくても、行き先が決まっているなら進む**
