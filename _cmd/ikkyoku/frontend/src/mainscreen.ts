@@ -2998,7 +2998,9 @@ ${st.turnLabel}${n}`;
     }
     followPending = !!got.pending;
     showStudy(got.state);
-    if (got.pending) {
+    // ⚠️ **足したうえで残りを控えた周（`applied` かつ `pending`）は足した側として出す**
+    // （2026-10-06。2 枚で揃った頭の手だけ足し、先へ進んだ分は次の 1 枚で確かめる）。
+    if (got.pending && !got.applied) {
       // ⚠️ **見送りとして数えないこと**（足せる手は見つかっている）。間を置かずに
       // 次の 1 枚を撮って確かめる（変わっていなければ `FollowConfirm` で足す）。
       publishFollow(followNote("確かめています"));
@@ -3047,8 +3049,9 @@ ${st.turnLabel}${n}`;
   const followAfter = (got: Awaited<ReturnType<typeof StudyService.FollowAuto>>): boolean => {
     if (got.applied) {
       const moves = got.text?.join(" ") || got.moves?.join(" ") || "";
-      const mark = got.guess ? "（推測）" : "";
-      sidePane.setStatus(`${moves}${mark} を足しました`);
+      // ⚠️ **文に「（推測）」を付けないこと**（2026-10-06）。追従が足す手は全部
+      // 推測の印（`Node.Guess`）が付くので、付けても情報にならない。印は手順の橙の丸だけ。
+      sidePane.setStatus(`${moves} を足しました`);
       // ⚠️ **手を決めた 1 枚だけを残す**（2026-09-15。デバッグ用の「録画」）。
       // 中継には**棋士の手が映り込む**ので、誤認識したときに
       // **「手が被ったのか、認識器が弱いのか」を切り分ける手掛かり**が要る。
@@ -3062,7 +3065,7 @@ ${st.turnLabel}${n}`;
         got.moves ?? [],
         !!got.guess,
       );
-      publishFollow(followNote(`${moves}${mark}`));
+      publishFollow(followNote(moves));
       followLost = 0;
       // ⚠️ **手が増えたなら間を置かずにもう 1 周**。**認識に 2 秒かかる**ので、
       // そのうえ待つと**1 手進むのに 3 秒以上**になり、早指しに構造的に追いつけない

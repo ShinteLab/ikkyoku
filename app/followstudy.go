@@ -501,7 +501,8 @@ func (s *StudyService) fallbackFollow(ranked position.RankResult, r position.Con
 //
 // ⚠️ **1 枚だけでは足さない**（2026-10-05。`followPending`）。足せる手が見つかったら
 // 控えておき、**次の 1 枚が同じ答えを出したとき**（`FollowAuto`）か、**次の 1 枚が
-// 変わっていなかったとき**（`FollowConfirm`）に初めて足す。
+// 変わっていなかったとき**（`FollowConfirm`）に初めて足す。次の 1 枚が**先へ進んでいたら、
+// 2 枚で揃った頭の手だけ足して残りを控え直す**（2026-10-06。`followConfirmed`）。
 //
 // cellHidden は**手や頭が被って見えないマス**（suteme の `CellDebug.Hidden`。81 個・行優先。2026-10-06）。
 // 見えないマスは根拠にも減点にもせず、行き先が見えない手は足さずに待つ（`position.CellMask`）。
@@ -528,15 +529,56 @@ func (s *StudyService) FollowAuto(boardSFEN string, cellConfidence []float64, ce
 		s.setPending(nil)
 		return s.followFrom(board, cost, unseen, rotated)
 	}
-	if !s.takePendingIf(moves) {
+	k := s.takePendingPrefix(moves)
+	if k == 0 {
 		// **初めて出た答え。** 控えて、次の 1 枚を待つ。
 		s.setPending(&followPending{tip: s.mainTip(), moves: moves, board: board, cost: cost,
 			unseen: unseen, rotated: rotated})
 		return FollowAuto{Kind: p.Kind, Pending: true, Reason: "確かめています",
 			Guess: p.Guess, Fit: p.Fit, Unseen: unseen.Count(), State: s.State()}, nil
 	}
-	// **2 枚続けて同じ答え。** ここから先は今までどおり（1 枚から取れるだけ取る）。
-	return s.followFrom(board, cost, unseen, rotated)
+	if k == len(moves) {
+		// **2 枚続けて同じ答え**（控えのほうが長ければ、その先は 2 枚目で消えた）。
+		// ここから先は今までどおり（1 枚から取れるだけ取る）。
+		return s.followFrom(board, cost, unseen, rotated)
+	}
+	// **2 枚目のほうが先へ進んでいる**（2026-10-06）。2 枚で揃った頭の k 手だけ足し、
+	// 残りは控え直して次の 1 枚で確かめる。
+	return s.followConfirmed(p, k, board, cost, unseen, rotated)
+}
+
+// followConfirmed は**2 枚で揃った頭の k 手だけ**足し、残りを控え直す（2026-10-06）。
+//
+// **実機の症状**: 5 秒おきの指し手が 2〜3 手続くと見失った。同じ答えを 2 枚に求めると、
+// **読み始めから次の 1 枚まで（約 2.75 秒）盤が止まっている**必要があり、そのあいだに
+// 次の手（指す手が盤に入るのも含む）が来ると、2 枚目は「1 手先まで進んだ答え」になって
+// 控え直しになる。速い手が続くと 1 手も足せないまま遅れが `Connect` の 4 手を超えた。
+//
+// ⚠️ **足すのは 2 枚が揃って言っている手だけ**（1 枚だけの読み違いを足さない、は崩さない）。
+// 2 枚目にしか無い手は控え直すので、それも次の 1 枚で確かめてから入る。
+func (s *StudyService) followConfirmed(p FollowProbe, k int, board *position.Board, cost *position.CellCost, unseen *position.CellMask, rotated bool) (FollowAuto, error) {
+	s.mu.Lock()
+	atTip := s.study != nil && s.study.CurrentID() == mainTipID(s.study)
+	s.mu.Unlock()
+
+	top := p.Candidates[0]
+	applied, err := s.FollowApply(top.Moves[:k], p.Rev, atTip)
+	if err != nil {
+		return FollowAuto{}, err
+	}
+	s.setPending(&followPending{tip: s.mainTip(), moves: slices.Clone(top.Moves[k:]), board: board,
+		cost: cost, unseen: unseen, rotated: rotated})
+	a := FollowAuto{Kind: p.Kind, Applied: true, Pending: true, Reason: "確かめています",
+		Moves: slices.Clone(top.Moves[:k]), Added: applied.Added,
+		// ⚠️ **順番が決まらずに選んだ手は推測**（`followFrom` と同じ判断）。
+		Guess: p.Guess || p.Kind == FollowChoices,
+		Fit:   p.Fit, Fixed: p.Fixed, Mismatch: p.Mismatch, Unseen: unseen.Count(),
+		Note:  applied.Note, State: applied.State}
+	if len(top.Text) >= k {
+		a.Text = slices.Clone(top.Text[:k])
+	}
+	log.Info("2 枚で揃った手だけ足し、残りを確かめます", "added", a.Moves, "pending", top.Moves[k:])
+	return a, nil
 }
 
 // FollowConfirm は**控えた答えを、撮り直した 1 枚が変わっていなかったことで確かめて**足す（2026-10-05）。
@@ -584,16 +626,26 @@ func (s *StudyService) setPending(p *followPending) {
 	s.mu.Unlock()
 }
 
-// takePendingIf は控えが「今の先端から同じ手」なら取り出して真を返す（違えば何もしない）。
-func (s *StudyService) takePendingIf(moves []string) bool {
+// takePendingPrefix は控え（今の先端からのもの）と今の答えが**頭から何手揃っているか**を返す。
+// 1 手でも揃っていれば控えを取り出す（0 なら何もしない）。
+//
+// ⚠️ **完全一致を求めないこと**（2026-10-06）。2 枚目が 1 手先まで進んでいると
+// 控え直しが続き、速い手が続くあいだ 1 手も足せなかった（`followConfirmed`）。
+func (s *StudyService) takePendingPrefix(moves []string) int {
 	tip := s.mainTip()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.pending == nil || s.pending.tip != tip || !slices.Equal(s.pending.moves, moves) {
-		return false
+	if s.pending == nil || s.pending.tip != tip {
+		return 0
 	}
-	s.pending = nil
-	return true
+	k := 0
+	for k < len(moves) && k < len(s.pending.moves) && moves[k] == s.pending.moves[k] {
+		k++
+	}
+	if k > 0 {
+		s.pending = nil
+	}
+	return k
 }
 
 // mainTip は本譜の先端の節点 id（局面が無ければ -1）。

@@ -920,6 +920,42 @@ func TestFollowAutoWaitsForSecondFrame(t *testing.T) {
 	}
 }
 
+// ⚠️ **2 枚目が先へ進んでいたら、2 枚で揃った手だけ足すこと**（2026-10-06）。
+//
+// **実機の症状**: 5 秒おきの指し手が 2〜3 手続くと見失った。完全に同じ答えを 2 枚に
+// 求めていたので、読んでいるあいだに次の手が来るたびに控え直しになり、1 手も足せないまま
+// 遅れが `Connect` の 4 手を超えた。⚠️ **2 枚目にしか無い手はまだ足さない**（次の 1 枚で確かめる）。
+func TestFollowAutoConfirmsPrefixWhileMovesKeepComing(t *testing.T) {
+	s, _ := following(t)
+	line := []string{"7g7f", "3c3d", "6g6f"}
+	// ⚠️ **確信度を渡さないこと**（厳密一致にする）。渡すと 2 枚目で `Rank` が 1 手目だけを
+	// 修復つきで決めてしまい、2 枚目の答えが「先へ進んだ手順」にならない（見たい形にならない）。
+
+	if a, _ := s.FollowAuto(boardAfter(t, line[:1]...), nil, nil); !a.Pending || a.Applied {
+		t.Fatalf("前提: 1 枚目は控えるはず: %+v", a)
+	}
+	for i := 2; i <= len(line); i++ {
+		a, err := s.FollowAuto(boardAfter(t, line[:i]...), nil, nil)
+		if err != nil {
+			t.Fatalf("%d 枚目: %v", i, err)
+		}
+		if !a.Applied || !a.Pending || len(a.Moves) != 1 || a.Moves[0] != line[i-2] {
+			t.Fatalf("%d 枚目: 揃った %s だけ足して残りを控えるはず: %+v", i, line[i-2], a)
+		}
+		if n := len(s.State().Nodes); n != i-1 {
+			t.Fatalf("%d 枚目: 手順 = %d, want %d（2 枚目にしか無い手を足した）", i, n, i-1)
+		}
+	}
+	// 盤が止まれば、控えた最後の手も入る。
+	a, err := s.FollowConfirm()
+	if err != nil {
+		t.Fatalf("FollowConfirm: %v", err)
+	}
+	if !a.Applied || len(a.Moves) != 1 || a.Moves[0] != line[2] {
+		t.Fatalf("止まった 1 枚で控えた手を足していません: %+v", a)
+	}
+}
+
 // ⚠️ **間に「足せる手が無い」1 枚が挟まったら、控えは捨てること。**
 //
 // 手が映った 1 枚の答えは、次の 1 枚で消えるのが普通（それがこの形）。
