@@ -49,3 +49,7 @@ func messageBox(title, text string) error {
 func placeBehind(hwnd, after unsafe.Pointer) error {
 	return fmt.Errorf("ikkyoku: このOSでは未対応です(Windows専用)")
 }
+
+func setEnginePriority(names map[string]bool, low bool) (int, error) {
+	return 0, fmt.Errorf("ikkyoku: このOSでは未対応です(Windows専用)")
+}

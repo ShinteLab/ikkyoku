@@ -1213,6 +1213,17 @@ export function mountMainScreen(root: HTMLElement): void {
             </span>
           </span>
         </label>
+        <label class="setting">
+          <input id="follow-first" type="checkbox" />
+          <span class="setting-body">
+            <span class="setting-title" data-hint="hint-followfirst">中継を追うあいだは盤の読みを優先する</span>
+            <span id="hint-followfirst" class="setting-note is-hint">
+              追っているあいだだけ、外部エンジンの優先度を下げて、盤の読み取りが先に CPU を使えるようにします。
+              エンジンは空いた CPU では今までどおり回りますが、解析が遅くなることがあります。
+              追うのを止めると元に戻ります。同梱エンジンには効きません。Windows のみ。
+            </span>
+          </span>
+        </label>
 
         <details id="fold-analyze" class="setting-group setting-fold">
           <summary class="setting-fold-head">
@@ -5133,6 +5144,8 @@ ${st.turnLabel}${n}`;
   // 食い違わせない)。テキスト欄は change(確定時)で拾うので、1 文字ごとには書かない。
   const fitOnStartup = root.querySelector<HTMLInputElement>("#fit-on-startup")!;
   const clickThrough = root.querySelector<HTMLInputElement>("#click-through")!;
+  // 中継を追うあいだは盤の読みを優先する（2026-10-07）。**切り替えたその場で効く**（追っている最中なら）。
+  const followFirst = root.querySelector<HTMLInputElement>("#follow-first")!;
   // 認識器の読み込み元。**「焼き込みがあるビルドか」は Go が返す**
   // （`sutemeEmbedAvailable`）。⚠️ **フロントで判定できない**（バイナリの中身の話）。
   const sutemeSource = root.querySelector<HTMLSelectElement>("#suteme-source")!;
@@ -5730,6 +5743,7 @@ ${st.turnLabel}${n}`;
   const showSettings = (s: {
     fitOnStartup: boolean;
     clickThrough: boolean;
+    followFirst: boolean;
     // 評価値グラフを別ウィンドウに切り離しているか（2026-09-08）。
     evalGraphDetached: boolean;
     // **候補手の面**を別ウィンドウに切り離しているか（2026-09-08）。
@@ -5772,6 +5786,7 @@ ${st.turnLabel}${n}`;
   }) => {
     fitOnStartup.checked = s.fitOnStartup;
     clickThrough.checked = s.clickThrough;
+    followFirst.checked = s.followFirst;
     // 配色。選択肢は Go 側が返したものをそのまま並べる（**フロントに表を書かない**）。
     if (themeSelect.options.length !== (s.themes ?? []).length) {
       themeSelect.replaceChildren();
@@ -6461,6 +6476,24 @@ ${st.turnLabel}${n}`;
         settingsStatus.classList.add("is-error");
       } finally {
         clickThrough.disabled = false;
+      }
+    })();
+  });
+
+  followFirst.addEventListener("change", () => {
+    void (async () => {
+      const want = followFirst.checked;
+      followFirst.disabled = true;
+      settingsStatus.textContent = "";
+      settingsStatus.classList.remove("is-error");
+      try {
+        showSettings(await SettingsService.SetFollowFirst(want));
+      } catch (err) {
+        followFirst.checked = !want;
+        settingsStatus.textContent = `設定を保存できませんでした: ${String(err)}`;
+        settingsStatus.classList.add("is-error");
+      } finally {
+        followFirst.disabled = false;
       }
     })();
   });

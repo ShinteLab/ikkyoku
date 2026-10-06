@@ -844,3 +844,26 @@ func TestConfigKifuFollowInterval(t *testing.T) {
 		t.Errorf("既定が 5 分ではありません: %d", DefaultKifuFollowMinutes)
 	}
 }
+
+// ⚠️ **「中継を追うあいだは盤の読みを優先する」は、キーが無ければ偽（解析を優先）・保存したら残ること**（2026-10-07）。
+// 偽が既定なのは、解析がこのアプリの本命だから（エンジンの CPU を黙って削らない）。
+func TestConfigFollowFirst(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if c.FollowFirst {
+		t.Fatal("キーが無いのに盤の読みを優先する設定になっています（既定は解析を優先）")
+	}
+	c.FollowFirst = true
+	if err := SaveConfig(path, c); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+	if c, err = LoadConfig(path); err != nil || !c.FollowFirst {
+		t.Fatalf("保存した設定が残っていません: %+v（%v）", c.FollowFirst, err)
+	}
+}
