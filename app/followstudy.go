@@ -338,28 +338,42 @@ func (s *StudyService) followProbe(board *position.Board, cost *position.CellCos
 // （`Connect`。打ち切りは `followTimeout`）を回すことになる。
 const followArrivedMinCost = 0.5
 
-// followArrived は「何も指していない」との食い違いに、**駒が来たマス**があるかを返す（2026-10-06）。
+// followArrived は「何も指していない」との食い違いに、**指された跡**があるかを返す（2026-10-06）。
 //
-// 来たとは、読んだ盤では駒があるのに、今の局面では空きか相手の駒、のこと
-// （`position.backed` と同じく先後までで、駒の種類は問わない）。⚠️ **空いただけは数えない**
-// —— 空きは手や影で簡単に作られる。⚠️ **読みの確かでないマスは数えない**（`followArrivedMinCost`）。
+// 跡と見なすのは 2 通り。どちらも**読みの確かなマスだけ**（`followArrivedMinCost`）:
+//
+//   - **駒が来た**: 読んだ盤では駒があるのに、今の局面では空きか相手の駒
+//     （`position.backed` と同じく先後まで）。▲2四歩 △同歩 を 1 枚で撮ると、2四 に後手の歩が来る
+//   - **同じ側の別の駒に入れ替わり、しかも空いたマスがある**: ▲2四歩 のあと △同歩 ▲同飛 を
+//     1 枚で撮ると、2四 は先手の歩が先手の飛車になっただけで、残りは 2三・2八 が空いたことだけ。
+//     ⚠️ **種類の変化だけでは数えない**（中継は種類を外しやすい。銀を香と読む）。
+//     指された手があるなら、どこかの駒は元のマスを空けている
+//
+// ⚠️ **空いただけは数えない**（空きは手や影で簡単に作られる）。
 // 費用表が無いときは厳密一致の側なので、ここには来ない。
 func followArrived(fixed []position.Fix, cost *position.CellCost) bool {
 	if cost == nil {
 		return false
 	}
+	sure := func(f position.Fix) bool { return cost[f.Rank][f.File] >= followArrivedMinCost }
+	vacated, swapped := false, false
 	for _, f := range fixed {
-		if f.Was.IsEmpty() {
-			continue
-		}
-		if !f.Now.IsEmpty() && f.Now.Black() == f.Was.Black() {
-			continue
-		}
-		if cost[f.Rank][f.File] >= followArrivedMinCost {
-			return true
+		switch {
+		case f.Was.IsEmpty():
+			if !f.Now.IsEmpty() {
+				vacated = true
+			}
+		case f.Now.IsEmpty() || f.Now.Black() != f.Was.Black():
+			if sure(f) {
+				return true
+			}
+		case f.Now != f.Was:
+			if sure(f) {
+				swapped = true
+			}
 		}
 	}
-	return false
+	return swapped && vacated
 }
 
 // FollowApply は選んだ手順を**本譜の先**に据える。
