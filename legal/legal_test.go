@@ -112,3 +112,19 @@ func TestUSIRoundTrip(t *testing.T) {
 		t.Error("盤の外なのにエラーになりませんでした")
 	}
 }
+
+// Parse は局面を見ずに座標だけ返す（解析タブの「直前の手」用。2026-10-07）。
+// ⚠️ **打ちは移動元が -1**（盤の外）。画面はそれを見て移動元を塗らない。
+func TestParse(t *testing.T) {
+	m, ok := legal.Parse("P*5e")
+	if !ok || m.FromRank != -1 || m.FromFile != -1 || m.ToRank != 4 || m.ToFile != 4 || !m.Drops() {
+		t.Fatalf("Parse(P*5e) = %+v, %v", m, ok)
+	}
+	m, ok = legal.Parse("8h2b+")
+	if !ok || m.FromRank != 7 || m.FromFile != 1 || m.ToRank != 1 || m.ToFile != 7 || !m.Promote {
+		t.Fatalf("Parse(8h2b+) = %+v, %v", m, ok)
+	}
+	if _, ok := legal.Parse("resign"); ok {
+		t.Fatal("resign が手として読めました")
+	}
+}

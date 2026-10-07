@@ -357,6 +357,10 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
   const paint = () => {
     const dests = movesFromPick();
     const loaded = !!state?.loaded;
+    // 直前の手（今の局面に至った手）。**居た場所と動いた場所を薄く塗るだけ**（2026-10-07）。
+    // ⚠️ **座標は Go が作る**（`StudyState.lastMove`。`Played` の USI をここで解釈しないこと）。
+    // 打ちは移動元が -1 なので、動いた場所だけが塗られる。
+    const last = loaded ? state?.lastMove ?? null : null;
     grid.classList.toggle("is-active", loaded);
     // 駒を掴んでいるあいだは、**動かせないマスを暗くする**（2026-08-29）。
     // 光らせるのではなく暗幕を敷くのは CSS 側（.study-grid.is-picking）の仕事で、
@@ -370,6 +374,8 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
       el.classList.toggle("is-target", target);
       el.classList.toggle("is-source", !!source);
       el.classList.toggle("is-pickable", loaded && !pick && canPickCell(rank, file));
+      el.classList.toggle("is-last-from", !!last && last.fromRank === rank && last.fromFile === file);
+      el.classList.toggle("is-last-to", !!last && last.toRank === rank && last.toFile === file);
       el.title = cellLabel(rank, file);
     }
     // 駒台のほうも、掴んでいる駒が分かるようにする（盤と同じ見え方に揃える）。

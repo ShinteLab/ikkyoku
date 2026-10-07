@@ -102,6 +102,43 @@ func TestStudyServicePlay(t *testing.T) {
 	}
 }
 
+// 直前の手（`LastMove`）は**今見ている局面に至った手**で、根では nil（2026-10-07）。
+//
+// ⚠️ **戻って見ているときは、その局面の手に替わること** —— 本譜の最後の手のままだと、
+// 盤に出ている局面と塗っているマスが食い違う。⚠️ **座標は局面の向き**（7g は 7 筋 7 段）。
+func TestStudyServiceLastMove(t *testing.T) {
+	s := adopted(t)
+	if st := s.State(); st.LastMove != nil {
+		t.Fatalf("根なのに直前の手があります: %+v", st.LastMove)
+	}
+	if _, err := s.Play("7g7f"); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	st, err := s.Play("3c3d")
+	if err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	// 3c3d: 3 筋（file 6）の 3 段（rank 2）→ 4 段（rank 3）。
+	if m := st.LastMove; m == nil || m.FromRank != 2 || m.FromFile != 6 || m.ToRank != 3 || m.ToFile != 6 {
+		t.Fatalf("直前の手 = %+v, want 3c3d（rank 2→3, file 6）", m)
+	}
+	// 1 手目へ戻ると 7g7f（file 2 の rank 6 → 5）。
+	back, err := s.GoTo(st.Line[1])
+	if err != nil {
+		t.Fatalf("GoTo: %v", err)
+	}
+	if m := back.LastMove; m == nil || m.FromRank != 6 || m.FromFile != 2 || m.ToRank != 5 || m.ToFile != 2 {
+		t.Fatalf("戻ったときの直前の手 = %+v, want 7g7f", m)
+	}
+	root, err := s.GoTo(0)
+	if err != nil {
+		t.Fatalf("GoTo: %v", err)
+	}
+	if root.LastMove != nil {
+		t.Fatalf("根へ戻ったのに直前の手が残っています: %+v", root.LastMove)
+	}
+}
+
 // ⚠️ **解析に渡すのは「根 + そこまでの手順」。** 組み立て直した 1 つの SFEN を
 // 渡すと、千日手と連続王手をエンジンが判定できない。
 //

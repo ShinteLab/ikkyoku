@@ -83,6 +83,13 @@ func Moves(positionSFEN string) (out []Move, err error) {
 	return out, nil
 }
 
+// Parse は USI の手文字列を座標にする（**局面は見ない**。合法かどうかも問わない）。
+//
+// 解析タブの盤に**直前の手**（居た場所と動いた場所）を出すのに使う（2026-10-07。
+// `app.StudyState.LastMove`）。⚠️ **フロントで USI を解釈させないための口** ——
+// 座標の読み替えは下の `parse` の 1 か所に閉じてある。
+func Parse(usi string) (Move, bool) { return parse(usi) }
+
 // parse は USI の手文字列を Move にする。**座標の読み替えはここ 1 か所。**
 func parse(text string) (Move, bool) {
 	mv, ok := coreusi.ParseMove(text)

@@ -253,6 +253,12 @@ type StudyState struct {
 	Ply int `json:"ply"`
 	// Played は今の局面までの手（USI）。**解析に渡す moves そのもの。**
 	Played []string `json:"played"`
+	// LastMove は**今の局面に至った最後の手**（居た場所と動いた場所。根なら nil。2026-10-07）。
+	//
+	// 解析タブの盤で「何を指したか」を薄く塗るのに使う。⚠️ **座標は `legal.Parse` で作る**
+	// （フロントで `Played` の USI を解釈しないこと。読み替えを 2 か所に書くと 1 マスずれても気づけない）。
+	// 打ちは `FromRank` / `FromFile` が -1。
+	LastMove *legal.Move `json:"lastMove"`
 	// Legal は今の局面で指せる手。**駒をクリックしたときに光らせる先。**
 	//
 	// ⚠️ **同じ移動先に成りと不成の 2 つが並ぶことがある。** どちらを指すかは
@@ -1434,6 +1440,13 @@ func (s *StudyService) state() StudyState {
 	if err != nil {
 		moves, legalErr = []legal.Move{}, err.Error()
 	}
+	played := s.study.Played()
+	var last *legal.Move
+	if n := len(played); n > 0 {
+		if m, ok := legal.Parse(played[n-1]); ok {
+			last = &m
+		}
+	}
 	return StudyState{
 		Loaded:      true,
 		BoardSFEN:   cur.BoardSFEN(),
@@ -1451,7 +1464,8 @@ func (s *StudyService) state() StudyState {
 		MainTip:     mainTipID(s.study),
 		Line:        s.study.Line(),
 		Ply:         s.study.Ply(),
-		Played:      s.study.Played(),
+		Played:      played,
+		LastMove:    last,
 		Legal:       moves,
 		LegalError:  legalErr,
 		Black:       s.game.Black,
