@@ -2814,8 +2814,9 @@ ${st.turnLabel}${n}`;
   const setFollowing = (on: boolean) => {
     followOn = on;
     studyFollowBtn.setAttribute("aria-pressed", on ? "true" : "false");
-    studyFollowBtn.classList.toggle("is-active", on);
-    studyFollowBtn.textContent = on ? "追跡中…" : "中継を追う";
+    // ⚠️ **「追跡中」はボタンに書かない**（2026-10-08。視点の上の札が言う）。
+    // ボタンは**押すと何が起きるか**だけを書き、光らせもしない（同じ状態を 2 か所に出さない）。
+    studyFollowBtn.textContent = on ? "追跡を止める" : "中継を追う";
     studyLiveFollow.hidden = !on;
     if (!on && followTimer !== undefined) {
       window.clearTimeout(followTimer);
