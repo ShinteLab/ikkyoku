@@ -238,7 +238,7 @@ type StudyState struct {
 	CurrentID int `json:"currentId"`
 	// MainTip は**本譜の先端**の節点（手が 1 つも無ければ 0 ＝ 根）。
 	//
-	// **中継を追うときの繋ぎ先**（`FollowProbe`）で、⚠️ **`CurrentID` とは別物** ——
+	// **中継を追うときの繋ぎ先**（`followProbe`）で、⚠️ **`CurrentID` とは別物** ——
 	// ユーザーが枝の途中を読んでいるのは普通にある。
 	// ⚠️ **`Nodes` を走査して `Main` の最後を探さないこと**（フロントで同じ判定を
 	// 書くと、「分岐にする」で下げた手の扱いが割れる）。

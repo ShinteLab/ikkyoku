@@ -24,7 +24,7 @@
 | `kifuservice.go`（棚・カード・仮の一覧） | `_docs/app-shelf.md` |
 | `PositionService.SetViewpoint` / `adoptPosition`（目線） | `_docs/app-viewpoint.md` |
 | `settings.go`（エンジンの登録・option）・`analyzeservice.go` | `_docs/app-engines.md` |
-| `followstudy.go`（`FollowProbe` / `FollowApply` / `FollowAuto`） | `_docs/app-follow.md`（調整とデバッグはスキル `ikkyoku-follow`） |
+| `followstudy.go`（`followProbe` / `followApply` / `FollowAuto`） | `_docs/app-follow.md`（調整とデバッグはスキル `ikkyoku-follow`） |
 | `StudyService.PlayLine`・`evalgraph.go` | `_docs/app-study.md` |
 | `studystore.go` / `studyrecord.go` / `studykey.go` / `studyexport.go` | `_docs/app-studystore.md`（検討の控え・棚と結ぶ・出どころの鍵） |
 | `fontservice.go` | `piecefont/AGENTS.md`（テストの意図は下の「テスト」） |

@@ -1,19 +1,22 @@
 package app
 
-// 「撮った盤面を、今の本譜の先に繋ぐ」（Phase 6 の入口。2026-09-14）。
+// 「撮った盤面を、今の本譜の先に繋ぐ」（Phase 6。2026-09-14）。
 //
-// 中継を観ながら数手ごとに撮り直すと、認識で分かるのは**盤面だけ**。
+// 中継を追っていると、認識で分かるのは**盤面だけ**。
 // そこから手順を割り出すのは `position.Connect` の仕事で、ここはその口。
 //
 // ⚠️ **`Adopt`（この局面を解析する）とは別物。** あちらは**根ごと入れ替える**
 // （前の手順も評価値も捨てる）。こちらは**本譜の先へ足す**ので、
-// **ユーザーの検討枝も評価値も残る**。押し間違えると検討が消えるので、
-// **画面でも別のボタンにしてある。**
+// **ユーザーの検討枝も評価値も残る**。
 //
 // ⚠️ **2 段になっているのは、順番が決められないことがあるから。**
-// `FollowProbe` は木を 1 手も触らずに候補だけ返し、`FollowApply` で初めて据える。
+// `followProbe` は木を 1 手も触らずに候補だけ返し、`followApply` で初めて据える。
 // **自動で 1 本選ばないこと** —— 選んだ手順は「実際に現れた指し手」として棋譜に残る
 // （`TODO.md`「本譜のロック」が一番避けたい壊れ方）。
+//
+// ⚠️ **訂正タブの「本譜に繋ぐ」（撮った 1 枚を手で繋ぐ口）は外した**（2026-10-07）。
+// 見失ったあとに訂正タブへ行って繋ぐのは現実的でなく、「本譜に繋ぐ」も何をするのか
+// 分からなかった。**抜けた手は解析タブの盤で先端から指して補う**（追従はそこから繋ぎ直す）。
 
 import (
 	"context"
@@ -45,7 +48,7 @@ const (
 	FollowSame = "same"
 	// FollowUnique は手順が 1 本に決まった（**そのまま据えてよい**）。
 	FollowUnique = "unique"
-	// FollowChoices は複数の順番があり得る（**人に選ばせる**）。
+	// FollowChoices は複数の順番があり得る（**追従は 1 本選ばない**）。
 	FollowChoices = "choices"
 	// FollowUnreachable は今の本譜からは繋がらない（認識の誤りか、別の対局）。
 	FollowUnreachable = "unreachable"
@@ -60,7 +63,7 @@ const (
 
 // FollowChoice は繋ぎ方の候補 1 本。
 type FollowChoice struct {
-	// Moves は手順（USI）。**`FollowApply` にそのまま渡す。**
+	// Moves は手順（USI）。**`followApply` にそのまま渡す。**
 	Moves []string `json:"moves"`
 	// Text は日本語表記（"▲７六歩" など）。**画面に並べるのはこちら。**
 	//
@@ -96,7 +99,7 @@ type FollowProbe struct {
 	//
 	// ⚠️ **立ったら選ばせないこと**（選択肢として出せない ＝ 決めようが無い）。
 	More bool `json:"more"`
-	// Rev は下見したときの版。**据えるときの合鍵**（`FollowApply`）。
+	// Rev は下見したときの版。**据えるときの合鍵**（`followApply`）。
 	//
 	// ⚠️ **下見と据えるのは別の呼び出し**なので、その間に別の窓が手を指しうる。
 	// 食い違ったら断る（**違う局面の先に繋がないため**）。
@@ -130,7 +133,7 @@ type FollowProbe struct {
 	// 順番だけが決まらない）と、`Rank` の 1 手の候補（**行き着く局面がそれぞれ違う**）。
 	// **追従が聞かずに進んでよいのは前者だけ**（2026-10-05 に実機で踏んだ。指している手が
 	// 盤を覆っている 1 枚から、差が 1 マスぶんも無い 1 位を採って空想の手を足した）。
-	// 画面には出さない（手で繋ぐ側は、どちらでも人に選ばせる）。
+	// 画面には出さない。
 	Unsettled bool `json:"-"`
 	// Unexplained は**駒が来たマスがあるのに、今の向きでは何手先まで探しても説明が付かなかった**か
 	// （`followArrived` で先を探し、繋がらずに「変わっていない」へ戻したときだけ立つ。2026-10-06）。
@@ -151,36 +154,17 @@ type FollowApplied struct {
 	Note string `json:"note"`
 }
 
-// FollowProbe は訂正タブの盤面を**今の本譜の先**に繋ぐ候補を探す。
+// followProbe は下見の本体。**盤と費用表をもらうだけで、どこから来たかを知らない。**
 //
-// ⚠️ **木を 1 手も触らない**（`study:changed` も出さない）。据えるのは `FollowApply`。
+// ⚠️ **木を 1 手も触らない**（`study:changed` も出さない）。据えるのは `followApply`。
 //
 // ⚠️ **繋ぎ先は本譜の先端（`MainTip`）で、「今見ている局面」ではない。**
 // ユーザーが枝の途中を読んでいるのは普通で、そこへ繋ぐと**検討の枝に中継の手が生える**。
 //
-// ⚠️ **`Adopt` と違って局面の確定を要求しない。** 要るのは盤面だけで、
+// ⚠️ **局面の確定を要求しない**（`Adopt` との違い）。要るのは盤面だけで、
 // **手番も駒台の先後も経路から決まる**（`position.Connect`）。
-// **これが Phase 6 の要点** —— 追従しながら人が駒台を埋めるのは不可能なので、
-// ここで確定を求めると自動化そのものが成り立たない。
-func (s *StudyService) FollowProbe() (FollowProbe, error) {
-	// ⚠️ **向きはここで直る**（`Adopt` と同じ写し・同じ 1 か所）。
-	// 撮った画像が後手目線なら盤も先後も 180 度回る。
-	p, rotated := s.src.adoptPosition()
-	if p == nil {
-		return FollowProbe{}, fmt.Errorf("まだ局面がありません")
-	}
-	// ⚠️ **修復は認識を通った盤のときだけ**（手合割・詰将棋では費用表が無い）。
-	// 人が並べた盤を機械が覆す理由は無いので、そちらは厳密一致のまま。
-	cost, fromImage := s.src.followCost()
-	// ⚠️ **見えないマスは渡さない**（nil）。訂正タブの盤は人が見て直したもので、
-	// 被っていたマスも人が決めている。
-	return s.followProbe(p.Board, cost, nil, fromImage, rotated)
-}
-
-// followProbe は下見の本体。**盤と費用表をもらうだけで、どこから来たかを知らない。**
 //
-// ⚠️ **訂正タブを読むのは呼び出し側**（`FollowProbe`）。⚠️ **追従（`FollowAuto`）
-// からは訂正タブを通さないこと**（2026-09-15 に実機で踏んだ）——
+// ⚠️ **訂正タブを通さないこと**（2026-09-15 に実機で踏んだ）——
 // 以前は 1 周ごとに `PositionService.Load` を呼んでいたので、
 // **人が訂正タブで作業していると 1 秒ごとに中継の盤で上書きされた。**
 //
@@ -396,7 +380,7 @@ func followArrived(fixed []position.Fix, cost *position.CellCost) bool {
 	return swapped && vacated
 }
 
-// FollowApply は選んだ手順を**本譜の先**に据える。
+// followApply は選んだ手順を**本譜の先**に据える。
 //
 // ⚠️ **据え方は `Graft` 1 か所**（URL の取り直しと同じ意味論）。**消さずに据える**ので、
 // ユーザーの検討枝も評価値もそのまま残る。
@@ -404,10 +388,13 @@ func followArrived(fixed []position.Fix, cost *position.CellCost) bool {
 // ⚠️ **`evals` を触らないこと。** `reset` も `dropAfter` も世代を進めるので、
 // **走っている解析の途中経過が捨てられる**（中継を追うたびにそれが起きる）。
 //
-// goTo は**繋いだ先へ移るか**。⚠️ **手で押したときだけ真にすること** ——
-// 自動で追い続ける段（Phase 6 の本体）では**見ている場所を勝手に動かさない**
+// goTo は**繋いだ先へ移るか**。⚠️ **先端を見ていたときだけ真にすること** ——
+// 戻って読んでいる最中は**見ている場所を勝手に動かさない**
 // （`mergeReloadLocked` と同じ約束）。
-func (s *StudyService) FollowApply(moves []string, rev int, goTo bool) (a FollowApplied, err error) {
+//
+// ⚠️ **公開しないこと**（2026-10-07 に外した）。公開するとフロントの API になり、
+// 下見を通さない手順を本譜へ足せる口が残る。
+func (s *StudyService) followApply(moves []string, rev int, goTo bool) (a FollowApplied, err error) {
 	// ⚠️ **`publish` はロックの外で走らせること**（`defer` は LIFO）。
 	defer func() { s.publish(a.State, err) }()
 	if len(moves) == 0 {
@@ -430,7 +417,7 @@ func (s *StudyService) FollowApply(moves []string, rev int, goTo bool) (a Follow
 		return FollowApplied{}, fmt.Errorf("%s", g.Note)
 	}
 	if goTo {
-		// **手で押した操作なので、繋いだ先を見せる。**
+		// **先端を見ていたので付いていく。**
 		if id, _, err := s.study.MainTip(); err == nil {
 			_ = s.study.GoTo(id)
 		}
@@ -613,7 +600,7 @@ func (s *StudyService) FollowAuto(boardSFEN string, cellConfidence []float64, ce
 	// ⚠️ **成・不成の見た目の証拠は、下見の前に盤へ書き込むこと**（2026-10-07。`followApplyPromo`）。
 	// 下見・控え・確かめが同じ盤を見るので、2 枚目でも同じ答えになる。
 	s.followApplyPromo(board, cost, promo, rotated)
-	// ⚠️ **修復してよいのは費用表があるときだけ**（`followCost` と同じ約束）。
+	// ⚠️ **修復してよいのは費用表があるときだけ**。
 	// 確信度が無ければ**どのマスを覆してよいかの根拠が無い**ので、厳密一致に倒す。
 	p, e := s.followProbe(board, cost, unseen, cost != nil, rotated)
 	if e != nil {
@@ -678,7 +665,7 @@ func (s *StudyService) followConfirmed(p FollowProbe, k int, board *position.Boa
 	s.mu.Unlock()
 
 	top := p.Candidates[0]
-	applied, err := s.FollowApply(top.Moves[:k], p.Rev, atTip)
+	applied, err := s.followApply(top.Moves[:k], p.Rev, atTip)
 	if err != nil {
 		return FollowAuto{}, err
 	}
@@ -705,7 +692,7 @@ func (s *StudyService) followConfirmed(p FollowProbe, k int, board *position.Boa
 // （認識は同じ画像に同じ答えを返す）。読み直さないぶん、確かめは 1 周（約 0.25 秒）で済む。
 //
 // 控えが無ければ何もしない（`FollowSame`）。⚠️ **本譜の先端が控えたときから動いていたら捨てる**
-// （手で繋いだ・戻したなど。違う局面の先に繋がないため）。
+// （手で指した・戻したなど。違う局面の先に繋がないため）。
 func (s *StudyService) FollowConfirm() (FollowAuto, error) {
 	s.mu.Lock()
 	pend := s.pending
@@ -1254,7 +1241,7 @@ func (s *StudyService) fastApply(moves []string, atFrame bool) (FollowAuto, erro
 	s.mu.Unlock()
 
 	text := followText(rootSfen, main, moves)
-	applied, err := s.FollowApply(moves, rev, atTip)
+	applied, err := s.followApply(moves, rev, atTip)
 	if err != nil {
 		return FollowAuto{}, err
 	}
@@ -1474,8 +1461,6 @@ func (s *StudyService) followFrom(board *position.Board, cost *position.CellCost
 		// 足し、次の 1 枚でそれを打ち消す ▲2八飛を足して、本当に指された
 		// ▲4五同銀を落とした。そこから先は 1 手も繋がらなくなった。
 		// **次の 1 枚（手がどいたあと）で決まる**ので、見送っても雪崩にはならない。
-		// ⚠️ **手で繋ぐ側（`FollowProbe`）は今までどおり人に聞く** ——
-		// **人が居るのに黙って選ぶ理由は無い。**
 		if p.Kind == FollowChoices {
 			if p.More || p.Unsettled {
 				break
@@ -1483,7 +1468,7 @@ func (s *StudyService) followFrom(board *position.Board, cost *position.CellCost
 			a.Guess = true
 		}
 		moves := p.Candidates[0].Moves
-		applied, aerr := s.FollowApply(moves, p.Rev, atTip)
+		applied, aerr := s.followApply(moves, p.Rev, atTip)
 		if aerr != nil {
 			if a.Applied {
 				break

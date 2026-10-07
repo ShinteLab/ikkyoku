@@ -97,7 +97,6 @@ import type {
   AppSettings,
   EngineSettings,
   FontChoice,
-  FollowProbe,
   FontState,
   GameSummary,
   KifuDBStatus,
@@ -2131,12 +2130,6 @@ export function mountMainScreen(root: HTMLElement): void {
   // 片方から読むと**もう片方を戻したときに「局面が無い」と誤読する**
   // （実際、解析の列を切り離しているとグラフがドックへ戻らなかった）。
   let studyLoaded = false;
-  // 訂正タブの「本譜に繋ぐ」を出すかどうかを伝える口（2026-09-14）。
-  //
-  // ⚠️ **入れ物越しにしてあるのは `mountEditor` がこれより下だから。**
-  // `showStudy` は局面が変わるたびに呼ばれるので、直に `editor` を触ると
-  // **初回の描画が編集器の初期化より前に来たときに落ちる**。
-  let setEditFollowable: (ok: boolean) => void = () => {};
   // followWaiting は**次に来るはずの手数**（棋譜の数え方。0 は局面が無いとき）。
   //
   // ⚠️ **枠の札に出すのはこれ**（2026-09-15。時刻から替えた）。時刻は
@@ -2516,14 +2509,6 @@ ${st.turnLabel}${n}`;
     syncStudyChrome(loaded);
     // 中継を追うボタンも局面があるときだけ（繋ぐ先が無いと足せない）。
     studyFollowBtn.hidden = !loaded;
-    // 訂正タブの「本譜に繋ぐ」の出し入れ。**局面があれば出す。**
-    //
-    // ⚠️ **「手順が 1 手以上あるとき」にしないこと**（2026-09-15 に直した）。
-    // 画像から追うときは**最初の 1 回が必ず 0 手の根からの接続**なので、
-    // その条件だと**本来の使い方でボタンが出ない**（実際に出なかった）。
-    // **根そのものが繋ぎ先**で、`MainTip` は 0 のまま正しい。
-    // **本譜が無い状態が普通で、あるのが特別**（`TODO.md`「本譜のロック」）。
-    setEditFollowable(loaded);
     // ⚠️ **待っている手数はここで取ること。** 追跡のループの中だけで数えると、
     // **人が手順を消したり分岐にしたりしたときに古いまま**になる
     // （`study:changed` もここへ来る）。
@@ -2690,171 +2675,6 @@ ${st.turnLabel}${n}`;
     setStudyViewpoint(!editNearWhite);
     selectTab(studyTab);
   };
-
-  // 訂正タブ → **本譜の先へ繋ぐ**（中継を追う口。2026-09-14）。
-  //
-  // ⚠️ **`adoptToStudy` とは別の操作。** あちらは**根ごと入れ替える**（前の手順も
-  // 検討の枝も評価値も捨てる）、こちらは**本譜の先へ足す**（全部残る）。
-  // 中継を数手ごとに撮り直して追うのがこちら。
-  //
-  // ⚠️ **手順をフロントで組み立てないこと。** 盤面の差分から手順を割り出すのは
-  // Go 側（`position.Connect`）で、ここがやるのは**下見の結果を画面に出すこと**と、
-  // **順番が決められないときに人に選ばせること**だけ。
-  //
-  // ⚠️ **一意でないときに勝手に 1 本選ばないこと** —— 選んだ手順は
-  // 「実際に現れた指し手」として棋譜に残る（`TODO.md`「本譜のロック」）。
-  const followToStudy = async (at: { x: number; y: number }) => {
-    const fail = (message: string) => {
-      editStatus.textContent = message;
-      editStatus.classList.add("is-error");
-    };
-    editStatus.textContent = "";
-    editStatus.classList.remove("is-error");
-
-    let probe: FollowProbe;
-    try {
-      probe = await StudyService.FollowProbe();
-    } catch (err) {
-      fail(String(err instanceof Error ? err.message : err));
-      return;
-    }
-    editor.setMismatch(probe.mismatch ?? []);
-
-    // ⚠️ **認識を覆したなら必ず言うこと。** 黙って直すと、盤に出ている局面が
-    // 「撮ったもの」なのか「こちらが直したもの」なのか区別が付かなくなる。
-    const fixedNote = () => {
-      const fixed = probe.fixed ?? [];
-      if (fixed.length === 0) {
-        return "";
-      }
-      const detail = fixed.map((f) => `${f.square} ${f.was}→${f.now}`).join("、");
-      return ` 認識を${fixed.length}マス直しました（${detail}）`;
-    };
-
-    // 据える（`goTo` は真 —— **手で押した操作なので繋いだ先を見せる**）。
-    const apply = async (moves: string[]) => {
-      try {
-        const got = await StudyService.FollowApply(moves, probe.rev, true);
-        showStudy(got.state);
-        // ⚠️ **表示視点は触らない**（`adoptToStudy` との違い）。あちらは根ごと
-        // 入れ替えるので撮った向きに合わせるが、**こちらは続いている検討**で、
-        // 視点はその検討に対するユーザーの選択。**勝手に回さない。**
-        selectTab(studyTab);
-        const note = got.note ? ` ${got.note}` : "";
-        sidePane.setStatus(`${got.added}手つなぎました（${moves.join(" ")}）${fixedNote()}${note}`);
-        // ⚠️ **決まった手の画像を残す**（2026-09-18）。**追従と揃えるためのもの** ——
-        // 実機で**6九歩打と読んだが正しくは6九桂打**という誤認識が出たとき、
-        // **手で繋いだぶんだけ証拠が 1 枚も残っていなかった。**
-        //
-        // ⚠️ **手数は足したあとの `followWaiting` から逆算すること**（`showStudy` が先に走る）。
-        // ⚠️ **待たないこと**（`void`）—— 残せなくても繋ぐのは成立する（設計原則 3）。
-        void CaptureService.SaveConnectFrame(
-          Math.max(followWaiting - moves.length, 0),
-          moves,
-          (probe.fixed ?? []).length > 0,
-        );
-      } catch (err) {
-        fail(String(err instanceof Error ? err.message : err));
-      }
-    };
-
-    const candidates = probe.candidates ?? [];
-    switch (probe.kind) {
-      case "unique":
-        if (candidates[0]) {
-          await apply(candidates[0].moves ?? []);
-        }
-        return;
-      case "choices":
-        // ⚠️ **押した場所で聞く**（`window.confirm` を使わない。`popup.ts` の ⚠️）。
-        // **並べるのは日本語表記**（USI では順番の違いが読み取れない）。
-        editStatus.textContent = probe.reason;
-        openPopup(at.x, at.y, {
-          label: "どの順番で進んだか",
-          items: candidates.map((c) => ({
-            label: (c.text ?? []).join(" "),
-            onPick: () => void apply(c.moves ?? []),
-          })),
-        });
-        return;
-      default:
-        // same / unreachable / budget。**理由は Go 側が持っている。**
-        // ⚠️ **繋がらなくても木は 1 手も変わっていない**ので、撮った 1 枚は
-        // 訂正タブにそのまま残る（「この局面を解析する」で始め直せる）。
-        editStatus.textContent = probe.reason;
-        if (probe.kind !== "same") {
-          editStatus.classList.add("is-error");
-        }
-    }
-  };
-
-  // 撮った直後に**自動で下見する**（2026-09-15）。
-  //
-  // ⚠️ **押すまで分からないのは設計が逆だった。** 撮って訂正タブに着いた時点で
-  // 「これは本譜に繋がるのか」「繋がらないならどこが違うのか」が分からないと、
-  // **人はどこを直せばよいか分からない**（実機で「繋がりません」としか出なかった）。
-  //
-  // ⚠️ **木は 1 手も触らない**（下見だけ）。据えるのは今までどおり人が押したとき。
-  // ⚠️ **繋ぐ先が無ければ何もしない**（解析タブが空のときは黙っている）。
-  // ⚠️ **最後に頼んだ 1 回だけを描くこと。** 直すたびに呼ぶので、
-  // **古い下見が後から届いて光るマスが巻き戻る**（1 マス直したのに増えて見える）。
-  let previewSeq = 0;
-  const previewFollow = async () => {
-    const seq = ++previewSeq;
-    if (!studyLoaded) {
-      editor.setMismatch([]);
-      editor.setFollowNote("");
-      return;
-    }
-    let probe: FollowProbe;
-    try {
-      probe = await StudyService.FollowProbe();
-    } catch {
-      return; // ⚠️ **下見の失敗で撮影も訂正も台無しにしない**（設計原則3）
-    }
-    if (seq !== previewSeq) {
-      return; // 追い越された
-    }
-    // **説明できないマスを盤の上で光らせる。** ここが「どこを直せばよいか」の答え。
-    editor.setMismatch(probe.mismatch ?? []);
-    switch (probe.kind) {
-      case "unique": {
-        const moves = probe.candidates?.[0]?.text?.join(" ") ?? "";
-        const fixed = probe.fixed ?? [];
-        const note = fixed.length > 0 ? `／認識を${fixed.length}マス直します` : "";
-        // ⚠️ **ぴったり一致と推測を同じ言い方にしないこと。** 確かさが違う。
-        if (probe.guess) {
-          const fit = Math.round((probe.fit ?? 0) * 100);
-          editor.setFollowNote(
-            `おそらく本譜の${probe.depth}手先です（${moves}）${note}／盤面の一致 ${fit}%`,
-            true,
-          );
-          return;
-        }
-        editor.setFollowNote(`本譜の${probe.depth}手先です（${moves}）${note}`);
-        return;
-      }
-      case "unreadable":
-        // ⚠️ **「繋がらない」とは別の話**（撮り直す側）。光らせても意味が無いので消す。
-        editor.setMismatch([]);
-        editor.setFollowNote(probe.reason, true);
-        return;
-      case "choices":
-        editor.setFollowNote(`${probe.reason}。「本譜に繋ぐ」で候補から選べます`, true);
-        return;
-      case "same":
-        editor.setFollowNote("本譜の先端と同じ盤面です");
-        return;
-      case "budget":
-        editor.setFollowNote("");
-        return; // 一時的なものなので黙っておく（押せば分かる）
-      default:
-        // ⚠️ **理由には食い違ったマスが入っている**（Go 側が組み立てる）。
-        editor.setFollowNote(probe.reason, true);
-    }
-  };
-
-
 
   // ---- 中継を追う（2026-09-15）------------------------------------------
   //
@@ -4186,15 +4006,9 @@ ${st.turnLabel}${n}`;
       // 押しづらくなる（実際にそうなっていた）。全文は title で読める。
       showSfenNote(st.analyzeSfen && st.analyzeSfen !== st.sfen ? st.analyzeSfen : "");
       fillWarnings(boardWarnings, st.warnings ?? []);
-      // ⚠️ **直すたびに下見し直す**（2026-09-15）。1 マス直せば光るマスが減り、
-      // **全部消えれば繋がる** —— それが見えていることが「どう直すか」の答え。
-      void previewFollow();
     },
     onConfirm: () => {
       void adoptToStudy();
-    },
-    onFollow: (at) => {
-      void followToStudy(at);
     },
     onError: (message) => {
       // **訂正タブの中に出す。** 撮影の結果（入力タブの #status）とは別の話で、
@@ -4203,9 +4017,6 @@ ${st.turnLabel}${n}`;
       editStatus.classList.add("is-error");
     },
   });
-
-  // ⚠️ **入れ物を繋ぐのは編集器を作ったあと**（上の `setEditFollowable` の ⚠️）。
-  setEditFollowable = (ok) => editor.setFollowable(ok);
 
   // onKifuDBChanged は棚を開き直したときに呼ぶ（棋譜タブの一覧を取り直す）。
   // ⚠️ **設定タブから棋譜タブの DOM を触らないこと** —— 一覧を持っているのは
@@ -4640,12 +4451,8 @@ ${st.turnLabel}${n}`;
     // 盤が取れなかったときは直すものが無いので、理由の出ている入力タブに留まる。
     if (result.sfen) {
       void editor
-        .load(result.sfen, cellConfidence(result.debug))
-        .then(() => {
-          selectTab(editTab);
-          // **撮ったその場で「繋がるか」を出す**（押させない）。
-          void previewFollow();
-        });
+        .load(result.sfen)
+        .then(() => selectTab(editTab));
     } else {
       editor.clear();
       showBoard("", "shot");

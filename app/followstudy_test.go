@@ -11,11 +11,11 @@ import (
 	"github.com/ShinteLab/ikkyoku/recognize"
 )
 
-// following は「初期局面を採った解析タブ」と「撮った局面を置く訂正タブ」を返す。
+// following は「初期局面を採った解析タブ」と、その元になった訂正タブを返す。
 func following(t *testing.T) (*StudyService, *PositionService) {
 	t.Helper()
 	pos := NewPositionService()
-	if _, err := pos.Load(hirateBoard, nil); err != nil {
+	if _, err := pos.Load(hirateBoard); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	if _, err := pos.SetTurn(1); err != nil {
@@ -28,14 +28,17 @@ func following(t *testing.T) (*StudyService, *PositionService) {
 	return study, pos
 }
 
-// shotWith は「撮った盤面 + マスごとの確信度」を訂正タブに置く。
+// probe は撮った 1 枚（盤面 + マスごとの確信度）を、追従と同じ形（`followFrame`）にして
+// 下見（`followProbe`）に渡す。**木は 1 手も触らない。**
 //
-// ⚠️ **確信度が無いと修復は働かない**（人が並べた盤を機械が覆さないため）。
-func shotWith(t *testing.T, pos *PositionService, boardSFEN string, conf []float64) {
+// ⚠️ **確信度が無いと修復は働かない**（どのマスを覆してよいかの根拠が無いため）。
+func probe(t *testing.T, s *StudyService, boardSFEN string, conf []float64) (FollowProbe, error) {
 	t.Helper()
-	if _, err := pos.Load(boardSFEN, conf); err != nil {
-		t.Fatalf("Load: %v", err)
+	b, cost, unseen, rotated, err := s.src.followFrame(boardSFEN, conf, nil)
+	if err != nil {
+		t.Fatalf("followFrame: %v", err)
 	}
+	return s.followProbe(b, cost, unseen, cost != nil, rotated)
 }
 
 // evenConf は全マス同じ確信度の表を作る。
@@ -65,15 +68,10 @@ func boardAfter(t *testing.T, moves ...string) string {
 	return p.BoardSFEN()
 }
 
-// shot は撮った盤面を**訂正タブ**に置く（手で繋ぐ側＝`FollowProbe` の入口）。
-//
-// ⚠️ **追従（`FollowAuto`）はここを通らない** —— あちらは撮った 1 枚を直に受け取る。
-// **訂正タブは人の作業場**なので、1 秒ごとに上書きしてはいけない（実機で踏んだ）。
-func shot(t *testing.T, pos *PositionService, moves ...string) {
+// shot は初期局面から moves だけ進んだ盤面を、確信度なしで下見に渡す（厳密一致だけ）。
+func shot(t *testing.T, s *StudyService, moves ...string) (FollowProbe, error) {
 	t.Helper()
-	if _, err := pos.Load(boardAfter(t, moves...), nil); err != nil {
-		t.Fatalf("Load: %v", err)
-	}
+	return probe(t, s, boardAfter(t, moves...), nil)
 }
 
 // 撮った盤面が 1 手進んでいたら、その 1 手で繋がって本譜が伸びること。
@@ -84,20 +82,13 @@ func shot(t *testing.T, pos *PositionService, moves ...string) {
 // **本来の使い方でボタンが出なかった**（2026-09-15 に直した）。
 //
 // ⚠️ **手番も駒台の先後も未決のまま通ること**が肝（`Adopt` との一番の違い）。
-// 追従しながら人が駒台を埋めるのは不可能なので、ここで確定を求めると
-// Phase 6 そのものが成り立たない。
+// 撮った盤面には手番も駒台も付かない（`boardAfter`）。追従しながら人が駒台を
+// 埋めるのは不可能なので、ここで確定を求めると Phase 6 そのものが成り立たない。
 func TestFollowProbeUnique(t *testing.T) {
-	s, pos := following(t)
-	shot(t, pos, "7g7f")
-
-	// ⚠️ **同じ局面で `Adopt` は通らない**（未決なので）。**そこが違う。**
-	if _, err := s.Adopt(); err == nil {
-		t.Fatal("未決の局面が Adopt で通ってしまいました（前提が崩れています）")
-	}
-
-	p, err := s.FollowProbe()
+	s, _ := following(t)
+	p, err := shot(t, s, "7g7f")
 	if err != nil {
-		t.Fatalf("FollowProbe: %v", err)
+		t.Fatalf("followProbe: %v", err)
 	}
 	if p.Kind != FollowUnique {
 		t.Fatalf("Kind = %q, want %q（%s）", p.Kind, FollowUnique, p.Reason)
@@ -110,14 +101,14 @@ func TestFollowProbeUnique(t *testing.T) {
 		t.Errorf("日本語表記が付いていません: %v", txt)
 	}
 
-	a, err := s.FollowApply(p.Candidates[0].Moves, p.Rev, true)
+	a, err := s.followApply(p.Candidates[0].Moves, p.Rev, true)
 	if err != nil {
-		t.Fatalf("FollowApply: %v", err)
+		t.Fatalf("followApply: %v", err)
 	}
 	if a.Added != 1 || len(a.State.Nodes) != 1 {
 		t.Fatalf("本譜が伸びていません: added=%d nodes=%+v", a.Added, a.State.Nodes)
 	}
-	// **手で押した操作なので、繋いだ先を見せる。**
+	// **goTo が真なら繋いだ先へ移る**（先端を見ていたとき）。
 	if a.State.CurrentID != a.State.MainTip || a.State.Ply != 1 {
 		t.Errorf("繋いだ先に移っていません: cur=%d tip=%d ply=%d",
 			a.State.CurrentID, a.State.MainTip, a.State.Ply)
@@ -130,7 +121,7 @@ func TestFollowProbeUnique(t *testing.T) {
 // 中継の手が生える**（本譜が枝の下にぶら下がる）。
 // ⚠️ **下見だけで今見ている場所が動かないこと**も一緒に見ている。
 func TestFollowProbeAnchorsAtMainTip(t *testing.T) {
-	s, pos := following(t)
+	s, _ := following(t)
 	for _, m := range []string{"7g7f", "3c3d"} {
 		if _, err := s.Play(m); err != nil {
 			t.Fatalf("Play(%q): %v", m, err)
@@ -150,10 +141,9 @@ func TestFollowProbeAnchorsAtMainTip(t *testing.T) {
 	}
 
 	// 中継は本譜の続きへ進んだ。
-	shot(t, pos, "7g7f", "3c3d", "2g2f")
-	p, err := s.FollowProbe()
+	p, err := shot(t, s, "7g7f", "3c3d", "2g2f")
 	if err != nil {
-		t.Fatalf("FollowProbe: %v", err)
+		t.Fatalf("followProbe: %v", err)
 	}
 	if p.Kind != FollowUnique || len(p.Candidates[0].Moves) != 1 {
 		t.Fatalf("本譜の先端から 1 手で繋がるはず: %+v（%s）", p.Candidates, p.Reason)
@@ -164,8 +154,8 @@ func TestFollowProbeAnchorsAtMainTip(t *testing.T) {
 	}
 
 	// 据えたあとも**枝は残る**（`Graft` は消さずに据える）。
-	if _, err := s.FollowApply(p.Candidates[0].Moves, p.Rev, false); err != nil {
-		t.Fatalf("FollowApply: %v", err)
+	if _, err := s.followApply(p.Candidates[0].Moves, p.Rev, false); err != nil {
+		t.Fatalf("followApply: %v", err)
 	}
 	st := s.State()
 	// ⚠️ **goTo が偽なら見ている場所は動かない**（自動追従はこちらで呼ぶ）。
@@ -185,18 +175,14 @@ func TestFollowProbeAnchorsAtMainTip(t *testing.T) {
 
 // ⚠️ **繋がらないとき・順番が決まらないときは木を 1 手も触らないこと。**
 //
-// `Rev` が進まない ＝ `study:changed` も出ない。**撮った 1 枚は訂正タブに残る**ので、
-// 「この局面を解析する」で新しく始められる（設計原則3）。
+// `Rev` が進まない ＝ `study:changed` も出ない（設計原則3。繋がらなくても何も失わない）。
 func TestFollowProbeLeavesTreeAlone(t *testing.T) {
-	s, pos := following(t)
+	s, _ := following(t)
 	before := s.State()
 	// 歩が一気に 2 マス進んだ盤面（＝認識の誤りの模擬。合法手では到達できない）。
-	if _, err := pos.Load("lnsgkgsnl/1r5b1/ppppppppp/9/2P6/9/PP1PPPPPP/1B5R1/LNSGKGSNL", nil); err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	p, err := s.FollowProbe()
+	p, err := probe(t, s, "lnsgkgsnl/1r5b1/ppppppppp/9/2P6/9/PP1PPPPPP/1B5R1/LNSGKGSNL", nil)
 	if err != nil {
-		t.Fatalf("FollowProbe: %v", err)
+		t.Fatalf("followProbe: %v", err)
 	}
 	if p.Kind != FollowUnreachable {
 		t.Fatalf("Kind = %q, want %q", p.Kind, FollowUnreachable)
@@ -216,11 +202,10 @@ func TestFollowProbeLeavesTreeAlone(t *testing.T) {
 // **一番大事。** ここが崩れると、空想の手順が「実際に現れた指し手」として棋譜に残る
 // （`TODO.md`「本譜のロック」）。
 func TestFollowProbeAmbiguous(t *testing.T) {
-	s, pos := following(t)
-	shot(t, pos, "7g7f", "3c3d", "2g2f", "8c8d")
-	p, err := s.FollowProbe()
+	s, _ := following(t)
+	p, err := shot(t, s, "7g7f", "3c3d", "2g2f", "8c8d")
 	if err != nil {
-		t.Fatalf("FollowProbe: %v", err)
+		t.Fatalf("followProbe: %v", err)
 	}
 	if p.Kind != FollowChoices {
 		t.Fatalf("Kind = %q, want %q（%s）", p.Kind, FollowChoices, p.Reason)
@@ -237,8 +222,8 @@ func TestFollowProbeAmbiguous(t *testing.T) {
 		}
 	}
 	// 選べば据わること。
-	if _, err := s.FollowApply(p.Candidates[0].Moves, p.Rev, false); err != nil {
-		t.Fatalf("FollowApply: %v", err)
+	if _, err := s.followApply(p.Candidates[0].Moves, p.Rev, false); err != nil {
+		t.Fatalf("followApply: %v", err)
 	}
 	if n := len(s.State().Nodes); n != 4 {
 		t.Fatalf("手順 = %d, want 4", n)
@@ -247,11 +232,10 @@ func TestFollowProbeAmbiguous(t *testing.T) {
 
 // 盤面が変わっていなければ `same`（何もすることが無い）。
 func TestFollowProbeSame(t *testing.T) {
-	s, pos := following(t)
-	shot(t, pos)
-	p, err := s.FollowProbe()
+	s, _ := following(t)
+	p, err := shot(t, s)
 	if err != nil {
-		t.Fatalf("FollowProbe: %v", err)
+		t.Fatalf("followProbe: %v", err)
 	}
 	if p.Kind != FollowSame || p.Depth != 0 {
 		t.Fatalf("Kind = %q depth = %d, want %q/0", p.Kind, p.Depth, FollowSame)
@@ -261,17 +245,16 @@ func TestFollowProbeSame(t *testing.T) {
 // ⚠️ **下見と据えるのは別の呼び出し。** その間に局面が変わっていたら断ること
 // （別の窓が手を指しうる。**違う局面の先に繋がない**）。
 func TestFollowApplyRejectsStaleRev(t *testing.T) {
-	s, pos := following(t)
-	shot(t, pos, "7g7f")
-	p, err := s.FollowProbe()
+	s, _ := following(t)
+	p, err := shot(t, s, "7g7f")
 	if err != nil {
-		t.Fatalf("FollowProbe: %v", err)
+		t.Fatalf("followProbe: %v", err)
 	}
 	// 下見のあとで誰かが手を指した。
 	if _, err := s.Play("2g2f"); err != nil {
 		t.Fatalf("Play: %v", err)
 	}
-	if _, err := s.FollowApply(p.Candidates[0].Moves, p.Rev, false); err == nil {
+	if _, err := s.followApply(p.Candidates[0].Moves, p.Rev, false); err == nil {
 		t.Fatal("古い版のまま据えられてしまいました")
 	}
 }
@@ -279,7 +262,7 @@ func TestFollowApplyRejectsStaleRev(t *testing.T) {
 // ⚠️ **評価値を捨てないこと。** `evals.reset` も `dropAfter` も世代を進めるので、
 // **走っている解析の途中経過が消える** —— 中継を追うたびにそれが起きる。
 func TestFollowApplyKeepsEvals(t *testing.T) {
-	s, pos := following(t)
+	s, _ := following(t)
 	if _, err := s.Play("7g7f"); err != nil {
 		t.Fatalf("Play: %v", err)
 	}
@@ -291,13 +274,12 @@ func TestFollowApplyKeepsEvals(t *testing.T) {
 		s.recordEval(target.Epoch, ply, "e1", "エンジン", analyze.Score{CP: 10 * ply}, 12)
 	}
 
-	shot(t, pos, "7g7f", "3c3d")
-	p, err := s.FollowProbe()
+	p, err := shot(t, s, "7g7f", "3c3d")
 	if err != nil {
-		t.Fatalf("FollowProbe: %v", err)
+		t.Fatalf("followProbe: %v", err)
 	}
-	if _, err := s.FollowApply(p.Candidates[0].Moves, p.Rev, false); err != nil {
-		t.Fatalf("FollowApply: %v", err)
+	if _, err := s.followApply(p.Candidates[0].Moves, p.Rev, false); err != nil {
+		t.Fatalf("followApply: %v", err)
 	}
 	g := s.Evals()
 	if len(g.Series) != 1 || len(g.Series[0].Points) != 2 {
@@ -308,11 +290,11 @@ func TestFollowApplyKeepsEvals(t *testing.T) {
 // 解析タブに何も無ければ断ること（繋ぐ先が無い）。**理由を出す。**
 func TestFollowProbeWithoutStudy(t *testing.T) {
 	pos := NewPositionService()
-	if _, err := pos.Load(hirateBoard, nil); err != nil {
+	if _, err := pos.Load(hirateBoard); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	s := NewStudyService(pos)
-	if _, err := s.FollowProbe(); err == nil {
+	if _, err := shot(t, s, "7g7f"); err == nil {
 		t.Fatal("繋ぐ先が無いのに通りました")
 	}
 }
@@ -323,13 +305,12 @@ func TestFollowProbeWithoutStudy(t *testing.T) {
 // ⚠️ **直したマスを必ず返すこと**（`Fixed`）。黙って直すと、盤に出ている局面が
 // 「撮ったもの」なのか「こちらが直したもの」なのか区別が付かなくなる。
 func TestFollowProbeRepairs(t *testing.T) {
-	s, pos := following(t)
+	s, _ := following(t)
 	// ▲7六歩まで進んでいて、認識が 9三の歩を落とした盤面。
-	shotWith(t, pos, "lnsgkgsnl/1r5b1/1pppppppp/9/9/2P6/PP1PPPPPP/1B5R1/LNSGKGSNL", evenConf(0.3))
 
-	p, err := s.FollowProbe()
+	p, err := probe(t, s, "lnsgkgsnl/1r5b1/1pppppppp/9/9/2P6/PP1PPPPPP/1B5R1/LNSGKGSNL", evenConf(0.3))
 	if err != nil {
-		t.Fatalf("FollowProbe: %v", err)
+		t.Fatalf("followProbe: %v", err)
 	}
 	if p.Kind != FollowUnique {
 		t.Fatalf("Kind = %q, want %q（%s）", p.Kind, FollowUnique, p.Reason)
@@ -352,38 +333,14 @@ func TestFollowProbeRepairs(t *testing.T) {
 //
 // 人が並べたものを機械が覆す理由は無い。**厳密一致のままにする。**
 func TestFollowProbeNoRepairWithoutConfidence(t *testing.T) {
-	s, pos := following(t)
+	s, _ := following(t)
 	// 同じ盤面を、確信度を付けずに置く。
-	shotWith(t, pos, "lnsgkgsnl/1r5b1/1pppppppp/9/9/2P6/PP1PPPPPP/1B5R1/LNSGKGSNL", nil)
-	p, err := s.FollowProbe()
+	p, err := probe(t, s, "lnsgkgsnl/1r5b1/1pppppppp/9/9/2P6/PP1PPPPPP/1B5R1/LNSGKGSNL", nil)
 	if err != nil {
-		t.Fatalf("FollowProbe: %v", err)
+		t.Fatalf("followProbe: %v", err)
 	}
 	if p.Kind == FollowUnique {
 		t.Fatalf("確信度が無いのに修復しました: %+v", p.Candidates)
-	}
-}
-
-// ⚠️ **人が直したマスは覆さないこと。**
-//
-// 1 マス直したのに修復で戻されると、**直しても直しても戻る**という一番たちの
-// 悪い壊れ方になる。
-func TestFollowProbeKeepsHumanEdits(t *testing.T) {
-	s, pos := following(t)
-	// 認識は 9三を「先手の歩」と誤り、人が盤から外した（＝空にした）。
-	shotWith(t, pos, "lnsgkgsnl/1r5b1/Ppppppppp/9/9/2P6/PP1PPPPPP/1B5R1/LNSGKGSNL", evenConf(0.3))
-	if _, err := pos.Remove(2, 0); err != nil {
-		t.Fatalf("Remove: %v", err)
-	}
-	p, err := s.FollowProbe()
-	if err != nil {
-		t.Fatalf("FollowProbe: %v", err)
-	}
-	// 人が空にしたマスを「後手の歩」に戻すのが修復の唯一の道なので、**繋がらない**。
-	for _, fx := range p.Fixed {
-		if fx.Square == "９三" {
-			t.Fatalf("人が直したマスを覆しました: %+v", fx)
-		}
 	}
 }
 
@@ -392,14 +349,12 @@ func TestFollowProbeKeepsHumanEdits(t *testing.T) {
 // **これが「認識器が 100% でないと動かない」への答え。** 厳密一致も修復も
 // 空振りしたら、**問いを変えて「どの候補が一番よく合うか」を聞く。**
 func TestFollowProbeGuesses(t *testing.T) {
-	s, pos := following(t)
+	s, _ := following(t)
 	// ▲7六歩まで進み、**さらに認識が 3 マス外している**盤面。
-	shotWith(t, pos, "lnsgkgsnl/1r5b1/2ppppppp/9/4p4/2P6/PP1PPPPPP/1B5R1/LNSGKGSNL",
+	p, err := probe(t, s, "lnsgkgsnl/1r5b1/2ppppppp/9/4p4/2P6/PP1PPPPPP/1B5R1/LNSGKGSNL",
 		evenConf(0.5))
-
-	p, err := s.FollowProbe()
 	if err != nil {
-		t.Fatalf("FollowProbe: %v", err)
+		t.Fatalf("followProbe: %v", err)
 	}
 	if p.Kind != FollowUnique {
 		t.Fatalf("Kind = %q, want %q（%s）", p.Kind, FollowUnique, p.Reason)
@@ -418,8 +373,8 @@ func TestFollowProbeGuesses(t *testing.T) {
 		t.Errorf("Fit = %v, want 0.9 以上", p.Fit)
 	}
 	// 据えられること。
-	if _, err := s.FollowApply(p.Candidates[0].Moves, p.Rev, false); err != nil {
-		t.Fatalf("FollowApply: %v", err)
+	if _, err := s.followApply(p.Candidates[0].Moves, p.Rev, false); err != nil {
+		t.Fatalf("followApply: %v", err)
 	}
 	if n := len(s.State().Nodes); n != 1 {
 		t.Fatalf("手順 = %d, want 1", n)
@@ -431,11 +386,10 @@ func TestFollowProbeGuesses(t *testing.T) {
 // ここで落とせないと、**映っていない盤から適当な手を選んで棋譜に足す**ことになる。
 // ⚠️ **「繋がらない」とは別の種類**にすること —— 次にすることが違う（撮り直す）。
 func TestFollowProbeUnreadableFrame(t *testing.T) {
-	s, pos := following(t)
-	shotWith(t, pos, "9/9/9/9/9/9/9/9/9", evenConf(0.5))
-	p, err := s.FollowProbe()
+	s, _ := following(t)
+	p, err := probe(t, s, "9/9/9/9/9/9/9/9/9", evenConf(0.5))
 	if err != nil {
-		t.Fatalf("FollowProbe: %v", err)
+		t.Fatalf("followProbe: %v", err)
 	}
 	if p.Kind != FollowUnreadable {
 		t.Fatalf("Kind = %q, want %q（%s）", p.Kind, FollowUnreadable, p.Reason)
@@ -454,13 +408,12 @@ func TestFollowProbeUnreadableFrame(t *testing.T) {
 // それでよいし（そちらのほうが確か）、拾えなければ候補を並べる。
 // **見るのは「推測で 1 本に決めていないこと」だけ。**
 func TestFollowProbeDoesNotGuessWhenUnclear(t *testing.T) {
-	s, pos := following(t)
+	s, _ := following(t)
 	// ▲7六歩 と ▲8六歩 の両方が指されている（1 手では説明が付かない）。
-	shotWith(t, pos, "lnsgkgsnl/1r5b1/ppppppppp/9/9/1PP6/P2PPPPPP/1B5R1/LNSGKGSNL",
+	p, err := probe(t, s, "lnsgkgsnl/1r5b1/ppppppppp/9/9/1PP6/P2PPPPPP/1B5R1/LNSGKGSNL",
 		evenConf(0.5))
-	p, err := s.FollowProbe()
 	if err != nil {
-		t.Fatalf("FollowProbe: %v", err)
+		t.Fatalf("followProbe: %v", err)
 	}
 	if p.Kind == FollowUnique && p.Guess {
 		t.Fatalf("1 手では説明が付かないのに推測で決め打ちました: %+v", p.Candidates)
@@ -574,7 +527,7 @@ func TestFollowAutoSkipsQuietly(t *testing.T) {
 // ⚠️ **見るのは「次にできることが返ること」。** どれを返すかは固定しない ——
 // 1 手ずつ追いつく（`unique`）でも、候補を並べる（`choices`）でもよい。
 func TestFollowProbeDoesNotDeadEnd(t *testing.T) {
-	s, pos := following(t)
+	s, _ := following(t)
 	// 初期局面から 6 手進んだ盤面（`MaxDepth` を超える）。
 	p, err := position.FromFullSFEN(hirateBoard + " b - 1")
 	if err != nil {
@@ -585,11 +538,10 @@ func TestFollowProbeDoesNotDeadEnd(t *testing.T) {
 			t.Fatalf("ApplyMove(%q): %v", m, err)
 		}
 	}
-	shotWith(t, pos, p.BoardSFEN(), evenConf(0.5))
 
-	got, err := s.FollowProbe()
+	got, err := probe(t, s, p.BoardSFEN(), evenConf(0.5))
 	if err != nil {
-		t.Fatalf("FollowProbe: %v", err)
+		t.Fatalf("followProbe: %v", err)
 	}
 	switch got.Kind {
 	case FollowUnique, FollowChoices:
@@ -607,13 +559,11 @@ func TestFollowProbeDoesNotDeadEnd(t *testing.T) {
 // **深い探索を先に回していたせいで、中盤の局面では 3 秒のタイムアウトに
 // 当たっていた**（実機）。⚠️ **速さの歯止め** —— 遅くなったらここが落ちる。
 func TestFollowProbeIsFastForOneMove(t *testing.T) {
-	s, pos := following(t)
-	shot(t, pos, "7g7f")
-
+	s, _ := following(t)
 	start := time.Now()
-	got, err := s.FollowProbe()
+	got, err := shot(t, s, "7g7f")
 	if err != nil {
-		t.Fatalf("FollowProbe: %v", err)
+		t.Fatalf("followProbe: %v", err)
 	}
 	if elapsed := time.Since(start); elapsed > 300*time.Millisecond {
 		t.Errorf("1 手の下見に %v かかりました（深い探索に入っている）", elapsed)
@@ -630,14 +580,12 @@ func TestFollowProbeIsFastForOneMove(t *testing.T) {
 // ⚠️ **「決められない」に落とさないこと** —— 落とすと深い探索へ進み、
 // **1 tick まるごと無駄になる**（進んでも「隔たりが大きすぎます」が返るだけ）。
 func TestFollowProbeSameDespiteNoise(t *testing.T) {
-	s, pos := following(t)
+	s, _ := following(t)
 	// 盤は初期局面のまま。**認識が 3 マス外している**（9三・8三が抜け、5五に湧いた）。
-	shotWith(t, pos, "lnsgkgsnl/1r5b1/2ppppppp/9/4p4/9/PPPPPPPPP/1B5R1/LNSGKGSNL",
+	got, err := probe(t, s, "lnsgkgsnl/1r5b1/2ppppppp/9/4p4/9/PPPPPPPPP/1B5R1/LNSGKGSNL",
 		evenConf(0.5))
-
-	got, err := s.FollowProbe()
 	if err != nil {
-		t.Fatalf("FollowProbe: %v", err)
+		t.Fatalf("followProbe: %v", err)
 	}
 	if got.Kind != FollowSame {
 		t.Fatalf("Kind = %q, want %q（%s）", got.Kind, FollowSame, got.Reason)
@@ -670,7 +618,7 @@ func TestFollowAutoDoesNotTouchEditor(t *testing.T) {
 
 	// **人が訂正タブで別の盤を直している最中。**
 	mine := "9/9/9/9/9/9/9/9/4K4"
-	if _, err := pos.Load(mine, nil); err != nil {
+	if _, err := pos.Load(mine); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	before := pos.State()
@@ -692,25 +640,6 @@ func TestFollowAutoDoesNotTouchEditor(t *testing.T) {
 	// **画素と一致しないラベルを suteme へ送る**ことになる（一番たちが悪い）。
 	if after.LabelSFEN != before.LabelSFEN {
 		t.Errorf("学習ラベルが書き換わりました: %q → %q", before.LabelSFEN, after.LabelSFEN)
-	}
-}
-
-// ⚠️ **手で繋ぐ側（`FollowProbe`）は今までどおり訂正タブを読むこと。**
-//
-// **2 つは別の口。** 追従は「撮った 1 枚を直に受け取る」、
-// 訂正タブの「本譜に繋ぐ」は「**人が直した盤**を繋ぐ」——
-// だからあちらだけが `humanEditCost`（人が直したマスは覆さない）を持つ。
-func TestFollowProbeStillReadsEditor(t *testing.T) {
-	s, pos := following(t)
-	shot(t, pos, "7g7f")
-
-	got, err := s.FollowProbe()
-	if err != nil {
-		t.Fatalf("FollowProbe: %v", err)
-	}
-	if got.Kind != FollowUnique || len(got.Candidates) != 1 ||
-		len(got.Candidates[0].Moves) != 1 || got.Candidates[0].Moves[0] != "7g7f" {
-		t.Fatalf("訂正タブの盤から繋がっていません: %+v", got)
 	}
 }
 
@@ -787,19 +716,16 @@ func TestFollowAutoIgnoresCoveredBoard(t *testing.T) {
 // `FollowChoices` で並べる。**候補ごとに行き着く局面が違う**ので、「順番が決まらない
 // だけ（行き先は同じ）」として進んでよい `Connect` の解とは別物。
 // 実機ではこれを取り違えて、上の ▲4八飛を採っていた。
-//
-// ⚠️ **手で繋ぐ側（`FollowProbe`）が候補を出すことは変えない**（黙って無反応にしない）。
 func TestFollowAutoDoesNotPickUnsettled(t *testing.T) {
-	s, pos := following(t)
+	s, _ := following(t)
 	// 先手の歩が 3 本進んでいる（後手は 1 筋の香で往復しただけ）。1 手では説明が付かず、
 	// 深さ 4 でも繋がらない。
 	board := boardAfter(t, "7g7f", "1a1b", "2g2f", "1b1a", "8g8f")
 
-	// 前提: 手で繋ぐ側には「行き先の違う候補」として並ぶこと。
-	shotWith(t, pos, board, evenConf(0.5))
-	p, err := s.FollowProbe()
+	// 前提: 下見では「行き先の違う候補」として並ぶこと。
+	p, err := probe(t, s, board, evenConf(0.5))
 	if err != nil {
-		t.Fatalf("FollowProbe: %v", err)
+		t.Fatalf("followProbe: %v", err)
 	}
 	if p.Kind != FollowChoices || !p.Unsettled || len(p.Candidates) < 2 {
 		t.Fatalf("前提が崩れています: kind=%q unsettled=%v 候補=%v", p.Kind, p.Unsettled, p.Candidates)
@@ -947,8 +873,8 @@ func realConf(board string, v float64) []float64 {
 func TestFollowAutoCatchesExchangeInOneFrame(t *testing.T) {
 	s, _ := following(t)
 	opening := []string{"2g2f", "8c8d", "2f2e", "8d8e"}
-	if _, err := s.FollowApply(opening, s.State().Rev, false); err != nil {
-		t.Fatalf("FollowApply: %v", err)
+	if _, err := s.followApply(opening, s.State().Rev, false); err != nil {
+		t.Fatalf("followApply: %v", err)
 	}
 	board := boardAfter(t, append(opening, "2e2d", "2c2d")...)
 
@@ -970,8 +896,8 @@ func TestFollowAutoCatchesExchangeInOneFrame(t *testing.T) {
 func TestFollowAutoCatchesRecaptureBySameSide(t *testing.T) {
 	s, _ := following(t)
 	opening := []string{"2g2f", "8c8d", "2f2e", "8d8e", "2e2d"}
-	if _, err := s.FollowApply(opening, s.State().Rev, false); err != nil {
-		t.Fatalf("FollowApply: %v", err)
+	if _, err := s.followApply(opening, s.State().Rev, false); err != nil {
+		t.Fatalf("followApply: %v", err)
 	}
 	board := boardAfter(t, append(opening, "2c2d", "2h2d")...)
 
@@ -1010,7 +936,7 @@ func TestFollowAutoKindMisreadStaysSame(t *testing.T) {
 func TestFollowAutoDoesNotCryFlipWhenSameFits(t *testing.T) {
 	pos := NewPositionService()
 	board := boardAfter(t, "5i6h")
-	if _, err := pos.Load(board, nil); err != nil {
+	if _, err := pos.Load(board); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	if _, err := pos.SetTurn(2); err != nil {
@@ -1183,8 +1109,8 @@ func TestFollowConfirm(t *testing.T) {
 	if a, _ := s.FollowAuto(boardAfter(t, "7g7f", "3c3d"), evenConf(0.9), nil, nil); !a.Pending {
 		t.Fatalf("前提: 1 枚目は控えるはず: %+v", a)
 	}
-	if _, err := s.FollowApply([]string{"8c8d"}, s.State().Rev, false); err != nil {
-		t.Fatalf("FollowApply: %v", err)
+	if _, err := s.followApply([]string{"8c8d"}, s.State().Rev, false); err != nil {
+		t.Fatalf("followApply: %v", err)
 	}
 	if a, _ := s.FollowConfirm(); a.Applied {
 		t.Fatalf("先端が動いたのに控えで足しました: %+v", a)
@@ -1299,7 +1225,7 @@ func TestFollowCellsFallsBackWhenUnclear(t *testing.T) {
 // ⚠️ **後手目線で採った局面では、撮った向きのマスを回してから割り出すこと。**
 func TestFollowCellsRotatesForGoteView(t *testing.T) {
 	pos := NewPositionService()
-	if _, err := pos.Load(hirateBoard, nil); err != nil {
+	if _, err := pos.Load(hirateBoard); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	if _, err := pos.SetViewpoint(true); err != nil {
@@ -1381,8 +1307,8 @@ func TestFollowCellsFromBaseWhenTipIsAhead(t *testing.T) {
 		t.Fatalf("前提: 平手の 1 枚で AtFrame が立つはず: %+v（%v）", a, err)
 	}
 	// 81 マスの読みで ▲7六歩 を足した（比べる相手は平手の 1 枚のまま）。
-	if _, err := s.FollowApply([]string{"7g7f"}, s.State().Rev, false); err != nil {
-		t.Fatalf("FollowApply: %v", err)
+	if _, err := s.followApply([]string{"7g7f"}, s.State().Rev, false); err != nil {
+		t.Fatalf("followApply: %v", err)
 	}
 	// 平手の 1 枚から見ると、▲7六歩 △3四歩 の 4 マスが変わっている。
 	if a := followCellsRead(t, s, cellIdx("7g", "7f", "3c", "3d"), false, "7g7f", "3c3d"); !a.Pending {
@@ -1401,8 +1327,8 @@ func TestFrameFits(t *testing.T) {
 	if a, _ := s.FollowAuto(hirateBoard, realConf(hirateBoard, 0.9), nil, nil); !a.AtFrame {
 		t.Fatalf("前提: 平手の 1 枚で AtFrame が立つはず: %+v", a)
 	}
-	if _, err := s.FollowApply([]string{"7g7f"}, s.State().Rev, false); err != nil {
-		t.Fatalf("FollowApply: %v", err)
+	if _, err := s.followApply([]string{"7g7f"}, s.State().Rev, false); err != nil {
+		t.Fatalf("followApply: %v", err)
 	}
 	if s.FrameFits(cellIdx("7g", "7f", "3c")) {
 		t.Fatal("足していない変化（3三）があるのに、比べる相手を替えました")
@@ -1423,8 +1349,8 @@ func TestFrameFits(t *testing.T) {
 // ⚠️ **読めなければ（"?"）決め打ちしないこと**（81 マスを読む）。
 func TestFollowCellsReadsTheCellToDecidePromotion(t *testing.T) {
 	s, _ := following(t)
-	if _, err := s.FollowApply([]string{"7g7f", "3c3d"}, s.State().Rev, false); err != nil {
-		t.Fatalf("FollowApply: %v", err)
+	if _, err := s.followApply([]string{"7g7f", "3c3d"}, s.State().Rev, false); err != nil {
+		t.Fatalf("followApply: %v", err)
 	}
 	changed := cellIdx("8h", "2b") // 角が 2二 の角を取る（成・不成の両方が指せる）
 	a, err := s.FollowCells(changed, nil, nil)
@@ -1456,8 +1382,8 @@ func TestFollowCellsPromotesWhenNotTheMovedPiece(t *testing.T) {
 	// （`recognize.ReadCells` は種類が読めなくても向きを返す。行き先の確かめはそれで通る）。
 	for _, read := range []string{"?", "+B", "S"} {
 		s, _ := following(t)
-		if _, err := s.FollowApply([]string{"7g7f", "3c3d"}, s.State().Rev, false); err != nil {
-			t.Fatalf("FollowApply: %v", err)
+		if _, err := s.followApply([]string{"7g7f", "3c3d"}, s.State().Rev, false); err != nil {
+			t.Fatalf("followApply: %v", err)
 		}
 		changed := cellIdx("8h", "2b")
 		if a, err := s.FollowCells(changed, []CellPiece{{Cell: cellIdx("2b")[0], Piece: read, Side: recognize.SideUp}}, nil); err != nil || !a.Pending {
@@ -1475,8 +1401,8 @@ func TestFollowCellsPromotesWhenNotTheMovedPiece(t *testing.T) {
 // 2 通りが残り、速い経路で決まらずにもう一度 81 マス（8 秒）を読んだ。
 func TestFollowCellsUsesPendingWhenPromotionVanished(t *testing.T) {
 	s, _ := following(t)
-	if _, err := s.FollowApply([]string{"7g7f", "3c3d", "2g2f", "4a3b"}, s.State().Rev, false); err != nil {
-		t.Fatalf("FollowApply: %v", err)
+	if _, err := s.followApply([]string{"7g7f", "3c3d", "2g2f", "4a3b"}, s.State().Rev, false); err != nil {
+		t.Fatalf("followApply: %v", err)
 	}
 	// 81 マスの読みで ▲2二角成 を控えた（ここでは控えを直に置く）。
 	s.setPending(&followPending{tip: s.mainTip(), moves: []string{"8h2b+"}})
@@ -1503,8 +1429,8 @@ func TestFollowCellsUsesPendingWhenPromotionVanished(t *testing.T) {
 func TestFollowCellsRejectsPhantomRecapture(t *testing.T) {
 	s, _ := following(t)
 	played := []string{"2g2f", "8c8d", "2f2e", "8d8e", "2e2d"}
-	if _, err := s.FollowApply(played, s.State().Rev, false); err != nil {
-		t.Fatalf("FollowApply: %v", err)
+	if _, err := s.followApply(played, s.State().Rev, false); err != nil {
+		t.Fatalf("followApply: %v", err)
 	}
 	changed := cellIdx("2c", "2d", "2h")
 	a, err := s.FollowCells(changed, nil, nil)
@@ -1580,7 +1506,7 @@ func TestFollowCellsArrivalSideWhenRotated(t *testing.T) {
 		{CellPiece{Cell: cellIdx("3d")[0], Piece: "P", Side: recognize.SideUp}, false},
 	} {
 		pos := NewPositionService()
-		if _, err := pos.Load(hirateBoard, nil); err != nil {
+		if _, err := pos.Load(hirateBoard); err != nil {
 			t.Fatalf("Load: %v", err)
 		}
 		if _, err := pos.SetViewpoint(true); err != nil {
@@ -1609,8 +1535,8 @@ func TestFollowCellsArrivalSideWhenRotated(t *testing.T) {
 // ▲2二角成（成・不成で分かれる）△3二金: 違いの出るマスは 2二、行き先は 2二 と 3二。3二 の金を銀と読み違えても決まる。
 func TestFollowCellsAsksDiffAndArrivalsTogether(t *testing.T) {
 	s, _ := following(t)
-	if _, err := s.FollowApply([]string{"7g7f", "3c3d"}, s.State().Rev, false); err != nil {
-		t.Fatalf("FollowApply: %v", err)
+	if _, err := s.followApply([]string{"7g7f", "3c3d"}, s.State().Rev, false); err != nil {
+		t.Fatalf("followApply: %v", err)
 	}
 	changed := cellIdx("8h", "2b", "4a", "3b")
 	a, err := s.FollowCells(changed, nil, nil)
@@ -1648,8 +1574,8 @@ var promoRookLine = []string{"7g7f", "3c3d", "2g2f", "4a3b", "2f2e", "8c8d", "2e
 func promoStudy(t *testing.T) *StudyService {
 	t.Helper()
 	s, _ := following(t)
-	if _, err := s.FollowApply(promoRookLine, s.State().Rev, false); err != nil {
-		t.Fatalf("FollowApply: %v", err)
+	if _, err := s.followApply(promoRookLine, s.State().Rev, false); err != nil {
+		t.Fatalf("followApply: %v", err)
 	}
 	s.markBase()
 	return s
@@ -1720,8 +1646,8 @@ func TestFollowAutoPromotionSecondFrame(t *testing.T) {
 // ⚠️ **比べる相手の局面が無ければ頼まず、今までどおり読んだ盤で決めること**（見た目を比べる 1 枚が無い）。
 func TestFollowAutoNoComparisonWithoutBase(t *testing.T) {
 	s, _ := following(t)
-	if _, err := s.FollowApply(promoRookLine, s.State().Rev, false); err != nil {
-		t.Fatalf("FollowApply: %v", err)
+	if _, err := s.followApply(promoRookLine, s.State().Rev, false); err != nil {
+		t.Fatalf("followApply: %v", err)
 	}
 	board := boardAfter(t, append(slices.Clone(promoRookLine), "2d2c")...)
 	a, err := s.FollowAuto(board, realConf(board, 0.9), nil, nil)
@@ -1737,7 +1663,7 @@ func TestFollowAutoNoComparisonWithoutBase(t *testing.T) {
 // 朝の実機の △8七飛成（8f8g を不成で記録した）と同じ形。撮った画像では後手の龍が手前（大文字の「R」）に写る。
 func TestFollowAutoPromotionGoteRotated(t *testing.T) {
 	pos := NewPositionService()
-	if _, err := pos.Load(hirateBoard, nil); err != nil {
+	if _, err := pos.Load(hirateBoard); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	if _, err := pos.SetViewpoint(true); err != nil {
@@ -1751,8 +1677,8 @@ func TestFollowAutoPromotionGoteRotated(t *testing.T) {
 		t.Fatalf("Adopt: %v", err)
 	}
 	line := []string{"7g7f", "8c8d", "2g2f", "8d8e", "2f2e", "8e8f", "8g8f", "8b8f", "2e2d"}
-	if _, err := s.FollowApply(line, s.State().Rev, false); err != nil {
-		t.Fatalf("FollowApply: %v", err)
+	if _, err := s.followApply(line, s.State().Rev, false); err != nil {
+		t.Fatalf("followApply: %v", err)
 	}
 	s.markBase()
 	after, err := position.FromSFEN(boardAfter(t, append(slices.Clone(line), "8f8g")...))
@@ -1786,8 +1712,8 @@ func TestFollowCellsPromotionByLooks(t *testing.T) {
 		want string
 	}{{0.4, "B", "8h2b+"}, {0.95, "?", "8h2b"}} {
 		s, _ := following(t)
-		if _, err := s.FollowApply([]string{"7g7f", "3c3d"}, s.State().Rev, false); err != nil {
-			t.Fatalf("FollowApply: %v", err)
+		if _, err := s.followApply([]string{"7g7f", "3c3d"}, s.State().Rev, false); err != nil {
+			t.Fatalf("followApply: %v", err)
 		}
 		s.markBase()
 		changed := cellIdx("8h", "2b")

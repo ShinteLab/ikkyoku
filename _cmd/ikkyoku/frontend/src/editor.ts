@@ -74,12 +74,7 @@ const cellLabel = (rank: number, file: number) => `${9 - file}${RANK_KANJI[rank]
 
 export interface EditorHandle {
   // load は認識結果（盤面部分の SFEN）を読み込んで訂正を始める。撮るたびに呼ぶ。
-  // cellConfidence は**認識器がマスごとにどれくらい自信を持っていたか**
-  // （81 個・行優先。無ければ省く）。
-  //
-  // ⚠️ **中継を追うときの「どのマスなら覆してよいか」の根拠**（`FollowProbe`）。
-  // 渡さないと**修復が働かず、認識が 1 マス外すたびに人が直すことになる。**
-  load(boardSFEN: string, cellConfidence?: number[]): Promise<void>;
+  load(boardSFEN: string): Promise<void>;
   // loadHandicap は**手合割の初期局面**から並べ始める（独自ハンデ。2026-09-12）。
   //
   // ⚠️ **画像の無い局面が訂正タブに入る唯一の口。** 撮った画像・認識の情報・
@@ -99,25 +94,6 @@ export interface EditorHandle {
   // 中では null が返る）。タブで隠している以上、開いたときに測り直さないと
   // グリッドが出ないか、前回の大きさのまま残って**1 マスずれたところを編集する**。
   relayout(): void;
-  // setMismatch は**本譜から説明できなかったマス**を盤の上で光らせる
-  // （撮った直後の下見。2026-09-15）。空の配列で消える。
-  //
-  // ⚠️ **これが「どこを直せばよいか」の答えそのもの。** 出さないと、
-  // 「繋がりません」と言われた人は**81 マスを端から見直すことになる**。
-  // ⚠️ **盤の中身は 1 マスも変えない**（光らせるだけ。直すのは人）。
-  setMismatch(cells: { rank: number; file: number }[]): void;
-  // setFollowNote は下見の結果を「本譜に繋ぐ」の隣に出す（空で消える）。
-  //
-  // ⚠️ **`onError`（操作の失敗）と同じ行に出さないこと** —— あちらは 1 操作ぶんの
-  // 一時的な文で、こちらは**撮った瞬間からずっと出ている情報**。混ぜると
-  // 互いに上書きし合う（実際にそうなりかけた）。
-  setFollowNote(text: string, caution?: boolean): void;
-  // setFollowable は「本譜に繋ぐ」を出すかどうか（**解析タブに局面があるか**）。
-  //
-  // ⚠️ **「手順があるか」ではない**（2026-09-15 に直した）。画像から追うときは
-  // **最初の 1 回が必ず 0 手の根からの接続**なので、手順の有無で出し分けると
-  // **本来の使い方でボタンが出ない**。**根そのものが繋ぎ先。**
-  setFollowable(ok: boolean): void;
   // release は掴んでいるもの（「足りない駒」のクリックで掴んだ駒・引きかけの
   // ドラッグ）を離す。
   //
@@ -158,19 +134,6 @@ export interface EditorOptions {
   // （手番や駒台の先後が未決かどうかは Go 側の StudyService.Adopt が言う。
   // フロントで同じ判定を書くと 2 か所に散る）。
   onConfirm(): void;
-  // onFollow は「本譜に繋ぐ」が押されたときに呼ばれる（2026-09-14）。
-  //
-  // ⚠️ **`onConfirm` とは別の操作。** あちらは**根ごと入れ替える**（前の手順も
-  // 評価値も捨てる）、こちらは**本譜の先へ足す**（検討の枝も評価値も残る）。
-  // 中継を数手ごとに撮り直して追うのがこちら。
-  //
-  // **繋げるかの判定も、候補の並べ方も呼び出し側**（`StudyService.FollowProbe`）。
-  // ⚠️ **フロントで手順を組み立てないこと。**
-  // at は候補を並べるダイアログを出す位置（**ボタンの左下**）。
-  //
-  // ⚠️ **マウスの位置ではなくボタンの矩形から取ること** —— 押した場所が
-  // ボタンの中で動くと、同じ操作なのに毎回違うところにダイアログが出る。
-  onFollow(at: { x: number; y: number }): void;
   // onError は操作が通らなかったときの理由（「移動元が空マスです」など）。
   onError(message: string): void;
 }
@@ -185,7 +148,6 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     resetButton: resetBtn,
     onState,
     onConfirm,
-    onFollow,
     onError,
   } = opts;
 
@@ -340,15 +302,9 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   // 出口（＝確定して解析タブへ渡す）と、盤の操作の説明。**一番下**（上の ⚠️）。
   confirmHost.innerHTML = `
     <button id="edit-confirm" class="ghost-btn is-primary" type="button">この局面を解析する</button>
-    <!-- 中継を追うときの口（2026-09-14）。⚠️ **解析タブに局面が無いときだけ出さない**
-         （手順の有無では出し分けない —— 0 手の根も繋ぎ先）。
-         ⚠️ **「この局面を解析する」と入れ替えないこと** ——
-         あちらは根ごと入れ替える操作で、押し間違えると検討が全部消える。 -->
-    <button id="edit-follow" class="ghost-btn" type="button" hidden>本譜に繋ぐ</button>
-    <!-- 下見の結果（2026-09-15）。⚠️ **訂正タブの状態の行とは別にしてある** ——
-         あちらは操作の結果（失敗の理由）を出す行で、こちらは**撮った瞬間から
-         ずっと出ている情報**。同じ行に出すと互いに上書きし合う。 -->
-    <span id="follow-note" class="note"></span>
+    <!-- ⚠️ **「本譜に繋ぐ」（撮った 1 枚を本譜の先へ足す口）は外した**（2026-10-07）。
+         見失ったあとに訂正タブへ来て繋ぐのは現実的でなく、「本譜に繋ぐ」も何をするのか
+         分からなかった。**抜けた手は解析タブの盤で先端から指して補う。戻さないこと。** -->
     <span class="edit-hint">
       盤 ⇄ 駒台をドラッグ（外すと同時に持ち主が決まる） /
       <strong>「<span id="edit-stock-name">足りない駒</span>」をクリックすると掴んだまま連続で置ける</strong>（残り 0 でも置ける。Esc で離す） /
@@ -472,8 +428,6 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   };
 
   const confirmBtn = confirmHost.querySelector<HTMLButtonElement>("#edit-confirm")!;
-  const followBtn = confirmHost.querySelector<HTMLButtonElement>("#edit-follow")!;
-  const followNote = confirmHost.querySelector<HTMLElement>("#follow-note")!;
   const body = panel.querySelector<HTMLDivElement>("#edit-body")!;
   const handZones = [handZone(true), handZone(false)];
   const moveNum = panel.querySelector<HTMLInputElement>("#edit-movenum")!;
@@ -589,7 +543,6 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     confirmBtn.title = editable
       ? "この局面を解析タブへ渡します（あとから訂正タブに戻って直せます）"
       : "まだ局面がありません";
-    followBtn.disabled = !editable;
     body.hidden = !editable;
     stage.classList.toggle("is-editing", editable);
     grid.classList.toggle("is-active", editable);
@@ -1310,14 +1263,6 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   // StudyService.Adopt が言う。フロントで同じ判定を書くと 2 か所に散る）。
   confirmBtn.addEventListener("click", () => onConfirm());
 
-  // 中継を追う口（2026-09-14）。⚠️ **こちらは根を入れ替えない** ——
-  // 本譜の先に足すだけなので、検討の枝も評価値も残る。
-  // **繋がるかも、順番が決められるかも Go 側が言う**（`StudyService.FollowProbe`）。
-  followBtn.addEventListener("click", () => {
-    const r = followBtn.getBoundingClientRect();
-    onFollow({ x: r.left, y: r.bottom });
-  });
-
   resetBtn.addEventListener("click", () => {
     void apply(() => PositionService.Reset());
   });
@@ -1363,8 +1308,8 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   });
 
   return {
-    async load(boardSFEN: string, cellConfidence?: number[]) {
-      await apply(() => PositionService.Load(boardSFEN, cellConfidence ?? null));
+    async load(boardSFEN: string) {
+      await apply(() => PositionService.Load(boardSFEN));
       syncLoaded();
     },
     // 手合割の初期局面から並べ始める（入力タブの「訂正タブで調整」。2026-09-12）。
@@ -1385,20 +1330,6 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
       syncLoaded();
       resetBtn.hidden = true;
       onState(null);
-    },
-    setFollowNote(text: string, caution?: boolean) {
-      followNote.textContent = text;
-      followNote.classList.toggle("is-caution", !!caution);
-    },
-    setMismatch(list) {
-      const want = new Set(list.map((c) => `${c.rank},${c.file}`));
-      for (const cell of cells) {
-        const key = `${cell.dataset.rank},${cell.dataset.file}`;
-        cell.classList.toggle("is-mismatch", want.has(key));
-      }
-    },
-    setFollowable(ok: boolean) {
-      followBtn.hidden = !ok;
     },
     relayout: layoutGrid,
     release() {

@@ -19,7 +19,7 @@ const hirateBoard = "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL"
 func adopted(t *testing.T) *StudyService {
 	t.Helper()
 	pos := NewPositionService()
-	if _, err := pos.Load(hirateBoard, nil); err != nil {
+	if _, err := pos.Load(hirateBoard); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	if _, err := pos.SetTurn(1); err != nil { // 先手番
@@ -36,7 +36,7 @@ func adopted(t *testing.T) *StudyService {
 func adoptedFrom(t *testing.T, board string) *StudyService {
 	t.Helper()
 	pos := NewPositionService()
-	if _, err := pos.Load(board, nil); err != nil {
+	if _, err := pos.Load(board); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	if _, err := pos.SetTurn(2); err != nil { // 後手番
@@ -175,7 +175,7 @@ func TestStudyServiceGoToAndDropFrom(t *testing.T) {
 // 採り直したら手順ごと入れ替わること。**前の局面の手順を引き継がない。**
 func TestStudyServiceAdoptResetsMoves(t *testing.T) {
 	pos := NewPositionService()
-	if _, err := pos.Load(hirateBoard, nil); err != nil {
+	if _, err := pos.Load(hirateBoard); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	if _, err := pos.SetTurn(1); err != nil {

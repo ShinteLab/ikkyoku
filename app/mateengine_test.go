@@ -94,7 +94,7 @@ func TestSolveMateWithoutMateEngine(t *testing.T) {
 func TestAddLineOnMateProblemBecomesMainLine(t *testing.T) {
 	pos := NewPositionService()
 	// 1 手詰（後手玉 5一・先手歩 5三・攻方の持駒は金）。
-	if _, err := pos.Load("4k4/9/4P4/9/9/9/9/9/9", nil); err != nil {
+	if _, err := pos.Load("4k4/9/4P4/9/9/9/9/9/9"); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	if _, err := pos.SetMateProblem(true); err != nil {
