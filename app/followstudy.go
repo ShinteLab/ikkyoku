@@ -1050,8 +1050,14 @@ func (s *StudyService) FollowCells(changed []int, read []CellPiece, promo []Prom
 			State: s.State()}, nil
 	}
 	if ok, bad, got := followBackedByRead(base, since, moves, read, rotated); !ok {
-		log.Info("行き先に指した側の駒が読めません（81 マスを読みます）", "moves", moves, "マス", bad, "読んだ駒", got)
-		return FollowAuto{Kind: FollowUnreachable, Reason: "行き先に指した側の駒が読めません", State: s.State()}, nil
+		// ⚠️ **読めなくても、動く前の駒と見た目が同じなら「駒が来た」証拠にする**（2026-10-08。`followBackedByLooks`）。
+		// ゲーム画面は直前の手のマスを赤く塗り、その上の駒を認識器が空きと読む（suteme の TODO）。▲7九玉 の玉が空きに
+		// 読まれ、相手が次を指して色付けが移るまで止まった。見た目の近さは 0.982（光ったマスとつまんだ駒は 0.499）。
+		if !followBackedByLooks(base, since, moves, read, looks, promo, rotated) {
+			log.Info("行き先に指した側の駒が読めません（81 マスを読みます）", "moves", moves, "マス", bad, "読んだ駒", got)
+			return FollowAuto{Kind: FollowUnreachable, Reason: "行き先に指した側の駒が読めません", State: s.State()}, nil
+		}
+		log.Info("行き先は読めませんが、動く前の駒と見た目が同じなので駒が来たと見なします", "moves", moves, "マス", bad)
 	}
 	// ⚠️ **成らない手は、行き先の見た目が動く前の駒と同じであること**（2026-10-08。`followLooksDiffer`）。
 	// ゲーム画面で銀をつまむと、浮いた銀のマスと光った行き先のマスが変わり、「銀が 1 マス動いた」と読めてしまう。
@@ -1947,6 +1953,53 @@ func followLookPairs(since, moves []string, rotated bool) []CellPair {
 		}
 	}
 	return out
+}
+
+// followBackedByLooks は、手順 moves の行き先（`followArrivals`）が**どれも、読みか見た目で「指した側の駒が来た」と
+// 言えるか**を返す（2026-10-08）。読みで言えないマスは、成らない手の組 looks で動いた先がそのマスのもの（撮った画像の
+// 向き）に、近さ `promoSameFrom` 以上の証拠があるときだけ来たと見なす。
+//
+// ⚠️ **見た目で救うのは「空き・読めない」と読めたマスだけ**（相手の駒と読めたマスは救わない —— 読みが違うと言っている）。
+// ⚠️ **証拠が無い・間の値なら救わない**（今までどおり 81 マスを読む）。
+func followBackedByLooks(base *position.Position, since, moves []string, read []CellPiece, looks []CellPair,
+	promo []PromoEvidence, rotated bool) bool {
+	final := followBoard(base, since, moves)
+	if final == nil {
+		return false
+	}
+	for _, i := range followArrivals(base, since, moves) {
+		c, err := final.At(i/9, i%9)
+		if err != nil {
+			return false
+		}
+		cp, found := followReadAt(read, i, rotated)
+		up, readable := cellPieceUp(cp)
+		if found && readable {
+			if (up != rotated) != c.Black() {
+				return false // 相手の駒と読めた
+			}
+			continue
+		}
+		img := i
+		if rotated {
+			img = 80 - i // 解析の向き → 撮った画像の向き
+		}
+		same := false
+		for _, l := range looks {
+			if l.To != img {
+				continue
+			}
+			for _, e := range promo {
+				if e.From == l.From && e.To == l.To && e.Sim >= promoSameFrom {
+					same = true
+				}
+			}
+		}
+		if !same {
+			return false
+		}
+	}
+	return true
 }
 
 // followLooksDiffer は、成らない手の組 looks のどれかで、**行き先の見た目が動く前の駒と違う**（近さが

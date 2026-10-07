@@ -1800,6 +1800,46 @@ func TestFollowCellsChecksLooksOfPlainMove(t *testing.T) {
 	}
 }
 
+// ⚠️ **行き先が空きと読めても、動く前の駒と見た目が同じ（`promoSameFrom` 以上）なら「駒が来た」と見なすこと**
+// （2026-10-08。`followBackedByLooks`）。ゲーム画面は直前の手のマスを赤く塗り、その上の駒を空きと読む。▲7九玉 が
+// 相手の次の手まで入らなかった（実測の近さ 0.982）。⚠️ **間の値・証拠が無ければ今までどおり足さない**。
+func TestFollowCellsArrivalBackedByLooks(t *testing.T) {
+	changed := cellIdx("7f", "7e")
+	ev := func(sim float64) []PromoEvidence {
+		return []PromoEvidence{{From: cellIdx("7f")[0], To: cellIdx("7e")[0], Sim: sim}}
+	}
+	for _, tc := range []struct {
+		name    string
+		promo   []PromoEvidence
+		pending bool
+	}{
+		{"見た目が同じ", ev(0.982), true},
+		{"間の値", ev(0.72), false},
+		{"証拠が無い", []PromoEvidence{}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := promoStudy(t)
+			a, err := s.FollowCells(changed, nil, nil)
+			if err != nil || len(a.ReadCells) == 0 {
+				t.Fatalf("前提: 行き先を読むよう頼むはず: %+v（%v）", a, err)
+			}
+			read := readAfter(t, false, a.ReadCells, append(slices.Clone(promoRookLine), "7f7e")...)
+			for i := range read {
+				if read[i].Cell == cellIdx("7e")[0] {
+					read[i].Piece, read[i].Side = "", "" // 色付けの上の駒を空きと読んだ
+				}
+			}
+			a, err = s.FollowCells(changed, read, tc.promo)
+			if err != nil {
+				t.Fatalf("FollowCells: %v", err)
+			}
+			if a.Pending != tc.pending || a.Applied {
+				t.Fatalf("pending=%v, want %v: %+v", a.Pending, tc.pending, a)
+			}
+		})
+	}
+}
+
 // ⚠️ **見た目が変わっていれば、「飛」と読めていても成りで控え、確かめでも成りで足すこと。**
 // ⚠️ **同じなら不成・間の値なら今までどおり（読んだ盤で決める）。**
 func TestFollowAutoDecidesPromotionByLooks(t *testing.T) {
