@@ -1213,7 +1213,7 @@ func TestFollowCellsPendsThenConfirms(t *testing.T) {
 // ⚠️ **決まらなければ何もしないこと**（フロントが 81 マスを読み直す合図）。
 func TestFollowCellsFallsBackWhenUnclear(t *testing.T) {
 	s, _ := following(t)
-	a, err := s.FollowCells(cellIdx("5e", "4e", "5f", "4f"), nil, nil) // 手が被ったような 1 枚
+	a, err := s.FollowCells(cellIdx("5e", "4e", "5g", "4f"), nil, nil) // 手が被ったような 1 枚（5七 の歩が隠れた）
 	if err != nil {
 		t.Fatalf("FollowCells: %v", err)
 	}
@@ -1256,6 +1256,43 @@ func TestFollowCellsDropOnHighlightedCell(t *testing.T) {
 				t.Fatalf("got %+v（%v）, want %v", a.Moves, err, tc.want)
 			}
 		})
+	}
+}
+
+// ⚠️ **空きのマスだけが変わり、打つ手でも説明が付かないなら `LooksOnly`（駒は動いていない）を返すこと**
+// （2026-10-08。`followGlowOnly`）。駒台の歩をつまむと、打てるマスが光る（実機で 15 マス）。81 マスを読むと
+// 光ったマスを歩と読み、3〜5 秒かけて繋がらないだけだった。⚠️ **読むマスを頼まない・手を足さない・控えない・
+// `AtFrame` を立てない**。多い組（撮る側の上限を超える）でも同じ。
+func TestFollowCellsLooksOnlyWhenOnlyEmptyCellsGlow(t *testing.T) {
+	cases := map[string][]int{
+		"多い（打てるマスが光った）": cellIdx("1d", "1e", "1f", "2d", "2e", "2f", "3d", "3e", "3f", "4d", "4e", "4f", "5d", "5e", "5f"),
+		"少ない（打つ手は無い）":   cellIdx("5e", "4e"),
+	}
+	for name, changed := range cases {
+		t.Run(name, func(t *testing.T) {
+			s, _ := following(t)
+			a, err := s.FollowCells(changed, nil, nil)
+			if err != nil {
+				t.Fatalf("FollowCells: %v", err)
+			}
+			if !a.LooksOnly || a.Applied || a.Pending || a.AtFrame || a.NoMoves || len(a.ReadCells) > 0 {
+				t.Fatalf("空きのマスだけが光った 1 枚で LooksOnly になっていないか、余計なことをしました: %+v", a)
+			}
+		})
+	}
+}
+
+// ⚠️ **駒のあるマスが 1 つでも変わったら `LooksOnly` にしないこと**（駒が動いたかもしれない）。
+// 多い組なら今までどおり 81 マスを読む合図（`NoMoves` も立てない）。
+func TestFollowCellsNotLooksOnlyWhenAPieceCellChanged(t *testing.T) {
+	s, _ := following(t)
+	changed := cellIdx("1d", "1e", "1f", "2d", "2e", "2f", "3d", "3e", "3f", "7g") // 7七 の歩のマスも変わった
+	a, err := s.FollowCells(changed, nil, nil)
+	if err != nil {
+		t.Fatalf("FollowCells: %v", err)
+	}
+	if a.LooksOnly || a.NoMoves || a.Applied || a.Pending {
+		t.Fatalf("駒のあるマスが変わったのに LooksOnly にしたか、すぐ読む合図になっていません: %+v", a)
 	}
 }
 
