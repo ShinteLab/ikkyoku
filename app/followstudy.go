@@ -779,7 +779,7 @@ func (s *StudyService) FollowConfirm() (FollowAuto, error) {
 	}
 	if pend.board == nil {
 		// **速い経路で控えた手**（`FollowCells`）。読んだ盤は無いので、手順をそのまま足す。
-		return s.fastApply(pend.moves, true)
+		return s.fastApply(pend.moves, true, "速い経路（次の 1 枚が変わらず確かめた）", pend.why)
 	}
 	return s.baseIf(s.followFrom(pend.board, pend.cost, pend.unseen, pend.rotated))
 }
@@ -957,6 +957,8 @@ func (s *StudyService) FollowCells(changed []int, read []CellPiece, promo []Prom
 		a.NoMoves = followOccupied(base, since, mask, extra) <= 1
 		return a, err
 	}
+	// why は**この手順に決めた根拠**（手を足したときのまとめの 1 行に出す。2026-10-08。`logAdded`）。
+	var why []string
 	if len(rests) > 1 {
 		// ⚠️ **控えた手と合う候補があれば、それを採ること**（2026-10-07 に実機で踏んだ）。▲3三角成 を
 		// 81 マスの読みで控えたあと △同金 が指されると、3三 は金になって成ったかどうかが盤から消え、
@@ -1012,8 +1014,12 @@ func (s *StudyService) FollowCells(changed []int, read []CellPiece, promo []Prom
 		// 読み違えるが、見た目が変わったかは成駒を学習していなくても分かる。決まらなければ読んだマスで選ぶ。
 		if len(promo) > 0 {
 			rests = followPickByPromo(rests, promo, rotated)
+			if len(rests) == 1 {
+				why = append(why, "成・不成を見た目で決めた")
+			}
 		}
 		if len(rests) > 1 {
+			why = append(why, "違いの出るマスを読んで決めた")
 			// ⚠️ **選ぶのに使うのは違いの出るマスの読みだけ**（行き先の読みまで渡すと、駒の種類まで比べる
 			// `followCellFits` が、種類を読み違えた行き先で正しい手まで落とす）。
 			rests = followPickByRead(base, since, rests, followReadOnly(read, diff, rotated), rotated)
@@ -1058,6 +1064,9 @@ func (s *StudyService) FollowCells(changed []int, read []CellPiece, promo []Prom
 			return FollowAuto{Kind: FollowUnreachable, Reason: "行き先に指した側の駒が読めません", State: s.State()}, nil
 		}
 		log.Info("行き先は読めませんが、動く前の駒と見た目が同じなので駒が来たと見なします", "moves", moves, "マス", bad)
+		why = append(why, "行き先は見た目で確かめた（"+bad+"）")
+	} else {
+		why = append(why, "行き先を読んだ")
 	}
 	// ⚠️ **成らない手は、行き先の見た目が動く前の駒と同じであること**（2026-10-08。`followLooksDiffer`）。
 	// ゲーム画面で銀をつまむと、浮いた銀のマスと光った行き先のマスが変わり、「銀が 1 マス動いた」と読めてしまう。
@@ -1068,22 +1077,26 @@ func (s *StudyService) FollowCells(changed []int, read []CellPiece, promo []Prom
 		return FollowAuto{Kind: FollowUnreachable, Reason: "行き先の見た目が動いた駒と違います", State: s.State()}, nil
 	}
 	log.Info("変わったマスで手を割り出しました", "moves", moves, "足し済み", len(since))
+	if sims := followLookSims(looks, promo); sims != "" {
+		why = append(why, "見た目の近さ "+sims)
+	}
+	reason := strings.Join(why, "・")
 
 	k := s.takePendingPrefix(moves)
 	switch {
 	case k == 0:
 		// **初めて出た答え。** 控えて、次の 1 枚を待つ（読んだ盤は無い）。
-		s.setPending(&followPending{tip: s.mainTip(), moves: moves})
+		s.setPending(&followPending{tip: s.mainTip(), moves: moves, why: reason})
 		return FollowAuto{Kind: FollowUnique, Pending: true, Reason: "確かめています", State: s.State()}, nil
 	case k == len(moves):
-		return s.fastApply(moves, true)
+		return s.fastApply(moves, true, "速い経路（2 枚で確かめた）", reason)
 	default:
 		// **2 枚目のほうが先へ進んでいる**（`followConfirmed` と同じ）。揃った頭だけ足し、残りを控え直す。
-		a, err := s.fastApply(moves[:k], false)
+		a, err := s.fastApply(moves[:k], false, "速い経路（2 枚で確かめた・頭だけ）", reason)
 		if err != nil {
 			return a, err
 		}
-		s.setPending(&followPending{tip: s.mainTip(), moves: slices.Clone(moves[k:])})
+		s.setPending(&followPending{tip: s.mainTip(), moves: slices.Clone(moves[k:]), why: reason})
 		a.Pending, a.Reason = true, "確かめています"
 		return a, nil
 	}
@@ -1451,7 +1464,7 @@ func (s *StudyService) FrameFits(cells []int) bool {
 }
 
 // fastApply は速い経路で決まった手順を本譜の先に足す。atFrame は「これでこの 1 枚とぴったり合う」か。
-func (s *StudyService) fastApply(moves []string, atFrame bool) (FollowAuto, error) {
+func (s *StudyService) fastApply(moves []string, atFrame bool, route, why string) (FollowAuto, error) {
 	s.mu.Lock()
 	if s.study == nil {
 		s.mu.Unlock()
@@ -1466,9 +1479,63 @@ func (s *StudyService) fastApply(moves []string, atFrame bool) (FollowAuto, erro
 	if err != nil {
 		return FollowAuto{}, err
 	}
+	logAdded(route, len(main)+1, moves, text, true, why)
 	return s.baseIf(FollowAuto{Kind: FollowUnique, Applied: true, Moves: slices.Clone(moves), Text: text,
 		Added: applied.Added, Guess: true, Fit: 1, Note: applied.Note, State: applied.State,
 		AtFrame: atFrame}, nil)
+}
+
+// logAdded は**追従が手を足したことを 1 行で残す**（2026-10-08。デバッグ用のまとめ）。
+//
+// 「▲7九玉 がおかしい」と言われたとき、どの経路で・何を根拠に足したかを、この 1 行で引けるようにする
+// （それまでは前後 100 行を読んで組み立てていた）。録画の名前は撮る側が直後に「録画を残しました」で出す。
+// ⚠️ **棋譜のコメントには書かない**（KIF に書き出され、棚にも残る。人の検討と混ざる）。
+// route は経路（速い経路・81 マスの読み）、startPly は 1 手目の手数、why は根拠（無ければ空）。
+func logAdded(route string, startPly int, moves, text []string, guess bool, why string) {
+	log.Info("手を足しました（追跡）", "手数", startPly, "手", strings.Join(text, " "), "usi", strings.Join(moves, " "),
+		"経路", route, "根拠", why, "推測", guess)
+}
+
+// followProbeWhy は 81 マスの読みの下見 p から、手を足した根拠を短く組み立てる（`logAdded`）。
+func followProbeWhy(p FollowProbe) string {
+	why := []string{fmt.Sprintf("一致度 %.3f", p.Fit)}
+	switch {
+	case p.Kind == FollowChoices:
+		why = append(why, fmt.Sprintf("順番の決まらない %d 通りから 1 本目", len(p.Candidates)))
+	case p.Guess:
+		why = append(why, "候補の 1 位")
+	default:
+		why = append(why, "1 通りに繋がった")
+	}
+	if len(p.Fixed) > 0 {
+		fixed := make([]string, 0, len(p.Fixed))
+		for _, f := range p.Fixed {
+			fixed = append(fixed, f.Square+"("+f.Was+"→"+f.Now+")")
+		}
+		why = append(why, "覆したマス "+strings.Join(fixed, ","))
+	}
+	return strings.Join(why, "・")
+}
+
+// followLookSims は成らない手の見た目の近さを「7f>7e=0.977」の形で並べる（撮った画像の向き。測れた組だけ）。
+func followLookSims(looks []CellPair, promo []PromoEvidence) string {
+	var out []string
+	for _, l := range looks {
+		for _, e := range promo {
+			if e.From == l.From && e.To == l.To {
+				out = append(out, fmt.Sprintf("%s>%s=%.3f", followCellName(l.From), followCellName(l.To), e.Sim))
+			}
+		}
+	}
+	return strings.Join(out, ",")
+}
+
+// followCellName は 81 マスの番号を USI のマス（"7g"）にする（ログ用）。
+func followCellName(i int) string {
+	if i < 0 || i > 80 {
+		return "?"
+	}
+	return string([]byte{byte('9' - i%9), byte('a' + i/9)})
 }
 
 // usiCells は USI の手が動かすマス（元と行き先。打つ手は行き先だけ）。読めなければ nil。
@@ -1558,8 +1625,10 @@ func (s *StudyService) pendingStillFits(board *position.Board, cost *position.Ce
 // ⚠️ **比べるのは「本譜の先端」と「最初に足す手」**（`StudyState.Rev` ではない —— 手順を
 // クリックしただけで進むので、見ているあいだ永久に確かめられなくなる）。
 type followPending struct {
-	tip     int
-	moves   []string
+	tip   int
+	moves []string
+	// why は速い経路で決めた根拠（確かめの周で足すときにまとめの 1 行へ出す。2026-10-08）。
+	why     string
 	board   *position.Board
 	cost    *position.CellCost
 	unseen  *position.CellMask
@@ -1689,6 +1758,9 @@ func (s *StudyService) followFrom(board *position.Board, cost *position.CellCost
 			a.Guess = true
 		}
 		moves := p.Candidates[0].Moves
+		s.mu.Lock()
+		ply := len(s.study.MainLine()) + 1
+		s.mu.Unlock()
 		applied, aerr := s.followApply(moves, p.Rev, atTip)
 		if aerr != nil {
 			if a.Applied {
@@ -1697,6 +1769,7 @@ func (s *StudyService) followFrom(board *position.Board, cost *position.CellCost
 			return a, aerr
 		}
 		a.Applied = true
+		logAdded("81 マスの読み", ply, moves, p.Candidates[0].Text, p.Guess || p.Kind == FollowChoices, followProbeWhy(p))
 		a.Moves = append(a.Moves, moves...)
 		a.Text = append(a.Text, p.Candidates[0].Text...)
 		a.Added += applied.Added
