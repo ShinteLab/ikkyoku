@@ -1559,6 +1559,8 @@ func (s *CaptureService) SaveFollowFrame(number int, moves []string, guess bool)
 		log.Warn("採用した画像を残せません", "name", name, "error", err)
 		return ""
 	}
+	// 直前の「手を足しました（追跡）」と並べて、その手を決めた 1 枚に辿れるようにする（2026-10-08）。
+	log.Info("録画を残しました（追跡）", "name", name)
 	return path
 }
 
