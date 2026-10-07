@@ -357,7 +357,7 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
   const paint = () => {
     const dests = movesFromPick();
     const loaded = !!state?.loaded;
-    // 直前の手（今の局面に至った手）。**居た場所と動いた場所を薄く塗るだけ**（2026-10-07）。
+    // 直前の手（今の局面に至った手）。**居た場所を薄く塗り、動いた場所を枠で囲む**（2026-10-07。枠は 2026-10-08）。
     // ⚠️ **座標は Go が作る**（`StudyState.lastMove`。`Played` の USI をここで解釈しないこと）。
     // 打ちは移動元が -1 なので、動いた場所だけが塗られる。
     const last = loaded ? state?.lastMove ?? null : null;
