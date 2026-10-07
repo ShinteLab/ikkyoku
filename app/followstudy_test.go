@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ShinteLab/core/sfen"
 	"github.com/ShinteLab/ikkyoku/analyze"
 	"github.com/ShinteLab/ikkyoku/position"
 	"github.com/ShinteLab/ikkyoku/recognize"
@@ -1282,6 +1283,24 @@ func TestFollowCellsLooksOnlyWhenOnlyEmptyCellsGlow(t *testing.T) {
 	}
 }
 
+// ⚠️ **81 マスで読んだ 1 枚で、変わったマスに「先端では駒があるのに空きと読めたマス」があれば、「動いていない」と
+// 言わないこと**（`CellsLookUnmoved`。2026-10-08）。▲7八金 の金が直前の手の色付けで空きと読まれ、「何も指していない」の
+// 組として覚えたせいで 1 分見なかった。光ったマスを駒と読んだだけ（先端では空き）なら「動いていない」でよい。
+func TestCellsLookUnmoved(t *testing.T) {
+	s, _ := following(t)
+	// 7七 の歩が空きに読めた 1 枚（5五 は光ったマスを歩と読んだ）。
+	const seen = "lnsgkgsnl/1r5b1/ppppppppp/9/4P4/9/PP1PPPPPP/1B5R1/LNSGKGSNL"
+	if _, err := s.FollowAuto(seen, realConf(seen, 0.9), nil, nil); err != nil {
+		t.Fatalf("FollowAuto: %v", err)
+	}
+	if s.CellsLookUnmoved(cellIdx("7g", "5e")) {
+		t.Fatal("先端では駒がある 7七 が空きと読めたのに「動いていない」と言いました")
+	}
+	if !s.CellsLookUnmoved(cellIdx("5e", "4e")) {
+		t.Fatal("光ったマス（先端では空き）を駒と読んだだけなのに「動いていない」と言いませんでした")
+	}
+}
+
 // ⚠️ **駒のあるマスが 1 つでも変わったら `LooksOnly` にしないこと**（駒が動いたかもしれない）。
 // 多い組なら今までどおり 81 マスを読む合図（`NoMoves` も立てない）。
 func TestFollowCellsNotLooksOnlyWhenAPieceCellChanged(t *testing.T) {
@@ -1293,6 +1312,21 @@ func TestFollowCellsNotLooksOnlyWhenAPieceCellChanged(t *testing.T) {
 	}
 	if a.LooksOnly || a.NoMoves || a.Applied || a.Pending {
 		t.Fatalf("駒のあるマスが変わったのに LooksOnly にしたか、すぐ読む合図になっていません: %+v", a)
+	}
+}
+
+// ⚠️ **駒のあったマスが 2 つ以上変わった組では、合う手順が無くても `NoMoves` を立てないこと**（2026-10-08）。
+// 速い経路の手数を超えて指された 1 枚で、待つと次の手で跡が消える。ゲーム画面で △2三歩打 ▲2九飛 △6四桂 ▲4三歩打 の
+// 4 手が写った 1 枚を待ったあいだに △同歩 が指され、▲4三歩打 △同歩 が △4三歩 になって手番と持ち駒の歩がずれた。
+// 駒をつまんだ 1 枚（駒のあったマスは浮いた駒の 1 マスだけ）は今までどおり待つ。
+func TestFollowCellsNoMovesOnlyForAPickedPiece(t *testing.T) {
+	s, _ := following(t)
+	a, err := s.FollowCells(cellIdx("7g", "7f", "3c", "3d", "2g", "2f", "4c", "4d"), nil, nil) // 4 手が 1 枚に写った
+	if err != nil {
+		t.Fatalf("FollowCells: %v", err)
+	}
+	if a.Applied || a.Pending || a.NoMoves || a.LooksOnly {
+		t.Fatalf("速い経路の手数を超えて指された 1 枚で、待つ合図を出したか足しました: %+v", a)
 	}
 }
 
@@ -1690,6 +1724,42 @@ func TestFollowAutoAsksToComparePromotion(t *testing.T) {
 	}
 	if s.State().Rev != rev || s.pendingMoves() != nil || len(s.study.MainLine()) != len(promoRookLine) {
 		t.Fatal("頼んだだけなのに局面か控えが動きました")
+	}
+}
+
+// ⚠️ **成る手と成らない手が同点で 1 つに決まらないときも、見た目を比べてもらうこと**（2026-10-08）。
+// ゲーム画面の ▲6四銀成 で、行き先の駒を成銀とも銀とも読めず、2 通りのまま 4 秒ごとに 81 マスを読み直して
+// 110 秒かかった（見た目を比べるのは、手が 1 つに決まったときだけだった）。2三 を金と読んだ 1 枚で再現する。
+func TestFollowAutoAsksToCompareWhenPromotionTies(t *testing.T) {
+	s := promoStudy(t)
+	b, err := position.FromSFEN(boardAfter(t, append(slices.Clone(promoRookLine), "2d2c")...))
+	if err != nil {
+		t.Fatalf("FromSFEN: %v", err)
+	}
+	gold, err := position.NewCell(sfen.Gold, true, false)
+	if err != nil {
+		t.Fatalf("NewCell: %v", err)
+	}
+	if err := b.Set(2, 7, gold); err != nil { // 2三
+		t.Fatalf("Set: %v", err)
+	}
+	board := b.SFEN()
+	rev := s.State().Rev
+	a, err := s.FollowAuto(board, realConf(board, 0.9), nil, nil)
+	if err != nil {
+		t.Fatalf("FollowAuto: %v", err)
+	}
+	want := []CellPair{{From: cellIdx("2d")[0], To: cellIdx("2c")[0]}}
+	if a.Applied || a.Pending || !slices.Equal(a.Compare, want) {
+		t.Fatalf("成・不成が同点なのに見た目を比べるよう頼んでいません: %+v", a)
+	}
+	if s.State().Rev != rev || s.pendingMoves() != nil {
+		t.Fatal("頼んだだけなのに局面か控えが動きました")
+	}
+	// 証拠（見た目が変わった）を添えると、成りで控える。
+	a, err = s.FollowAuto(board, realConf(board, 0.9), nil, []PromoEvidence{{From: want[0].From, To: want[0].To, Sim: 0.4}})
+	if err != nil || !a.Pending || !slices.Equal(s.pendingMoves(), []string{"2d2c+"}) {
+		t.Fatalf("証拠を添えたのに成りで控えていません: %+v（%v） pending=%v", a, err, s.pendingMoves())
 	}
 }
 

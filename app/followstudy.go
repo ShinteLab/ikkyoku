@@ -660,6 +660,9 @@ func (s *StudyService) FollowAuto(boardSFEN string, cellConfidence []float64, ce
 	// ⚠️ **成・不成の見た目の証拠は、下見の前に盤へ書き込むこと**（2026-10-07。`followApplyPromo`）。
 	// 下見・控え・確かめが同じ盤を見るので、2 枚目でも同じ答えになる。
 	s.followApplyPromo(board, cost, promo, rotated)
+	s.mu.Lock()
+	s.lastFrame = board
+	s.mu.Unlock()
 	// ⚠️ **修復してよいのは費用表があるときだけ**。
 	// 確信度が無ければ**どのマスを覆してよいかの根拠が無い**ので、厳密一致に倒す。
 	p, e := s.followProbe(board, cost, unseen, cost != nil, rotated)
@@ -678,6 +681,19 @@ func (s *StudyService) FollowAuto(boardSFEN string, cellConfidence []float64, ce
 				log.Info("成りも不成も指せる手があるので、見た目を比べます", "moves", moves, "組", len(pairs))
 				return FollowAuto{Kind: FollowChoices, Reason: "成・不成を見た目で確かめます", Compare: pairs,
 					Fit: p.Fit, Unseen: unseen.Count(), State: s.State()}, nil
+			}
+		}
+	}
+	if !ok && promo == nil {
+		// ⚠️ **成る手と成らない手だけで分かれて決まらないときも、見た目を比べてもらう**（2026-10-08。`followPromoOnly`）。
+		// ゲーム画面の ▲6四銀成 で、行き先を成銀とも銀とも読めず 2 通りのまま、4 秒ごとに 81 マスを読み直して 110 秒かかった。
+		if pm := followPromoOnly(p); pm != nil {
+			if base, since, _, bok := s.followFromBase(); bok {
+				if pairs := followPromoPairs(base, since, pm, rotated); len(pairs) > 0 {
+					log.Info("成りと不成で分かれたので、見た目を比べます", "moves", pm, "組", len(pairs))
+					return FollowAuto{Kind: FollowChoices, Reason: "成・不成を見た目で確かめます", Compare: pairs,
+						Fit: p.Fit, Unseen: unseen.Count(), State: s.State()}, nil
+				}
 			}
 		}
 	}
@@ -934,8 +950,11 @@ func (s *StudyService) FollowCells(changed []int, read []CellPiece, promo []Prom
 	if len(rests) == 0 {
 		// ⚠️ **合う手順が 1 つも無いことを添えること**（`NoMoves`。2026-10-08）。フロントはすぐ 81 マスを読まず、
 		// 組が変わるのを待つ（駒を掴んで行き先が光っているだけの 1 枚が多い）。
+		// ⚠️ **ただし駒のあったマスが 2 つ以上変わった組は待たない**（`followOccupied`）—— 駒をつまんだときに駒のあったマスで
+		// 変わるのは浮いた駒の 1 マスだけ。それより多いのは、速い経路の手数（`followCellsDepth`）を超えて指された 1 枚で、
+		// 待つと次の手で跡が消える（▲4三歩打 △同歩 が △4三歩 になり、手番と持ち駒の歩がずれた）。すぐその 1 枚を読む。
 		a, err := unclear(0, nil)
-		a.NoMoves = true
+		a.NoMoves = followOccupied(base, since, mask, extra) <= 1
 		return a, err
 	}
 	if len(rests) > 1 {
@@ -1081,6 +1100,64 @@ func followGlowOnly(base *position.Position, since []string, mask, extra *positi
 		}
 	}
 	return n > 0, n
+}
+
+// CellsLookUnmoved は、**直前に 81 マスで読んだ 1 枚（`FollowAuto`）で、変わったマス cells に「本譜の先端では駒が
+// あるのに空きと読めたマス」が無いか**を返す（2026-10-08）。cells は撮った画像の向きの番号（`CaptureResult.Cells`）。
+//
+// フロントは 81 マスの読みが「何も指していない」だったとき、これが真なら `CaptureService.CellsUnmoved` でその組を
+// 覚えさせる（続くあいだ読み直さない）。⚠️ **駒が空いて見えるマスがあれば偽** —— 駒が動いた跡かもしれない。
+// ゲーム画面で ▲7八金 の金が直前の手の赤い色付けで空きと読まれ、6九 が空いたのも安く数えられて「何も指していない」に
+// なった。その組を覚えたせいで 10 秒ごとの保険でしか見なくなり、▲7八金 が入るまで 1 分かかった。
+// 駒をつまんで行き先が光っている 1 枚では、浮いた駒はそのマスに読め、光ったマスは空きのマスなので真になる。
+func (s *StudyService) CellsLookUnmoved(cells []int) bool {
+	mask := s.cellsMask(cells)
+	s.mu.Lock()
+	frame := s.lastFrame
+	var tip *position.Position
+	if s.study != nil {
+		_, tip, _ = s.study.MainTip()
+	}
+	s.mu.Unlock()
+	if frame == nil || tip == nil || mask.Count() == 0 {
+		return false
+	}
+	for r := 0; r < 9; r++ {
+		for f := 0; f < 9; f++ {
+			if !mask[r][f] {
+				continue
+			}
+			want, err1 := tip.Board.At(r, f)
+			got, err2 := frame.At(r, f)
+			if err1 != nil || err2 != nil || (!want.IsEmpty() && got.IsEmpty()) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// followOccupied は、変わったマス mask のうち色付けのマス（extra）を除いて、**比べる相手の局面か先端で駒があるマス**の数を返す
+// （2026-10-08。`NoMoves` を立てるか）。駒をつまんだ 1 枚では浮いた駒の 1 マスだけになる。
+func followOccupied(base *position.Position, since []string, mask, extra *position.CellMask) int {
+	tip := followBoard(base, since, nil)
+	n := 0
+	for r := 0; r < 9; r++ {
+		for f := 0; f < 9; f++ {
+			if !mask[r][f] || (extra != nil && extra[r][f]) {
+				continue
+			}
+			was, _ := base.Board.At(r, f)
+			now := was
+			if tip != nil {
+				now, _ = tip.At(r, f)
+			}
+			if !was.IsEmpty() || !now.IsEmpty() {
+				n++
+			}
+		}
+	}
+	return n
 }
 
 // followLooksOnly は「変わったのは空きのマスだけで、駒は動いていない」と返す（`LooksOnly`）。
@@ -1826,6 +1903,31 @@ func followPromoPairs(base *position.Position, since, moves []string, rotated bo
 		}
 	}
 	return out
+}
+
+// followPromoOnly は、下見の候補が**同じ手順で、成るか成らないかだけが違う**なら、その手順（1 本目）を返す（2026-10-08）。
+// そうでなければ nil。⚠️ **並べきれなかった（`More`）なら nil**（見えていない候補がある）。
+func followPromoOnly(p FollowProbe) []string {
+	if len(p.Candidates) < 2 || p.More {
+		return nil
+	}
+	first := p.Candidates[0].Moves
+	split := false
+	for _, c := range p.Candidates[1:] {
+		if len(c.Moves) != len(first) {
+			return nil
+		}
+		for i, m := range c.Moves {
+			if strings.TrimSuffix(m, "+") != strings.TrimSuffix(first[i], "+") {
+				return nil
+			}
+			split = split || m != first[i]
+		}
+	}
+	if !split {
+		return nil
+	}
+	return first
 }
 
 // followBothLegal は局面 p で、成らない手 plain と成る手 plain+"+" の両方が合法か。
