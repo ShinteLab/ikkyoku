@@ -5,7 +5,7 @@
 //
 // **エンジンは USI を話す相手**（`core/usi/client`）。Go の関数として import しない。
 // 繋ぎ先はやねうら王でも `prokishi.exe` でも自作 `engine` でもよく、
-// **ここから上のコードは違いを知らない**（`_docs/phase4-engine-usi.md` の案 B）。
+// **ここから上のコードは違いを知らない**（`_docs/design-engine.md` の Phase 4）。
 //
 // ⚠️ **正式な SFEN を要求するのはここだけ。** 手番と駒台の先後が決まっていないと
 // 評価値は出せない（`position.Position.SFEN` がエラーを返す状態では呼べない）。

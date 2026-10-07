@@ -18,7 +18,7 @@ import (
 //
 // **エンジンは USI を話す相手**（`analyze` → `core/usi/client`）。同梱の `engine` でも
 // 外部エンジンの exe でも `prokishi.exe` でも、ここは変わらない
-// （`_docs/phase4-engine-usi.md`）。
+// （`_docs/design-engine.md` の Phase 4）。
 //
 // ⚠️ **エンジンのプロセスは解析タブに居るあいだ生きる**（2026-08-12 に変えた。
 // 以前は「1 回の解析のあいだだけ」だった）。接続は登録 ID ごとに持ち回り、

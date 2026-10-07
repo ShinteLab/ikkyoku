@@ -717,7 +717,7 @@ func NextPieceFontID(fonts []PieceFontEntry) string {
 //
 // **繋ぎ先は「USI を話すプロセス」なら何でもよい**（やねうら王・水匠・prokishi.exe）。
 // 検討ツールとして実用になるかは繋ぐエンジンの棋力で決まるので、そこを差し替え
-// られるようにしてある（`_docs/phase4-engine-usi.md`）。
+// られるようにしてある（`_docs/design-engine.md` の Phase 4）。
 type EngineEntry struct {
 	// ID は一覧の中でこのエンジンを指す識別子。**設定ファイルの中だけで通じればよい。**
 	//

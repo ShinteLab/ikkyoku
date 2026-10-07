@@ -6,7 +6,7 @@ description: ikkyoku（一局）をクラウド（Claude Code on the web の Lin
 # ikkyoku-cloud — クラウドで触るとき
 
 ⚠️ **クラウドで動いているときだけ読む**（`CLAUDE_CODE_REMOTE=true`）。手元（Windows）での
-ビルドと確認はスキル `ikkyoku-build` / `ikkyoku-verify`。
+ビルドはスキル `ikkyoku-build`。
 
 クラウドのコンテナは**Linux で、セッションごとに作り直される**（入れたものは次のセッションに残らない）。
 ikkyoku は Windows のアプリなので、**そのままでは組めない・テストできないところ**がある。
@@ -58,7 +58,7 @@ bash _docs/skills/ikkyoku-cloud/cloud.sh setup   # wails3・bindings・npm だ�
 ## クラウドではできないこと
 
 - **アプリを起動して触ること**（画面キャプチャ・ホットキー・Wails のウィンドウ）。実機で見てほしいことは
-  作業の終わりの返答とコミットメッセージに書いて、手元で見てもらう（スキル `ikkyoku-verify`）
+  作業の終わりの返答とコミットメッセージに書いて、手元で見てもらう（`AGENTS.md` の「ビルドと実機確認」）
 - **`_cmd/ikkyoku` のテスト**（Wails の Linux 版は cgo が要る）。`check` は build/vet まで
 - **兄弟のリポジトリへの push**（suteme などは読むだけ。タグは手元で打ってもらう。
   ⚠️ **打ってもらったら、引く前にタグの位置を確かめること** —— スキル `ikkyoku-build` の「タグを付け直さない」）

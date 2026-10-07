@@ -5,7 +5,6 @@
 | ディレクトリ | 中身 |
 |---|---|
 | `ikkyoku-build/` | ビルド・bindings の生成・配布ビルド（焼き込み）・兄弟のモジュールのタグの上げ方 |
-| `ikkyoku-verify/` | 実機の確かめ方（ビルドして起動する・画面を撮る・ピクセルを数える・ハーネス・ログ）と、実機で見てほしいことの伝え方 |
 | `ikkyoku-follow/` | 中継の追従の調整とデバッグ（症状から引く表・録画とログの読み方・ふるいの定数・`references/measurements.md` = 速さの実測） |
 | `ikkyoku-cloud/` | クラウド（Claude Code on the web の Linux コンテナ）で組む・テストする `cloud.sh`。⚠️ **`CLAUDE_CODE_REMOTE=true` のときだけ使う** |
 | `ikkyoku-handicap-mate/` | 手合割（駒落ち）と詰将棋の全体像・詰将棋エンジンを繋ぐ手順（`references/engines.md` = どのエンジンが何を返すかの実測） |
@@ -16,7 +15,7 @@
   ここへジャンクション（シンボリックリンク）を張る。例（PowerShell、リポジトリ直下で）:
 
   ```powershell
-  New-Item -ItemType Junction -Path .claude\skills\ikkyoku-verify -Target (Resolve-Path _docs\skills\ikkyoku-verify)
+  New-Item -ItemType Junction -Path .claude\skills\ikkyoku-follow -Target (Resolve-Path _docs\skills\ikkyoku-follow)
   ```
 
 - ⚠️ **worktree（`.claude/worktrees/<名前>/`）の `.claude/skills` にはジャンクションを張らない。**

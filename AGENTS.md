@@ -114,7 +114,6 @@ Claude Code でスキルとして使いたい人は、各自の `.claude/skills/
 | 置き場所 | 中身 | 引くとき |
 |---|---|---|
 | スキル **`ikkyoku-build`**（`_docs/skills/`） | **ビルド・bindings の生成・配布ビルド（焼き込み）・バージョンの上げ方・常用場所への配置（`local:deploy`）・兄弟のモジュールのバージョンの上げ方** | ビルドが通らないとき / 配るとき |
-| スキル **`ikkyoku-verify`**（`_docs/skills/`） | **実機の確かめ方**（ビルドして起動する・画面を撮って見る・ピクセルを数える・ハーネス・ログ）と、⚠️ **実機で見てほしいことの伝え方** | 実装が終わって実機で触るとき |
 | スキル **`ikkyoku-follow`**（`_docs/skills/`） | **中継の追従の調整とデバッグ**（症状から引く表・録画とログの読み方・ふるいの定数の詰め方・速さの実測） | 追従が進まないとき / 定数を詰めるとき |
 | スキル **`ikkyoku-handicap-mate`**（`_docs/skills/`） | **手合割（駒落ち）と詰将棋の全体像**（3 通りの解釈・4 つの入口・側の呼び名）と**詰将棋エンジンを繋ぐ手順**、⚠️ **どのエンジンが何を返すかの実測**（`references/engines.md`） | 駒落ち・詰将棋・詰み探索を触るとき |
 | スキル **`ikkyoku-cloud`**（`_docs/skills/`） | **クラウド（Linux コンテナ）で組む・テストする 1 コマンド**（`cloud.sh test` / `check`）と、使用量を抑える約束。⚠️ **`CLAUDE_CODE_REMOTE=true` のときだけ読む**（手元では要らない） | クラウドで動いているとき（**手探りで準備する前に**） |
@@ -126,7 +125,6 @@ Claude Code でスキルとして使いたい人は、各自の `.claude/skills/
 | **`_docs/design-*.md`** | **Phase ごとの「なぜそう決めたか」**（`capture` = Phase 0〜2 / `position` = 3/5 / `engine` = 4/5 / `follow` = 6） | 下の「崩さないこと」を覆すとき |
 | `_docs/phase0-capture.md` | Phase 0 の検証（なぜ Chrome 拡張をやめたか）の全文 | まず要らない（結論は `_docs/design-capture.md`） |
 | `_docs/blackscreen.md` | 「メイン画面が真っ黒になる」の調査ログ | **次に黒くなったとき** |
-| `_docs/phase4-engine-usi.md` | Phase 4 の案 A / 案 B の比較と Step の切り方 | エンジン接続の設計を疑うとき |
 | `TODO.md`（このリポジトリ） | まだ実装していないもの（**本譜のロック**・追従の見直し・Phase から持ち越した項目） | 手順まわりを触るとき / 次に何をするか決めるとき |
 
 ⚠️ **制約（「⚠️ …しないこと」）を外に出さないこと。** あれは**触ったときに読まれる場所**に
@@ -268,7 +266,7 @@ Claude Code でスキルとして使いたい人は、各自の `.claude/skills/
 | `piecefont/` / `training/` | 端末のフォントから駒の字を焼く / 訂正した局面を `suteme` へ登録するクライアント |
 | `_cmd/ikkyoku/` | **Wails3 アプリ**（独立したネストモジュール。**Wails の口が要るものだけ**。CLI は無い）。ウィンドウ 5 枚（枠 / メイン画面 / 評価値グラフ / 候補手 / 手順）・キャプチャ領域は枠のクライアント矩形そのもの。`_cmd/ikkyoku/AGENTS.md`、画面は `_cmd/ikkyoku/frontend/src/AGENTS.md` |
 
-## ビルドと実機確認 — スキル `ikkyoku-build` / `ikkyoku-verify`
+## ビルドと実機確認 — スキル `ikkyoku-build`
 
 ```powershell
 go build ./...      # app / guide / position / analyze / recognize / legal / piecefont / training / usi
@@ -283,7 +281,8 @@ go test ./...
 - ⚠️ **Wails は手元の CLI に追従している**（beta.26）。スキル `wails3` は alpha2.117 前提なので食い違う
 - ⚠️ **実機で押していないものは、作業の終わりの返答とコミットメッセージに「実機で見てほしいこと」として書くこと**
   （「型とテストが通った」を「動いた」と言わない）。⚠️ **積み上げる文書（チェックリスト）を作らないこと** ——
-  2026-10-07 にやめた（足すばかりで誰も読んでいなかった。スキル `ikkyoku-verify`）
+  2026-10-07 にやめた（足すばかりで誰も読んでいなかった）。**1 項目 1 行**で、何を押して何が見えれば良いか。
+  ログで分かるなら出るはずのログの文を添える
 - go.mod・`go mod tidy`・兄弟のモジュールのバージョンの上げ方はスキル `ikkyoku-build`
 
 ## テスト方針

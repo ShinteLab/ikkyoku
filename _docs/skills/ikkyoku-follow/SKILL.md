@@ -186,4 +186,3 @@ python _docs/skills/ikkyoku-follow/references/promo_similarity.py --logs "_cmd/i
 | `_docs/app-follow.md` | `followProbe` / `followApply` / `FollowAuto`（推測の印・先端を見ていたときだけ動かす・訂正タブを通さない・`Flipped`） |
 | `_docs/cmd-capture.md` | 枠の札・1 周の予約・ふるい（`gate` / `detectGate`）・録画 |
 | `TODO.md` 3・4 | 目線を先に決めさせる話・追従の作りの見直し（未決） |
-| スキル `ikkyoku-verify` | 実機の確かめ方 |
