@@ -15,6 +15,7 @@ package main
 //   - **説明の付かない組（`CellsUnclear`）は盤全体が止まっていても待つ上限まで待つこと**（2026-10-08。組が変われば待たない）
 //   - **81 マスで「何も指していない」と出た組・光っているだけの組（`CellsUnmoved`）は「変わっていない」に数えること**（2026-10-08。保険は残る）
 //   - **変わったマスが多い組も解析タブ側へ渡すこと**（2026-10-08。光っているだけかはあちらが決める）
+//   - **81 マスの読みで手が見つかったら「動いていない」組を忘れること**（2026-10-08。`ForgetUnmoved`）
 
 import (
 	"image"
@@ -324,6 +325,22 @@ func TestSetCellBaseForgetsUnmovedCells(t *testing.T) {
 	s.SetCellBase()
 	if s.cellsUnmoved.ok {
 		t.Fatalf("比べる相手を替えたのに残っています: %+v", s.cellsUnmoved)
+	}
+}
+
+// ⚠️ **81 マスの読みで手が見つかったら、「駒は動いていない」組を忘れること**（`ForgetUnmoved`。2026-10-08）。
+// 覚えたままだと次の 1 枚が `same` で省かれ、控えが捨てられて確かめが次の保険（10 秒後）まで延びた。
+func TestForgetUnmovedReadsTheSetAgain(t *testing.T) {
+	s := gameService(t)
+	lifted := 7*9 + 1
+	s.lastQuiet = gameFrame(0, lifted)
+	s.CellsUnmoved()
+	if got := s.gateImg(gameFrame(1, lifted)); got != cellSkipSame {
+		t.Fatalf("前提: 覚えた組は省くはず: %q", got)
+	}
+	s.ForgetUnmoved()
+	if got := s.gateImg(gameFrame(2, lifted)); got == cellSkipSame {
+		t.Fatalf("忘れたのにまだ省きました: %q", got)
 	}
 }
 

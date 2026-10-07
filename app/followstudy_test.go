@@ -1282,6 +1282,24 @@ func TestFollowCellsLooksOnlyWhenOnlyEmptyCellsGlow(t *testing.T) {
 	}
 }
 
+// ⚠️ **81 マスで読んだ 1 枚で、変わったマスに「先端では駒があるのに空きと読めたマス」があれば、「動いていない」と
+// 言わないこと**（`CellsLookUnmoved`。2026-10-08）。▲7八金 の金が直前の手の色付けで空きと読まれ、「何も指していない」の
+// 組として覚えたせいで 1 分見なかった。光ったマスを駒と読んだだけ（先端では空き）なら「動いていない」でよい。
+func TestCellsLookUnmoved(t *testing.T) {
+	s, _ := following(t)
+	// 7七 の歩が空きに読めた 1 枚（5五 は光ったマスを歩と読んだ）。
+	const seen = "lnsgkgsnl/1r5b1/ppppppppp/9/4P4/9/PP1PPPPPP/1B5R1/LNSGKGSNL"
+	if _, err := s.FollowAuto(seen, realConf(seen, 0.9), nil, nil); err != nil {
+		t.Fatalf("FollowAuto: %v", err)
+	}
+	if s.CellsLookUnmoved(cellIdx("7g", "5e")) {
+		t.Fatal("先端では駒がある 7七 が空きと読めたのに「動いていない」と言いました")
+	}
+	if !s.CellsLookUnmoved(cellIdx("5e", "4e")) {
+		t.Fatal("光ったマス（先端では空き）を駒と読んだだけなのに「動いていない」と言いませんでした")
+	}
+}
+
 // ⚠️ **駒のあるマスが 1 つでも変わったら `LooksOnly` にしないこと**（駒が動いたかもしれない）。
 // 多い組なら今までどおり 81 マスを読む合図（`NoMoves` も立てない）。
 func TestFollowCellsNotLooksOnlyWhenAPieceCellChanged(t *testing.T) {

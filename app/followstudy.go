@@ -660,6 +660,9 @@ func (s *StudyService) FollowAuto(boardSFEN string, cellConfidence []float64, ce
 	// ⚠️ **成・不成の見た目の証拠は、下見の前に盤へ書き込むこと**（2026-10-07。`followApplyPromo`）。
 	// 下見・控え・確かめが同じ盤を見るので、2 枚目でも同じ答えになる。
 	s.followApplyPromo(board, cost, promo, rotated)
+	s.mu.Lock()
+	s.lastFrame = board
+	s.mu.Unlock()
 	// ⚠️ **修復してよいのは費用表があるときだけ**。
 	// 確信度が無ければ**どのマスを覆してよいかの根拠が無い**ので、厳密一致に倒す。
 	p, e := s.followProbe(board, cost, unseen, cost != nil, rotated)
@@ -1081,6 +1084,41 @@ func followGlowOnly(base *position.Position, since []string, mask, extra *positi
 		}
 	}
 	return n > 0, n
+}
+
+// CellsLookUnmoved は、**直前に 81 マスで読んだ 1 枚（`FollowAuto`）で、変わったマス cells に「本譜の先端では駒が
+// あるのに空きと読めたマス」が無いか**を返す（2026-10-08）。cells は撮った画像の向きの番号（`CaptureResult.Cells`）。
+//
+// フロントは 81 マスの読みが「何も指していない」だったとき、これが真なら `CaptureService.CellsUnmoved` でその組を
+// 覚えさせる（続くあいだ読み直さない）。⚠️ **駒が空いて見えるマスがあれば偽** —— 駒が動いた跡かもしれない。
+// ゲーム画面で ▲7八金 の金が直前の手の赤い色付けで空きと読まれ、6九 が空いたのも安く数えられて「何も指していない」に
+// なった。その組を覚えたせいで 10 秒ごとの保険でしか見なくなり、▲7八金 が入るまで 1 分かかった。
+// 駒をつまんで行き先が光っている 1 枚では、浮いた駒はそのマスに読め、光ったマスは空きのマスなので真になる。
+func (s *StudyService) CellsLookUnmoved(cells []int) bool {
+	mask := s.cellsMask(cells)
+	s.mu.Lock()
+	frame := s.lastFrame
+	var tip *position.Position
+	if s.study != nil {
+		_, tip, _ = s.study.MainTip()
+	}
+	s.mu.Unlock()
+	if frame == nil || tip == nil || mask.Count() == 0 {
+		return false
+	}
+	for r := 0; r < 9; r++ {
+		for f := 0; f < 9; f++ {
+			if !mask[r][f] {
+				continue
+			}
+			want, err1 := tip.Board.At(r, f)
+			got, err2 := frame.At(r, f)
+			if err1 != nil || err2 != nil || (!want.IsEmpty() && got.IsEmpty()) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // followLooksOnly は「変わったのは空きのマスだけで、駒は動いていない」と返す（`LooksOnly`）。

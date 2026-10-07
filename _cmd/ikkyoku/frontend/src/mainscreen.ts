@@ -2928,7 +2928,15 @@ ${st.turnLabel}${n}`;
     if (got.kind === "same" && !got.atFrame && cells && cells.length > 0) {
       // **81 マスを読んだら何も指していなかったのに、変わったマスがある**（駒を掴んで行き先が光っている。2026-10-08）。
       // その組を覚えさせ、続くあいだは読み直させない（同じ組を 20 秒で 5 回読んでいた。保険の 1 枚は残る）。
-      void CaptureService.CellsUnmoved();
+      // ⚠️ **駒が空いて見えるマスがあれば覚えさせない**（`CellsLookUnmoved`）—— 色付けで読めない駒が動いた跡かもしれない
+      // （▲7八金 を覚えた組のせいで 1 分見なかった）。
+      if (await StudyService.CellsLookUnmoved(cells)) {
+        void CaptureService.CellsUnmoved();
+      }
+    } else if (got.pending || got.applied) {
+      // **手が見つかった**。「動いていない」と覚えた組なら忘れさせる（次の 1 枚が `same` で省かれて控えが捨てられ、
+      // 確かめが次の保険まで延びる）。
+      void CaptureService.ForgetUnmoved();
     }
     // ⚠️ **先端と合った 1 枚だけを、速い経路の比べる相手にする**（判断は Go 側）。81 マスの読みで
     // ぴったり合った（`atFrame`）か、比べる相手から変わったマスが足した手で説明できた（`FrameFits`）とき。

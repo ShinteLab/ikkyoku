@@ -57,6 +57,8 @@ type StudyService struct {
 	pending *followPending
 	// cellBase は**速い経路の比べる相手の 1 枚が、どの局面だったか**（`followBase`。2026-10-07）。
 	cellBase *followBase
+	// lastFrame は**追従が最後に 81 マスで読んだ盤**（解析の向き。2026-10-08。`CellsLookUnmoved` が使う）。
+	lastFrame *position.Board
 	// study は確定した局面を根にした検討（手順を含む）。まだ採っていなければ nil。
 	//
 	// ⚠️ **局面を単体で持たない。** 「今の局面」は根 + 手順から組み立てるもので、
