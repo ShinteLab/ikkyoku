@@ -40,8 +40,8 @@ ABEMA でも YouTube でもキャプチャボードでも同じ経路で扱え�
 
 ## なぜ Chrome 拡張ではなくネイティブなのか（経緯）
 
-最初のプロトタイプは Chrome 拡張（MV3）だった（検証コードは Phase 0 完了後に削除済み。
-結果は [`_docs/phase0-capture.md`](_docs/phase0-capture.md) の表に記録してある）。要点だけ書くと以下の通り。
+最初のプロトタイプは Chrome 拡張（MV3）だった（検証コードは Phase 0 完了後に削除済み）。
+要点だけ書くと以下の通り。
 
 - ABEMA は盤面データを通信でも DOM でも流していない（映像に焼き込んで配信している）
 - `<video>` → canvas の `drawImage`、および `chrome.tabs.captureVisibleTab` はどちらも
