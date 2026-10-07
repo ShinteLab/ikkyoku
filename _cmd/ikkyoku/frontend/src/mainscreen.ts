@@ -2669,7 +2669,13 @@ ${st.turnLabel}${n}`;
   // ⚠️ **確定しているかの判定は Go 側（StudyService.Adopt）に任せる。** 手番か
   // 駒台の先後が未決ならエラーが返るので、そのまま訂正タブに出して留まる
   // （フロントで同じ判定を書くと 2 か所に散る）。
-  const adoptToStudy = async () => {
+  //
+  // follow が真なら「そのまま追跡」（2026-10-08）—— 渡して解析タブへ移ったあと、
+  // **盤の下の「中継を追う」を押すのと同じ**ことをする（入口を 2 本にしない）。
+  // ⚠️ **渡せなかったら追い始めない**（訂正タブに留まって理由を出す）。
+  // ⚠️ **本譜へ繋ぐ口ではない** —— この局面を**新しい根**にして、そこから追う
+  // （「本譜に繋ぐ」を外した理由は `_docs/design-follow.md`）。
+  const adoptToStudy = async (follow = false) => {
     // ⚠️ **根が入れ替わるので、中継を追っていたら聞いて止める**（`followguard.ts`）。
     if (!(await confirmStopFollow("この局面を解析する"))) {
       return;
@@ -2691,6 +2697,11 @@ ${st.turnLabel}${n}`;
     // **あとから解析タブのボタンで自由に戻せる。**
     setStudyViewpoint(!editNearWhite);
     selectTab(studyTab);
+    // ⚠️ **追っていたなら上の確認で止まっている**ので、ここでは必ず「入れる」側になる。
+    // 念のため入っているときは押さない（押すと止まる）。
+    if (follow && !followOn) {
+      studyFollowBtn.click();
+    }
   };
 
   // ---- 中継を追う（2026-09-15）------------------------------------------
@@ -4073,8 +4084,8 @@ ${st.turnLabel}${n}`;
       showSfenNote(st.analyzeSfen && st.analyzeSfen !== st.sfen ? st.analyzeSfen : "");
       fillWarnings(boardWarnings, st.warnings ?? []);
     },
-    onConfirm: () => {
-      void adoptToStudy();
+    onConfirm: (follow) => {
+      void adoptToStudy(follow);
     },
     onError: (message) => {
       // **訂正タブの中に出す。** 撮影の結果（入力タブの #status）とは別の話で、
