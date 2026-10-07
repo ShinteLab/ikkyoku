@@ -125,7 +125,8 @@ type FollowProbe struct {
 	// `Was` が認識結果、`Now` が**本譜から辿るとそうなるはずの駒**なので、
 	// **そのまま直し方の指示になる。**
 	Mismatch []FollowFix `json:"mismatch"`
-	// Unsettled は**行き先が決まっていない候補**を並べたか（`fallbackFollow` だけが立てる）。
+	// Unsettled は**行き先が決まっていない候補**を並べたか（`fallbackFollow` と、行き着く局面が
+	// 揃わない `Connect` の解。`followSameEnd`）。
 	//
 	// ⚠️ **`FollowChoices` には 2 つの意味がある。** `Connect` の解（行き着く局面は同じで、
 	// 順番だけが決まらない）と、`Rank` の 1 手の候補（**行き着く局面がそれぞれ違う**）。
@@ -209,6 +210,9 @@ func (s *StudyService) followProbe(board *position.Board, cost *position.CellCos
 	var ranked position.RankResult
 	// arrived は「何も指していない」が 1 位なのに、駒が来たマスがあったので先を探しに行ったか。
 	arrived := false
+	// decided は `Rank` が 1 手で決めたが、その手のあとにも指された跡が残ったので先を探しに行ったときの答え
+	// （`Connect` が繋げなければこれを返す）。
+	var decided *FollowProbe
 	if fromImage {
 		got, rerr := position.Rank(from, board, opt)
 		if rerr == nil && len(got.Candidates) > 0 {
@@ -258,7 +262,18 @@ func (s *StudyService) followProbe(board *position.Board, cost *position.CellCos
 					Moves: top.Moves,
 					Text:  followText(rootSfen, main, top.Moves),
 				}}
-				return out, nil
+				// ⚠️ **その手のあとにも指された跡が残るなら、先を探してから決める**（2026-10-07 に実機で踏んだ）。
+				// △6五桂 ▲同桂 △同歩 ▲2四歩 を 1 枚で撮ると、▲2四歩 だけで 1 位になる（7七・6四 が空いたのは
+				// 空きの読みで安い）。それを採ると ▲同桂 △同歩 が落ちて局面がずれ、その先が全部繋がらなくなった。
+				// ⚠️ **繋がらなければ今までどおりこの手を返す**（深く探すのは確かめのためだけ）。
+				if !followArrived(top.Fixed, cost) {
+					return out, nil
+				}
+				d := out
+				decided = &d
+				out = FollowProbe{Rev: rev, Candidates: []FollowChoice{}, Fit: top.Fit}
+				log.Info("1 位の手のあとにも指された跡があるので先を探します",
+					"tip", tipID, "moves", top.Moves, "rotated", rotated)
 			}
 		}
 	}
@@ -267,22 +282,35 @@ func (s *StudyService) followProbe(board *position.Board, cost *position.CellCos
 	// （CM を挟んで飛んだとき）。⚠️ **時間がかかるのはこちらだけ。**
 	ctx, cancel := context.WithTimeout(context.Background(), followTimeout)
 	defer cancel()
-	r, err := position.Connect(ctx, from, board, opt)
+	// ⚠️ **手や頭が被った 1 枚では、深く繋ぐのは厳密一致だけにする**（2026-10-07）。見えないマスの周りは
+	// 読みが崩れていて、安いマスを見逃せる修復では偽の手順が予算に収まる（手が覆った 1 枚から
+	// ▲1六香 △2六桂 ▲同飛 を繋いだ）。1 手なら `Rank` が拾い、手がどいた次の 1 枚で入る。
+	copt := opt
+	if unseen.Count() > 0 {
+		copt.Tolerance = 0
+	}
+	r, err := position.Connect(ctx, from, board, copt)
 	if err != nil {
 		return FollowProbe{}, err
 	}
+	// scattered は**答えが複数あり、行き着く局面が揃わない**か（`followSameEnd`）。
+	scattered := r.Stop == position.StopFound && !r.Unique && !r.More && !followSameEnd(from, r.Solutions)
 	log.Info("本譜の先に繋げるか下見しました",
 		"tip", tipID, "stop", r.Stop.String(), "depth", r.Depth,
 		"candidates", len(r.Solutions), "nodes", r.Nodes,
 		"cost", r.Cost, "fixed", len(r.Fixed), "rotated", rotated)
 
+	// ⚠️ **1 手で決まっていたなら、それより深く繋がったときだけ乗り換える**（`decided`。並べきれないときは乗り換えない）。
+	if decided != nil && (r.Stop != position.StopFound || r.More || scattered || r.Depth <= decided.Depth) {
+		return *decided, nil
+	}
 	out.Depth = r.Depth
 	// ⚠️ **駒が来たので探しに来ただけなら、足せる答えが出なければ元の「変わっていない」に戻すこと**
 	// （`followArrived`）。読みの揺れで来たように見えただけの 1 枚を「繋がらない」にすると、
 	// 「見失っています」に数えられる。⚠️ **「何手か進んだが順番が多すぎる」（`More`）も同じ** ——
 	// 盤が上下逆に映っていると、片側が行って戻る手を挟んで説明が付いてしまい、これになる。
 	// そのときは `Unexplained` を立てる（「盤が上下逆」を疑う合図。`looksFlipped`）。
-	if arrived && (r.Stop != position.StopFound || r.More) {
+	if arrived && (r.Stop != position.StopFound || r.More || scattered) {
 		out.Kind, out.Reason, out.Unexplained = FollowSame, "盤面は変わっていません", true
 		out.Depth = 0
 		return out, nil
@@ -316,7 +344,41 @@ func (s *StudyService) followProbe(board *position.Board, cost *position.CellCos
 	}
 	out.Kind = FollowChoices
 	out.Reason = fmt.Sprintf("%d手ぶん進んだようですが、順番が決められません", r.Depth)
+	if scattered {
+		out.Guess, out.Unsettled = true, true
+		out.Reason = "どの手が指されたか決められません（認識が曖昧か、2 手以上進んでいます）"
+	}
 	return out, nil
+}
+
+// followSameEnd は `Connect` の答えが**どれも同じ局面に行き着くか**を返す（2026-10-07）。
+//
+// 厳密一致の答えは全部が撮った盤に行き着くので「順番だけが違う」で済むが、⚠️ **修復の答えは
+// 見逃したマスが答えごとに違い、行き着く局面も別々になる**（手が覆った 1 枚で、▲6六歩 など
+// 1 手の答えが 3 つ並んだ）。それを「行き先が決まっている」として追従が足すと、空想の手が入る。
+// ⚠️ **組めない手順があれば揃っていない側に倒す**。
+func followSameEnd(from *position.Position, sols [][]string) bool {
+	end := ""
+	for i, moves := range sols {
+		p := from.Clone()
+		for _, mv := range moves {
+			if err := p.ApplyMove(mv); err != nil {
+				return false
+			}
+		}
+		got, err := p.SFEN()
+		if err != nil {
+			return false
+		}
+		// 手数は手順の長さで揃うので、比べるのは盤・手番・駒台。
+		got = got[:strings.LastIndex(got, " ")]
+		if i == 0 {
+			end = got
+		} else if got != end {
+			return false
+		}
+	}
+	return true
 }
 
 // followKindOnly は「何も指していない」との食い違いが**駒の種類だけ**か（駒の有無と先後は全部合っている）。

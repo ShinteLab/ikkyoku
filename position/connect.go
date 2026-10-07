@@ -65,6 +65,15 @@ const (
 	// 一方**往復して戻る偽の手順は、相手側だけで 2 手を無駄にした上に、
 	// 盤を動かす側の無駄も乗る**ので 3 以上になる。**その間に線を引いている。**
 	DefaultMaxWaste = 2
+	// kindOnlyWeight は**先後が合って種類だけ違うマス**の費用に掛ける割合（2026-10-07）。
+	//
+	// 種類は認識が一番外すところ（玉を金・金を玉・飛を香と読む）で、1 枚に 2〜3 マスは普通に出る。
+	// 満額で数えると、それだけで修復の予算（`DefaultTolerance`）を食い尽くし、**正しい 2 手**
+	// （△6五桂 のあとの ▲同桂 △同歩）が繋がらなかった。行き先の裏付け（`backed`）も先後までしか
+	// 見ないので、それと揃える。⚠️ **費用表があるときだけ**（厳密一致の `cost` は「何マス食い違って
+	// いるか」のままにする）。⚠️ **0 にしないこと** —— 種類の違いで成・不成や打った駒を選んでいる。
+	// ⚠️ **当て推量**（`TODO.md` 4 の案の「半分」）。
+	kindOnlyWeight = 0.5
 )
 
 // CellCost は**マスごとの「認識結果を覆すのにかかる費用」**（rank, file の順）。
@@ -369,7 +378,17 @@ func search(ctx context.Context, root *Position, target *Board, opt ConnectOptio
 	// ⚠️ **下界から MaxWaste 手ぶんまでしか探さない。** ここを外して MaxDepth まで
 	// 素直に探すと、**相手が往復して戻る手順**でほとんどの盤面が「繋がって」しまい、
 	// 認識の誤りを落とす働きが消える（`DefaultMaxWaste` のコメント）。
-	if top := h + opt.maxWaste(); top < depth {
+	// ⚠️ **修復では、種類を見ない下界までは必ず探すこと**（`blindBound`）。見逃しで緩めた下界は
+	// 本当に空いたマスまで見逃して 0 まで落ち、それに `MaxWaste` を足しただけでは届かない手順がある。
+	// ⚠️ **`blindBound` には `MaxWaste` を足さないこと** —— 足すと、直しきれない 1 マスを見逃したうえに
+	// 相手が往復して戻る偽の手順が通り、「並べきれない」になる（`TestFollowAutoDoesNotPickUnsettled`）。
+	top := h + opt.maxWaste()
+	if tolerance > 0 {
+		if b := d0.blindBound(root.Turn); b > top {
+			top = b
+		}
+	}
+	if top < depth {
 		depth = top
 	}
 	if h < 1 {
@@ -438,6 +457,19 @@ type connect struct {
 	bestCost  float64
 	bestFixes []Fix
 	bestDepth int
+	// work は**深さごとの作業用の局面**（子を作るたびに `Clone` しない。2026-10-07）。
+	// 修復で 3 手を探すと子は 50 万を超え、`Clone`（盤 2KB と駒台の map）だけで時間の大半が GC になった。
+	// ⚠️ **深さ g の子は work[g+1]** —— 深さ優先なので、子を辿り終えるまで同じ深さの局面は使わない。
+	// ⚠️ **節点を指したまま残さないこと**（解は手順の写し、近づけたところは `fixes` の値で持つ）。
+	work []*Position
+}
+
+// at は深さ g の作業用の局面を返す（無ければ作る）。
+func (s *connect) at(g int) *Position {
+	for len(s.work) <= g {
+		s.work = append(s.work, &Position{Board: &Board{}, handBlack: map[int]int{}, handWhite: map[int]int{}})
+	}
+	return s.work[g]
 }
 
 // solution は見つかった手順 1 本（**費用つき**）。
@@ -525,6 +557,10 @@ func (s *connect) dfs(pos *Position, g int) bool {
 	if g+d.bound(pos.Turn) > s.limit || g >= s.limit {
 		return false
 	}
+	// ⚠️ **修復では、残りの手で直しきれない費用でも刈る**（`floor`。2026-10-07）。
+	if s.tolerance > 0 && d.floor(s.limit-g) > s.tolerance+costEpsilon {
+		return false
+	}
 	if s.nodes >= s.maxNodes {
 		return true
 	}
@@ -540,8 +576,9 @@ func (s *connect) dfs(pos *Position, g int) bool {
 	}
 	d.order(moves)
 
+	next := s.at(g + 1)
 	for _, m := range moves {
-		next := pos.Clone()
+		next.copyFrom(pos)
 		if err := next.ApplyMove(m.USI); err != nil {
 			continue
 		}
@@ -624,18 +661,29 @@ type diff struct {
 	cost float64
 	// forgive は予算内で見逃せるマスの数（**下界を緩める量**）。
 	forgive int
+	// mismatches / cheap は**修復のときだけ**: 食い違ったマスの数と、費用の安い順の先頭（`floor`）。
+	mismatches int
+	cheap      [16]float64
+	// sideArrive / sideNeedBlack / sideNeedWhite は**駒の種類を見ない**ときの arrive / need
+	// （先後と駒の有無だけで数える。`blindBound`）。
+	sideArrive, sideNeedBlack, sideNeedWhite int
 }
 
 // unseen のマスは**食い違いにも駒数にも数えない**（`CellMask`）。
-func newDiff(cur, tgt *Board, cost *CellCost, budget float64, unseen *CellMask) *diff {
-	d := &diff{}
+//
+// ⚠️ **値で返し、ヒープに確保しないこと**（2026-10-07）。ここは節点の子ごとに呼ばれ、
+// 修復で 3 手を探すと 50 万回を超える。`*diff` と見逃し用のスライスを確保していたので
+// **時間の 6 割が GC** になり、追従の打ち切り（1.5 秒）に届いた（`BenchmarkConnectRelay`）。
+func newDiff(cur, tgt *Board, cost *CellCost, budget float64, unseen *CellMask) diff {
+	var d diff
 	hidden := false
-	// ⚠️ **厳密一致では 1 バイトも確保しないこと。** ここは節点ごとに呼ばれるので、
+	// ⚠️ **厳密一致では見逃し用の作業をしないこと。** ここは節点ごとに呼ばれるので、
 	// 修復用の作業を素通しにすると**厳密一致のほうが目に見えて遅くなる**
-	// （実測で深さ 4 が 0.68ms → 1.18ms に落ちた）。
+	// （実測で深さ 4 が 0.68ms → 1.18ms に落ちた）。作業領域はスタックに置く。
+	var scratch [81]float64
 	var mismatch []float64
 	if budget > 0 {
-		mismatch = make([]float64, 0, 8)
+		mismatch = scratch[:0]
 	}
 	var curCount, tgtCount [2][16]int // [先後][ベース駒]
 	for r := 0; r < 9; r++ {
@@ -651,11 +699,18 @@ func newDiff(cur, tgt *Board, cost *CellCost, budget float64, unseen *CellMask) 
 				if !t.IsEmpty() {
 					d.want[r][f] = true
 					d.arrive++
+					if c.IsEmpty() || c.Black() != t.Black() {
+						d.sideArrive++
+					}
 				} else {
 					d.free[r][f] = true
 					d.vacate++
 				}
 				v := cost.at(r, f)
+				// ⚠️ **先後が合って種類だけ違うマスは軽く数える**（費用表があるときだけ。`kindOnlyWeight`）。
+				if cost != nil && !c.IsEmpty() && !t.IsEmpty() && c.Black() == t.Black() {
+					v *= kindOnlyWeight
+				}
 				d.cost += v
 				if mismatch != nil {
 					mismatch = append(mismatch, v)
@@ -674,7 +729,10 @@ func newDiff(cur, tgt *Board, cost *CellCost, budget float64, unseen *CellMask) 
 	// 先手が打つ数と、後手の駒が消える数（＝先手が取った）は
 	// **どちらも先手が指さねばならない手**。後手側はその裏。
 	var blackDrops, whiteDrops, blackLost, whiteLost int
+	var side [2]int // [先後] 目指す盤 − 今の盤 の枚数
 	for p := 0; p < 16; p++ {
+		side[0] += tgtCount[0][p] - curCount[0][p]
+		side[1] += tgtCount[1][p] - curCount[1][p]
 		if n := tgtCount[0][p] - curCount[0][p]; n > 0 {
 			blackDrops += n
 		} else {
@@ -688,29 +746,51 @@ func newDiff(cur, tgt *Board, cost *CellCost, budget float64, unseen *CellMask) 
 	}
 	d.needBlack = blackDrops + whiteLost
 	d.needWhite = whiteDrops + blackLost
+	// 種類を見ないなら、打てばその側が 1 枚増え、取れば相手が 1 枚減るだけ。
+	d.sideNeedBlack = max(side[0], 0) + max(-side[1], 0)
+	d.sideNeedWhite = max(side[1], 0) + max(-side[0], 0)
 	// ⚠️ **読めていないマスがあるときは、駒数からの下界を使わない**（admissible でなくなる）。
 	// 見えている範囲だけの駒数は、**読めていないマスから出入りした駒**でも変わるので、
 	// 「打った」「取った」の手数の下限にならない。マスの差分のほうは見えているマスだけでも
 	// 下限のまま（1 手で埋まる「来る」「空く」は高々 1 つずつ）。
 	if hidden {
 		d.needBlack, d.needWhite = 0, 0
+		d.sideNeedBlack, d.sideNeedWhite = 0, 0
 	}
-	d.forgive = forgivable(mismatch, budget)
+	d.forgive = forgivable(mismatch, budget) // mismatch はここで安い順に並ぶ
+	d.mismatches = len(mismatch)
+	copy(d.cheap[:], mismatch)
 	return d
+}
+
+// floor は**あと r 手指しても残る食い違いの費用の下限**（修復のときだけ意味がある。2026-10-07）。
+//
+// 1 手で中身が変わるマスは高々 2 つ（元と行き先。打つ手は 1 つ）なので、r 手では高々 2r マスしか
+// 直せない。**手の触れないマスの食い違いはそのまま残る**ので、安い順に (食い違い − 2r) マスぶんは
+// 必ず払う。⚠️ **admissible**（直すマスを一番高いほうから選べた場合でもこれだけ残る）。
+// `bound` は安いマスを見逃せる数で下界を緩めるので、空き（0.15）が多い 1 枚では 0 まで落ちて
+// 刈れない —— こちらは費用で刈る。
+func (d *diff) floor(r int) float64 {
+	keep := d.mismatches - 2*r
+	sum := 0.0
+	for i := 0; i < keep && i < len(d.cheap); i++ {
+		sum += d.cheap[i]
+	}
+	return sum
 }
 
 // forgivable は予算内で見逃せるマスの最大数（**安い順に詰める**）。
 //
 // ⚠️ **下界を緩めるためだけの数。** 実際にどのマスを見逃すかは探索が決めるので、
 // ここは「一番都合よく見逃せたら何枚か」＝**下界として安全な側**を返す。
+// ⚠️ **mismatch をその場で並べ替える**（`newDiff` の作業領域。写すと確保が要る）。
 func forgivable(mismatch []float64, budget float64) int {
 	if budget <= 0 || len(mismatch) == 0 {
 		return 0
 	}
-	sorted := append([]float64(nil), mismatch...)
-	sort.Float64s(sorted)
+	sort.Float64s(mismatch)
 	n, sum := 0, 0.0
-	for _, v := range sorted {
+	for _, v := range mismatch {
 		if sum+v > budget+costEpsilon {
 			break
 		}
@@ -741,7 +821,7 @@ func (d *diff) fixes(cur, tgt *Board, unseen *CellMask) []Fix {
 	return out
 }
 
-func (d *diff) same() bool { return d.arrive == 0 && d.vacate == 0 }
+func (d diff) same() bool { return d.arrive == 0 && d.vacate == 0 }
 
 // backed は from から cand へ指したとき、**駒が来たマスがすべて、撮った盤（tgt）で
 // 同じ持ち主の駒として読めているか**を返す（2026-10-05）。
@@ -798,6 +878,22 @@ func (d *diff) bound(turn Turn) int {
 	// （相手の駒が消えた ＝ 取った、が同時に無くなる）ので 2k で引く。
 	nb, nw := d.needBlack-2*k, d.needWhite-2*k
 	if n := alternating(turn, nb, nw); n > h {
+		h = n
+	}
+	return h
+}
+
+// blindBound は**駒の種類を見ない**下界（先後と駒の有無だけ。2026-10-07）。
+//
+// 修復で**どこまで深く探すか**にだけ使う（`search`）。`bound` は見逃せるマスを
+// **安い順に**引くので、空きの読み（0.15）で安く見えるだけの**本当に空いたマス**まで見逃し、
+// 下界が 0 まで落ちる —— そこへ `MaxWaste` を足すと深さ 2 で打ち切られ、△6五桂 のあとの
+// ▲同桂 △同歩 ▲2四歩（3 手）に届かなかった。逆に種類の読み違いは数えないので、満額の下界
+// （玉が消えて湧いた）のように膨らみもしない。⚠️ **満額の下界以下**なので、厳密一致の上限
+// （満額の下界 + `MaxWaste`）より深くはならない。
+func (d *diff) blindBound(turn Turn) int {
+	h := atLeast(d.sideArrive, d.vacate)
+	if n := alternating(turn, d.sideNeedBlack, d.sideNeedWhite); n > h {
 		h = n
 	}
 	return h

@@ -405,6 +405,48 @@ func TestConnectRepairNeedsArrivalEvidence(t *testing.T) {
 	}
 }
 
+// relayConf は録画から読み直した 1 枚の確信度（行優先 81 個。空きは下限の 0.15 にしてある）。
+func relayConf(v [81]float64) *position.CellCost {
+	c := &position.CellCost{}
+	for i, x := range v {
+		c[i/9][i%9] = x
+	}
+	return c
+}
+
+// relayShot / relayCost は録画 `follow/20261007-152341/002-2e2d-guess.png` を読み直した盤と確信度。
+const relayShot = "ln1g3nl/1gs3p2/1pp1s2p1/p4b1Pp/3p1p3/P1P1p4/1P1P1PSLP/2KGGG3/L7+b"
+
+var relayCost = [81]float64{
+	1.00, 1.00, 0.15, 1.00, 0.15, 0.15, 0.15, 1.00, 1.00,
+	0.15, 0.80, 1.00, 0.15, 0.15, 0.15, 1.00, 0.15, 0.15,
+	0.15, 1.00, 1.00, 0.15, 1.00, 0.15, 0.15, 1.00, 0.15,
+	1.00, 0.15, 0.15, 0.15, 0.15, 1.00, 0.15, 1.00, 1.00,
+	0.15, 0.15, 0.15, 1.00, 0.15, 1.00, 0.15, 0.15, 0.15,
+	1.00, 0.15, 1.00, 0.15, 1.00, 0.15, 0.15, 0.15, 0.15,
+	0.15, 1.00, 0.15, 1.00, 0.15, 1.00, 1.00, 0.56, 1.00,
+	0.15, 0.15, 0.80, 0.69, 0.68, 0.39, 0.15, 0.15, 0.15,
+	0.85, 0.15, 0.15, 0.15, 0.15, 0.15, 0.15, 0.15, 0.98,
+}
+
+// ⚠️ **種類だけの読み違いが何マスかあっても、修復で繋がること**（`kindOnlyWeight`。2026-10-07 に実機で踏んだ）。
+//
+// **実機の症状**（録画 `follow/20261007-152341/002-2e2d-guess.png`）: △6五桂 のあと ▲同桂 △同歩 ▲2四歩 と
+// 進んだ 1 枚で、8二 の後手玉を「金」（確信度 0.80。この中継では毎回）、2七 の飛を「香」（0.56）、
+// 4八 の銀を「金」（0.39）と読んだ。種類の違いを満額で数えると、厳密一致は駒が消えて湧いたことになって
+// 「隔たりが大きすぎます」、修復も 3 マスで予算 1.0 を超えて落ちた。そこへ `Rank` が ▲2四歩 だけを
+// 1 手で採り（7七・6四 が空いたのは空きの読みなので安い）、局面がずれて △1八馬 ▲2六飛 も繋がらなくなった。
+func TestConnectRepairForgivesKindMisreads(t *testing.T) {
+	from := after(t, "ln1g3nl/1ks3p2/1pp1s2p1/p2p1b1lp/5p1P1/P1P1p4/1PNP1PSRP/2KGGS3/L7+b w RGPnp 1", "N*6e")
+	r := connect(t, from, relayShot, position.ConnectOptions{Tolerance: position.DefaultTolerance, Cost: relayConf(relayCost)})
+	if r.Stop != position.StopFound || !r.Unique || strings.Join(r.Moves, " ") != "7g6e 6d6e 2e2d" {
+		t.Fatalf("▲同桂 △同歩 ▲2四歩 で繋がるはず: stop=%v moves=%v solutions=%v near=%d", r.Stop, r.Moves, r.Solutions, len(r.Near))
+	}
+	if len(r.Fixed) != 3 {
+		t.Errorf("覆したのは 8二・2七・4八 の 3 マスのはず: %+v", r.Fixed)
+	}
+}
+
 // ⚠️ **厳密一致を先に試すこと。** 認識と合法性が完全に一致したなら、それが
 // 一番強い証拠。**覆す余地があっても覆さない。**
 func TestConnectPrefersExact(t *testing.T) {
@@ -548,6 +590,33 @@ func BenchmarkConnectRepair(b *testing.B) {
 	opt := position.ConnectOptions{Tolerance: 1}
 	for i := 0; i < b.N; i++ {
 		r, err := position.Connect(context.Background(), p, board, opt)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if r.Stop != position.StopFound {
+			b.Fatalf("繋がりませんでした: %v", r.Stop)
+		}
+	}
+}
+
+// BenchmarkConnectRelay は**種類の読み違いが混じった中継の 1 枚から 3 手を修復で繋ぐ**時間の歯止め（2026-10-07）。
+//
+// ⚠️ **追従の打ち切り（`app.followTimeout` 1.5 秒）に届くと、繋がるはずの 3 手を落として 1 手の答えに戻る。**
+func BenchmarkConnectRelay(b *testing.B) {
+	from, err := position.FromFullSFEN("ln1g3nl/1ks3p2/1pp1s2p1/p2p1b1lp/5p1P1/P1P1p4/1PNP1PSRP/2KGGS3/L7+b w RGPnp 1")
+	if err != nil {
+		b.Fatal(err)
+	}
+	if err := from.ApplyMove("N*6e"); err != nil {
+		b.Fatal(err)
+	}
+	board, err := position.FromSFEN(relayShot)
+	if err != nil {
+		b.Fatal(err)
+	}
+	opt := position.ConnectOptions{Tolerance: position.DefaultTolerance, Cost: relayConf(relayCost)}
+	for i := 0; i < b.N; i++ {
+		r, err := position.Connect(context.Background(), from, board, opt)
 		if err != nil {
 			b.Fatal(err)
 		}

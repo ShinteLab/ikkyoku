@@ -1732,3 +1732,43 @@ func TestFollowCellsPromotionByLooks(t *testing.T) {
 		}
 	}
 }
+
+// ⚠️ **`Rank` が 1 手で決めても、その手のあとに指された跡が残るなら先を探すこと**（`decided`。2026-10-07 に実機で踏んだ）。
+//
+// **実機の症状**（録画 `follow/20261007-152341/002-2e2d-guess.png`）: △6五桂 のあと ▲同桂 △同歩 ▲2四歩 と進んだ 1 枚で、
+// `Rank` が ▲2四歩 だけを 1 位にした（7七・6四 が空いたのは空きの読みなので安い）。それを足して ▲同桂 △同歩 が落ち、
+// 局面がずれて △1八馬 ▲2六飛 も繋がらなくなった。確信度は録画を読み直した値（8二 の玉を金、2七 の飛を香、
+// 4八 の銀を金と読んでいる）。
+func TestFollowProbeLooksPastRankWhenMovesRemain(t *testing.T) {
+	root, err := position.FromFullSFEN("ln1g3nl/1ks3p2/1pp1s2p1/p2p1b1lp/5p1P1/P1P1p4/1PNP1PSRP/2KGGS3/L7+b w RGPnp 1")
+	if err != nil {
+		t.Fatalf("FromFullSFEN: %v", err)
+	}
+	if err := root.ApplyMove("N*6e"); err != nil {
+		t.Fatalf("ApplyMove: %v", err)
+	}
+	s := NewStudyService(NewPositionService())
+	s.mu.Lock()
+	s.study = position.NewStudy(root)
+	s.mu.Unlock()
+
+	const shot = "ln1g3nl/1gs3p2/1pp1s2p1/p4b1Pp/3p1p3/P1P1p4/1P1P1PSLP/2KGGG3/L7+b"
+	conf := []float64{
+		1.00, 1.00, 0, 1.00, 0, 0, 0, 1.00, 1.00,
+		0, 0.80, 1.00, 0, 0, 0, 1.00, 0, 0,
+		0, 1.00, 1.00, 0, 1.00, 0, 0, 1.00, 0,
+		1.00, 0, 0, 0, 0, 1.00, 0, 1.00, 1.00,
+		0, 0, 0, 1.00, 0, 1.00, 0, 0, 0,
+		1.00, 0, 1.00, 0, 1.00, 0, 0, 0, 0,
+		0, 1.00, 0, 1.00, 0, 1.00, 1.00, 0.56, 1.00,
+		0, 0, 0.80, 0.69, 0.68, 0.39, 0, 0, 0,
+		0.85, 0, 0, 0, 0, 0, 0, 0, 0.98,
+	}
+	p, err := probe(t, s, shot, conf)
+	if err != nil {
+		t.Fatalf("followProbe: %v", err)
+	}
+	if p.Kind != FollowUnique || len(p.Candidates) != 1 || strings.Join(p.Candidates[0].Moves, " ") != "7g6e 6d6e 2e2d" {
+		t.Fatalf("▲同桂 △同歩 ▲2四歩 を返していません: kind=%q reason=%q candidates=%+v", p.Kind, p.Reason, p.Candidates)
+	}
+}

@@ -429,6 +429,10 @@ func (p *Position) Violations() []sfen.Violation {
 }
 
 // Clone は局面を複製する。**分岐を作るときに元の局面を壊さないため。**
+//
+// ⚠️ **フィールドを足したら `copyFrom` にも足すこと**（`Connect` の探索はあちらで写す）。
+// ⚠️ **`copyFrom` を呼ぶ形にしないこと** —— インライン化されなくなり、`Rank` が候補ごとに
+// 盤を確保して 2.5 倍遅くなった（`BenchmarkRank`）。
 func (p *Position) Clone() *Position {
 	c := &Position{
 		Board:      p.Board.Clone(),
@@ -450,4 +454,28 @@ func (p *Position) Clone() *Position {
 		c.handWhite[k] = v
 	}
 	return c
+}
+
+// copyFrom は src の中身をそのまま写す（`Clone` と同じ中身を**確保せずに**。`Connect` の探索が
+// 深さごとの作業領域を使い回すため。2026-10-07）。
+//
+// ⚠️ **`Clone` にフィールドを足したら、ここにも足すこと**（`TestCopyFromMatchesClone`）。
+func (p *Position) copyFrom(src *Position) {
+	*p.Board = *src.Board
+	p.Turn = src.Turn
+	// ⚠️ **HandsFixed も写すこと。** 落とすと、手を 1 つ進めた（＝Clone した）
+	// 瞬間に駒台の逆算が復活し、駒落ちの棋譜がそこで進まなくなる。
+	p.HandsFixed = src.HandsFixed
+	// ⚠️ **詰将棋も写すこと。** 落とすと、1 手進めた瞬間に余りが未決に戻り、
+	// SFEN が組み上がらなくなる（`HandsFixed` を落としたときと同じ壊れ方）。
+	p.MateProblem = src.MateProblem
+	p.MoveNumber = src.MoveNumber
+	clear(p.handBlack)
+	clear(p.handWhite)
+	for k, v := range src.handBlack {
+		p.handBlack[k] = v
+	}
+	for k, v := range src.handWhite {
+		p.handWhite[k] = v
+	}
 }
