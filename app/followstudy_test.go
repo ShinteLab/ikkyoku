@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ShinteLab/core/sfen"
 	"github.com/ShinteLab/ikkyoku/analyze"
 	"github.com/ShinteLab/ikkyoku/position"
 	"github.com/ShinteLab/ikkyoku/recognize"
@@ -1708,6 +1709,42 @@ func TestFollowAutoAsksToComparePromotion(t *testing.T) {
 	}
 	if s.State().Rev != rev || s.pendingMoves() != nil || len(s.study.MainLine()) != len(promoRookLine) {
 		t.Fatal("頼んだだけなのに局面か控えが動きました")
+	}
+}
+
+// ⚠️ **成る手と成らない手が同点で 1 つに決まらないときも、見た目を比べてもらうこと**（2026-10-08）。
+// ゲーム画面の ▲6四銀成 で、行き先の駒を成銀とも銀とも読めず、2 通りのまま 4 秒ごとに 81 マスを読み直して
+// 110 秒かかった（見た目を比べるのは、手が 1 つに決まったときだけだった）。2三 を金と読んだ 1 枚で再現する。
+func TestFollowAutoAsksToCompareWhenPromotionTies(t *testing.T) {
+	s := promoStudy(t)
+	b, err := position.FromSFEN(boardAfter(t, append(slices.Clone(promoRookLine), "2d2c")...))
+	if err != nil {
+		t.Fatalf("FromSFEN: %v", err)
+	}
+	gold, err := position.NewCell(sfen.Gold, true, false)
+	if err != nil {
+		t.Fatalf("NewCell: %v", err)
+	}
+	if err := b.Set(2, 7, gold); err != nil { // 2三
+		t.Fatalf("Set: %v", err)
+	}
+	board := b.SFEN()
+	rev := s.State().Rev
+	a, err := s.FollowAuto(board, realConf(board, 0.9), nil, nil)
+	if err != nil {
+		t.Fatalf("FollowAuto: %v", err)
+	}
+	want := []CellPair{{From: cellIdx("2d")[0], To: cellIdx("2c")[0]}}
+	if a.Applied || a.Pending || !slices.Equal(a.Compare, want) {
+		t.Fatalf("成・不成が同点なのに見た目を比べるよう頼んでいません: %+v", a)
+	}
+	if s.State().Rev != rev || s.pendingMoves() != nil {
+		t.Fatal("頼んだだけなのに局面か控えが動きました")
+	}
+	// 証拠（見た目が変わった）を添えると、成りで控える。
+	a, err = s.FollowAuto(board, realConf(board, 0.9), nil, []PromoEvidence{{From: want[0].From, To: want[0].To, Sim: 0.4}})
+	if err != nil || !a.Pending || !slices.Equal(s.pendingMoves(), []string{"2d2c+"}) {
+		t.Fatalf("証拠を添えたのに成りで控えていません: %+v（%v） pending=%v", a, err, s.pendingMoves())
 	}
 }
 

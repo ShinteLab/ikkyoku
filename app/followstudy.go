@@ -684,6 +684,19 @@ func (s *StudyService) FollowAuto(boardSFEN string, cellConfidence []float64, ce
 			}
 		}
 	}
+	if !ok && promo == nil {
+		// ⚠️ **成る手と成らない手だけで分かれて決まらないときも、見た目を比べてもらう**（2026-10-08。`followPromoOnly`）。
+		// ゲーム画面の ▲6四銀成 で、行き先を成銀とも銀とも読めず 2 通りのまま、4 秒ごとに 81 マスを読み直して 110 秒かかった。
+		if pm := followPromoOnly(p); pm != nil {
+			if base, since, _, bok := s.followFromBase(); bok {
+				if pairs := followPromoPairs(base, since, pm, rotated); len(pairs) > 0 {
+					log.Info("成りと不成で分かれたので、見た目を比べます", "moves", pm, "組", len(pairs))
+					return FollowAuto{Kind: FollowChoices, Reason: "成・不成を見た目で確かめます", Compare: pairs,
+						Fit: p.Fit, Unseen: unseen.Count(), State: s.State()}, nil
+				}
+			}
+		}
+	}
 	if !ok {
 		// ⚠️ **控えと矛盾しない 1 枚なら、控えは捨てない**（2026-10-06 に実機で踏んだ。`pendingStillFits`）。
 		if s.pendingStillFits(board, cost, unseen) {
@@ -1864,6 +1877,31 @@ func followPromoPairs(base *position.Position, since, moves []string, rotated bo
 		}
 	}
 	return out
+}
+
+// followPromoOnly は、下見の候補が**同じ手順で、成るか成らないかだけが違う**なら、その手順（1 本目）を返す（2026-10-08）。
+// そうでなければ nil。⚠️ **並べきれなかった（`More`）なら nil**（見えていない候補がある）。
+func followPromoOnly(p FollowProbe) []string {
+	if len(p.Candidates) < 2 || p.More {
+		return nil
+	}
+	first := p.Candidates[0].Moves
+	split := false
+	for _, c := range p.Candidates[1:] {
+		if len(c.Moves) != len(first) {
+			return nil
+		}
+		for i, m := range c.Moves {
+			if strings.TrimSuffix(m, "+") != strings.TrimSuffix(first[i], "+") {
+				return nil
+			}
+			split = split || m != first[i]
+		}
+	}
+	if !split {
+		return nil
+	}
+	return first
 }
 
 // followBothLegal は局面 p で、成らない手 plain と成る手 plain+"+" の両方が合法か。
