@@ -302,9 +302,6 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   // 出口（＝確定して解析タブへ渡す）と、盤の操作の説明。**一番下**（上の ⚠️）。
   confirmHost.innerHTML = `
     <button id="edit-confirm" class="ghost-btn is-primary" type="button">この局面を解析する</button>
-    <!-- ⚠️ **「本譜に繋ぐ」（撮った 1 枚を本譜の先へ足す口）は外した**（2026-10-07）。
-         見失ったあとに訂正タブへ来て繋ぐのは現実的でなく、「本譜に繋ぐ」も何をするのか
-         分からなかった。**抜けた手は追跡を止めて解析タブの盤で指し、追い直す。戻さないこと。** -->
     <span class="edit-hint">
       盤 ⇄ 駒台をドラッグ（外すと同時に持ち主が決まる） /
       <strong>「<span id="edit-stock-name">足りない駒</span>」をクリックすると掴んだまま連続で置ける</strong>（残り 0 でも置ける。Esc で離す） /
