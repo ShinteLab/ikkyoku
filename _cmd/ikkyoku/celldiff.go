@@ -3,6 +3,7 @@ package main
 import (
 	"image"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/ShinteLab/ikkyoku"
@@ -142,6 +143,37 @@ func (s *CaptureService) ReadCells(cells []int) ([]ikkyokuapp.CellPiece, error) 
 	return out, nil
 }
 
+// ComparePieces は**動いた駒の、動く前と動いた先の見た目の近さ**を測る（2026-10-07。成・不成の証拠）。
+//
+// 組ごとに、動く前のマス（From）は速い経路の比べる相手の 1 枚（`cellBase`）から、動いた先のマス（To）は
+// 直前に撮った 1 枚（`lastQuiet`）から、マス割り（`cellRects`）で切り出して `ikkyoku.PieceSimilarity` で比べる。
+// マスは撮った画像の向きの番号（`app.CellPair`。フロントが `FollowAuto.Compare` をそのまま渡す）。
+// 測れない組は -1（比べる相手もマス割りも無い・画像の大きさが違う・一様なマス）。
+//
+// ⚠️ **測るだけ。成ったかどうかは決めない**（しきい値は `app` の `promoChangedBelow` / `promoSameFrom`）。
+// ⚠️ **撮り直さない**（変わったマスを測った・81 マスを読んだ 1 枚と同じ 1 枚を見る）。
+func (s *CaptureService) ComparePieces(pairs []ikkyokuapp.CellPair) []float64 {
+	s.mu.Lock()
+	base, cur, rects, bounds := s.cellBase, s.lastQuiet, s.cellRects, s.cellBounds
+	s.mu.Unlock()
+	out := make([]float64, len(pairs))
+	names := make([]string, len(pairs))
+	usable := base != nil && cur != nil && len(rects) == 81 &&
+		bounds.Eq(base.Bounds()) && bounds.Eq(cur.Bounds())
+	for i, p := range pairs {
+		out[i] = -1
+		names[i] = cellName(p.From) + ">" + cellName(p.To) + "="
+		if usable && p.From >= 0 && p.From < 81 && p.To >= 0 && p.To < 81 {
+			if v, ok := ikkyoku.PieceSimilarity(base, rects[p.From], cur, rects[p.To]); ok {
+				out[i] = v
+			}
+		}
+		names[i] += strconv.FormatFloat(out[i], 'f', 3, 64)
+	}
+	log.Info("動く前と後の駒の見た目を比べました（追跡）", "組", strings.Join(names, ","))
+	return out
+}
+
 // noteCellRects は 81 マスを読んだときのマス割りを控える（速い経路はこれでマスを切る）。
 func (s *CaptureService) noteCellRects(img image.Image, d *recognize.Debug) {
 	if d == nil || len(d.Cells) != 81 {
@@ -192,5 +224,8 @@ func (s *CaptureService) fastCells(fc frameCells) bool {
 
 // cellName は 81 マスの番号を、撮った画像の向きの USI のマス（"7g"）にする（ログ用）。
 func cellName(i int) string {
+	if i < 0 || i > 80 {
+		return "?"
+	}
 	return string([]byte{byte('9' - i%9), byte('a' + i/9)})
 }

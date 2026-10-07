@@ -3022,11 +3022,15 @@ ${st.turnLabel}${n}`;
     } else if (shot.fast) {
       // **速い経路**（2026-10-07）。81 マスは読んでおらず、先端と合っていた 1 枚から変わったマスだけが来る。
       // ⚠️ **「盤が映っていない」と取り違えないこと**（SFEN が空なのは読んでいないから）。
-      let fast = await StudyService.FollowCells(shot.cells ?? [], null);
-      if (!fast.applied && !fast.pending && !fast.atFrame && fast.readCells && fast.readCells.length > 0) {
-        // 成・不成や打った駒の種類で分かれた。**違いの出るマスだけ読んで**もう一度（81 マスは読まない）。
-        const read = await CaptureService.ReadCells(fast.readCells);
-        fast = await StudyService.FollowCells(shot.cells ?? [], read);
+      let fast = await StudyService.FollowCells(shot.cells ?? [], null, null);
+      const wantRead = fast.readCells && fast.readCells.length > 0 ? fast.readCells : null;
+      const wantCompare = fast.compare && fast.compare.length > 0 ? fast.compare : null;
+      if (!fast.applied && !fast.pending && !fast.atFrame && (wantRead || wantCompare)) {
+        // 成・不成や打った駒の種類で分かれた・行き先を確かめる。**頼まれたマスだけ読み、成・不成は見た目を比べて**
+        // もう一度（81 マスは読まない）。⚠️ **1 回だけ**（決まらなければ下で 81 マスを読む）。
+        const read = wantRead ? await CaptureService.ReadCells(wantRead) : null;
+        const promo = wantCompare ? await followEvidence(wantCompare) : null;
+        fast = await StudyService.FollowCells(shot.cells ?? [], read, promo);
       }
       if (fast.applied || fast.pending || fast.atFrame) {
         got = fast;
@@ -3100,11 +3104,29 @@ ${st.turnLabel}${n}`;
     //
     // ⚠️ **禁止事項で塞がないこと** —— 中継を観ながら学習データを作るのは
     // **正当な使い方**（訂正結果を学習に回すのは 2026-08-07 の決定）。
-    return await StudyService.FollowAuto(
-      shot.sfen,
-      cellConfidence(shot.debug) ?? null,
-      cellHidden(shot.debug) ?? null,
-    );
+    const conf = cellConfidence(shot.debug) ?? null;
+    const hidden = cellHidden(shot.debug) ?? null;
+    const got = await StudyService.FollowAuto(shot.sfen, conf, hidden, null);
+    // ⚠️ **成りも不成も指せる手なら、動く前と後の見た目を比べて同じ 1 枚でもう一度**（2026-10-07）。
+    // 最初の呼び出しは何も動かしていない。⚠️ **2 回目は証拠が空でも渡す**（null だとまた頼まれる）。
+    if (got.compare && got.compare.length > 0) {
+      return await StudyService.FollowAuto(shot.sfen, conf, hidden, await followEvidence(got.compare));
+    }
+    return got;
+  };
+
+  // followEvidence は**動く前と後の駒の見た目を測って**成・不成の証拠にする（2026-10-07）。
+  // ⚠️ **ここで成ったかを決めないこと**（しきい値は Go 側の `app`）。測れなかった組（負の値）は渡さない。
+  const followEvidence = async (pairs: { from: number; to: number }[]) => {
+    let sims: number[] = [];
+    try {
+      sims = (await CaptureService.ComparePieces(pairs)) ?? [];
+    } catch {
+      sims = [];
+    }
+    return pairs
+      .map((p, i) => ({ from: p.from, to: p.to, sim: sims[i] ?? -1 }))
+      .filter((e) => e.sim >= 0);
   };
 
   // followAfter は追従の結果（足した・足せなかった）を画面と録画に出す。戻り値は「すぐ次の 1 周へ行くか」。

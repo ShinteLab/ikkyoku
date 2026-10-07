@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/ShinteLab/core/kifu"
+	"github.com/ShinteLab/ikkyoku/legal"
 	"github.com/ShinteLab/ikkyoku/log"
 	"github.com/ShinteLab/ikkyoku/position"
 	"github.com/ShinteLab/ikkyoku/recognize"
@@ -596,7 +597,11 @@ func (s *StudyService) fallbackFollow(ranked position.RankResult, r position.Con
 // cellHidden は**手や頭が被って見えないマス**（suteme の `CellDebug.Hidden`。81 個・行優先。2026-10-06）。
 // 見えないマスは根拠にも減点にもせず、行き先が見えない手は足さずに待つ（`position.CellMask`）。
 // ⚠️ **無くても動くこと**（nil・数が合わない → 全部見えていることにする。今までどおり）。
-func (s *StudyService) FollowAuto(boardSFEN string, cellConfidence []float64, cellHidden []bool) (FollowAuto, error) {
+//
+// promo は**成・不成の見た目の証拠**（2026-10-07。`PromoEvidence`）。nil で呼ばれ、足そうとしている手に
+// 成りも不成も指せる手があれば、何も動かさずに `Compare` を返す（フロントが `CaptureService.ComparePieces` で
+// 測って、同じ盤と証拠でもう一度呼ぶ）。⚠️ **nil でない（空でも）ときは、もう頼まない**（今までどおり決める）。
+func (s *StudyService) FollowAuto(boardSFEN string, cellConfidence []float64, cellHidden []bool, promo []PromoEvidence) (FollowAuto, error) {
 	// ⚠️ **訂正タブを通さないこと**（2026-09-15 に実機で踏んだ）。
 	// 以前は呼び出し側が毎周 `PositionService.Load` を呼んでいたので、
 	// **人が訂正タブで作業していると 1 秒ごとに中継の盤で上書きされた**
@@ -605,6 +610,9 @@ func (s *StudyService) FollowAuto(boardSFEN string, cellConfidence []float64, ce
 	if e != nil {
 		return FollowAuto{}, e
 	}
+	// ⚠️ **成・不成の見た目の証拠は、下見の前に盤へ書き込むこと**（2026-10-07。`followApplyPromo`）。
+	// 下見・控え・確かめが同じ盤を見るので、2 枚目でも同じ答えになる。
+	s.followApplyPromo(board, cost, promo, rotated)
 	// ⚠️ **修復してよいのは費用表があるときだけ**（`followCost` と同じ約束）。
 	// 確信度が無ければ**どのマスを覆してよいかの根拠が無い**ので、厳密一致に倒す。
 	p, e := s.followProbe(board, cost, unseen, cost != nil, rotated)
@@ -612,6 +620,20 @@ func (s *StudyService) FollowAuto(boardSFEN string, cellConfidence []float64, ce
 		return FollowAuto{}, e
 	}
 	moves, ok := followAddable(p)
+	if ok && promo == nil {
+		// ⚠️ **成りも不成も指せる手があれば、決める前に見た目を比べてもらう**（2026-10-07）。
+		// 成駒は学習データに入らないのが普通で、龍を「飛」と読み違えるので、読んだ盤だけで決めると
+		// 不成になる（ゲーム画面で ▲2三飛成 を 2f2c、△8七飛成 を 8f8g と記録した）。
+		// ⚠️ **ここでは何も動かさない**（控えも足しもしない）。証拠を添えてもう一度呼ばれてから決める。
+		// 証拠が空（測れなかった）でも nil でなければ、もう頼まずに今までどおり決める。
+		if base, since, _, bok := s.followFromBase(); bok {
+			if pairs := followPromoPairs(base, since, moves, rotated); len(pairs) > 0 {
+				log.Info("成りも不成も指せる手があるので、見た目を比べます", "moves", moves, "組", len(pairs))
+				return FollowAuto{Kind: FollowChoices, Reason: "成・不成を見た目で確かめます", Compare: pairs,
+					Fit: p.Fit, Unseen: unseen.Count(), State: s.State()}, nil
+			}
+		}
+	}
 	if !ok {
 		// ⚠️ **控えと矛盾しない 1 枚なら、控えは捨てない**（2026-10-06 に実機で踏んだ。`pendingStillFits`）。
 		if s.pendingStillFits(board, cost, unseen) {
@@ -793,13 +815,18 @@ func (s *StudyService) cellsMask(cells []int) *position.CellMask {
 // `followBackedByRead`）。read が行き先を読んでいなければ `ReadCells` に行き先を入れて返し
 // （フロントが `CaptureService.ReadCells` で読んでもう一度呼ぶ）、読めて先後が違えば何もせずに返す（81 マスを読む）。
 // 手が分かれたときに頼むマスは、**違いの出るマスとどの候補の行き先も合わせたもの**（フロントが読むのは 1 回だけ）。
+// ⚠️ **成・不成で分かれたら、同じ 1 回で見た目の比べも頼む**（`Compare`。2026-10-07）。promo はその答えで、
+// **読んだマスより先に使う**（`followPickByPromo`。成駒は成っていない姿に読み違えるが、見た目が変わったかは分かる）。
+// 間の値や測れなかったときは、今までどおり読んだマスで選ぶ。
 // ⚠️ **1 枚だけでは足さない**のは同じ（`followPending`）。次の 1 枚が変わっていなければ
 // `FollowConfirm` で足す。⚠️ **比べる相手の 1 枚に至った手のマスは、見た目だけ変わってよい**（色付け）。
-func (s *StudyService) FollowCells(changed []int, read []CellPiece) (FollowAuto, error) {
+func (s *StudyService) FollowCells(changed []int, read []CellPiece, promo []PromoEvidence) (FollowAuto, error) {
 	mask := s.cellsMask(changed)
 	rotated := s.src.followRotated()
 
 	base, since, extra, ok := s.followFromBase()
+	// fromBase は比べる相手の局面が分かっているか（見た目を比べられるのはそのときだけ。`followPromoSplit`）。
+	fromBase := ok
 	if !ok {
 		// 比べる相手の局面を覚えていない。先端から突き合わせる。
 		s.mu.Lock()
@@ -861,13 +888,23 @@ func (s *StudyService) FollowCells(changed []int, read []CellPiece) (FollowAuto,
 	if len(rests) > 1 {
 		// **成・不成や打った駒の種類で分かれた**（変わったマスの組は同じ）。違いの出るマスだけを読めば決まる。
 		diff := followDiffCells(base, since, rests)
-		if len(read) == 0 {
-			if len(diff) == 0 || len(diff) > followReadMax {
+		if len(read) == 0 && promo == nil {
+			diffOK := len(diff) > 0 && len(diff) <= followReadMax
+			// ⚠️ **成・不成で分かれたら、見た目も比べてもらう**（2026-10-07。`followPromoSplit`）。
+			// 読むだけだと、成駒を成っていない姿に読み違えたとき不成に決まる（龍を「飛」と読む）。
+			var pairs []CellPair
+			if fromBase {
+				pairs = followPromoSplit(since, rests, rotated)
+			}
+			if !diffOK && len(pairs) == 0 {
 				return unclear(len(rests), nil)
 			}
 			// ⚠️ **どの候補の行き先も一緒に頼むこと**（フロントが読むのは 1 回だけ。下の行き先の確かめに使う）。
 			// 上限（`followReadMax`）は違いの出るマスだけに掛ける —— 行き先は手数ぶんしか増えない。
-			want := slices.Clone(diff)
+			var want []int
+			if diffOK {
+				want = slices.Clone(diff)
+			}
 			for _, r := range rests {
 				for _, i := range followArrivals(base, since, r) {
 					if !slices.Contains(want, i) {
@@ -877,12 +914,21 @@ func (s *StudyService) FollowCells(changed []int, read []CellPiece) (FollowAuto,
 			}
 			slices.Sort(want)
 			idx := followImageCells(want, rotated)
-			log.Info("変わったマスでは手が分かれました（違いの出るマスだけ読みます）", "候補", len(rests), "読むマス", len(idx))
-			return FollowAuto{Kind: FollowChoices, Reason: "違いの出るマスを読みます", ReadCells: idx, State: s.State()}, nil
+			log.Info("変わったマスでは手が分かれました（違いの出るマスだけ読みます）", "候補", len(rests), "読むマス", len(idx),
+				"見た目を比べる組", len(pairs))
+			return FollowAuto{Kind: FollowChoices, Reason: "違いの出るマスを読みます", ReadCells: idx, Compare: pairs,
+				State: s.State()}, nil
 		}
-		// ⚠️ **選ぶのに使うのは違いの出るマスの読みだけ**（行き先の読みまで渡すと、駒の種類まで比べる
-		// `followCellFits` が、種類を読み違えた行き先で正しい手まで落とす）。
-		rests = followPickByRead(base, since, rests, followReadOnly(read, diff, rotated), rotated)
+		// ⚠️ **見た目の証拠を、読んだマスより先に使うこと**（2026-10-07）。読んだ駒は成駒を成っていない姿に
+		// 読み違えるが、見た目が変わったかは成駒を学習していなくても分かる。決まらなければ読んだマスで選ぶ。
+		if len(promo) > 0 {
+			rests = followPickByPromo(rests, promo, rotated)
+		}
+		if len(rests) > 1 {
+			// ⚠️ **選ぶのに使うのは違いの出るマスの読みだけ**（行き先の読みまで渡すと、駒の種類まで比べる
+			// `followCellFits` が、種類を読み違えた行き先で正しい手まで落とす）。
+			rests = followPickByRead(base, since, rests, followReadOnly(read, diff, rotated), rotated)
+		}
 		if len(rests) != 1 {
 			return unclear(len(rests), nil)
 		}
@@ -1545,6 +1591,265 @@ type FollowAuto struct {
 	// 手が分かれたときの違いの出るマスと、決まった手順の行き先（指した側の駒が来たかを確かめる）。
 	// 空でなければフロントは `CaptureService.ReadCells` で読み、結果を添えて `FollowCells` をもう一度呼ぶ。
 	ReadCells []int `json:"readCells"`
+	// Compare は**成・不成を見た目で確かめたい手の、動く前と動いた先のマス**（撮った画像の向き。2026-10-07。
+	// `followPromoPairs`）。空でなければフロントは `CaptureService.ComparePieces` で測り、結果を
+	// `PromoEvidence` にして同じ 1 枚でもう一度呼ぶ（`FollowAuto` / `FollowCells`）。⚠️ **これを返した周は
+	// 局面も控えも 1 つも動かしていない**（もう一度呼ばれて初めて決める）。
+	Compare []CellPair `json:"compare"`
+}
+
+// CellPair は**動いた駒の、動く前のマスと動いた先のマス**（撮った画像の向きの 81 マスの番号。2026-10-07）。
+// From は速い経路の比べる相手の 1 枚（`CaptureService.cellBase`）、To は今の 1 枚で見る。
+type CellPair struct {
+	From int `json:"from"`
+	To   int `json:"to"`
+}
+
+// PromoEvidence は CellPair を測った**見た目の近さ**（`ikkyoku.PieceSimilarity`。-1〜1。2026-10-07）。
+// フロントは測れなかった組（負の値）を渡さない。
+type PromoEvidence struct {
+	From int     `json:"from"`
+	To   int     `json:"to"`
+	Sim  float64 `json:"sim"`
+}
+
+// 成・不成を見た目で決めるしきい値（2026-10-07）。⚠️ **仮の値**（実機で詰めること）。
+//
+// 録画の全部（今日のゲーム画面と 10/05〜10/06 の中継。約 580 手）を、動く前のマスと動いた先のマスの
+// 正規化相互相関で測った: 成った 39 手（中継の 6 手を含む。重複を除くと約 15 手）は 0.19〜0.55、
+// 成っていない約 540 手のうち 516 手は 0.9 以上（中継の 1 局だけ 0.77〜0.88）。龍を飛と読んで不成で
+// 記録した 2 手（▲2三飛成 を 2f2c、△8七飛成 を 8f8g）は 0.552 と 0.555。
+// 計り直しはスキル `ikkyoku-follow` の `references/promo_similarity.py`。
+const (
+	// promoChangedBelow より低ければ**見た目が変わった ＝ 成った**。
+	promoChangedBelow = 0.65
+	// promoSameFrom 以上なら**見た目が同じ ＝ 成っていない**。間は証拠にしない（今までどおりの決め方）。
+	promoSameFrom = 0.80
+)
+
+// promoVerdict は近さ sim から成ったかを返す。decided が偽なら証拠にならない（間の値・測れなかった）。
+func promoVerdict(sim float64) (promoted, decided bool) {
+	switch {
+	case sim < 0:
+		return false, false
+	case sim < promoChangedBelow:
+		return true, true
+	case sim >= promoSameFrom:
+		return false, true
+	}
+	return false, false
+}
+
+// usiSquare は USI のマス（"7g"）を盤の座標にする。
+func usiSquare(sq string) (rank, file int, ok bool) {
+	if len(sq) != 2 || sq[0] < '1' || sq[0] > '9' || sq[1] < 'a' || sq[1] > 'i' {
+		return 0, 0, false
+	}
+	return int(sq[1] - 'a'), 9 - int(sq[0]-'0'), true
+}
+
+// usiFromTo は盤の上を動く手の元と行き先を、解析の向きの 81 マスの番号で返す（打つ手・読めない手は ok が偽）。
+func usiFromTo(mv string) (from, to int, ok bool) {
+	if len(mv) < 4 || mv[1] == '*' {
+		return 0, 0, false
+	}
+	fr, ff, ok1 := usiSquare(mv[0:2])
+	tr, tf, ok2 := usiSquare(mv[2:4])
+	if !ok1 || !ok2 {
+		return 0, 0, false
+	}
+	return fr*9 + ff, tr*9 + tf, true
+}
+
+// usiTouches は手 mv がマス i（解析の向き）を動かすか（元か行き先）。
+func usiTouches(mv string, i int) bool {
+	if m := usiCells(mv); m != nil {
+		return m[i/9][i%9]
+	}
+	return false
+}
+
+// followPromoPairs は**成・不成を見た目で確かめられる手**の、動く前と動いた先のマス（撮った画像の向き）を返す
+// （2026-10-07）。
+//
+// base は速い経路の比べる相手の局面（`followFromBase`）、since はそこから本譜の先端までの手、moves は
+// 先端から足そうとしている手順。拾うのは次の 3 つを満たす手だけ:
+//
+//   - **その時点で成りも不成も合法**（どちらか一方しか指せないなら見た目に頼る必要が無い）
+//   - **動く前のマスを since と、それより前の手が 1 度も動かしていない**（比べる相手の 1 枚のそのマスに、
+//     指した駒がそのまま写っている）
+//   - **動いた先のマスを、それより後の手が動かしていない**（今の 1 枚のそのマスに、指した駒が写っている）
+//
+// ⚠️ **将棋の見込み（敵陣に入った飛車はほぼ成る、など）は使わない**（ユーザーの判断）。ここは
+// 「比べられるか」を決めるだけで、成ったかどうかは測った見た目で決める。
+func followPromoPairs(base *position.Position, since, moves []string, rotated bool) []CellPair {
+	p := base.Clone()
+	for _, m := range since {
+		if p.ApplyMove(m) != nil {
+			return nil
+		}
+	}
+	var out []CellPair
+	for j, mv := range moves {
+		from, to, ok := usiFromTo(mv)
+		plain := strings.TrimSuffix(mv, "+")
+		if ok && followBothLegal(p, plain) && !slices.ContainsFunc(since, func(m string) bool { return usiTouches(m, from) }) &&
+			!slices.ContainsFunc(moves[:j], func(m string) bool { return usiTouches(m, from) }) &&
+			!slices.ContainsFunc(moves[j+1:], func(m string) bool { return usiTouches(m, to) }) {
+			pair := CellPair{From: from, To: to}
+			if rotated {
+				pair = CellPair{From: 80 - from, To: 80 - to} // 解析の向き → 撮った画像の向き
+			}
+			if !slices.Contains(out, pair) {
+				out = append(out, pair)
+			}
+		}
+		if p.ApplyMove(mv) != nil {
+			break
+		}
+	}
+	return out
+}
+
+// followBothLegal は局面 p で、成らない手 plain と成る手 plain+"+" の両方が合法か。
+func followBothLegal(p *position.Position, plain string) bool {
+	sfenStr, err := p.SFEN()
+	if err != nil {
+		return false
+	}
+	moves, err := legal.Moves(sfenStr)
+	if err != nil {
+		return false
+	}
+	var bare, promo bool
+	for _, m := range moves {
+		switch m.USI {
+		case plain:
+			bare = true
+		case plain + "+":
+			promo = true
+		}
+	}
+	return bare && promo
+}
+
+// followApplyPromo は**成・不成の証拠で、読んだ盤の動いた先のマスを書き換える**（2026-10-07）。
+//
+// 証拠ごとに、動いた先のマスに**指した側の駒**（比べる相手の局面の、動く前のマスの駒と同じ先後）が
+// 読めていれば、近さが `promoChangedBelow` より低ければその駒の成った姿に、`promoSameFrom` 以上なら
+// 成っていない姿に置き換える。費用表があればそのマスは確信度 1 にする（覆させない）。
+// ⚠️ **空き・相手の駒・間の値なら触らない**（今までどおり読んだ盤で決める）。
+// ⚠️ **下見の前に盤を書き換えること** —— `Rank` / `Connect`・控え（`followPending.board`）・確かめ
+// （`FollowConfirm`）が同じ盤を見るので、2 枚目でも同じ答えになる。
+// board と cost は解析の向き（`followFrame` が回したあと）、証拠は撮った画像の向き。
+func (s *StudyService) followApplyPromo(board *position.Board, cost *position.CellCost, promo []PromoEvidence, rotated bool) {
+	if board == nil || len(promo) == 0 {
+		return
+	}
+	base, _, _, ok := s.followFromBase()
+	if !ok {
+		log.Info("成・不成の見た目の証拠を使えません（比べる相手の局面がありません）", "証拠", len(promo))
+		return
+	}
+	for _, ev := range promo {
+		promoted, decided := promoVerdict(ev.Sim)
+		from, to := ev.From, ev.To
+		if rotated {
+			from, to = 80-from, 80-to // 撮った画像の向き → 解析の向き
+		}
+		if !decided || from < 0 || from >= 81 || to < 0 || to >= 81 {
+			continue
+		}
+		mover, err := base.Board.At(from/9, from%9)
+		if err != nil || mover.IsEmpty() {
+			continue
+		}
+		got, err := board.At(to/9, to%9)
+		if err != nil || got.IsEmpty() || got.Black() != mover.Black() {
+			continue
+		}
+		c, err := position.NewCell(mover.Piece(), mover.Black(), promoted)
+		if err != nil {
+			continue // 成れない駒（金・玉）
+		}
+		if board.Set(to/9, to%9, c) != nil {
+			continue
+		}
+		if cost != nil {
+			cost[to/9][to%9] = 1
+		}
+		log.Info("見た目を比べて成・不成を決めました", "元", squareText(from/9, from%9), "先", squareText(to/9, to%9),
+			"近さ", fmt.Sprintf("%.3f", ev.Sim), "成り", promoted, "読んだ駒", got.Mark())
+	}
+}
+
+// followPickByPromo は**成・不成の証拠と食い違う候補を落とす**（速い経路。2026-10-07）。
+//
+// 候補の手順に、証拠と同じ元と行き先の手があり、その成・不成が証拠と違えば落とす（そういう手を含まない
+// 候補は残す）。全部落ちたら空を返す（呼ぶ側は決めない）。
+func followPickByPromo(rests [][]string, promo []PromoEvidence, rotated bool) [][]string {
+	out := rests
+	for _, ev := range promo {
+		promoted, decided := promoVerdict(ev.Sim)
+		if !decided {
+			continue
+		}
+		from, to := ev.From, ev.To
+		if rotated {
+			from, to = 80-from, 80-to
+		}
+		var keep [][]string
+		for _, r := range out {
+			ok := true
+			for _, mv := range r {
+				if f, t, isMove := usiFromTo(mv); isMove && f == from && t == to && strings.HasSuffix(mv, "+") != promoted {
+					ok = false
+					break
+				}
+			}
+			if ok {
+				keep = append(keep, r)
+			}
+		}
+		if len(keep) < len(out) {
+			log.Info("見た目を比べて成・不成を決めました（速い経路）", "元", squareText(from/9, from%9),
+				"先", squareText(to/9, to%9), "近さ", fmt.Sprintf("%.3f", ev.Sim), "成り", promoted, "候補", len(keep))
+		}
+		out = keep
+	}
+	return out
+}
+
+// followPromoSplit は**成・不成だけで分かれた候補**の、成・不成を見た目で確かめられる手のマスを返す（速い経路）。
+// 候補のどれかに成る手 mv+"+" があり、別の候補の同じ位置に成らない mv があるもの。確かめられるかの条件は
+// `followPromoPairs` と同じ（成りも不成も合法かは、候補に両方あることで分かっている）。
+func followPromoSplit(since []string, rests [][]string, rotated bool) []CellPair {
+	var out []CellPair
+	for _, r := range rests {
+		for j, mv := range r {
+			if !strings.HasSuffix(mv, "+") {
+				continue
+			}
+			plain := strings.TrimSuffix(mv, "+")
+			if !slices.ContainsFunc(rests, func(o []string) bool { return len(o) > j && o[j] == plain }) {
+				continue
+			}
+			from, to, ok := usiFromTo(mv)
+			if !ok || slices.ContainsFunc(since, func(m string) bool { return usiTouches(m, from) }) ||
+				slices.ContainsFunc(r[:j], func(m string) bool { return usiTouches(m, from) }) ||
+				slices.ContainsFunc(r[j+1:], func(m string) bool { return usiTouches(m, to) }) {
+				continue
+			}
+			pair := CellPair{From: from, To: to}
+			if rotated {
+				pair = CellPair{From: 80 - from, To: 80 - to}
+			}
+			if !slices.Contains(out, pair) {
+				out = append(out, pair)
+			}
+		}
+	}
+	return out
 }
 
 // looksFlipped は**盤を 180 度回したら 1 手で説明が付くか**を見る（2026-09-15。2026-10-06 に見直した）。

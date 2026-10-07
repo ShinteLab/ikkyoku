@@ -18,6 +18,8 @@ import (
 	"image/color"
 	"slices"
 	"testing"
+
+	ikkyokuapp "github.com/ShinteLab/ikkyoku/app"
 )
 
 // fastImg は `CaptureQuiet` と同じ順に、変わったマスを測ってから速い経路で扱えるかを返す。
@@ -226,5 +228,35 @@ func TestGateCountsEmptyCellsAsUnchanged(t *testing.T) {
 	}
 	if got := s.gateImg(gameFrame(gateSkipMax)); got != "" || s.gateRead != gateReadInsurance {
 		t.Fatalf("省き続けたのに %q / %q（保険の 1 枚が来ない）", got, s.gateRead)
+	}
+}
+
+// ⚠️ **ComparePieces は測るだけ**（2026-10-07）。比べる相手が無ければ -1（証拠にしない）、同じ駒なら 1 に近いこと。
+func TestComparePieces(t *testing.T) {
+	s := fastService()
+	if got := s.ComparePieces([]ikkyokuapp.CellPair{{From: 10, To: 10}}); len(got) != 1 || got[0] != -1 {
+		t.Fatalf("比べる相手が無いのに測りました: %v", got)
+	}
+	img := gateFrame()
+	// 2 行目・2 列目のマスに字の代わりの模様（L 字）を描く。
+	x0, y0 := gateBoard.Min.X+20, gateBoard.Min.Y+20
+	for y := y0 + 4; y < y0+16; y++ {
+		for x := x0 + 4; x < x0+8; x++ {
+			img.SetRGBA(x, y, color.RGBA{R: 30, G: 20, B: 10, A: 255})
+		}
+	}
+	for x := x0 + 4; x < x0+16; x++ {
+		for y := y0 + 13; y < y0+16; y++ {
+			img.SetRGBA(x, y, color.RGBA{R: 30, G: 20, B: 10, A: 255})
+		}
+	}
+	s.lastQuiet = img
+	s.SetCellBase()
+	got := s.ComparePieces([]ikkyokuapp.CellPair{{From: 10, To: 10}, {From: 10, To: 99}})
+	if got[0] < 0.99 {
+		t.Fatalf("同じ駒なのに %.3f", got[0])
+	}
+	if got[1] != -1 {
+		t.Fatalf("盤の外のマスを測りました: %v", got[1])
 	}
 }

@@ -28,7 +28,7 @@ func TestFollowAutoWaitsForUnseenArrival(t *testing.T) {
 	covered := hiddenAt([2]int{5, 2}) // 7六
 
 	for i := 0; i < 3; i++ {
-		a, err := s.FollowAuto(board, evenConf(0.9), covered)
+		a, err := s.FollowAuto(board, evenConf(0.9), covered, nil)
 		if err != nil {
 			t.Fatalf("FollowAuto: %v", err)
 		}
@@ -42,10 +42,10 @@ func TestFollowAutoWaitsForUnseenArrival(t *testing.T) {
 	}
 
 	// 手がどいた（印が消えた）1 枚なら、今までどおり 2 枚で足す。
-	if a, err := s.FollowAuto(board, evenConf(0.9), nil); err != nil || !a.Pending {
+	if a, err := s.FollowAuto(board, evenConf(0.9), nil, nil); err != nil || !a.Pending {
 		t.Fatalf("手がどいた 1 枚目で控えていません: %+v (%v)", a, err)
 	}
-	a, err := s.FollowAuto(board, evenConf(0.9), nil)
+	a, err := s.FollowAuto(board, evenConf(0.9), nil, nil)
 	if err != nil {
 		t.Fatalf("FollowAuto: %v", err)
 	}
@@ -70,10 +70,10 @@ func TestFollowAutoReadsAroundUnseen(t *testing.T) {
 	}
 	hidden := hiddenAt(top...)
 
-	if a, err := s.FollowAuto(board, evenConf(0.9), hidden); err != nil || !a.Pending {
+	if a, err := s.FollowAuto(board, evenConf(0.9), hidden, nil); err != nil || !a.Pending {
 		t.Fatalf("1 枚目で控えていません: %+v (%v)", a, err)
 	}
-	a, err := s.FollowAuto(board, evenConf(0.9), hidden)
+	a, err := s.FollowAuto(board, evenConf(0.9), hidden, nil)
 	if err != nil {
 		t.Fatalf("FollowAuto: %v", err)
 	}

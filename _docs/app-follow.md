@@ -275,6 +275,20 @@ FollowProbe ─> Rank（候補から選ぶ。29µs）─┬─ 読めていな�
   駒の有無と先後で全部合い（`KindOnly`。種類の読み違いは問わない）、見えないマスが無いときだけ**（速い経路の比べる相手になる。
   駒の有無が食い違う 1 枚 —— 行き先の駒が読めていない手の名残 —— を相手にすると、その手のマスの変化が二度と見えなくなる。
   何かが被った 1 枚を相手にすると、外れたあと盤じゅうが変わって見える）
+- ⚠️ **成・不成は、動く前と後の駒の見た目を比べて決める**（2026-10-07。`followPromoPairs` / `followApplyPromo` /
+  `followPickByPromo`。理由は `_docs/design-follow.md` の「速い経路」）。
+  ⚠️ **`FollowAuto` は promo が nil で、足そうとしている手に成りも不成も指せる手があれば、何も動かさずに `Compare` を返す**
+  （控えも足しも `Rev` も動かさない。フロントが `CaptureService.ComparePieces` で測り、同じ盤と証拠でもう一度呼ぶ）。
+  ⚠️ **promo が nil でなければ（空でも）もう頼まない**（無限に頼み直さない）。
+  ⚠️ **比べてよいのは、比べる相手の局面（`followFromBase`）があり、動く前のマスを since とその手より前の手が
+  動かしておらず、動いた先のマスをその手より後の手が動かしていない手だけ**（比べる相手の 1 枚と今の 1 枚に、
+  指した駒がそれぞれ写っている）。⚠️ **証拠は下見の前に読んだ盤へ書き込む**（動いた先に指した側の駒が読めていれば、
+  成った姿か成っていない姿に置き換え、確信度を 1 にする）—— `Rank` / `Connect`・控え（`followPending.board`）・
+  `FollowConfirm` が同じ盤を見るので、2 枚目でも同じ答えになる。⚠️ **空き・相手の駒・間の値なら書き換えない**。
+  ⚠️ **しきい値（`promoChangedBelow` 0.65 / `promoSameFrom` 0.80）はここだけに置く**（`ComparePieces` もフロントも持たない。仮の値）。
+  ⚠️ **速い経路（`FollowCells`）は、成・不成で分かれたら `ReadCells` と同じ 1 回で `Compare` も返し、証拠を読んだマスより
+  先に使う**（読んだ駒は成駒を成っていない姿に読み違える）。間の値なら今までどおり読んだマスで選ぶ。
+  ⚠️ **将棋の見込みは使わない**（比べるかどうかは合法かどうかだけで決める）
 - ⚠️ **「駒が来たのに今の向きでは説明が付かない」1 枚だけ、盤を 180 度回して試す**（`Flipped` / `FlipMove`。
   2026-09-15 に実機で踏んだ）。**後手で対局したゲーム画面は盤が上下逆に映り**、
   1 手目から 1 手も進まない。**平手の初形は上下対称なので最初の 1 手まで気づけず、
@@ -342,7 +356,13 @@ FollowProbe ─> Rank（候補から選ぶ。29µs）─┬─ 読めていな�
   "?" では決めず、向きだけ読めた "?" は先後で見ること（`TestFollowCellsArrivalMustBeReadable`）・⚠️ **種類は比べない
   こと**（`TestFollowCellsArrivalIgnoresKind`）・後手目線の先後（`TestFollowCellsArrivalSideWhenRotated`）・
   ⚠️ **手が分かれたら違いの出るマスと行き先を 1 回で頼み、選ぶのには違いの出るマスだけを使うこと**
-  （`TestFollowCellsAsksDiffAndArrivalsTogether`）。速い経路を呼ぶテストは `followCellsRead`（頼まれたマスを 1 回読む）を使う
+  （`TestFollowCellsAsksDiffAndArrivalsTogether`）。速い経路を呼ぶテストは `followCellsRead`（頼まれたマスを 1 回読む）を使う。
+  **成・不成を見た目で決める**（2026-10-07）もここ: ⚠️ **成りも不成も指せる手は見た目の比べを頼み、そのとき何も動かさない
+  こと**（`TestFollowAutoAsksToComparePromotion`。龍を「飛」と読んだ 1 枚）・**変わっていれば成り、同じなら不成、間なら今まで
+  どおりで控え、確かめでも同じ手を足すこと**（`TestFollowAutoDecidesPromotionByLooks`）・**2 枚目を 81 マスで読んでも同じ答えに
+  なること**（`TestFollowAutoPromotionSecondFrame`）・**比べる相手が無ければ頼まないこと**（`TestFollowAutoNoComparisonWithoutBase`）・
+  後手の駒と後手目線（`TestFollowAutoPromotionGoteRotated`。△8七飛成）・⚠️ **速い経路では証拠を読んだマスより先に使うこと**
+  （`TestFollowCellsPromotionByLooks`）
 - `followunseen_test.go` — **手や頭が被って見えないマス**（2026-10-06）。⚠️ **行き先が見えない 1 枚が
   何枚続いても足さず（控えもせず）、印が消えた次の 2 枚で足すこと**（`TestFollowAutoWaitsForUnseenArrival`。
   **頭が動かないと同じ 1 枚が続く**ので、2 枚の確かめだけでは止まらない形）・**頭が上辺に被っていても
