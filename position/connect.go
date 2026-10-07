@@ -402,12 +402,66 @@ func search(ctx context.Context, root *Position, target *Board, opt ConnectOptio
 		s.path = s.path[:0]
 		s.seen = map[posKey]bool{keyOf(root): true}
 		if over := s.dfs(root, 0); len(s.sols) > 0 {
-			return s.result(limit), nil
+			r := s.result(limit)
+			if tolerance > 0 && s.forgaveEmpty(r.Cost) {
+				// ⚠️ **修復では、1 手深い手順がもっと安く合うなら、そちらを採る**（2026-10-08。`cheaperDeeper`）。
+				// 探すのは、答えが「空きと読めたマスに駒がある」と覆したときだけ（深く探すと 1 枚が約 10 倍重い）。
+				if deeper, ok := s.cheaperDeeper(root, limit+1, opt.maxDepth(), r.Cost); ok {
+					return deeper, nil
+				}
+			}
+			return r, nil
 		} else if over {
 			return s.miss(StopBudget), nil
 		}
 	}
 	return s.miss(StopUnreachable), nil
+}
+
+// cheaperDeeper は**修復の答えが見つかったあと、1 手深い手順で、もっと少なく覆して合うもの**を探す（2026-10-08）。
+//
+// 修復は浅い手数から探して最初に見つかった手数で止まり、深さの上限も下界 + `MaxWaste`（と `blindBound`）で決まる。
+// 「空き」の読みは安く覆せる（0.15）ので、**駒が本当に動いて空いたマスを「読み違い」として覆した浅い手順**が、
+// ぴったり合う深い手順より先に通ってしまう。ゲーム画面で ▲3七銀 △8六歩 ▲同歩 △同飛 の 4 手が 1 枚に写り
+// （1d の歩を香と読んでいたので厳密一致は無かった）、3 手の [8g8f 8e8f 4h3g] が 8b の飛車を「読めていない」
+// として通って、本譜と持ち駒が狂った。
+//
+// ⚠️ **予算を今の答えの費用より小さく絞ること**（厳密に安いものだけ採る）—— 同じだけ覆す深い手順は、同じ変化を
+// 遠回りで説明しているだけで、往復して戻る偽の手順もここに入る。絞った予算は刈り（`floor`）にも効くので軽い。
+// ⚠️ **1 手だけ深く探す**（上限は `MaxDepth`）。⚠️ **打ち切ったら浅い答えのまま**（探し切れていない）。
+// ⚠️ **呼ぶのは浅い答えが「空きと読めたマスに駒がある」と覆したときだけ**（`forgaveEmpty`）。深く探すと
+// 中継の 1 枚（`BenchmarkConnectRelay`）が 7.7ms → 72ms になった。種類の読み違いだけを覆した答えは、
+// 深い手順でも同じマスを覆すことになるので、探しても安くならない。
+func (s *connect) cheaperDeeper(root *Position, limit, maxDepth int, best float64) (ConnectResult, bool) {
+	tol := best - costEpsilon
+	if limit > maxDepth || tol <= 0 {
+		return ConnectResult{}, false
+	}
+	d := &connect{ctx: s.ctx, root: s.root, target: s.target, maxNodes: s.maxNodes, want: s.want,
+		cost: s.cost, tolerance: tol, unseen: s.unseen, bestCost: math.Inf(1), limit: limit,
+		seen: map[posKey]bool{keyOf(root): true}}
+	over := d.dfs(root, 0)
+	if over || len(d.sols) == 0 {
+		return ConnectResult{}, false
+	}
+	r := d.result(limit)
+	r.Nodes += s.nodes
+	return r, true
+}
+
+// forgaveEmpty は、費用 best の答えのどれかが**空きと読めたマスに駒がある**と覆したか（`cheaperDeeper` を呼ぶか）。
+func (s *connect) forgaveEmpty(best float64) bool {
+	for _, sol := range s.sols {
+		if sol.cost > best+costEpsilon {
+			continue
+		}
+		for _, f := range sol.fixed {
+			if f.Was.IsEmpty() && !f.Now.IsEmpty() {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // miss は繋がらなかった結果に**一番近づけたところ**を載せて返す。

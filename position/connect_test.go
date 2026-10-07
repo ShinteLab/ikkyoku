@@ -447,6 +447,41 @@ func TestConnectRepairForgivesKindMisreads(t *testing.T) {
 	}
 }
 
+// gameShot / gameCost は録画 `follow/20261008-040431/021-8g8f_8e8f_4h3g.png` を読み直した盤と確信度
+// （空きは 0.15）。1四 の後手の歩を香と読んでいる（0.65）ほかは正しい。
+const gameShot = "ln1g2snl/3s1kg2/p1pppp1p1/6p1l/4b4/Pr4PRP/2PPPPS2/1BG6/LNS1KG1NL"
+
+var gameCost = [81]float64{
+	1.00, 1.00, 0.15, 1.00, 0.15, 0.15, 1.00, 1.00, 0.80,
+	0.15, 0.15, 0.15, 1.00, 0.15, 1.00, 1.00, 0.15, 0.15,
+	1.00, 0.15, 1.00, 1.00, 1.00, 1.00, 0.15, 1.00, 0.15,
+	0.15, 0.15, 0.15, 0.15, 0.15, 0.15, 1.00, 0.15, 0.65,
+	0.15, 0.15, 0.15, 0.15, 1.00, 0.15, 0.15, 0.15, 0.15,
+	1.00, 1.00, 0.15, 0.15, 0.15, 0.15, 1.00, 1.00, 1.00,
+	0.15, 0.15, 1.00, 1.00, 1.00, 1.00, 1.00, 0.15, 0.15,
+	0.15, 1.00, 1.00, 0.15, 0.15, 0.15, 0.15, 0.15, 0.15,
+	1.00, 1.00, 1.00, 0.15, 1.00, 1.00, 0.15, 1.00, 1.00,
+}
+
+// ⚠️ **修復で浅い答えが見つかっても、1 手深い手順がもっと少なく覆して合うなら、そちらを採ること**（2026-10-08。`cheaperDeeper`）。
+//
+// **実機の症状**（ゲーム画面）: ▲3七銀 △8六歩 ▲同歩 △同飛 の 4 手が 1 枚に写った。1四 の歩を香と読んでいたので
+// 厳密一致は無く、修復が 3 手の [8g8f 8e8f 4h3g] で止まった —— 8六 の飛を「歩の種類の読み違い」、空いた 8二 を
+// 「飛が読めていない」として覆した（空きの読みは安い）。正しい 4 手は 1四 を覆すだけで合うのに、深さの上限で探されて
+// いなかった。本譜と持ち駒が狂い、そこから見失った。
+func TestConnectRepairPrefersCheaperDeeper(t *testing.T) {
+	from := after(t, connectHirate,
+		"2g2f", "5a4b", "2f2e", "4a3b", "2e2d", "2c2d", "2h2d", "P*2c", "2d2f", "8c8d",
+		"6i7h", "8d8e", "9g9f", "1c1d", "1g1f", "7a6b", "3i4h", "3c3d", "3g3f", "2b5e")
+	r := connect(t, from, gameShot, position.ConnectOptions{Tolerance: position.DefaultTolerance, Cost: relayConf(gameCost)})
+	if r.Stop != position.StopFound || !r.Unique || strings.Join(r.Moves, " ") != "4h3g 8e8f 8g8f 8b8f" {
+		t.Fatalf("▲3七銀 △8六歩 ▲同歩 △同飛 で繋がるはず: stop=%v moves=%v solutions=%v cost=%v", r.Stop, r.Moves, r.Solutions, r.Cost)
+	}
+	if len(r.Fixed) != 1 {
+		t.Errorf("覆したのは 1四 の 1 マスのはず: %+v", r.Fixed)
+	}
+}
+
 // ⚠️ **厳密一致を先に試すこと。** 認識と合法性が完全に一致したなら、それが
 // 一番強い証拠。**覆す余地があっても覆さない。**
 func TestConnectPrefersExact(t *testing.T) {
