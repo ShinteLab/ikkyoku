@@ -1036,14 +1036,30 @@ func (s *StudyService) FollowCells(changed []int, read []CellPiece, promo []Prom
 	// 変わったマスの組だけで決めると「駒が来た」ことを確かめないまま手を足す。確かめは控える周にも
 	// 確かめの周（もう一度ここへ来たとき）にも掛かる。読むのは数マスなので数ミリ秒。
 	arrivals := followArrivals(base, since, moves)
+	// looks は**成らない手の、動く前と動いた先のマス**（見た目が同じ駒かを確かめる。2026-10-08。`followLookPairs`）。
+	var looks []CellPair
+	if fromBase {
+		looks = followLookPairs(since, moves, rotated)
+	}
 	if !followReadCovers(read, arrivals, rotated) {
 		idx := followImageCells(arrivals, rotated)
-		log.Info("変わったマスで手を割り出しました（行き先を読んで確かめます）", "moves", moves, "読むマス", len(idx))
-		return FollowAuto{Kind: FollowChoices, Reason: "行き先のマスを読みます", ReadCells: idx, State: s.State()}, nil
+		log.Info("変わったマスで手を割り出しました（行き先を読んで確かめます）", "moves", moves, "読むマス", len(idx),
+			"見た目を比べる組", len(looks))
+		// ⚠️ **見た目の比べも同じ 1 回で頼むこと**（フロントが読むのは 1 回だけ）。
+		return FollowAuto{Kind: FollowChoices, Reason: "行き先のマスを読みます", ReadCells: idx, Compare: looks,
+			State: s.State()}, nil
 	}
 	if ok, bad, got := followBackedByRead(base, since, moves, read, rotated); !ok {
 		log.Info("行き先に指した側の駒が読めません（81 マスを読みます）", "moves", moves, "マス", bad, "読んだ駒", got)
 		return FollowAuto{Kind: FollowUnreachable, Reason: "行き先に指した側の駒が読めません", State: s.State()}, nil
+	}
+	// ⚠️ **成らない手は、行き先の見た目が動く前の駒と同じであること**（2026-10-08。`followLooksDiffer`）。
+	// ゲーム画面で銀をつまむと、浮いた銀のマスと光った行き先のマスが変わり、「銀が 1 マス動いた」と読めてしまう。
+	// 行き先の読みは光ったマスを手前側の歩と読み、先後が合うので通って、つまんだだけの △5三銀 を足した。
+	// 本当に動いたなら行き先には同じ見た目の駒がある（近さ 0.98 前後）。光ったマスは似ていない。
+	if bad, sim, ok := followLooksDiffer(looks, promo); ok {
+		log.Info("行き先の見た目が動いた駒と違います（81 マスを読みます）", "moves", moves, "組", bad, "近さ", fmt.Sprintf("%.3f", sim))
+		return FollowAuto{Kind: FollowUnreachable, Reason: "行き先の見た目が動いた駒と違います", State: s.State()}, nil
 	}
 	log.Info("変わったマスで手を割り出しました", "moves", moves, "足し済み", len(since))
 
@@ -1800,7 +1816,7 @@ type CellPair struct {
 }
 
 // PromoEvidence は CellPair を測った**見た目の近さ**（`ikkyoku.PieceSimilarity`。-1〜1。2026-10-07）。
-// フロントは測れなかった組（負の値）を渡さない。
+// フロントは測れなかった組（ちょうど -1）を渡さない（2026-10-08 から、負の近さは渡す —— 似ていない駒どうしは負になりうる）。
 type PromoEvidence struct {
 	From int     `json:"from"`
 	To   int     `json:"to"`
@@ -1903,6 +1919,47 @@ func followPromoPairs(base *position.Position, since, moves []string, rotated bo
 		}
 	}
 	return out
+}
+
+// followLookPairs は手順 moves のうち**成らない手**（打つ手を除く）の、動く前と動いた先のマス（撮った画像の向き）を返す
+// （2026-10-08。`followLooksDiffer`）。比べてよいのは、動く前のマスを since とその手より前の手が動かしておらず、
+// 動いた先のマスをその手より後の手が動かしていない手だけ（比べる相手の 1 枚と今の 1 枚に、指した駒がそれぞれ写っている）。
+// 条件は `followPromoPairs` と同じで、成りも不成も指せるかは問わない。
+func followLookPairs(since, moves []string, rotated bool) []CellPair {
+	var out []CellPair
+	for j, mv := range moves {
+		if strings.HasSuffix(mv, "+") {
+			continue // 成る手は見た目が変わる（`followPromoPairs` の受け持ち）
+		}
+		from, to, ok := usiFromTo(mv)
+		if !ok ||
+			slices.ContainsFunc(since, func(m string) bool { return usiTouches(m, from) }) ||
+			slices.ContainsFunc(moves[:j], func(m string) bool { return usiTouches(m, from) }) ||
+			slices.ContainsFunc(moves[j+1:], func(m string) bool { return usiTouches(m, to) }) {
+			continue
+		}
+		pair := CellPair{From: from, To: to}
+		if rotated {
+			pair = CellPair{From: 80 - from, To: 80 - to} // 解析の向き → 撮った画像の向き
+		}
+		if !slices.Contains(out, pair) {
+			out = append(out, pair)
+		}
+	}
+	return out
+}
+
+// followLooksDiffer は、成らない手の組 looks のどれかで、**行き先の見た目が動く前の駒と違う**（近さが
+// `promoChangedBelow` より低い）かを返す。測れなかった組（promo に無い）は証拠にしない。
+func followLooksDiffer(looks []CellPair, promo []PromoEvidence) (CellPair, float64, bool) {
+	for _, l := range looks {
+		for _, e := range promo {
+			if e.From == l.From && e.To == l.To && e.Sim < promoChangedBelow {
+				return l, e.Sim, true
+			}
+		}
+	}
+	return CellPair{}, 0, false
 }
 
 // followPromoOnly は、下見の候補が**同じ手順で、成るか成らないかだけが違う**なら、その手順（1 本目）を返す（2026-10-08）。

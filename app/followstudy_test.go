@@ -1763,6 +1763,43 @@ func TestFollowAutoAsksToCompareWhenPromotionTies(t *testing.T) {
 	}
 }
 
+// ⚠️ **速い経路で成らない手を決めたら、行き先の見た目が動く前の駒と同じかを確かめること**（2026-10-08。`followLooksDiffer`）。
+// ゲーム画面で銀をつまむと、浮いた銀のマスと光った行き先のマスが変わり、光ったマスを手前側の歩と読んで（先後は合う）
+// つまんだだけの △5三銀 を足した。実測で、つまんだ銀と光ったマスの近さは 0.499、本当に動いた金は 0.977。
+// ⚠️ **行き先を読むのと同じ 1 回で比べも頼むこと**（`Compare`）・⚠️ **測れなければ（証拠が無ければ）止めないこと**。
+func TestFollowCellsChecksLooksOfPlainMove(t *testing.T) {
+	changed := cellIdx("7f", "7e")
+	for _, tc := range []struct {
+		name    string
+		promo   []PromoEvidence
+		pending bool
+	}{
+		{"見た目が違う（つまんだだけ）", []PromoEvidence{{From: cellIdx("7f")[0], To: cellIdx("7e")[0], Sim: 0.499}}, false},
+		{"見た目が同じ（動いた）", []PromoEvidence{{From: cellIdx("7f")[0], To: cellIdx("7e")[0], Sim: 0.977}}, true},
+		{"測れなかった", []PromoEvidence{}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := promoStudy(t)
+			a, err := s.FollowCells(changed, nil, nil)
+			if err != nil {
+				t.Fatalf("FollowCells: %v", err)
+			}
+			want := []CellPair{{From: cellIdx("7f")[0], To: cellIdx("7e")[0]}}
+			if len(a.ReadCells) == 0 || !slices.Equal(a.Compare, want) {
+				t.Fatalf("行き先を読むのと同じ 1 回で見た目の比べを頼んでいません: %+v", a)
+			}
+			read := readAfter(t, false, a.ReadCells, append(slices.Clone(promoRookLine), "7f7e")...)
+			a, err = s.FollowCells(changed, read, tc.promo)
+			if err != nil {
+				t.Fatalf("FollowCells: %v", err)
+			}
+			if a.Pending != tc.pending || a.Applied {
+				t.Fatalf("pending=%v, want %v: %+v", a.Pending, tc.pending, a)
+			}
+		})
+	}
+}
+
 // ⚠️ **見た目が変わっていれば、「飛」と読めていても成りで控え、確かめでも成りで足すこと。**
 // ⚠️ **同じなら不成・間の値なら今までどおり（読んだ盤で決める）。**
 func TestFollowAutoDecidesPromotionByLooks(t *testing.T) {
