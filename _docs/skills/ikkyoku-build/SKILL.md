@@ -291,6 +291,6 @@ _cmd/ikkyoku/go.mod       replace github.com/ShinteLab/ikkyoku => ../../
 
 | | |
 |---|---|
-| スキル `ikkyoku-verify` | ビルドしたあと**実機で何を押すか** |
+| スキル `ikkyoku-verify` | ビルドしたあと**実機でどう確かめるか** |
 | スキル `wails3` | Wails3 全般。⚠️ **alpha2.117 前提なので beta.26 と食い違う** |
 | `_cmd/ikkyoku/AGENTS.md`（索引）→ `_docs/cmd-windows.md` / `_docs/cmd-frame.md` | ウィンドウ・Frameless・Win32 まわりの制約 |

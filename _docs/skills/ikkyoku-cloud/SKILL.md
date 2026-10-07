@@ -57,8 +57,8 @@ bash _docs/skills/ikkyoku-cloud/cloud.sh setup   # wails3・bindings・npm だ�
 
 ## クラウドではできないこと
 
-- **アプリを起動して触ること**（画面キャプチャ・ホットキー・Wails のウィンドウ）。実機の確認は
-  `ikkyoku-verify` の `checklist.md` に足して、手元で見てもらう
+- **アプリを起動して触ること**（画面キャプチャ・ホットキー・Wails のウィンドウ）。実機で見てほしいことは
+  作業の終わりの返答とコミットメッセージに書いて、手元で見てもらう（スキル `ikkyoku-verify`）
 - **`_cmd/ikkyoku` のテスト**（Wails の Linux 版は cgo が要る）。`check` は build/vet まで
 - **兄弟のリポジトリへの push**（suteme などは読むだけ。タグは手元で打ってもらう。
   ⚠️ **打ってもらったら、引く前にタグの位置を確かめること** —— スキル `ikkyoku-build` の「タグを付け直さない」）
