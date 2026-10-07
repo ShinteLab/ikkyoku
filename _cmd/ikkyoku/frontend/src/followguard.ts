@@ -50,17 +50,24 @@ export async function confirmStopFollow(what: string): Promise<boolean> {
   if (!following) {
     return true;
   }
-  const yes = "はい（追跡を止める）";
+  // ⚠️ **ボタンの Label は "Yes" / "No" から変えないこと**（2026-10-07 に実機で踏んだ）。
+  // Windows の Wails（beta.26）は OS 標準の MessageBox（MB_YESNO）で出すので、**付けた文字は
+  // 画面に出ず**（OS の言語で「はい」「いいえ」になる）、押した結果は "Yes" / "No" で返る。
+  // それを **Label と文字列で突き合わせて** Promise を解く作りなので、Label が "Yes" でないと
+  // **はいを押しても Promise が解けず、追跡も止まらず操作も通らないまま**になる
+  // （以前は「はい（追跡を止める）」と書いていてそうなった）。
+  // ⚠️ **既定を「いいえ」にするのも Label "No" + IsDefault が条件**（MB_DEFBUTTON2 になる）
+  // —— Enter の連打で追跡が止まらないように。
+  // ボタンに意味を書けないので、**「はい」が何をするかは本文で言い切ること**。
   const got = await Dialogs.Question({
     Title: "中継を追っています",
     Message: `${what}と、中継の追跡が正しく続けられなくなります。\n追跡を止めて続けますか？`,
     Buttons: [
-      { Label: yes },
-      // ⚠️ **既定は「いいえ」** —— Enter の連打で追跡が止まらないように。
-      { Label: "いいえ", IsCancel: true, IsDefault: true },
+      { Label: "Yes" },
+      { Label: "No", IsCancel: true, IsDefault: true },
     ],
   });
-  if (got !== yes) {
+  if (got !== "Yes") {
     return false;
   }
   if (stopHere) {
