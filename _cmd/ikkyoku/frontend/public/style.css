@@ -2376,17 +2376,83 @@ html.is-main #app {
    **押すたびにボタンが飛ぶと、もう一度押すのに探すことになる。**
 
    ⚠️ **幅は駒台と同じで頭打ちにすること**（対局者名と同じ理由）。列は `auto` なので、
-   はみ出すと**列が広がって盤が押し出される**。 */
-.view-flip {
+   はみ出すと**列が広がって盤が押し出される**。
+
+   **セルを持つのは器の `.view-side`**（2026-10-08。中継の札を視点のボタンの上に積むため）。 */
+.view-side {
   grid-column: 3;
   grid-row: 2;
   /* 「先手の駒台の上」に寄せる（真ん中に浮かせると、どちらの持ち物か曖昧になる）。 */
   align-self: end;
   justify-self: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
   max-width: calc(var(--board-size) * 0.2);
+}
+
+.view-flip {
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 中継の札（2026-10-08）。画面を撮って追っている = 赤、棋譜の自動更新 = 緑（ユーザー指定）。
+   ⚠️ **色はトークン**（`--danger` / `--success`。テーマで変わる。地は字の色を薄めたもの）。
+   ⚠️ **幅は器（駒台の幅）で頭打ち**。溢れたら省略して title で読ませる。 */
+.live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 14%, transparent);
+}
+
+/* 頭の点。**明滅させて「動いている」ことを見せる**（止まっている札と見分けるため）。 */
+.live-badge::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: live-badge-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes live-badge-pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-badge::before {
+    animation: none;
+  }
+}
+
+.live-badge.is-follow {
+  color: var(--danger);
+}
+
+.live-badge.is-kifu {
+  color: var(--success);
+}
+
+.live-badge[hidden] {
+  display: none;
 }
 
 .view-flip[hidden] {

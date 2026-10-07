@@ -133,7 +133,10 @@ export interface EditorOptions {
   // 移る）は呼び出し側（mainscreen）の仕事で、**この UI は確定の可否を判定しない**
   // （手番や駒台の先後が未決かどうかは Go 側の StudyService.Adopt が言う。
   // フロントで同じ判定を書くと 2 か所に散る）。
-  onConfirm(): void;
+  //
+  // follow が真なら「そのまま追跡」（2026-10-08）—— 解析タブへ渡したあと、
+  // **そのまま中継を追い始める**（盤の下の「中継を追う」を押すのと同じ）。
+  onConfirm(follow: boolean): void;
   // onError は操作が通らなかったときの理由（「移動元が空マスです」など）。
   onError(message: string): void;
 }
@@ -302,6 +305,7 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   // 出口（＝確定して解析タブへ渡す）と、盤の操作の説明。**一番下**（上の ⚠️）。
   confirmHost.innerHTML = `
     <button id="edit-confirm" class="ghost-btn is-primary" type="button">この局面を解析する</button>
+    <button id="edit-confirm-follow" class="ghost-btn" type="button">そのまま追跡</button>
     <span class="edit-hint">
       盤 ⇄ 駒台をドラッグ（外すと同時に持ち主が決まる） /
       <strong>「<span id="edit-stock-name">足りない駒</span>」をクリックすると掴んだまま連続で置ける</strong>（残り 0 でも置ける。Esc で離す） /
@@ -425,6 +429,8 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   };
 
   const confirmBtn = confirmHost.querySelector<HTMLButtonElement>("#edit-confirm")!;
+  // 「そのまま追跡」（2026-10-08）。出口は同じで、渡したあと中継を追い始めるだけ。
+  const confirmFollowBtn = confirmHost.querySelector<HTMLButtonElement>("#edit-confirm-follow")!;
   const body = panel.querySelector<HTMLDivElement>("#edit-body")!;
   const handZones = [handZone(true), handZone(false)];
   const moveNum = panel.querySelector<HTMLInputElement>("#edit-movenum")!;
@@ -539,6 +545,10 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     confirmBtn.disabled = !editable;
     confirmBtn.title = editable
       ? "この局面を解析タブへ渡します（あとから訂正タブに戻って直せます）"
+      : "まだ局面がありません";
+    confirmFollowBtn.disabled = !editable;
+    confirmFollowBtn.title = editable
+      ? "この局面を解析タブへ渡して、そのまま中継を追い始めます（枠を中継の盤に合わせておいてください）"
       : "まだ局面がありません";
     body.hidden = !editable;
     stage.classList.toggle("is-editing", editable);
@@ -1258,7 +1268,8 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
 
   // 訂正タブの唯一の出口。**可否の判定はここでしない**（Go 側の
   // StudyService.Adopt が言う。フロントで同じ判定を書くと 2 か所に散る）。
-  confirmBtn.addEventListener("click", () => onConfirm());
+  confirmBtn.addEventListener("click", () => onConfirm(false));
+  confirmFollowBtn.addEventListener("click", () => onConfirm(true));
 
   resetBtn.addEventListener("click", () => {
     void apply(() => PositionService.Reset());
