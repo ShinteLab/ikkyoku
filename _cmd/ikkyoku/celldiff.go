@@ -29,12 +29,14 @@ import (
 // 行き先が光り続けると同じ組が続くので、見なすと 0.5 秒ごとに 81 マスを読むことになる。
 // ⚠️ **比べる相手は解析タブが「先端と合っている」と言った 1 枚だけ**（`SetCellBase`）。
 // 前に読んだ 1 枚と比べると、それが手の被った 1 枚だったとき残像が混ざる（2026-10-06 に実測）。
-// ⚠️ **変わったマスが多ければ 81 マスを読む**（`cellFastMax`。手や頭が被った 1 枚）。
+// ⚠️ **変わったマスが多ければ 81 マスを読む**（`cellFastMax`。手や頭が被った 1 枚）—— ただし多い組も一度は解析タブ側へ
+// 渡し、空きのマスだけが光っているなら読まない（2026-10-08。`fastCells`）。
 const (
 	// cellChanged は「変わったマス」と見なす、マスの内側で変わった画素の割合。
 	// 録画の実測（2026-10-06）で、指した手のマスは最小 0.72、ほかのマスは最大 0.077 だった。
 	cellChanged = 0.3
-	// cellFastMax は速い経路で扱う変わったマスの数の上限（2 手で 4 マス + 前の手の色付け 2 マス + 余裕）。
+	// cellFastMax は速い経路で手順を割り出す変わったマスの数の上限（2 手で 4 マス + 前の手の色付け 2 マス + 余裕）。
+	// ⚠️ **解析タブ側の `followCellsMax` と同じ値にすること**（あちらが超えた組を 81 マスへ回す）。
 	cellFastMax = 8
 
 	// cellSkipSame は**比べる相手から、どのマスも変わっていない**（`CaptureResult.Skipped`）。
@@ -236,9 +238,11 @@ func (s *CaptureService) noteCellRects(img image.Image, d *recognize.Debug) {
 // fastCells は**この 1 枚を速い経路で扱ってよいか**を返す（2026-10-07）。fc は `cellsOf` で測ったもの。
 //
 // 真になるのは、比べられて（`fc.ok`）、ふるいが「変化して止まった」と言った 1 枚（`gateReadSettled` か
-// `gateReadCells`）で、変わったマスが `cellFastMax` 以下のときだけ。偽なら 81 マスを読む
-// （そのときも呼ぶ側は `fc.cells` を `FrameFits` のために返す）。
-// ⚠️ **多すぎて 81 マスへ回した組は `cellsFailed` に覚える**（同じ組が続いても「止まった」と見なさない）。
+// `gateReadCells`）のときだけ。偽なら 81 マスを読む（そのときも呼ぶ側は `fc.cells` を `FrameFits` のために返す）。
+// ⚠️ **変わったマスが多い（`cellFastMax` を超える）組も渡すこと**（2026-10-08）。駒台の駒をつまむと打てるマスが
+// 15 マスほど光る。光っているだけか（空きのマスだけが変わったか）は局面を知っている解析タブ側が決め
+// （`StudyService.FollowCells` の `LooksOnly`）、そうでなければ手順を割り出さずに返す —— フロントがその 1 枚を
+// 81 マスで読み、`RecognizeQuiet` が決まらなかった組として覚える（今までと同じ）。
 func (s *CaptureService) fastCells(fc frameCells) bool {
 	if !fc.ok {
 		return false
@@ -250,9 +254,8 @@ func (s *CaptureService) fastCells(fc frameCells) bool {
 		return false
 	}
 	if len(fc.cells) > cellFastMax {
-		log.Info("変わったマスが多いので 81 マスを読みます（追跡）", "変わったマス", len(fc.cells))
-		s.markCellsFailed(fc)
-		return false
+		log.Info("変わったマスが多いです（光っているだけか確かめ、違えば 81 マスを読みます）（追跡）", "変わったマス", len(fc.cells))
+		return true
 	}
 	if len(fc.cells) > 0 {
 		names := make([]string, 0, len(fc.cells))

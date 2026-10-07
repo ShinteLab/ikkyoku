@@ -2883,6 +2883,15 @@ ${st.turnLabel}${n}`;
         const promo = wantCompare ? await followEvidence(wantCompare) : null;
         fast = await StudyService.FollowCells(shot.cells ?? [], read, promo);
       }
+      if (fast.looksOnly) {
+        // **変わったのは空きのマスだけで、駒は動いていない**（駒台の駒をつまんで打てるマスが光っている。2026-10-08）。
+        // ⚠️ **81 マスを読まないこと**（光ったマスを歩と読み、3〜5 秒かけて繋がらないだけだった）。組を覚えさせ、
+        // ふるいが同じ組を「変わっていない」に数える（保険の 1 枚は残る）。⚠️ **見送りとして数えない**。
+        await CaptureService.CellsUnmoved();
+        followPending = false;
+        publishFollow(followNote("追跡中"));
+        return false;
+      }
       if (fast.noMoves) {
         // **変わったマスを説明できる手順が 1 つも無い**（駒を掴んで行き先が光っている 1 枚が多い。2026-10-08）。
         // ⚠️ **すぐ 81 マスを読まないこと**（1〜5 秒塞がり、そのあいだに指した手と応手がまとめて遅れた）。

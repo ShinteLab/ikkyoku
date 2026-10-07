@@ -13,7 +13,8 @@ package main
 //   - **速い経路で決まらなかった組は見なさないこと**（`cellsFailed`。それでも待つ上限で読むこと）
 //   - **何も変わっていない組が続くのは「変わっていない」に数えること**（保険の 1 枚を飢えさせない）
 //   - **説明の付かない組（`CellsUnclear`）は盤全体が止まっていても待つ上限まで待つこと**（2026-10-08。組が変われば待たない）
-//   - **81 マスで「何も指していない」と出た組（`CellsUnmoved`）は「変わっていない」に数えること**（2026-10-08。保険は残る）
+//   - **81 マスで「何も指していない」と出た組・光っているだけの組（`CellsUnmoved`）は「変わっていない」に数えること**（2026-10-08。保険は残る）
+//   - **変わったマスが多い組も解析タブ側へ渡すこと**（2026-10-08。光っているだけかはあちらが決める）
 
 import (
 	"image"
@@ -180,8 +181,9 @@ func TestGateIgnoresFailedCells(t *testing.T) {
 	}
 }
 
-// ⚠️ **多すぎて 81 マスへ回した組も、決まらなかった組として覚えること**（`fastCells`）。
-func TestFastCellsRemembersTooManyCells(t *testing.T) {
+// ⚠️ **変わったマスが多い組も解析タブ側へ渡すこと**（2026-10-08。駒台の駒をつまむと打てるマスが光る。光っているだけかは
+// 解析タブ側が決める）。⚠️ **そこで決まらずに 81 マスへ回した組（`RecognizeQuiet`）は、決まらなかった組として覚えること**。
+func TestFastCellsPassesManyCells(t *testing.T) {
 	s := gameService(t)
 	many := []int{}
 	for i := 0; i <= cellFastMax; i++ {
@@ -191,9 +193,10 @@ func TestFastCellsRemembersTooManyCells(t *testing.T) {
 	if got := s.gateImg(gameFrame(2, many...)); got != "" || s.gateRead != gateReadCells {
 		t.Fatalf("前提: 組が 2 枚続けて同じなら読むはず: %q / %q", got, s.gateRead)
 	}
-	if _, _, fast := s.fastImg(gameFrame(2, many...)); fast {
-		t.Fatal("変わったマスが多いのに速い経路を使いました")
+	if cells, _, fast := s.fastImg(gameFrame(2, many...)); !fast || len(cells) != len(many) {
+		t.Fatalf("変わったマスが多い組を渡していません: fast=%v cells=%v", fast, cells)
 	}
+	s.markCellsFailed(s.cellsOf(gameFrame(2, many...))) // 解析タブ側で決まらず、81 マスを読んだ（`RecognizeQuiet`）
 	if got := s.gateImg(gameFrame(3, many...)); got != gateSkipMoving {
 		t.Fatalf("81 マスへ回した組で、また止まったと見なしました: %q", got)
 	}

@@ -901,6 +901,17 @@ func (s *StudyService) FollowCells(changed []int, read []CellPiece, promo []Prom
 	if len(since) > followCellsBehind {
 		return unclear(0, nil)
 	}
+	// ⚠️ **空きのマスだけが変わり、打つ手でも説明が付かないなら、駒は動いていない**（2026-10-08。`followGlowOnly`）。
+	// ゲーム画面で駒台の駒をつまむと、打てるマスが光る（15 マスなど）。81 マスを読むと光ったマスを歩と読み、
+	// 3〜5 秒かけて繋がらないだけだった。駒を動かす手は必ず駒のあったマスを変え、打つ手は 1 手で 1 マス。
+	glow, glowN := followGlowOnly(base, since, mask, extra)
+	if glow && glowN > followCellsDepth {
+		return s.followLooksOnly(glowN), nil
+	}
+	if mask.Count() > followCellsMax {
+		// 多すぎて手順を割り出せない（手や頭が被った 1 枚など）。今までどおり 81 マスを読む。
+		return unclear(0, nil)
+	}
 	sols, err := position.ChangedMoves(base, mask, extra, len(since)+followCellsDepth)
 	if err != nil {
 		return unclear(0, err)
@@ -915,6 +926,10 @@ func (s *StudyService) FollowCells(changed []int, read []CellPiece, promo []Prom
 		if !slices.ContainsFunc(rests, func(r []string) bool { return slices.Equal(r, rest) }) {
 			rests = append(rests, rest)
 		}
+	}
+	if len(rests) == 0 && glow {
+		// 空きのマスだけが変わり、打つ手でも説明が付かない（光ったマスが少ないとき）。
+		return s.followLooksOnly(glowN), nil
 	}
 	if len(rests) == 0 {
 		// ⚠️ **合う手順が 1 つも無いことを添えること**（`NoMoves`。2026-10-08）。フロントはすぐ 81 マスを読まず、
@@ -1035,6 +1050,45 @@ func (s *StudyService) FollowCells(changed []int, read []CellPiece, promo []Prom
 
 // followReadMax は「違いの出るマスだけ読む」で読むマスの上限（多ければ 81 マスを読む）。
 const followReadMax = 4
+
+// followCellsMax は速い経路で手順を割り出す、変わったマスの数の上限（撮る側の `cellFastMax` と同じ値にすること）。
+// 多い組でも、空きのマスだけが変わったなら「動いていない」と言える（`followGlowOnly`）ので、撮る側は組を全部渡してくる。
+const followCellsMax = 8
+
+// followGlowOnly は、変わったマス mask のうち色付けのマス（extra）を除いたものが、**比べる相手の局面でも先端でも
+// 全部空き**かを返す（2026-10-08）。n はそのマスの数（0 なら偽）。
+//
+// ⚠️ **局面だけで決めること**（画像の色を見ない —— 光り方はゲームごとに違う）。駒を動かす手は必ず駒のあったマスを
+// 変え、取る手は駒のあるマスへ行く。空きのマスだけが変わるのは打つ手だけで、1 手で 1 マスしか変えない。
+// ⚠️ **足し済みの手（since）で駒が来た・去ったマスは空きにならない**ので、ここで偽になる（今までどおり割り出す）。
+func followGlowOnly(base *position.Position, since []string, mask, extra *position.CellMask) (bool, int) {
+	tip := followBoard(base, since, nil)
+	if tip == nil {
+		return false, 0
+	}
+	n := 0
+	for r := 0; r < 9; r++ {
+		for f := 0; f < 9; f++ {
+			if !mask[r][f] || (extra != nil && extra[r][f]) {
+				continue
+			}
+			was, err1 := base.Board.At(r, f)
+			now, err2 := tip.At(r, f)
+			if err1 != nil || err2 != nil || !was.IsEmpty() || !now.IsEmpty() {
+				return false, 0
+			}
+			n++
+		}
+	}
+	return n > 0, n
+}
+
+// followLooksOnly は「変わったのは空きのマスだけで、駒は動いていない」と返す（`LooksOnly`）。
+// ⚠️ **手は足さず、控えず、`AtFrame` も立てない**（光ったマスを比べる相手にしない）。
+func (s *StudyService) followLooksOnly(n int) FollowAuto {
+	log.Info("変わったのは空きのマスだけです（駒は動いていません。81 マスは読みません）", "マス", n)
+	return FollowAuto{Kind: FollowSame, Reason: "駒は動いていません", LooksOnly: true, State: s.State()}
+}
 
 // CellPiece は**マス 1 つの読み**（`CaptureService.ReadCells` が返し、`FollowCells` が受ける。2026-10-07）。
 // Cell は撮った画像の向きの 81 マスの番号、Piece は撮った画像の向きの SFEN の駒（手前側が大文字。
@@ -1655,6 +1709,10 @@ type FollowAuto struct {
 	// 真ならフロントはすぐ 81 マスを読まず、`CaptureService.CellsUnclear` で組が変わるのを待たせる
 	// （ふるいが待つ上限で読む）。⚠️ **成・不成や打った駒で決まらなかった周には立てない**（手はある。すぐ読む）。
 	NoMoves bool `json:"noMoves"`
+	// LooksOnly は**速い経路で、変わったのは空きのマスだけで、駒は動いていない**か（2026-10-08。`followGlowOnly`）。
+	// 駒台の駒をつまんで、打てるマスが光っている 1 枚。真ならフロントは 81 マスを読まず、`CaptureService.CellsUnmoved` で
+	// その組を覚えさせる（ふるいは同じ組を「変わっていない」に数え、保険の 1 枚は残る）。
+	LooksOnly bool `json:"looksOnly"`
 }
 
 // CellPair は**動いた駒の、動く前のマスと動いた先のマス**（撮った画像の向きの 81 マスの番号。2026-10-07）。
