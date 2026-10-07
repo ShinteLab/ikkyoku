@@ -988,8 +988,19 @@ export function mountMainScreen(root: HTMLElement): void {
 
                  ⚠️ **視点を反転しても列を移さないこと。** 駒台は左右が入れ替わるが、
                  **押すたびにボタンが飛ぶと、もう一度押すのに探すことになる**。
-                 どちら側が手前かはボタンの文字が言っている。 -->
-            <button id="study-flip" class="ghost-btn view-flip" type="button" hidden></button>
+                 どちら側が手前かはボタンの文字が言っている。
+
+                 中継の札（2026-10-08）。**視点のボタンの上に積む**（同じ空きのセル）。
+                 画面を撮って追っているあいだは赤、URL の棋譜を自動更新しているあいだは緑
+                 （ユーザー指定）。**両方入っていれば 2 枚とも出す**（別物なので 1 枚にまとめない）。
+                 ⚠️ **押せない**（入り切りは「中継を追う」と自動更新のアイコンが持つ）。 -->
+            <div class="view-side">
+              <span id="study-live-follow" class="live-badge is-follow" hidden
+                    title="中継の画面を撮って、進んだ手を本譜に足しています">中継を追跡中</span>
+              <span id="study-live-kifu" class="live-badge is-kifu" hidden
+                    title="棋譜の URL を取り直して、新しい手に付いていきます">棋譜を自動更新中</span>
+              <button id="study-flip" class="ghost-btn view-flip" type="button" hidden></button>
+            </div>
             <div id="study-hand-white-slot" class="hand-slot" hidden></div>
             <div id="study-stage" class="board-stage">
               <!-- ⚠️ fluid: 置き場所の幅いっぱいに広げる（core/web の属性。2026-08-12）。
@@ -2103,6 +2114,10 @@ export function mountMainScreen(root: HTMLElement): void {
   // 視点のボタン（解析タブ）。**盤のグリッドの右の列**に置いてある
   // （先手の対局者名の下・先手の駒台の上）。
   const studyFlip = root.querySelector<HTMLButtonElement>("#study-flip")!;
+  // 中継の札（2026-10-08。視点のボタンの上）。画面を撮って追っている / 棋譜の自動更新。
+  // ⚠️ **映すだけ**（入り切りの持ち主は `setFollowing` と `StudyState.kifuFollow`）。
+  const studyLiveFollow = root.querySelector<HTMLElement>("#study-live-follow")!;
+  const studyLiveKifu = root.querySelector<HTMLElement>("#study-live-kifu")!;
 
   // 視点（手前が先手 / 手前が後手）。**表示だけの反転で、局面には効かない。**
   // 切り替えの中身は下の「視点」の節にまとめてある（ここは値の置き場所だけ）。
@@ -2509,6 +2524,8 @@ ${st.turnLabel}${n}`;
     syncStudyChrome(loaded);
     // 中継を追うボタンも局面があるときだけ（繋ぐ先が無いと足せない）。
     studyFollowBtn.hidden = !loaded;
+    // 棋譜の自動更新の札。⚠️ **条件は自動更新のアイコンと同じ**（URL から読んだときだけ。sidepane.ts）。
+    studyLiveKifu.hidden = !(loaded && (st.sourceUrl ?? "") !== "" && !!st.kifuFollow);
     // ⚠️ **待っている手数はここで取ること。** 追跡のループの中だけで数えると、
     // **人が手順を消したり分岐にしたりしたときに古いまま**になる
     // （`study:changed` もここへ来る）。
@@ -2788,6 +2805,7 @@ ${st.turnLabel}${n}`;
     studyFollowBtn.setAttribute("aria-pressed", on ? "true" : "false");
     studyFollowBtn.classList.toggle("is-active", on);
     studyFollowBtn.textContent = on ? "追跡中…" : "中継を追う";
+    studyLiveFollow.hidden = !on;
     if (!on && followTimer !== undefined) {
       window.clearTimeout(followTimer);
       followTimer = undefined;
