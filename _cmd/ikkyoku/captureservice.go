@@ -178,6 +178,10 @@ type CaptureService struct {
 	// ⚠️ **この組が続いても「止まった」と見なさない** —— 駒を掴んだまま行き先が光り続けると同じ組が続き、
 	// 見なすと 0.5 秒ごとに 81 マスを読み直す。比べる相手を替えたら忘れる。
 	cellsFailed frameCells
+	// cellsUnmoved は**81 マスを読んだら何も指していなかった、変わったマスの組**（2026-10-08。`CellsUnmoved`）。
+	// 駒を掴んで行き先が光っているだけの組。⚠️ **この組のあいだは「変わっていない」に数える**（`gate`）——
+	// 81 マスを読まず、組が変われば（指した）すぐ速い経路に入る。保険（`gateSkipMax`）は残る。比べる相手を替えたら忘れる。
+	cellsUnmoved frameCells
 	// followMisses は**繋げなかった周を残した枚数**（2026-09-15）。
 	//
 	// ⚠️ **見送りを全部残さない方針の例外。** 1 秒ごとの空振りは残さないが、
@@ -1235,6 +1239,10 @@ func (s *CaptureService) gate(img image.Image, fc frameCells) string {
 	s.gateFrame = img
 	// 変わったマスの組は毎周入れ替える（次の周が「2 枚続けて同じ」かを見るため。比べられない周も入れる）。
 	cellsStill := fc.same(s.gateCells) && !fc.same(s.cellsFailed)
+	// unmoved は**読んで「駒は動いていない」と確かめた組のまま**か（`cellsUnmoved`。2026-10-08）。
+	unmoved := len(fc.cells) > 0 && fc.same(s.cellsUnmoved)
+	// failed は**速い経路で決まらなかった組のまま**か（`cellsFailed`）。
+	failed := len(fc.cells) > 0 && fc.same(s.cellsFailed)
 	s.gateCells = fc
 
 	// ⚠️ **ここで数えないこと**（2026-09-18）。この先に**盤の有無のふるい**
@@ -1262,7 +1270,23 @@ func (s *CaptureService) gate(img image.Image, fc frameCells) string {
 			"しきい値", gateChangedRatio)
 		return read(gateReadInsurance)
 	}
+	// sameSkip は**駒は動いていない**として `same` で省く（81 マスは読まない）。
+	// ⚠️ **「変わっていない」として数えること**（`gateSkipped`）。待つ上限（`gateMovingMax`）に
+	// 数えると演出のあいだ 8 周ごとに 81 マスを読み、`read` で数え直すと保険（`gateSkipMax`）が
+	// 二度と来ない —— 変わったマスの測り違いで手を見落としたとき、戻れなくなる。
+	sameSkip := func() string {
+		s.gateDirty, s.gateMoving = false, 0
+		s.gateSkipped++
+		if s.gateSkipped < gateSkipMax {
+			return cellSkipSame
+		}
+		return insurance()
+	}
 	if ratio >= gateChangedRatio {
+		if unmoved {
+			// 駒を掴んで行き先が光っているあいだ（読んで確かめた組のまま。`cellsUnmoved`）。
+			return sameSkip()
+		}
 		if cellsStill && len(fc.cells) > 0 {
 			// 盤全体は動いているが、指し手のマスは落ち着いた（ゲーム画面の演出。`gateReadCells`）。
 			log.Info("盤全体は動いていますが、変わったマスが 2 枚続けて同じなので止まったと見なします（追跡）",
@@ -1271,16 +1295,7 @@ func (s *CaptureService) gate(img image.Image, fc frameCells) string {
 		}
 		if cellsStill {
 			// **比べる相手から、どのマスも変わっていない**まま 2 枚続いた（演出だけが動いている）。
-			// ⚠️ **「変わっていない」として数えること**（`gateSkipped`）。待つ上限（`gateMovingMax`）に
-			// 数えると演出のあいだ 8 周ごとに 81 マスを読み、`read` で数え直すと保険（`gateSkipMax`）が
-			// 二度と来ない —— 変わったマスの測り違いで手を見落としたとき、戻れなくなる。
-			// `same` で省く（81 マスは読まない）。
-			s.gateDirty, s.gateMoving = false, 0
-			s.gateSkipped++
-			if s.gateSkipped < gateSkipMax {
-				return cellSkipSame
-			}
-			return insurance()
+			return sameSkip()
 		}
 		s.gateDirty = true
 		s.gateMoving++
@@ -1298,6 +1313,19 @@ func (s *CaptureService) gate(img image.Image, fc frameCells) string {
 			return gateSkipUnchanged
 		}
 		return insurance()
+	}
+	if unmoved {
+		// 変化して止まったが、読んで「駒は動いていない」と確かめた組のまま（読み直さない）。
+		return sameSkip()
+	}
+	if failed {
+		// 盤全体は止まったが、速い経路で決まらなかった組のまま（駒を掴んで考えている。2026-10-08）。
+		// ⚠️ **盤全体が動いているときと同じく、組が変わるか待つ上限まで待つ**（すぐ読むと 1 周が塞がる）。
+		s.gateMoving++
+		if s.gateMoving < gateMovingMax {
+			return gateSkipMoving
+		}
+		return read(gateReadRestless)
 	}
 	return read(gateReadSettled) // 変化したあと静止した ＝ 読むならこの 1 枚
 }
@@ -1392,7 +1420,7 @@ func (s *CaptureService) resetGate() {
 	s.gateFrame, s.gateDirty, s.gateMoving, s.detectMisses = nil, false, 0, 0
 	s.gateSkipped, s.gateMaxSkip = 0, 0
 	s.gateShots, s.gateReads = 0, 0
-	s.gateCells, s.cellsFailed = frameCells{}, frameCells{}
+	s.gateCells, s.cellsFailed, s.cellsUnmoved = frameCells{}, frameCells{}, frameCells{}
 }
 
 // noteQuiet は**結果の種類が変わったときだけ**ログに出す。

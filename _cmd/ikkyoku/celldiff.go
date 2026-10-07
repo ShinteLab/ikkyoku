@@ -62,7 +62,49 @@ func (s *CaptureService) SetCellBase() {
 func (s *CaptureService) setCellBaseLocked(img image.Image) {
 	s.cellBase = img
 	s.cellGen++
-	s.gateCells, s.cellsFailed = frameCells{}, frameCells{}
+	s.gateCells, s.cellsFailed, s.cellsUnmoved = frameCells{}, frameCells{}, frameCells{}
+}
+
+// CellsUnclear は**直前に撮った 1 枚の変わったマスの組を決まらなかった組として覚え、組が変わるのを待たせる**（2026-10-08）。
+//
+// 呼ぶのはフロントで、速い経路が `FollowAuto.NoMoves`（変わったマスを説明できる手順が 1 つも無い）を返したとき。
+// ゲーム画面で駒を掴むと、その駒が浮いて行き先が光り、考えているあいだ同じ組が続く。そこですぐ 81 マスを読むと
+// 1 周が 1〜5 秒塞がり、そのあいだに指した手と相手の応手がまとめて遅れた（1 組 10 秒前後。2026-10-08 に実機で踏んだ）。
+// 待っているあいだに指せば組が変わり、速い経路ですぐ取れる。⚠️ **待つ上限（`gateMovingMax`）では読む**（`gate`）——
+// 盤全体が止まっていても待つ側に数えるため、「変化した」印（`gateDirty`）を立てる。
+func (s *CaptureService) CellsUnclear() {
+	s.mu.Lock()
+	img := s.lastQuiet
+	s.mu.Unlock()
+	fc := s.cellsOf(img)
+	if !fc.ok || len(fc.cells) == 0 {
+		return
+	}
+	s.markCellsFailed(fc)
+	s.mu.Lock()
+	s.gateDirty, s.gateMoving = true, 0
+	s.mu.Unlock()
+	log.Info("変わったマスを説明できる手がありません（組が変わるのを待ちます）", "変わったマス", len(fc.cells))
+}
+
+// CellsUnmoved は**直前に撮った 1 枚の変わったマスの組を、「駒は動いていない」組として覚える**（2026-10-08）。
+//
+// 呼ぶのはフロントで、81 マスを読んで解析タブ側が「何も指していない」（`FollowAuto.Kind` が `same`）と返したとき。
+// 駒を掴んで行き先が光っているあいだ、ふるいはこの組を「変わっていない」に数え（`gate`）、同じ組を何度も
+// 81 マスで読み直さない（2026-10-08 に、同じ組を 20 秒で 5 回読んでいた）。保険（`gateSkipMax`）は残る。
+// ⚠️ **ここで「動いていないか」を判断しないこと**（局面を知らない層なので）。
+// ⚠️ **比べる相手を替えたら忘れる**（`setCellBaseLocked`）。
+func (s *CaptureService) CellsUnmoved() {
+	s.mu.Lock()
+	img := s.lastQuiet
+	s.mu.Unlock()
+	fc := s.cellsOf(img)
+	if !fc.ok || len(fc.cells) == 0 {
+		return
+	}
+	s.mu.Lock()
+	s.cellsUnmoved = fc
+	s.mu.Unlock()
 }
 
 // frameCells は**1 枚の、比べる相手から変わったマス**（撮った画像の向きの 81 マスの番号。`cellsOf`。2026-10-07）。

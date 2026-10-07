@@ -857,6 +857,7 @@ func (s *StudyService) cellsMask(cells []int) *position.CellMask {
 // ⚠️ **合う手順が 1 つに決まるときだけ進む**（`position.ChangedMoves`）。成・不成、打った駒の種類、
 // 手や頭が被った 1 枚など、決まらなければ何もせずに返す（`Applied` も `Pending` も `AtFrame` も偽）。
 // **フロントはそれを見て、同じ 1 枚を 81 マスで読む**（`CaptureService.RecognizeQuiet` → `FollowAuto`）。
+// ⚠️ **合う手順が 1 つも無いときだけは `NoMoves` を立てる**（2026-10-08）—— フロントはすぐには読まず、組が変わるのを待つ。
 // 残りが無ければ（今の 1 枚が先端そのもの）`AtFrame` だけを立てて返す。
 // ⚠️ **1 通りに決まっても、行き先に指した側の駒が読めるまで控えも足しもしない**（2026-10-07。
 // `followBackedByRead`）。read が行き先を読んでいなければ `ReadCells` に行き先を入れて返し
@@ -914,6 +915,13 @@ func (s *StudyService) FollowCells(changed []int, read []CellPiece, promo []Prom
 		if !slices.ContainsFunc(rests, func(r []string) bool { return slices.Equal(r, rest) }) {
 			rests = append(rests, rest)
 		}
+	}
+	if len(rests) == 0 {
+		// ⚠️ **合う手順が 1 つも無いことを添えること**（`NoMoves`。2026-10-08）。フロントはすぐ 81 マスを読まず、
+		// 組が変わるのを待つ（駒を掴んで行き先が光っているだけの 1 枚が多い）。
+		a, err := unclear(0, nil)
+		a.NoMoves = true
+		return a, err
 	}
 	if len(rests) > 1 {
 		// ⚠️ **控えた手と合う候補があれば、それを採ること**（2026-10-07 に実機で踏んだ）。▲3三角成 を
@@ -1641,6 +1649,12 @@ type FollowAuto struct {
 	// `PromoEvidence` にして同じ 1 枚でもう一度呼ぶ（`FollowAuto` / `FollowCells`）。⚠️ **これを返した周は
 	// 局面も控えも 1 つも動かしていない**（もう一度呼ばれて初めて決める）。
 	Compare []CellPair `json:"compare"`
+	// NoMoves は**速い経路で、変わったマスを説明できる手順が 1 つも無かった**か（2026-10-08）。
+	// ゲーム画面で駒を掴むと、その駒が浮いて行き先が光り、考えているあいだ同じ組が続く。そこで 81 マスを
+	// 読むと 1 周が 1〜5 秒塞がり、そのあいだに指した手と相手の応手がまとめて遅れた（1 組 10 秒前後）。
+	// 真ならフロントはすぐ 81 マスを読まず、`CaptureService.CellsUnclear` で組が変わるのを待たせる
+	// （ふるいが待つ上限で読む）。⚠️ **成・不成や打った駒で決まらなかった周には立てない**（手はある。すぐ読む）。
+	NoMoves bool `json:"noMoves"`
 }
 
 // CellPair は**動いた駒の、動く前のマスと動いた先のマス**（撮った画像の向きの 81 マスの番号。2026-10-07）。

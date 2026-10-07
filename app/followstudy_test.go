@@ -1220,6 +1220,29 @@ func TestFollowCellsFallsBackWhenUnclear(t *testing.T) {
 	if a.Applied || a.Pending {
 		t.Fatalf("合う手が無いのに足すか控えました: %+v", a)
 	}
+	// ⚠️ **合う手順が 1 つも無いことを添えること**（`NoMoves`。2026-10-08。フロントはすぐ 81 マスを読まずに待つ）。
+	if !a.NoMoves {
+		t.Fatalf("合う手順が無いのに NoMoves が立っていません: %+v", a)
+	}
+}
+
+// ⚠️ **手はあるが決まらなかった周に `NoMoves` を立てないこと**（成・不成や打った駒。すぐ 81 マスを読む）。
+func TestFollowCellsNoMovesOnlyWithoutMoves(t *testing.T) {
+	s, _ := following(t)
+	// ▲7六歩 は 1 通りに決まるが、行き先（7六）に空きと読めた（指した側の駒が来ていない）。
+	changed := cellIdx("7g", "7f")
+	a, err := s.FollowCells(changed, nil, nil)
+	if err != nil || len(a.ReadCells) == 0 {
+		t.Fatalf("前提: 行き先を読むよう頼むはず: %+v（%v）", a, err)
+	}
+	read := readAfter(t, false, a.ReadCells)
+	a, err = s.FollowCells(changed, read, nil)
+	if err != nil {
+		t.Fatalf("FollowCells: %v", err)
+	}
+	if a.Applied || a.Pending || a.NoMoves {
+		t.Fatalf("手はあるのに NoMoves を立てたか、足しました: %+v", a)
+	}
 }
 
 // ⚠️ **後手目線で採った局面では、撮った向きのマスを回してから割り出すこと。**

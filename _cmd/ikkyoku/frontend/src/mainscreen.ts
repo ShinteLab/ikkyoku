@@ -2883,6 +2883,17 @@ ${st.turnLabel}${n}`;
         const promo = wantCompare ? await followEvidence(wantCompare) : null;
         fast = await StudyService.FollowCells(shot.cells ?? [], read, promo);
       }
+      if (fast.noMoves) {
+        // **変わったマスを説明できる手順が 1 つも無い**（駒を掴んで行き先が光っている 1 枚が多い。2026-10-08）。
+        // ⚠️ **すぐ 81 マスを読まないこと**（1〜5 秒塞がり、そのあいだに指した手と応手がまとめて遅れた）。
+        // 組が変わるのを待たせる（指せば速い経路ですぐ取れる。待つ上限ではふるいが 81 マスを読む）。
+        // ⚠️ **見送りとして数えない**（読んでいない周と同じ）。⚠️ **控えは捨てる** —— この 1 枚から
+        // 変わっていない次の 1 枚（`unchanged`）で、説明の付かない盤のまま控えた手を足さないため。
+        await CaptureService.CellsUnclear();
+        followPending = false;
+        publishFollow(followNote("追跡中"));
+        return false;
+      }
       if (fast.applied || fast.pending || fast.atFrame) {
         got = fast;
       } else {
@@ -2905,6 +2916,11 @@ ${st.turnLabel}${n}`;
     followPending = !!got.pending;
     followPendingCells = got.pending ? cells : null;
     showStudy(got.state);
+    if (got.kind === "same" && !got.atFrame && cells && cells.length > 0) {
+      // **81 マスを読んだら何も指していなかったのに、変わったマスがある**（駒を掴んで行き先が光っている。2026-10-08）。
+      // その組を覚えさせ、続くあいだは読み直させない（同じ組を 20 秒で 5 回読んでいた。保険の 1 枚は残る）。
+      void CaptureService.CellsUnmoved();
+    }
     // ⚠️ **先端と合った 1 枚だけを、速い経路の比べる相手にする**（判断は Go 側）。81 マスの読みで
     // ぴったり合った（`atFrame`）か、比べる相手から変わったマスが足した手で説明できた（`FrameFits`）とき。
     // ⚠️ **控えているあいだは替えない**（先端とこの 1 枚が食い違っている）。

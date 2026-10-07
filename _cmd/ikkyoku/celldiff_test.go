@@ -12,6 +12,8 @@ package main
 //   - **組が毎周変わるあいだは待つこと**（手が盤の上を動いている）
 //   - **速い経路で決まらなかった組は見なさないこと**（`cellsFailed`。それでも待つ上限で読むこと）
 //   - **何も変わっていない組が続くのは「変わっていない」に数えること**（保険の 1 枚を飢えさせない）
+//   - **説明の付かない組（`CellsUnclear`）は盤全体が止まっていても待つ上限まで待つこと**（2026-10-08。組が変われば待たない）
+//   - **81 マスで「何も指していない」と出た組（`CellsUnmoved`）は「変わっていない」に数えること**（2026-10-08。保険は残る）
 
 import (
 	"image"
@@ -228,6 +230,97 @@ func TestGateCountsEmptyCellsAsUnchanged(t *testing.T) {
 	}
 	if got := s.gateImg(gameFrame(gateSkipMax)); got != "" || s.gateRead != gateReadInsurance {
 		t.Fatalf("省き続けたのに %q / %q（保険の 1 枚が来ない）", got, s.gateRead)
+	}
+}
+
+// ⚠️ **読んで「駒は動いていない」と確かめた組（`CellsUnmoved`）は、続くあいだ「変わっていない」に数えること**
+// （2026-10-08）。駒を掴んで行き先が光っているあいだ、81 マスを読まない。⚠️ **それでも保険（`gateSkipMax`）では
+// 読むこと**・⚠️ **組が変われば（指した）すぐ止まったかを見ること**・⚠️ **止まった 1 枚でも同じ組なら読まないこと**。
+func TestGateCountsUnmovedCellsAsUnchanged(t *testing.T) {
+	s := gameService(t)
+	lifted := 7*9 + 1
+	s.lastQuiet = gameFrame(0, lifted)
+	s.CellsUnmoved() // 解析タブ側が `LooksOnly` を返した
+	for i := 1; i < gateSkipMax; i++ {
+		if got := s.gateImg(gameFrame(i, lifted)); got != cellSkipSame {
+			t.Fatalf("%d 周目で %q（駒は動いていないと確かめた組なのに待つか読みました）", i, got)
+		}
+	}
+	if got := s.gateImg(gameFrame(gateSkipMax, lifted)); got != "" || s.gateRead != gateReadInsurance {
+		t.Fatalf("省き続けたのに %q / %q（保険の 1 枚が来ない）", got, s.gateRead)
+	}
+
+	// 指した（組が変わった）。2 枚続けて同じなら速い経路に入る。
+	moved := []int{lifted, 6*9 + 1}
+	s.gateImg(gameFrame(1, moved...))
+	if got := s.gateImg(gameFrame(2, moved...)); got != "" || s.gateRead != gateReadCells {
+		t.Fatalf("組が変わったのに %q / %q（止まったと見なしていない）", got, s.gateRead)
+	}
+
+	// 盤全体が止まった 1 枚でも、確かめた組のままなら読まない。
+	s.gateImg(gameFrame(3, lifted))
+	s.gateDirty = true
+	if got := s.gateImg(gameFrame(3, lifted)); got != cellSkipSame {
+		t.Fatalf("止まった 1 枚で %q（確かめた組なのに読みました）", got)
+	}
+}
+
+// ⚠️ **説明の付かない組（`CellsUnclear`）は、盤全体が止まっていても待つ上限まで待ってから読むこと**（2026-10-08）。
+// 駒を掴んで考えているあいだ、すぐ 81 マスを読むと 1 周が塞がり、指した手と応手がまとめて遅れた。
+// ⚠️ **待つ上限では読むこと**・⚠️ **組が変われば（指した）待たずに止まったかを見ること**。
+func TestGateWaitsOnUnclearCells(t *testing.T) {
+	s := gateServiceStatic(t)
+	lifted := 7*9 + 1
+	still := gameFrame(1, lifted)
+	if got := s.gateImg(still); got != gateSkipMoving {
+		t.Fatalf("前提: 変わった 1 枚目は待つはず: %q", got)
+	}
+	if got := s.gateImg(still); got != "" || s.gateRead != gateReadSettled {
+		t.Fatalf("前提: 止まったら速い経路へ: %q / %q", got, s.gateRead)
+	}
+	s.lastQuiet = still
+	s.CellsUnclear() // 速い経路が NoMoves を返した
+	for i := 1; i < gateMovingMax; i++ {
+		if got := s.gateImg(still); got != gateSkipMoving {
+			t.Fatalf("%d 周目で %q（説明の付かない組のまま読むか、待つのをやめました）", i, got)
+		}
+	}
+	if got := s.gateImg(still); got != "" || s.gateRead != gateReadRestless {
+		t.Fatalf("待つ上限で %q / %q（止まらなくても、いずれ読むはず）", got, s.gateRead)
+	}
+
+	// 指した（組が変わった）なら、待たずに止まったかを見る。
+	s.lastQuiet = still
+	s.CellsUnclear()
+	moved := gameFrame(1, lifted, 6*9+1)
+	if got := s.gateImg(moved); got != gateSkipMoving {
+		t.Fatalf("指した 1 枚目で %q", got)
+	}
+	if got := s.gateImg(moved); got != "" || s.gateRead != gateReadSettled {
+		t.Fatalf("組が変わって止まったのに %q / %q（待ち続けた）", got, s.gateRead)
+	}
+}
+
+// gateServiceStatic は gameService のあと、光の位置が同じ 1 枚を 2 回通して「変わっていない」まで落ち着かせる。
+func gateServiceStatic(t *testing.T) *CaptureService {
+	t.Helper()
+	s := gameService(t)
+	s.gateImg(gameFrame(1))
+	s.gateImg(gameFrame(1))
+	return s
+}
+
+// ⚠️ **比べる相手を替えたら、「駒は動いていない」組も忘れること**（相手が違えば同じ組でも意味が違う）。
+func TestSetCellBaseForgetsUnmovedCells(t *testing.T) {
+	s := gameService(t)
+	s.lastQuiet = gameFrame(0, 10)
+	s.CellsUnmoved()
+	if !s.cellsUnmoved.ok {
+		t.Fatal("前提: 組を覚えていません")
+	}
+	s.SetCellBase()
+	if s.cellsUnmoved.ok {
+		t.Fatalf("比べる相手を替えたのに残っています: %+v", s.cellsUnmoved)
 	}
 }
 
