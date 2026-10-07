@@ -950,8 +950,11 @@ func (s *StudyService) FollowCells(changed []int, read []CellPiece, promo []Prom
 	if len(rests) == 0 {
 		// ⚠️ **合う手順が 1 つも無いことを添えること**（`NoMoves`。2026-10-08）。フロントはすぐ 81 マスを読まず、
 		// 組が変わるのを待つ（駒を掴んで行き先が光っているだけの 1 枚が多い）。
+		// ⚠️ **ただし駒のあったマスが 2 つ以上変わった組は待たない**（`followOccupied`）—— 駒をつまんだときに駒のあったマスで
+		// 変わるのは浮いた駒の 1 マスだけ。それより多いのは、速い経路の手数（`followCellsDepth`）を超えて指された 1 枚で、
+		// 待つと次の手で跡が消える（▲4三歩打 △同歩 が △4三歩 になり、手番と持ち駒の歩がずれた）。すぐその 1 枚を読む。
 		a, err := unclear(0, nil)
-		a.NoMoves = true
+		a.NoMoves = followOccupied(base, since, mask, extra) <= 1
 		return a, err
 	}
 	if len(rests) > 1 {
@@ -1132,6 +1135,29 @@ func (s *StudyService) CellsLookUnmoved(cells []int) bool {
 		}
 	}
 	return true
+}
+
+// followOccupied は、変わったマス mask のうち色付けのマス（extra）を除いて、**比べる相手の局面か先端で駒があるマス**の数を返す
+// （2026-10-08。`NoMoves` を立てるか）。駒をつまんだ 1 枚では浮いた駒の 1 マスだけになる。
+func followOccupied(base *position.Position, since []string, mask, extra *position.CellMask) int {
+	tip := followBoard(base, since, nil)
+	n := 0
+	for r := 0; r < 9; r++ {
+		for f := 0; f < 9; f++ {
+			if !mask[r][f] || (extra != nil && extra[r][f]) {
+				continue
+			}
+			was, _ := base.Board.At(r, f)
+			now := was
+			if tip != nil {
+				now, _ = tip.At(r, f)
+			}
+			if !was.IsEmpty() || !now.IsEmpty() {
+				n++
+			}
+		}
+	}
+	return n
 }
 
 // followLooksOnly は「変わったのは空きのマスだけで、駒は動いていない」と返す（`LooksOnly`）。

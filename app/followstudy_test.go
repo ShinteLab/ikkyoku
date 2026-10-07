@@ -1315,6 +1315,21 @@ func TestFollowCellsNotLooksOnlyWhenAPieceCellChanged(t *testing.T) {
 	}
 }
 
+// ⚠️ **駒のあったマスが 2 つ以上変わった組では、合う手順が無くても `NoMoves` を立てないこと**（2026-10-08）。
+// 速い経路の手数を超えて指された 1 枚で、待つと次の手で跡が消える。ゲーム画面で △2三歩打 ▲2九飛 △6四桂 ▲4三歩打 の
+// 4 手が写った 1 枚を待ったあいだに △同歩 が指され、▲4三歩打 △同歩 が △4三歩 になって手番と持ち駒の歩がずれた。
+// 駒をつまんだ 1 枚（駒のあったマスは浮いた駒の 1 マスだけ）は今までどおり待つ。
+func TestFollowCellsNoMovesOnlyForAPickedPiece(t *testing.T) {
+	s, _ := following(t)
+	a, err := s.FollowCells(cellIdx("7g", "7f", "3c", "3d", "2g", "2f", "4c", "4d"), nil, nil) // 4 手が 1 枚に写った
+	if err != nil {
+		t.Fatalf("FollowCells: %v", err)
+	}
+	if a.Applied || a.Pending || a.NoMoves || a.LooksOnly {
+		t.Fatalf("速い経路の手数を超えて指された 1 枚で、待つ合図を出したか足しました: %+v", a)
+	}
+}
+
 // ⚠️ **手はあるが決まらなかった周に `NoMoves` を立てないこと**（成・不成や打った駒。すぐ 81 マスを読む）。
 func TestFollowCellsNoMovesOnlyWithoutMoves(t *testing.T) {
 	s, _ := following(t)
