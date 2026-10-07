@@ -454,7 +454,8 @@ body {
 
 /* ---- ガイド枠ウィンドウ(?window=frame) -----------------------------------
    Frameless。上部にツールバー、その下が透過するキャプチャ領域。
-   ツールバーより下には一切要素を置かない(置いた要素はそのまま写り込む)。
+   ツールバーとガイド枠の間・ガイド枠の内側には一切要素を置かない(置いた要素はそのまま写り込む)。
+   ガイド枠の下には、知らせがあるときだけ帯(.frame-footer)が付く(撮る範囲の外。2026-10-07)。
 
    --guide-border / --toolbar-height はここでは定義しない。Go 側
    (captureservice.go)が唯一のソースで、frame.ts が起動時に受け取って
@@ -672,6 +673,61 @@ html.is-frame #app {
   pointer-events: none; /* 透過部分は DOM のヒットテスト対象にしない */
   /* 撮った画像(.capture-flyout)を内側に重ねるための基準。 */
   position: relative;
+}
+
+/* 枠の下の帯（2026-10-07。中継の追従の知らせ）。
+   ⚠️ **高さは frame.ts が `style.height` で付ける**（普段は 0）。ここで高さを持たせないこと ——
+   ウィンドウを伸ばすのは Go（SetFrameFooter）で、伸びていないのに帯が高さを持つと
+   ガイド枠が上へ押し上げられ、帯が撮る範囲に入る。
+   ⚠️ **overflow: hidden を外さないこと**（中身が伸びても帯の外へ出さない。測るのは中身の高さ）。 */
+.frame-footer {
+  flex: 0 0 auto;
+  height: 0;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.frame-footer-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 4px 4px 4px 8px;
+}
+
+/* 長い文は 3 行で切る（帯の高さの上限は Go の guide.FooterMaxPx。全文はホバーで出る）。 */
+.frame-footer-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-top: 2px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+
+.frame-footer.is-warn .frame-footer-text {
+  color: var(--warn);
+}
+
+.frame-footer.is-error .frame-footer-text {
+  color: var(--danger);
+}
+
+.frame-footer .frame-btn.is-icon {
+  flex: 0 0 auto;
+  padding: 3px;
+  font-size: 13px;
+  background: transparent;
+}
+
+.frame-footer .frame-btn.is-icon:hover {
+  background: var(--line);
 }
 
 /* 撮れた画像を、撮った位置にそのまま重ねて出し、右下へ縮めながら消す(frame.ts)。

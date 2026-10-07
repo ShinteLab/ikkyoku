@@ -28,6 +28,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -75,6 +76,16 @@ type appWindows struct {
 	graphGeom *geometryTracker
 	sideGeom  *geometryTracker
 	movesGeom *geometryTracker
+
+	// frameFooterMu は枠の下の帯の高さ（`frameFooterPx`）と、**それに合わせたウィンドウの伸び縮み**を守る。
+	//
+	// ⚠️ **撮る範囲の算出（`captureRegion`）も同じロックで読むこと。** 伸ばしたのに帯の高さが
+	// 古いまま読まれると、**帯の文字とガイド枠の線が撮った画像に写り込む**（追従は裏で回り続けている）。
+	frameFooterMu sync.Mutex
+	// frameFooterPx は枠の下の帯の高さ(CSS px。0 なら帯は無い)。ウィンドウはそのぶん下へ伸びている。
+	// ⚠️ **保存する枠の高さからは引くこと**（`saveWindowState`）。引かないと、帯を出したまま終了したとき
+	// 次の起動で撮る範囲が帯のぶん広がる。
+	frameFooterPx int
 
 	// mainHasSavedPos は前回終了時の位置を復元したか。復元しているなら初回表示で
 	// 枠の外へ動かさない(ユーザーが決めた位置を上書きしないため)。
@@ -861,8 +872,15 @@ func registerVisibilityLog(wins *appWindows) {
 // **ここで Position()/Size() を読まない。** メイン画面を閉じる経路では既に破棄が
 // 進行中で不正な値が返る(geometry.go)。動いたときに記録しておいた値を使う。
 func saveWindowState(wins *appWindows) {
+	frame := wins.frameGeom.snapshot()
+	// ⚠️ **枠の下の帯のぶんは引く**（帯は文が出ているあいだだけの伸び。`frameFooterPx`）。
+	wins.frameFooterMu.Lock()
+	if footer := wins.frameFooterPx; footer > 0 && frame.Height > footer {
+		frame.Height -= footer
+	}
+	wins.frameFooterMu.Unlock()
 	st := appState{
-		Frame: wins.frameGeom.snapshot(),
+		Frame: frame,
 		Main:  wins.mainGeom.snapshot(),
 		Graph: wins.graphGeom.snapshot(),
 		Side:  wins.sideGeom.snapshot(),

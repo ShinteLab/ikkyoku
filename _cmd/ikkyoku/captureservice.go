@@ -827,6 +827,42 @@ func (s *CaptureService) setMouseThrough(on bool) {
 	s.mouseThrough = on
 }
 
+// SetFrameFooter は枠の下の帯の高さ(CSS px)を決め、**ウィンドウをそのぶん下へ伸ばす／縮める**（2026-10-07）。
+//
+// 帯は中継の追従の知らせ（見失った・止めた理由など）を出す場所で、文が出ているあいだだけある。
+// 以前は解析タブの手順の下に出していたが、**追っているあいだ見ているのは中継**なので、
+// 枠の近くに無いと届かない（枠のツールバーの札と同じ理由）。
+//
+// ⚠️ **上へは伸ばさない。** 上端・左右は動かさないので、**撮る範囲は 1 画素も動かない**
+// （動くと追っている盤を取り直すことになる）。
+// ⚠️ **伸び縮みと高さの記録を同じロックの中でやること**（`captureRegion` も同じロックで読む）。
+// 追従は裏で回り続けているので、伸ばしたのに高さが古いまま読まれると、帯が撮る範囲に入る。
+// ⚠️ **帯の中身（文字）を描く順番はフロントが守る** —— 伸ばしてから描く・消してから縮める
+// （逆だと、一瞬ガイド枠の線が撮る範囲の内側に描かれる）。
+//
+// px は 0〜`guide.FooterMaxPx` に丸め、**丸めた結果を返す**（帯はその高さで描くこと。
+// ⚠️ **フロントで上限を持たないこと** —— 伸ばしたより高く描くと、帯が撮る範囲に食い込む）。
+func (s *CaptureService) SetFrameFooter(px int) (int, error) {
+	if s.wins == nil || s.wins.frame == nil {
+		return 0, fmt.Errorf("ikkyoku: 枠がありません")
+	}
+	px = max(0, min(px, guide.FooterMaxPx))
+	w := s.wins
+	w.frameFooterMu.Lock()
+	defer w.frameFooterMu.Unlock()
+	delta := px - w.frameFooterPx
+	if delta == 0 {
+		return px, nil
+	}
+	fw, fh := w.frame.Size()
+	if fh+delta <= 0 {
+		return w.frameFooterPx, fmt.Errorf("ikkyoku: 枠の高さが足りません")
+	}
+	w.frame.SetSize(fw, fh+delta)
+	w.frameFooterPx = px
+	return px, nil
+}
+
 // Layout は枠ウィンドウが描くべき寸法を返す。フロントは起動時にこれを呼び、
 // CSS 変数に反映してからガイド枠を描く(定数の二重管理を避けるため)。
 func (s *CaptureService) Layout() guide.Layout {
@@ -2216,6 +2252,8 @@ func (s *CaptureService) CopyImage(path string) error {
 //	│ ┌──────────────────────┐ │ ← ガイド枠(guide.BorderPx)
 //	│ │   ここを撮る(透過)    │ │
 //	│ └──────────────────────┘ │
+//	├──────────────────────────┤
+//	│ 帯(frameFooterPx。0 もある)│ ← 中継の追従の知らせ(SetFrameFooter)
 //	└──────────────────────────┘
 //
 // Frameless なのでクライアント領域はウィンドウ全体と一致する(Wails が WM_NCCALCSIZE で
@@ -2238,14 +2276,19 @@ func (s *CaptureService) captureRegion() (ikkyoku.Region, float64, error) {
 		return ikkyoku.Region{}, 0, fmt.Errorf("ikkyoku: ネイティブウィンドウハンドルを取得できませんでした")
 	}
 
+	// ⚠️ **帯の高さと矩形は同じロックの中で読むこと**（`SetFrameFooter`。伸びた矩形と古い高さを
+	// 組み合わせると、帯が撮る範囲に入る）。
+	s.wins.frameFooterMu.Lock()
+	footer := s.wins.frameFooterPx
 	rect, scale, err := clientRectPhysical(hwnd)
+	s.wins.frameFooterMu.Unlock()
 	if err != nil {
 		return ikkyoku.Region{}, 0, err
 	}
 
 	border := guide.ScaleUp(guide.BorderPx, scale)
 	top := guide.ScaleUp(guide.ToolbarHeightPx, scale) + border
-	bottom := border + guide.FramelessBottomPaddingPx
+	bottom := border + guide.FramelessBottomPaddingPx + guide.ScaleUp(footer, scale)
 	region := ikkyoku.Region{
 		X:      rect.X + border,
 		Y:      rect.Y + top,

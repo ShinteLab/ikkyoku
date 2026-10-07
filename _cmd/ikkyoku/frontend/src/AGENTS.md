@@ -23,7 +23,7 @@
 | `evalgraph.ts` / `evalgraphpane.ts` | **`_docs/ui/evalgraph.md`** |
 | `graphscreen.ts` / `studyscreen.ts` | **`_docs/ui/detach.md`** |
 | `veildrag.ts` | **`_docs/ui/study-pane.md`**（連続解析の幕の節） |
-| `frame.ts` / `main.ts` | `_docs/ui/screens.md` + 親 `AGENTS.md` の「透過と Frameless」 |
+| `frame.ts` / `main.ts` | `_docs/ui/screens.md` + 親 `AGENTS.md` の「透過と Frameless」（**枠の下の帯**は `_docs/cmd-frame.md`） |
 | `hint.ts`（設定の説明の吹き出し） | `_docs/ui/screens.md`（設定タブの節） |
 | `fetchcards.ts` / `library.ts` | `_docs/app-shelf.md`（理由は `_docs/design-capture.md` の「棋譜データベース（棚）」） |
 
@@ -73,7 +73,7 @@
 | ファイル | 役割 |
 |---|---|
 | `main.ts` | エントリ。**素の `import "@wailsio/runtime"`** と `?window=` による画面分岐 |
-| `frame.ts` | 枠（ツールバー + ガイド枠） |
+| `frame.ts` | 枠（ツールバー + ガイド枠 + **下の帯**）。帯は中継の追従の知らせ（2026-10-07。`follow:notice` を映すだけ）。⚠️ **伸ばすのは Go が先・縮めるのは描き消してから**（逆だと帯が撮る範囲に入る。`_docs/cmd-frame.md` の「枠の下の帯」） |
 | `mainscreen.ts` | メイン画面（5 タブ: 入力 / 棋譜 / 訂正 / 解析 / 設定。認識の記録は**訂正タブの盤の下**の折りたたみ「認識詳細情報」）。**盤の側**を持つ —— 盤・駒台・SFEN・**勝率バー**と**対局者名**（⚠️ **解析タブの黒地の右クリックで別々に隠せる**。`isStudyBackdrop` / `openBoardMenu` / `applyStudyTopRow`。⚠️ **出す条件は `applyStudyTopRow` の 1 か所**。`_docs/ui/layout.md` の「隠せる」）・視点（`applyViewpoint`）・十字キー・**連続解析の幕**・切り離しの状態。⚠️ **候補手も手順も持たない**（2026-09-08 に `sidepane.ts` へ。**連続解析の順番を決めているのもあちら**）。⚠️ **局面があるかを他の要素の `hidden` から読まないこと**（`studyLoaded` の 1 つで持つ。切り離すと別の理由で `hidden` になる） |
 | `editor.ts` | **訂正タブ**の中身（盤に重ねる 9x9 のグリッド・駒箱・手番・手数）。⚠️ **訂正モードのトグルは無い**（タブそのものがモード）。視点は `setFlip`（⚠️ **見た目の位置 → 局面のマス**の読み替えだけ。局面には効かない） |
 | `followguard.ts` | **中継を追っているあいだ、追従を壊す操作を聞いてから通す**（2026-10-05）。根が入れ替わる操作（この局面を解析する・棋譜を読む・新規対局・棚やカードから解析）・本線にする は**OS の確認ダイアログで聞き、はいなら追跡を止めて通す**。本譜の手を消す・**本譜の先端で手を指す**は**聞くが止めない**（`movelist.ts` / `study.ts` の確認に一言添える。消したところから 4 手以内なら追従が繋ぎ直す。先端で指すのは**見失ったときに抜けた手を人が補う**操作で、補えば追従はそこから繋ぎ直す）。⚠️ **ロックしない**・⚠️ **止めてから操作を通す**（逆だと走っている 1 周が入れ替えた局面へ手を足す）・⚠️ **状態の持ち主はメイン画面**（ここは `follow:state` を映すだけ。切り離した窓でも効く）・⚠️ **タブを離れただけでは止めない**（訂正タブで学習データを作りながら追う使い方がある） |

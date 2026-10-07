@@ -95,6 +95,17 @@ export function mountFrame(root: HTMLElement): void {
     <div class="capture-guide">
       <img id="frame-flyout" class="capture-flyout" alt="">
     </div>
+    <!-- 枠の下の帯（2026-10-07）。中継の追従の知らせ（見失った・止めた理由など）。
+         ⚠️ **撮る範囲の外**（ガイド枠の下）で、**文があるあいだだけ高さを持つ**（普段は 0）。
+         ⚠️ **ウィンドウを伸ばすのは Go**（SetFrameFooter）—— ここで高さを勝手に増やすと、
+         伸びていないウィンドウの中で**ガイド枠が上へ押し上げられ、帯が撮る範囲に入る**。 -->
+    <div class="frame-footer" role="status">
+      <div class="frame-footer-body">
+        <span class="frame-footer-text"></span>
+        <button id="frame-footer-close" class="frame-btn is-icon" type="button"
+                aria-label="閉じる" title="閉じる">${iconMarkup(FiX)}</button>
+      </div>
+    </div>
   `;
 
   const title = root.querySelector<HTMLSpanElement>(".frame-title")!;
@@ -142,6 +153,85 @@ export function mountFrame(root: HTMLElement): void {
     void followBtn.offsetWidth;
     followBtn.classList.add("is-beat");
   });
+  // ---- 枠の下の帯（中継の追従の知らせ。2026-10-07）------------------------
+  //
+  // **中身もいつ出すかもメイン画面が決める**（`follow:notice`）。枠は映すだけ（札と同じ）。
+  //
+  // ⚠️ **順番を守ること**（帯が撮る範囲に入らないための約束。`captureservice.go` の `SetFrameFooter`）:
+  //   - 伸ばすとき: **先に Go がウィンドウを伸ばし、それから帯に高さを付ける**
+  //   - 縮めるとき: **先に帯の高さを落として描き終え、それから Go が縮める**
+  // 逆にすると、伸びていないウィンドウの中で帯がガイド枠を押し上げ、**枠の線と帯の文字が写り込む**
+  // （追従は裏で回り続けている）。
+  // ⚠️ **1 回ずつ順番に流すこと**（`footerQueue`）。重ねると上の順番が崩れる。
+  const footer = root.querySelector<HTMLDivElement>(".frame-footer")!;
+  const footerBody = footer.querySelector<HTMLDivElement>(".frame-footer-body")!;
+  const footerText = footer.querySelector<HTMLSpanElement>(".frame-footer-text")!;
+  const footerClose = root.querySelector<HTMLButtonElement>("#frame-footer-close")!;
+  type FooterKind = "" | "warn" | "error";
+  // footerPx は**今 Go に伸ばしてもらっている高さ**（＝帯に付けてよい高さ）。
+  let footerPx = 0;
+  // footerWant は最後に頼まれた中身（順番待ちのあいだに来た分は、最後の 1 つだけ描けばよい）。
+  let footerWant: { text: string; kind: FooterKind } = { text: "", kind: "" };
+  let footerQueue: Promise<void> = Promise.resolve();
+  const painted = () =>
+    new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+  const applyFooter = async () => {
+    const { text, kind } = footerWant;
+    if (text) {
+      footerText.textContent = text;
+      footerText.title = text; // 3 行で切れたときの全文
+      footer.classList.toggle("is-warn", kind === "warn");
+      footer.classList.toggle("is-error", kind === "error");
+    }
+    // ⚠️ **測るのは中身の高さ**（帯そのものは高さ 0 で切っているので、中身は描かれたまま測れる）。
+    const want = text ? Math.ceil(footerBody.getBoundingClientRect().height) : 0;
+    if (want > footerPx) {
+      // 伸ばす: **Go が先**。上限で丸められたらその高さで描く（上限はこちらで持たない）。
+      footerPx = await CaptureService.SetFrameFooter(want);
+      footer.style.height = `${footerPx}px`;
+      return;
+    }
+    // 縮める（または同じ）: **描き消すのが先**。
+    footer.style.height = `${want}px`;
+    if (!text) {
+      footerText.textContent = "";
+      footerText.title = "";
+    }
+    if (want === footerPx) {
+      return;
+    }
+    await painted();
+    footerPx = await CaptureService.SetFrameFooter(want);
+  };
+  const showFooter = (text: string, kind: FooterKind) => {
+    footerWant = { text, kind };
+    footerQueue = footerQueue.then(applyFooter).catch((err) => {
+      console.warn("[frame] 枠の下の帯を出し入れできませんでした", err);
+    });
+  };
+  Events.On("follow:notice", (e: { data: { text?: string; kind?: FooterKind } }) => {
+    showFooter(e.data?.text ?? "", e.data?.kind ?? "");
+  });
+  // ✕ は**この枠で閉じるだけ**（メイン画面の状態は変えない。次の知らせが来ればまた出る）。
+  footerClose.addEventListener("click", () => showFooter("", ""));
+  // 幅が変わると折り返しが変わるので測り直す（自分で伸ばしたときも来るが、高さが同じなら何もしない）。
+  let footerResize = 0;
+  window.addEventListener("resize", () => {
+    window.clearTimeout(footerResize);
+    footerResize = window.setTimeout(() => {
+      if (footerWant.text) {
+        showFooter(footerWant.text, footerWant.kind);
+      }
+    }, 150);
+  });
+  // ⚠️ **開いた（描き直した）ときは Go 側の伸びを 0 に戻すこと。** 帯を出したまま枠の画面が
+  // 読み直されると、帯は空なのにウィンドウだけ伸びたまま残る（今は帯の高さが 0 なので縮めて安全）。
+  footerQueue = footerQueue
+    .then(async () => {
+      footerPx = await CaptureService.SetFrameFooter(0);
+    })
+    .catch(() => {});
+
   const menuBtn = root.querySelector<HTMLButtonElement>("#frame-menu")!;
   const menu = root.querySelector<HTMLDivElement>("#frame-menu-items")!;
   const settingsBtn = root.querySelector<HTMLButtonElement>("#frame-settings")!;

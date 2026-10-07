@@ -12,7 +12,7 @@ Service は `ikkyoku/app`、枠の幾何は `ikkyoku/guide`、画面は `fronten
 | 触るもの | 読む文書 |
 |---|---|
 | ウィンドウの生成・起動時に出す窓・Frameless・窓の位置と大きさ（`main.go` / `window.go`）・**メイン画面が真っ黒になる**・**起動で黙って消えない**（`fatal.go` / `issues.go`） | `_docs/cmd-windows.md` |
-| 枠の透過・素通し・移動とリサイズ・**キャプチャ領域（物理ピクセル・HWND）**（`native_windows.go` / `captureservice.go`） | `_docs/cmd-frame.md`（寸法と幾何は `guide/AGENTS.md`） |
+| 枠の透過・素通し・移動とリサイズ・**キャプチャ領域（物理ピクセル・HWND）**・**枠の下の帯**（`SetFrameFooter`）（`native_windows.go` / `captureservice.go`） | `_docs/cmd-frame.md`（寸法と幾何は `guide/AGENTS.md`） |
 | 撮る・中継を追う（枠の札・ふるい・録画）・画像ファイル・撮った画像のパス・ホットキー（`captureservice.go`） | `_docs/cmd-capture.md`（調整とデバッグはスキル `ikkyoku-follow`） |
 
 ## GUI アプリ(Wails3)

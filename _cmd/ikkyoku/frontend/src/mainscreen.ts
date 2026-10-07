@@ -2729,19 +2729,50 @@ ${st.turnLabel}${n}`;
   // 分からない」と出た）。**追跡中に見ているのは中継**なので、
   // 状態も操作も**枠に無いと届かない**（メイン画面は裏に回っている）。
   //
-  // ⚠️ **毎周の状態は手順の下（`sidePane.setStatus`）に出さないこと**（2026-10-06）。
-  // あの行は出入りと折り返しで**手順のリストの高さを変える**ので、1 周ごとに書き換えると
-  // **手順がガクガクして何を見ていたか分からなくなる**（実機で出た）。毎周の状態は札、
-  // 足した手は手順そのものが知らせる。手順の下は**人が何かするべきとき**だけ
-  // （見失った・止めた・始められなかった）。
+  // ⚠️ **毎周の状態は札だけ**（2026-10-06）。足した手は手順そのものが知らせる。
+  // **人が知るべきとき**（見失った・止めた・始められなかった）だけ枠の下の帯に出す（`followNotice`）。
   // detail は札のホバーに出す補足（「別の盤」の理由など。札は狭いので本文に入れない）。
   const publishFollow = (text: string, detail = "") => {
     noteFollowing(followOn);
     void Events.Emit("follow:state", { on: followOn, text, detail });
   };
-  // followLostShown は「見失っています」を手順の下に出しているか。**繋がり直したら 1 回だけ消す**
-  // （足した手で上書きしなくなったので、消さないと直ったあとも残る）。
+  // followLostShown は「見失っています」を帯に出しているか。**繋がり直したら 1 回だけ消す**
+  // （足した手で上書きしないので、消さないと直ったあとも残る）。
   let followLostShown = false;
+
+  // followNotice は中継の追従で**人に知らせる 1 行**を、**枠の下の帯**に出す（2026-10-07。空なら消す）。
+  //
+  // 以前は解析タブの手順の下に出していたが、**追っているあいだ見ているのは中継**なので届かなかった
+  // （札を枠に置いたのと同じ理由）。帯は文があるあいだだけ枠を下へ伸ばす（撮る範囲は動かない。
+  // `CaptureService.SetFrameFooter`）。
+  // ⚠️ **毎周の状態を流さないこと** —— 出入りのたびに枠が伸び縮みする。毎周の状態は札（`publishFollow`）。
+  // ⚠️ **枠が出ていないときは手順の下に出す**（見えないところに出しても届かない。枠が隠れていて
+  // 撮れずに止まったときがこれ）。
+  // fade は**しばらくして消す**か（人が自分で止めたときの「止めました」など。読めば済むもの）。
+  type FollowNoticeKind = "" | "warn" | "error";
+  const followNoticeFadeMs = 4000;
+  let followNoticeTimer: number | undefined;
+  let followNoticeInSide = false;
+  const followNotice = (text: string, kind: FollowNoticeKind = "", fade = false) => {
+    if (followNoticeTimer !== undefined) {
+      window.clearTimeout(followNoticeTimer);
+      followNoticeTimer = undefined;
+    }
+    if (followNoticeInSide) {
+      followNoticeInSide = false;
+      sidePane.setStatus("");
+    }
+    if (text && !frameVisible) {
+      followNoticeInSide = true;
+      sidePane.setStatus(text);
+      void Events.Emit("follow:notice", { text: "", kind: "" });
+      return;
+    }
+    void Events.Emit("follow:notice", { text, kind });
+    if (text && fade) {
+      followNoticeTimer = window.setTimeout(() => followNotice(""), followNoticeFadeMs);
+    }
+  };
 
   // followNote は状態に**次に来るはずの手数**を添える。
   //
@@ -2790,11 +2821,11 @@ ${st.turnLabel}${n}`;
   // 枠は映すだけ（2 か所が別々に覚えると食い違う）。
   Events.On("follow:toggle", () => studyFollowBtn.click());
 
-  const followStop = (message: string) => {
+  // followStop は追跡を止めて、理由を帯に出す（`followNotice`）。
+  // kind が空なら**人が自分で止めた**ときで、読めば済むのでしばらくして消す。
+  const followStop = (message: string, kind: FollowNoticeKind = "") => {
     setFollowing(false);
-    if (message) {
-      sidePane.setStatus(message);
-    }
+    followNotice(message, kind, kind === "");
   };
 
   // 追従を壊す操作に「はい」と答えたときの止め方（2026-10-05。`followguard.ts`）。
@@ -2958,7 +2989,7 @@ ${st.turnLabel}${n}`;
       // 推測の印（`Node.Guess`）が付くので、付けても情報にならない。印は手順の橙の丸だけ。
       if (followLostShown) {
         followLostShown = false;
-        sidePane.setStatus("");
+        followNotice("");
       }
       // ⚠️ **手を決めた 1 枚だけを残す**（2026-09-15。デバッグ用の「録画」）。
       // 中継には**棋士の手が映り込む**ので、誤認識したときに
@@ -2989,6 +3020,7 @@ ${st.turnLabel}${n}`;
         `盤が上下逆に映っているようです（逆向きなら ${got.flipMove} で繋がります）。` +
           "訂正タブの「目線」を『後手が手前』にして、撮り直して" +
           "「この局面を解析する」からやり直してください",
+        "warn",
       );
       return false;
     }
@@ -3020,12 +3052,14 @@ ${st.turnLabel}${n}`;
     // 90 手ぶん止まったとき、**止まった瞬間の証拠だけが残っていなかった。**
     void CaptureService.SaveFollowMiss(followWaiting, got.kind ?? "miss");
     if (followLost >= followLostLimit) {
-      // ⚠️ **手順の下に書くのは見失った最初の 1 回だけ**（理由は周ごとに変わるので、
-      // 毎周書くと文の長さで手順の高さが揺れる）。続いている間は札が「見失っています」を出す。
-      const reason = `本譜に繋がらない状態が続いています（${got.reason || got.kind}）`;
+      // ⚠️ **帯に書くのは見失った最初の 1 回だけ**（理由は周ごとに変わるので、
+      // 毎周書くと文の長さで枠が伸び縮みする）。続いている間は札が「見失っています」を出す。
+      // ⚠️ **「本譜に繋ぐ」「訂正タブで繋ぎ直して」と案内しないこと**（2026-10-07 にその口を外した。
+      // 抜けた手は解析タブの盤で先端から指して補う。`_docs/design-follow.md`）。
+      const reason = `中継の手順を見失っています（${got.reason || got.kind}）`;
       if (!followLostShown) {
         followLostShown = true;
-        sidePane.setStatus(`${reason}。撮って「この局面を解析する」で繋ぎ直してください`);
+        followNotice(reason, "warn");
       }
       publishFollow(followNote("見失っています"), reason);
       return false;
@@ -3066,7 +3100,7 @@ ${st.turnLabel}${n}`;
     } catch (err) {
       // ⚠️ **枠が出ていない等はここに来る。** 黙って回し続けると理由が読めないので
       // **止めて理由を出す**（設計原則3 は「落ちない」であって「黙る」ではない）。
-      followStop(String(err instanceof Error ? err.message : err));
+      followStop(String(err instanceof Error ? err.message : err), "error");
       return;
     }
     followTickAt = Date.now();
@@ -3084,22 +3118,22 @@ ${st.turnLabel}${n}`;
     // ⚠️ **だから押すときは本物の盤が映っていること**が前提 —— 失敗したら
     // 理由を出して始めない（黙って始めると大盤を追い始める）。
     setFollowing(true);
-    sidePane.setStatus("追う盤を決めています…");
+    followNotice("追う盤を決めています…");
     void CaptureService.AnchorBoard()
       .then((first) => {
         if (!followOn) {
           return;
         }
-        // 始まったら消す（追っていることはボタンと札が出す。以後は手順の下を毎周は使わないので、
+        // 始まったら消す（追っていることはボタンと札が出す。帯は毎周は使わないので、
         // 書いたままだと止めるまで残る。`publishFollow`）。
-        sidePane.setStatus("");
+        followNotice("");
         // ⚠️ **押したときに読んだ 1 枚を、最初の 1 周として流すこと**（2026-10-07）。捨てると、
         // 速い経路の比べる相手が決まるまで次の 81 マスの読み（重いときは 7〜10 秒）を待つことになり、
         // そのあいだに 2 秒おきの手が 4〜5 手進んで初手から置いていかれた（ShogiHome の自動再生で踏んだ）。
         void followTick(first);
       })
       .catch((err) => {
-        followStop(String(err instanceof Error ? err.message : err));
+        followStop(String(err instanceof Error ? err.message : err), "error");
       });
   });
 
