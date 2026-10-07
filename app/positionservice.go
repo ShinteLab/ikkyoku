@@ -137,10 +137,6 @@ type EditState struct {
 //
 // **撮るたびに呼ぶ。** 1 回のキャプチャは他と独立している（設計原則1）ので、
 // 前の訂正内容を引き継がない。壊れた盤面でも読めた分で始める（設計原則3）。
-//
-// ⚠️ **認識器の確信度は受け取らない**（2026-10-07）。訂正タブの「本譜に繋ぐ」が
-// 認識を覆す根拠に使っていたが、その口を外した。追従は撮った 1 枚を直に受け取る
-// （`followFrame`）ので、訂正タブを通らない。
 func (s *PositionService) Load(boardSFEN string) (EditState, error) {
 	return s.loadBoard(boardSFEN)
 }
