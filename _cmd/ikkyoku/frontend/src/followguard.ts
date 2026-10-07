@@ -9,7 +9,7 @@
 // | この局面を解析する・棋譜を読む・新規対局・棚やカードから解析 | 根が入れ替わる → 聞いて止める |
 // | 本線にする | 本譜の先端に続きを据える → 聞いて止める |
 // | 本譜の手を消す | **聞くが止めない**（消したところから 4 手以内なら追従が繋ぎ直す）。`movelist.ts` |
-// | 本譜の先端で手を指す | **聞くが止めない**（見失ったときに抜けた手を人が補う操作。補えば追従はそこから繋ぎ直す）。`study.ts` |
+// | 解析タブの盤で駒を動かす | **動かせない**（2026-10-07。追跡を止めてから動かす）。`study.ts` |
 //
 // ⚠️ **状態の持ち主はメイン画面**（`mainscreen.ts` の `followOn`）。ここは
 // `follow:state`（1 周ごとにアプリ全体へ流れる）を映すだけで、切り離した窓でも同じに効く。
@@ -17,15 +17,33 @@
 import { Dialogs, Events } from "@wailsio/runtime";
 
 let following = false;
+const watchers: ((on: boolean) => void)[] = [];
+
+// setFollowing は**入り切りが変わったときだけ**見張りへ知らせる（`follow:state` は 1 周ごとに来る）。
+const setFollowing = (on: boolean) => {
+  if (on === following) {
+    return;
+  }
+  following = on;
+  for (const fn of watchers) {
+    fn(on);
+  }
+};
 
 Events.On("follow:state", (e: { data: { on: boolean } }) => {
-  following = !!e.data?.on;
+  setFollowing(!!e.data?.on);
 });
 
 // noteFollowing は**メイン画面が自分の状態をここへ写す**（自分の出したイベントが
 // 自分に届くかに頼らないため）。
 export function noteFollowing(on: boolean): void {
-  following = on;
+  setFollowing(on);
+}
+
+// onFollowingChange は追跡の入り切りが変わったときに呼ばれる（解析タブの盤が
+// 「動かせる駒」の見た目を描き直すのに使う。2026-10-07）。
+export function onFollowingChange(fn: (on: boolean) => void): void {
+  watchers.push(fn);
 }
 
 // isFollowing は中継を追っているか。
@@ -75,6 +93,6 @@ export async function confirmStopFollow(what: string): Promise<boolean> {
   } else {
     void Events.Emit("follow:stop", null);
   }
-  following = false;
+  setFollowing(false);
   return true;
 }

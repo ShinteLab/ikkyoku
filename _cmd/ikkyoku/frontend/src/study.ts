@@ -23,7 +23,7 @@
 import { StudyService } from "../bindings/github.com/ShinteLab/ikkyoku/app";
 import type { StudyState } from "../bindings/github.com/ShinteLab/ikkyoku/app/models";
 import type { Move as LegalMove } from "../bindings/github.com/ShinteLab/ikkyoku/legal/models";
-import { isFollowing } from "./followguard";
+import { isFollowing, onFollowingChange } from "./followguard";
 import { openPopup, type PopupHandle } from "./popup";
 
 const RANK_KANJI = ["一", "二", "三", "四", "五", "六", "七", "八", "九"];
@@ -361,6 +361,8 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
     // ⚠️ **座標は Go が作る**（`StudyState.lastMove`。`Played` の USI をここで解釈しないこと）。
     // 打ちは移動元が -1 なので、動いた場所だけが塗られる。
     const last = loaded ? state?.lastMove ?? null : null;
+    // **動かせるか**。中継を追っているあいだは掴める駒の印（カーソル）も出さない（`followingReason`）。
+    const movable = loaded && !isFollowing();
     grid.classList.toggle("is-active", loaded);
     // 駒を掴んでいるあいだは、**動かせないマスを暗くする**（2026-08-29）。
     // 光らせるのではなく暗幕を敷くのは CSS 側（.study-grid.is-picking）の仕事で、
@@ -373,7 +375,7 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
       const source = pick?.from === "cell" && pick.rank === rank && pick.file === file;
       el.classList.toggle("is-target", target);
       el.classList.toggle("is-source", !!source);
-      el.classList.toggle("is-pickable", loaded && !pick && canPickCell(rank, file));
+      el.classList.toggle("is-pickable", movable && !pick && canPickCell(rank, file));
       el.classList.toggle("is-last-from", !!last && last.fromRank === rank && last.fromFile === file);
       el.classList.toggle("is-last-to", !!last && last.toRank === rank && last.toFile === file);
       el.title = cellLabel(rank, file);
@@ -392,14 +394,15 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
       const mine = loaded && state?.turn === (black ? 1 : 2);
       for (const chip of slot.querySelectorAll<HTMLElement>(".stock-chip")) {
         const piece = Number(chip.dataset.piece);
-        const canDrop = loaded && legalMoves().some((m) => m.drop === piece);
+        const canDrop = movable && legalMoves().some((m) => m.drop === piece);
         chip.classList.toggle("is-source", pick?.from === "hand" && pick.piece === piece);
         chip.classList.toggle("is-pickable", canDrop);
-        chip.classList.toggle("is-unpickable", !!mine && !canDrop);
+        // ⚠️ **追っているあいだは「打てない」と薄くしない**（打てないのは駒のせいではない）。
+        chip.classList.toggle("is-unpickable", !!mine && movable && !canDrop);
         // ⚠️ **元の見出し（駒種と枚数）は dataset に持っておくこと。**
         // title に直接足すと、描き直すたびに理由が積み重なる。
         const base = chip.dataset.label ?? "";
-        chip.title = canDrop || !loaded ? base : `${base}／${dropReason(!!mine)}`;
+        chip.title = canDrop || !movable ? base : `${base}／${dropReason(!!mine)}`;
       }
     }
     // ⚠️ **候補手の重ね表示もここで描き直す**（描き直しの入口を 1 本にする）。
@@ -463,14 +466,14 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
     });
   };
 
-  // extendsMain は**ここで指すと本譜が伸びるか**（本譜の先端に居て、そこに続きが 1 手も無い）。
-  const extendsMain = (): boolean => {
-    if (!state) {
-      return false;
-    }
-    const tip = state.mainTip;
-    return state.currentId === tip && !(state.nodes ?? []).some((n) => n.parent === tip);
-  };
+  // ⚠️ **中継を追っているあいだは駒を動かせない**（2026-10-07。ユーザーの判断）。
+  //
+  // 以前は「本譜の先端で指すなら聞いて通す」だった（見失ったときに抜けた手を人が補う口）。
+  // ところが追っているあいだは 1 周ごとに局面が描き直されて**掴んだ駒が落ち**、
+  // 指せても**その瞬間に追従が中継を読み直して、たいてい違う手を足した**（実機で出た）。
+  // 動かしても混乱するだけなので、**追跡を止めてから動かす**。⚠️ **聞いて通す作りに戻さないこと。**
+  // 枝（本譜の途中）で指すのも止める —— 掴んだ駒が落ちるのは同じなので。
+  const followingReason = "中継を追っているあいだは駒を動かせません";
 
   // play は移動先が決まったときに 1 手指す。
   //
@@ -483,22 +486,10 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
     const stay = dests.find((m) => !m.promote);
     const go = (move: string) => {
       pick = null;
-      // ⚠️ **本譜の先端で指した手は本譜の続きになる**（続きが無いところで指すと
-      // `kids[0]` に入る）。中継を追っていると、その手から先へ繋ぐことになる。
-      // **聞くが、追跡は止めない**（2026-10-05。`followguard.ts`）—— 見失ったときに
-      // **抜けた手を人が補う**のがまさにこの操作で、補えば追従はそこから繋ぎ直す
-      // （実機で ▲9三歩成 を補ったら △8四飛 から追い直した）。先端以外で指した手は枝になるので聞かない。
-      if (isFollowing() && extendsMain()) {
-        closeAsk();
-        ask = openPopup(at.x, at.y, {
-          label: "本譜の手として指す（中継中のため、追跡が壊れる可能性があります）",
-          // ⚠️ **初期フォーカスは「やめる」**（削除の確認と同じ。Enter の連打で本譜を伸ばさない）。
-          focus: 1,
-          items: [
-            { label: "本譜の手として指す", kind: "primary", onPick: () => void run(() => StudyService.Play(move)) },
-            { label: "やめる", onPick: () => {} },
-          ],
-        });
+      // ⚠️ **成る / 成らずを聞いているあいだに追跡が始まっていたら指さない**（上の約束）。
+      if (isFollowing()) {
+        onError(followingReason);
+        paint();
         return;
       }
       void run(() => StudyService.Play(move));
@@ -519,6 +510,16 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
     }
     const el = (e.target as HTMLElement)?.closest<HTMLElement>(".study-cell");
     if (!el) {
+      return;
+    }
+    // ⚠️ **追っているあいだは掴ませない**（`followingReason`）。黙って何も起きないと壊れて見えるので、
+    // 掴める駒を押したときだけ理由を出す。
+    if (isFollowing()) {
+      pick = null;
+      paint();
+      if (canPickCell(Number(el.dataset.rank), Number(el.dataset.file))) {
+        onError(followingReason);
+      }
       return;
     }
     const rank = Number(el.dataset.rank);
@@ -590,6 +591,13 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
         return;
       }
       const piece = Number(chip.dataset.piece);
+      // ⚠️ **追っているあいだは打たせない**（盤と同じ。`followingReason`）。
+      if (isFollowing()) {
+        pick = null;
+        paint();
+        onError(followingReason);
+        return;
+      }
       // 同じ駒をもう一度押したら解除。
       if (pick?.from === "hand" && pick.piece === piece) {
         pick = null;
@@ -610,6 +618,16 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
       paint();
     });
   }
+
+  // 追跡の入り切りで「掴める駒」の見た目を描き直す（局面は変わらないので render は来ない）。
+  // ⚠️ **始まったら掴んでいる駒も離す**（追っているあいだは動かせない）。
+  onFollowingChange((on) => {
+    if (on) {
+      closeAsk();
+      pick = null;
+    }
+    paint();
+  });
 
   // ---- 外向き -------------------------------------------------------------
 
