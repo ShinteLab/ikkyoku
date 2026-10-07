@@ -5,6 +5,7 @@ package position
 //   - **成・不成、打った駒の種類のように見分けられないものは、1 通りに決めないこと**（複数返す）
 //   - **変わったマスが合法手のどれとも合わなければ、何も返さないこと**（手や頭が被った 1 枚）
 //   - **色付けのマス（extra）は変わっても変わらなくてもよいこと**
+//   - **色付けのマスに手が指されたかもしれないなら、長い手順も合わせて返すこと**（2026-10-08。いちばん短い手数のものだけ）
 
 import (
 	"slices"
@@ -109,5 +110,22 @@ func TestChangedMovesAllowsHighlight(t *testing.T) {
 	// 色付けのマス以外の余計な変化は許さない。
 	if got, _ := ChangedMoves(from, maskOf("3c", "3d", "5e"), extra, 2); len(got) != 0 {
 		t.Fatalf("余計なマスが変わっているのに合いました: %v", got)
+	}
+}
+
+// ⚠️ **色付けのマスに本当に手が指されたかもしれないなら、長い手順も合わせて返すこと**（2026-10-08）。
+// ▲2四歩 △同歩 のあと ▲2四飛 △2三歩 が 1 枚に写った。2三 は直前の手（△同歩）の元のマスで色付けが
+// 消えるので、短い [2h2d] だけを返すと △2三歩 が落ちる（ゲーム画面で順序と持ち駒が狂った）。
+func TestChangedMovesLongerWhenHighlightMayHideAMove(t *testing.T) {
+	from := posAfter(t, "2g2f", "8c8d", "2f2e", "8d8e", "2e2d", "2c2d")
+	extra := maskOf("2c", "2d")
+	got, err := ChangedMoves(from, maskOf("2c", "2d", "2h"), extra, 3)
+	if err != nil {
+		t.Fatalf("ChangedMoves: %v", err)
+	}
+	// 長い答えは、色付けのマス（2三）の中身を変えるもので、いちばん短い手数のものだけ（3 手の空想は並べない）。
+	want := [][]string{{"2h2d"}, {"2h2d", "P*2c"}}
+	if !slices.EqualFunc(got, want, slices.Equal) {
+		t.Fatalf("got %v, want %v", got, want)
 	}
 }

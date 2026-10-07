@@ -26,6 +26,12 @@ import (
 //
 // 返すのは**いちばん短い手数で合う手順のすべて**。1 つでなければ呼び出し側は決め打ちしないこと。
 // 何も合わなければ空。
+//
+// ⚠️ **ただし、いちばん短い答えが色付けのマス（extra）の変化を「見た目だけ」で済ませたときは、
+// そのマスの中身を変える、より長い手順も合わせて返す**（2026-10-08）。色付けのマスに本当に手が指されることが
+// ある —— 直前の手（△同歩 2c2d）の元のマスへ歩を打たれた ▲2四飛 △2三歩 の 1 枚で、短い [2h2d] が
+// 2c の変化を色付けとして飲み込み、△2三歩 を落として順序と持ち駒が狂った（ゲーム画面）。
+// 長さの違う答えが並んだら、呼び出し側は違いの出るマス（ここでは 2c）を読んで決める。
 func ChangedMoves(from *Position, changed, extra *CellMask, maxDepth int) ([][]string, error) {
 	if from == nil || from.Board == nil {
 		return nil, fmt.Errorf("ikkyoku/position: 割り出す元の局面がありません")
@@ -39,12 +45,19 @@ func ChangedMoves(from *Position, changed, extra *CellMask, maxDepth int) ([][]s
 	// allowed は動かしてよいマス（変わったマスと、色付けのマス）。
 	allowed := func(r, f int) bool { return changed.at(r, f) || extra.at(r, f) }
 
+	// written は**いちばん短い答えが「見た目だけ」で済ませた色付けのマス**（中身を変えずに変わったマス）。
+	// nil のあいだは、まだ答えが見つかっていない。
+	var found [][]string
+	var written *CellMask
 	for depth := 1; depth <= maxDepth; depth++ {
 		var out [][]string
 		var walk func(p *Position, line []string) error
 		walk = func(p *Position, line []string) error {
 			if len(line) == depth {
-				if changedFits(from.Board, p.Board, changed, extra) {
+				// ⚠️ **より長い答えは、短い答えが見た目だけで済ませたマスの中身を変えるものだけ採る**
+				// （そうでない長い答えは、同じ変化を遠回りで説明しているだけ）。
+				if changedFits(from.Board, p.Board, changed, extra) &&
+					(written == nil || touches(from.Board, p.Board, written)) {
 					out = append(out, append([]string(nil), line...))
 				}
 				return nil
@@ -79,11 +92,57 @@ func ChangedMoves(from *Position, changed, extra *CellMask, maxDepth int) ([][]s
 		if err := walk(from, nil); err != nil {
 			return nil, err
 		}
-		if len(out) > 0 {
-			return out, nil
+		if len(out) == 0 {
+			continue
+		}
+		if written != nil {
+			// ⚠️ **長い答えも、いちばん短い手数のものだけ**（その先は空想の手順が増えるだけ）。
+			return append(found, out...), nil
+		}
+		found = out
+		written = writtenOff(from, out, changed, extra)
+		if written == nil {
+			return found, nil
 		}
 	}
-	return nil, nil
+	return found, nil
+}
+
+// writtenOff は、答え sols のどれかが**中身を変えずに済ませた、変わった色付けのマス**を返す（無ければ nil）。
+func writtenOff(from *Position, sols [][]string, changed, extra *CellMask) *CellMask {
+	m := &CellMask{}
+	hit := false
+	for _, sol := range sols {
+		p := from.Clone()
+		for _, mv := range sol {
+			if p.ApplyMove(mv) != nil {
+				return nil
+			}
+		}
+		for r := 0; r < 9; r++ {
+			for f := 0; f < 9; f++ {
+				if changed.at(r, f) && extra.at(r, f) && from.Board.cells[r][f] == p.Board.cells[r][f] {
+					m[r][f], hit = true, true
+				}
+			}
+		}
+	}
+	if !hit {
+		return nil
+	}
+	return m
+}
+
+// touches は from → to で、マスの組 m のどれかの中身が変わるか。
+func touches(from, to *Board, m *CellMask) bool {
+	for r := 0; r < 9; r++ {
+		for f := 0; f < 9; f++ {
+			if m.at(r, f) && from.cells[r][f] != to.cells[r][f] {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // ChangedFits は**盤 from から盤 to への変化が、変わったマスの組とぴったり合うか**を返す（2026-10-07）。

@@ -1226,6 +1226,39 @@ func TestFollowCellsFallsBackWhenUnclear(t *testing.T) {
 	}
 }
 
+// ⚠️ **直前の手のマス（色付け）に打たれた手を落とさないこと**（2026-10-08。ゲーム画面で踏んだ）。
+// ▲2四歩 △同歩 のあと ▲2四飛 △2三歩 が 1 枚に写った。2三 は △同歩 の元のマスで、色付けが消えただけとも
+// 読めるので、[2h2d] だけで足すと △2三歩 が落ち、次の手と順序が入れ替わって持ち駒が狂った。
+// 2 通りに分かれ、2三 を読んで決めること。
+func TestFollowCellsDropOnHighlightedCell(t *testing.T) {
+	line := []string{"2g2f", "8c8d", "2f2e", "8d8e", "2e2d", "2c2d"}
+	changed := cellIdx("2c", "2d", "2h")
+	for name, tc := range map[string]struct {
+		seen []string // 撮った 1 枚の局面（平手からの手順）
+		want []string
+	}{
+		"歩を打っていた":   {append(slices.Clone(line), "2h2d", "P*2c"), []string{"2h2d", "P*2c"}},
+		"色付けが消えただけ": {append(slices.Clone(line), "2h2d"), []string{"2h2d"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s, _ := following(t)
+			for _, m := range line {
+				if _, err := s.Play(m); err != nil {
+					t.Fatalf("Play(%q): %v", m, err)
+				}
+			}
+			a := followCellsRead(t, s, changed, false, tc.seen...)
+			if !a.Pending {
+				t.Fatalf("控えていません: %+v", a)
+			}
+			a, err := s.FollowConfirm()
+			if err != nil || !a.Applied || !slices.Equal(a.Moves, tc.want) {
+				t.Fatalf("got %+v（%v）, want %v", a.Moves, err, tc.want)
+			}
+		})
+	}
+}
+
 // ⚠️ **手はあるが決まらなかった周に `NoMoves` を立てないこと**（成・不成や打った駒。すぐ 81 マスを読む）。
 func TestFollowCellsNoMovesOnlyWithoutMoves(t *testing.T) {
 	s, _ := following(t)
