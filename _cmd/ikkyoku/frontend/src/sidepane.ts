@@ -50,7 +50,10 @@ export interface SidePaneHandle {
   // render は局面が変わったときに呼ぶ（null なら空にする）。
   render(state: StudyState | null): void;
   // setEngines は設定（色・名前・候補手の本数）を入れ直す。
-  setEngines(engines: EngineSettings[], colors: EngineColorOption[], seconds: number): void;
+  // batchSeconds は連続解析の 1 手の秒数（2026-10-08。考える秒数とは別に持つ）。
+  setEngines(
+    engines: EngineSettings[], colors: EngineColorOption[], seconds: number, batchSeconds: number,
+  ): void;
   // setStatus は手順の下の 1 行（**空なら消す**）。
   setStatus(message: string): void;
   // reveal は面に来たとき（連続モードならそのまま解析を始める）。
@@ -862,8 +865,8 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
   // ここでの 1 回は、設定が届く前の初期値。
   reserveLines();
 
-  // 考える秒数は**設定に持つ**（2026-08-15）。連続解析では「手数 × 秒数」が
-  // そのまま待ち時間になるので、**起動のたびに選び直させない**。
+  // 考える秒数は**設定に持つ**（2026-08-15）。待ち時間を決める値なので、
+  // **起動のたびに選び直させない**。⚠️ **連続解析の秒数は別**（`batchSecondsSaved`。2026-10-08）。
   // ⚠️ **連続モードのチェックとは扱いが違う**（あちらはその場かぎりの操作）。
   //
   // ⚠️ **設定ファイルには選択肢に無い値も入りうる**（手で書けば 15 でも通る）。
@@ -879,8 +882,6 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
       analyzeSeconds.insertBefore(opt, analyzeSeconds.options[analyzeSeconds.options.length - 1]);
     }
     analyzeSeconds.value = v;
-    // ⚠️ **連続解析のボタンは秒数を出している**ので、一緒に描き直すこと。
-    syncBatchButton();
   };
 
   analyzeSeconds.addEventListener("change", () => {
@@ -1345,8 +1346,8 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
   // ⚠️ **止めた直後に最新手で起こし直さないこと** —— 止める手段が無くなる。
   let holdAuto = false;
 
-  // runSeconds は今走っているものが 1 手に使う秒数（残り時間と見切りの計算用）。
-  const runSeconds = () => (catchUp ? catchUpSeconds : batchSeconds());
+  // runSeconds は今走っているものが 1 手に使う秒数（解析に渡す・残り時間と見切りの計算用）。
+  const runSeconds = () => (catchUp ? catchUpSeconds : batchRunSeconds);
 
   // ---- 自動で指し継ぐ（2026-09-14）------------------------------------------
   //
@@ -1390,22 +1391,7 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
   // **持ち主に二重に頼む**ことになる。
   const batchBusy = () => (active ? runActive() : remoteBusy);
 
-  // 連続解析を始められない理由。**空なら押せる。**
-  const batchBlockedReason = (): string => {
-    if (!analyzeReady) {
-      return "";
-    }
-    // ⚠️ **「無制限」では次へ進めない**（1 手目で考え続けて終わらない）。
-    // 押せないことより、**なぜ押せないか**が出ているほうが大事。
-    if ((Number(analyzeSeconds.value) || 0) <= 0) {
-      return "連続解析は、考える秒数を決めてから（「無制限」では次の手へ進めません）";
-    }
-    // ⚠️ **手が 1 つも無くても押せてよい**（根の局面だけを解析するのは正当）。
-    return "";
-  };
-
   const syncBatchButton = () => {
-    const blocked = batchBlockedReason();
     // ⚠️ **幕の出し入れはここ 1 か所**（走っているかの判定が 2 か所に散ると、
     // 幕だけ残って何も触れなくなる）。
     // ⚠️ **幕そのものは呼び出し側が持つ**（2026-09-08）——**盤も塞ぐ必要がある**
@@ -1424,16 +1410,17 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
     // 一言で、始点はツールチップにしか無かった）。始点は**今どこを見ているか**で
     // 決まるので、**押す前に読めないと押せない**（範囲の欄を置かない代わりの表示）。
     //
-    // **秒数も出す**（「3秒毎2手目から解析」）。⚠️ **これが何分かかるかを決めている**
-    // ので、押す前に**手数と一緒に**読めるのが要る（残り時間は手数 × 秒数）。
-    // ⚠️ **秒数が決まっていないときは書かない**（「無制限」。0 秒と書かないこと）。
+    // **秒数も出す**（「3秒毎2手目から解析」）。出すのは**連続解析の秒数**（前に選んだ値。
+    // 押すとダイアログで選び直せる。2026-10-08 に「考える秒数」から分けた）。
+    // ⚠️ **設定が届く前は書かない**（0 秒と書かないこと）。
     batchRun.textContent = batchBusy()
       ? "停止"
       : `${batchSecondsLabel()}${batchFrom()}手目から解析`;
     batchRun.classList.toggle("is-active", batchBusy());
-    // 走っている最中は止められる。走っていないときは、解析できる局面かつ
-    // 秒数が決まっているときだけ押せる。
-    batchRun.disabled = !batchBusy() && (!analyzeReady || blocked !== "");
+    // 走っている最中は止められる。走っていないときは、解析できる局面なら押せる。
+    // ⚠️ **手が 1 つも無くても押せてよい**（根の局面だけを解析するのは正当）。
+    // ⚠️ **「考える秒数」が無制限でも押せること**（2026-10-08。秒数はダイアログで選ぶ）。
+    batchRun.disabled = !batchBusy() && !analyzeReady;
     // ⚠️ **持ち主でない窓では「連続解析」の言い方になる**（走っているのが
     // どちらかは `study:busy` では届かない）。**幕の文言が本当のことを言っている**
     // ので、ここは押せば止まることが読めれば足りる。
@@ -1441,7 +1428,7 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
       ? (selfActive()
         ? "自動で指すのを止めます（そこまでの手順と評価値は残ります）"
         : "連続解析を止めます（そこまでの評価値は残ります）")
-      : blocked || batchRangeText();
+      : batchRangeText();
   };
 
   // batchFrom は連続解析が**最初に考えさせる手**の手数。
@@ -1458,23 +1445,95 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
   // batchTo は最後に考えさせる手の手数（同じ数え方）。
   const batchTo = () => studyFirst + studyMoveCount + 1;
 
-  // batchSeconds は 1 手に使う秒数（0 なら「無制限」＝連続解析はできない）。
-  const batchSeconds = () => Math.max(0, Number(analyzeSeconds.value) || 0);
-  const batchSecondsLabel = () => {
-    const s = batchSeconds();
-    return s > 0 ? `${s}秒毎` : "";
-  };
+  // batchCount は連続解析が考えさせる局面の数（始点から手順の最後まで）。
+  const batchCount = () => batchTo() - batchFrom() + 1;
+
+  // 連続解析の 1 手の秒数（2026-10-08）。**「考える秒数」とは別に持つ** ——
+  // あちらは 1 局面を見続けるための値で「無制限」のことが多く、それを使っていた頃は
+  // 連続解析を押す前に毎回秒数を選び直すことになっていた。
+  // ⚠️ **既定の解決は Go 側**（`Config.BatchThinkSeconds`）。**0 は設定が届く前**。
+  let batchSecondsSaved = 0;
+  // 今走っている連続解析の秒数（**押したときにダイアログで選んだ値**）。
+  // ⚠️ **走っている途中で設定が変わっても動かさない**（残り時間の見積もりがずれる）。
+  let batchRunSeconds = 0;
+  const batchSecondsLabel = () => (batchSecondsSaved > 0 ? `${batchSecondsSaved}秒毎` : "");
+
+  // thinkSeconds は「考える秒数」（**0 は無制限**）。自動で指し継ぐのはこちらを使う。
+  const thinkSeconds = () => Math.max(0, Number(analyzeSeconds.value) || 0);
 
   const batchRangeText = () => {
-    const per = batchSeconds() > 0 ? `1 手あたり ${batchSeconds()} 秒。` : "";
+    const per = batchSecondsSaved > 0 ? `1 手あたり ${batchSecondsSaved} 秒。` : "";
     return (
       per +
       (batchFrom() === batchTo()
         ? `${batchFrom()}手目を考えさせます（手順の最後に居ます）`
         : `${batchFrom()}手目から${batchTo()}手目まで、1 手ずつ順に考えさせます` +
           `（今見ている局面から手順の最後まで）` +
-          `。全部で ${durationText((batchTo() - batchFrom() + 1) * batchSeconds())}ほど`)
+          (batchSecondsSaved > 0
+            ? `。全部で ${durationText(batchCount() * batchSecondsSaved)}ほど`
+            : ""))
     );
+  };
+
+  // batchSecondsChoices はダイアログに並べる秒数（**「考える秒数」の欄の選択肢から無制限を除いたもの**）。
+  //
+  // ⚠️ **一覧を 2 つ持たないこと** —— 欄の選択肢を写すので、刻みを変えるときは欄だけ直せばよい。
+  // ⚠️ **前に選んだ値が一覧に無ければ足す**（設定ファイルを手で書けば 15 でも入る）。
+  const batchSecondsChoices = (): number[] => {
+    const set = new Set(
+      [...analyzeSeconds.options].map((o) => Number(o.value) || 0).filter((v) => v > 0),
+    );
+    if (batchSecondsSaved > 0) {
+      set.add(batchSecondsSaved);
+    }
+    return [...set].sort((a, b) => a - b);
+  };
+
+  // askBatchSeconds は連続解析の秒数を選ばせ、**選んだらその秒数で始める**（2026-10-08）。
+  //
+  // 各行に**その秒数で全部にかかる時間の目安**を添える（手数 × 秒数。`batchEndAt` と同じ掛け算で、
+  // エンジンの起動や局面の移動のぶんは入っていない —— だから「約」）。
+  // ⚠️ **選んだ秒数は保存する**（次に押したときの初期値。ボタンの「3秒毎」もこれ）。
+  // ⚠️ **選ばずに閉じたら始めない**（`openPopup` の約束）。
+  const askBatchSeconds = () => {
+    const r = batchRun.getBoundingClientRect();
+    const n = batchCount();
+    const choices = batchSecondsChoices();
+    const now = choices.indexOf(batchSecondsSaved);
+    openPopup(r.left, r.bottom, {
+      label: "連続解析の秒数",
+      title: n <= 1
+        ? `${batchFrom()}手目を解析`
+        : `${batchFrom()}〜${batchTo()}手目（${n}手）を連続解析`,
+      items: choices.map((sec) => ({
+        label: `${sec}秒`,
+        note: `約${durationText(n * sec)}`,
+        checked: sec === batchSecondsSaved,
+        onPick: () => pickBatchSeconds(sec),
+      })),
+      focus: now >= 0 ? now : 0,
+    });
+  };
+
+  const pickBatchSeconds = (sec: number) => {
+    batchSecondsSaved = sec;
+    void (async () => {
+      try {
+        onSettings(await SettingsService.SetBatchSeconds(sec));
+      } catch (err) {
+        // ⚠️ **保存に失敗しても連続解析は始める**（設計原則3。次に押したときの初期値が戻るだけ）。
+        setStatus(
+          `連続解析の秒数を保存できませんでした: ${String(err instanceof Error ? err.message : err)}`,
+          true,
+        );
+      }
+    })();
+    // ⚠️ **持ち主でなければ頼むだけ**（下の `study:batch`。秒数も一緒に渡す）。
+    if (!active) {
+      void Events.Emit("study:batch", { seconds: sec });
+      return;
+    }
+    startBatch(sec);
   };
 
   // durationText は秒数を「3分20秒」の形にする。**0 なら空。**
@@ -1676,7 +1735,9 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
       // あちらは「まだ解析していない局面なら」という条件で動くので、
       // **連続モードが切ってあると 1 手目で止まる。**
       // ⚠️ **追いつきは設定に依らず `catchUpSeconds`**（途中の手の秒数はユーザー指定）。
-      await startAnalyze(catchUp ? catchUpSeconds : undefined);
+      // ⚠️ **秒数は走っているものの秒数**（追いつきは `catchUpSeconds`、連続解析はダイアログで選んだ値）。
+      // 「考える秒数」を使わないこと —— 無制限だと 1 手目で考え続ける。
+      await startAnalyze(runSeconds());
       // ⚠️ **待つ世代を控えること。** これと違う世代の done では進まない。
       batchSeq = analyzeSeq;
       startRunWatch();
@@ -1829,9 +1890,10 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
     if (runActive()) {
       return;
     }
-    // ⚠️ **「無制限」では次の手へ進めない**（連続解析と同じ。1 手目で考え続ける）。
+    // ⚠️ **「無制限」では次の手へ進めない**（1 手目で考え続ける）。
     // ⚠️ **メニューから消さないこと** —— 消すと、なぜ無いのかが画面から読めない。
-    if (batchSeconds() <= 0) {
+    // ⚠️ **こちらは「考える秒数」のまま**（連続解析の秒数とは分けていない。2026-10-08）。
+    if (thinkSeconds() <= 0) {
       setStatus(
         "自動で指すには、考える秒数を決めてください（「無制限」では次の手へ進めません）",
         true,
@@ -1875,16 +1937,15 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
     }
   });
 
-  // toggleBatch は連続解析の入切（**持ち主だけが実際に回す**）。
-  const toggleBatch = () => {
-    // ⚠️ **自動で指しているときも「停止」として効くこと**（ボタンは 1 つ）。
-    if (runActive()) {
-      cancelBatch();
+  // startBatch は連続解析を sec 秒ずつで始める（**持ち主だけが実際に回す**）。
+  const startBatch = (sec: number) => {
+    if (runActive() || sec <= 0) {
       return;
     }
     // ⚠️ **始点は「今どこを見ているか」**（カーソル位置）。範囲を打ち込ませない
     // ——手順リストや評価値グラフを押して戻れば、そこが始点になる。
     // 数え方は**棋譜の手数**（評価値グラフの横軸と同じ）。
+    batchRunSeconds = sec;
     batchNext = studyFirst + studyPly;
     batchLast = studyFirst + studyMoveCount;
     syncBatchButton();
@@ -1892,24 +1953,40 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
   };
 
   batchRun.addEventListener("click", () => {
+    // ⚠️ **走っているあいだは「停止」**（自動で指しているときも。ボタンは 1 つ）。
     // ⚠️ **持ち主でなければ頼むだけ**（2026-09-12）。手順を切り離すと、
     // ボタンは**候補手の面を持っていない窓**に居る —— そこで自分が回すと、
     // **エンジンを持っている側と局面を取り合う**（互いの解析を打ち切り合う）。
     // ⚠️ **持ち主は「候補手の面を出している窓」ただ 1 つ**（`setActive`）。
-    if (!active) {
-      void Events.Emit("study:batch", null);
+    if (batchBusy()) {
+      if (!active) {
+        void Events.Emit("study:batch", null);
+        return;
+      }
+      cancelBatch();
       return;
     }
-    toggleBatch();
+    // 始めるときは**秒数を選ばせてから**（2026-10-08）。ダイアログは押した窓に出す。
+    askBatchSeconds();
   });
 
   // ⚠️ **頼まれる側。持ち主だけが応じること**（`study:cancel` と同じ形）。
   // 応じる相手が複数居ると、**押した 1 回で入って即座に切れる。**
-  Events.On("study:batch", () => {
+  // **秒数が付いていれば始める、付いていなければ止める**（2026-10-08。以前は入切の
+  // トグルだったが、始めるには秒数が要るようになった）。⚠️ **秒数の無い頼みで始めないこと**
+  // —— 止めるつもりの頼みが、すれ違いで始める頼みになる。
+  Events.On("study:batch", (event: { data: { seconds?: number } | null }) => {
     if (!active) {
       return;
     }
-    toggleBatch();
+    const sec = event.data?.seconds ?? 0;
+    if (runActive()) {
+      if (sec <= 0) {
+        cancelBatch();
+      }
+      return;
+    }
+    startBatch(sec);
   });
 
   // 持ち主の側の連続解析の状態（**ボタンの文字がこれで決まる**）。
@@ -1922,7 +1999,6 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
     remoteBusy = !!event.data?.on;
     syncBatchButton();
   });
-  analyzeSeconds.addEventListener("change", syncBatchButton);
 
   // seconds を渡すと設定の「考える秒数」の代わりにそれを使う（**途中の手の解析だけ**）。
   const startAnalyze = async (seconds?: number) => {
@@ -2471,7 +2547,9 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
       // 自動更新の入切・局面の有無が変わったかもしれない。
       syncFollow();
     },
-    setEngines(engines: EngineSettings[], colors: EngineColorOption[], seconds: number) {
+    setEngines(
+      engines: EngineSettings[], colors: EngineColorOption[], seconds: number, batchSeconds: number,
+    ) {
       engineColors.clear();
       engineNames.clear();
       engineMultiPV.clear();
@@ -2489,6 +2567,10 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
       reserveLines();
       // 考える秒数。⚠️ **既定の解決は Go 側**（`Config.ThinkSeconds`）。
       showAnalyzeSeconds(seconds);
+      // 連続解析の秒数（2026-10-08）。⚠️ **既定の解決は Go 側**（`Config.BatchThinkSeconds`）。
+      // ⚠️ **ボタンが秒数を出している**ので、一緒に描き直すこと。
+      batchSecondsSaved = Math.max(0, batchSeconds || 0);
+      syncBatchButton();
       paintEngineColors();
     },
     setStatus(message: string) {

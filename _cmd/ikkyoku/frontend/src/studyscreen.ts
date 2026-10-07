@@ -165,7 +165,7 @@ export function mountStudyScreen(root: HTMLElement, part: StudyScreenPart = "ana
     // 設定を書き換えた（色・候補手の本数）。⚠️ **設定タブは別の窓**なので、
     // 描き直しは向こうに任せる（こちらは自分の写しを入れ直すだけ）。
     onSettings: (s) => {
-      pane.setEngines(s.engines ?? [], s.engineColors ?? [], s.analyzeSeconds);
+      pane.setEngines(s.engines ?? [], s.engineColors ?? [], s.analyzeSeconds, s.batchSeconds);
       pane.setKifuFollowMinutes(s.kifuFollowMinutes);
       pane.setShowComment(!!s.showMoveComment);
       tell("settings:changed", null);
@@ -281,7 +281,7 @@ export function mountStudyScreen(root: HTMLElement, part: StudyScreenPart = "ana
     void (async () => {
       try {
         const s = await SettingsService.Settings();
-        pane.setEngines(s.engines ?? [], s.engineColors ?? [], s.analyzeSeconds);
+        pane.setEngines(s.engines ?? [], s.engineColors ?? [], s.analyzeSeconds, s.batchSeconds);
         pane.setKifuFollowMinutes(s.kifuFollowMinutes);
         pane.setShowComment(!!s.showMoveComment);
         // ⚠️ **起動直後の形は設定から読むこと。** Go 側は起動時にも

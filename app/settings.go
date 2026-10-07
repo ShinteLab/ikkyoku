@@ -103,6 +103,11 @@ type AppSettings struct {
 	// **既定値（3）は解決済みで返る**（`ikkyoku.Config.ThinkSeconds`）。
 	// ⚠️ **フロントに既定値を書かないこと。**
 	AnalyzeSeconds int `json:"analyzeSeconds"`
+	// BatchSeconds は連続解析の 1 手の秒数（2026-10-08。**必ず 1 以上**。無制限は無い）。
+	//
+	// **既定値は解決済みで返る**（`ikkyoku.Config.BatchThinkSeconds`）。
+	// ⚠️ **フロントに既定値を書かないこと。**
+	BatchSeconds int `json:"batchSeconds"`
 	// PonanzaConstant は評価値 → 勝率の変換に使う定数（解析タブの勝率バー）。
 	//
 	// **既定値（1500）は解決済みで返る**（`analyze.PonanzaConstantOr`）。
@@ -484,6 +489,7 @@ func (s *SettingsService) settings() AppSettings {
 		Engines:           engines,
 		EngineColors:      ikkyoku.EngineColors,
 		AnalyzeSeconds:    s.cfg.ThinkSeconds(),
+		BatchSeconds:      s.cfg.BatchThinkSeconds(),
 		PonanzaConstant:   analyze.PonanzaConstantOr(s.cfg.PonanzaConstant),
 		KifuFollowMinutes: s.cfg.KifuFollowInterval(),
 
@@ -1176,8 +1182,8 @@ func (s *SettingsService) SetPonanzaConstant(v float64) (AppSettings, error) {
 // ポインタなのはこのため —— 値で持って省略すると、**次の起動で既定に戻る**。
 //
 // ⚠️ **連続モードのチェックとは扱いが違う**（あちらは起動のたびに入で始まる
-// その場かぎりの操作）。秒数は待ち時間を決める値で、連続解析では
-// 「手数 × 秒数」がそのまま所要時間になるので、**選び直しを毎回やらせない。**
+// その場かぎりの操作）。秒数は待ち時間を決める値なので、**選び直しを毎回やらせない。**
+// ⚠️ **連続解析の秒数は別**（`SetBatchSeconds`。2026-10-08）。
 func (s *SettingsService) SetAnalyzeSeconds(v int) (AppSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1185,6 +1191,19 @@ func (s *SettingsService) SetAnalyzeSeconds(v int) (AppSettings, error) {
 		return s.settings(), fmt.Errorf("考える秒数は 0 以上で指定してください（0 は無制限）: %d", v)
 	}
 	return s.save(func(cfg *ikkyoku.Config) { cfg.AnalyzeSeconds = &v })
+}
+
+// SetBatchSeconds は連続解析の 1 手の秒数を保存する（連続解析を押したときのダイアログで選んだ値）。
+//
+// ⚠️ **0 以下は受け付けない**（無制限では 1 手目で考え続けて次へ進めない）。
+// ⚠️ **「考える秒数」は動かさない**（あちらは 1 局面を見続けるための値。2026-10-08 に分けた）。
+func (s *SettingsService) SetBatchSeconds(v int) (AppSettings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if v <= 0 {
+		return s.settings(), fmt.Errorf("連続解析の秒数は 1 以上で指定してください: %d", v)
+	}
+	return s.save(func(cfg *ikkyoku.Config) { cfg.BatchSeconds = v })
 }
 
 // SetFollowFirst は「中継を追うあいだは盤の読みを優先する」を切り替えて保存し、**その場で効かせる**

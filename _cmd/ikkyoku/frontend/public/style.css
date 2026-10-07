@@ -4554,6 +4554,29 @@ html.is-graph #app {
   background: var(--danger);
 }
 
+/* 見出し（押せない 1 行。連続解析の範囲など）。 */
+.popup-title {
+  padding: 4px 10px 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 4px;
+}
+
+/* 行の右端の薄い字（連続解析の所要時間）。⚠️ **塗った行の上では地の色に合わせる**
+   （`--accent` の地に薄い字だと読めない）。 */
+.popup-note {
+  margin-left: auto;
+  padding-left: 16px;
+  color: var(--text-dim);
+}
+
+.popup-btn:hover .popup-note,
+.popup-btn:focus .popup-note {
+  color: inherit;
+}
+
 /* 既定の選択肢（成る／手順を追加）。OS のメニューの既定項目と同じく太字にする。 */
 .popup-btn.is-primary {
   font-weight: 700;

@@ -327,6 +327,45 @@ func TestConfigAnalyzeSecondsRoundTrip(t *testing.T) {
 	}
 }
 
+// 連続解析の秒数（2026-10-08）。⚠️ **歯止めは 2 つ** —— **「考える秒数」と別に残ること**
+// （無制限で見ている人が連続解析を押すたびに選び直さない）・**無制限（0）を返さないこと**
+// （1 手目で考え続けて、連続解析が次の手へ進まない）。
+func TestConfigBatchSecondsRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+
+	for _, tt := range []struct {
+		name    string
+		analyze *int
+		batch   int
+		want    int
+	}{
+		{"選んだ秒数が残る", ptr(0), 5, 5},
+		{"考える秒数とは別に残る", ptr(7), 2, 2},
+		{"未選択なら考える秒数を引き継ぐ", ptr(7), 0, 7},
+		{"考える秒数が無制限なら既定", ptr(0), 0, DefaultAnalyzeSeconds},
+		{"どちらも未設定なら既定", nil, 0, DefaultAnalyzeSeconds},
+		{"壊れた値は未選択として扱う", ptr(0), -3, DefaultAnalyzeSeconds},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(dir, tt.name+".json")
+			if err := SaveConfig(path, Config{AnalyzeSeconds: tt.analyze, BatchSeconds: tt.batch}); err != nil {
+				t.Fatalf("SaveConfig() error = %v", err)
+			}
+			got, err := LoadConfig(path)
+			if err != nil {
+				t.Fatalf("LoadConfig() error = %v", err)
+			}
+			if n := got.BatchThinkSeconds(); n != tt.want {
+				t.Errorf("BatchThinkSeconds() = %d, want %d", n, tt.want)
+			}
+			// 連続解析の秒数を選んでも、考える秒数（無制限を含む）は動かない。
+			if tt.analyze != nil && got.ThinkSeconds() != *tt.analyze {
+				t.Errorf("ThinkSeconds() = %d, want %d", got.ThinkSeconds(), *tt.analyze)
+			}
+		})
+	}
+}
+
 func ptr(v int) *int { return &v }
 
 // 駒フォントの登録が往復すること。

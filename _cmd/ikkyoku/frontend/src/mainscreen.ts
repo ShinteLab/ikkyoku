@@ -5649,6 +5649,8 @@ ${st.turnLabel}${n}`;
     engines: EngineSettings[] | null;
     engineColors: EngineColorOption[] | null;
     analyzeSeconds: number;
+    // 連続解析の 1 手の秒数（2026-10-08。**解決済み**。必ず 1 以上）。
+    batchSeconds: number;
     // 棋譜の自動更新の間隔（分。**解決済み**。設定タブには出さない）。
     kifuFollowMinutes: number;
     ponanzaConstant: number;
@@ -5721,7 +5723,7 @@ ${st.turnLabel}${n}`;
     }
     // ⚠️ **側の列へは押し込むこと**（色・名前・候補手の本数・考える秒数）。
     // **設定が唯一の出所**で、既定色の解決も Go 側が済ませてある。
-    sidePane.setEngines(s.engines ?? [], s.engineColors ?? [], s.analyzeSeconds);
+    sidePane.setEngines(s.engines ?? [], s.engineColors ?? [], s.analyzeSeconds, s.batchSeconds);
     // 棋譜の自動更新の間隔（設定ファイルだけで決まる。既定の解決は Go 側）。
     sidePane.setKifuFollowMinutes(s.kifuFollowMinutes);
     // 手順の下のコメント欄（2026-10-04）。**起動直後にどちらで始まるかはここで決まる。**

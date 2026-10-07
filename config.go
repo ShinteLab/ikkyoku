@@ -245,9 +245,21 @@ type Config struct {
 	// **既定値はここに書かない**（解決は `Config.ThinkSeconds`）。
 	//
 	// ⚠️ **連続モードのチェックとは扱いが違う**（あちらは起動のたびに入で始まる
-	// その場かぎりの操作）。秒数は**待ち時間を決める値**で、連続解析では
-	// 「手数 × 秒数」がそのまま所要時間になるので、**選び直しを毎回やらせない。**
+	// その場かぎりの操作）。秒数は**待ち時間を決める値**なので、**選び直しを毎回やらせない。**
+	// ⚠️ **連続解析はこれを使わない**（`BatchSeconds`。2026-10-08 に分けた）。
 	AnalyzeSeconds *int `json:"analyzeSeconds,omitempty"`
+
+	// BatchSeconds は**連続解析の 1 手の秒数**（2026-10-08）。押したときの
+	// ダイアログで選び、次に押したときの初期値になる。
+	//
+	// ⚠️ **「考える秒数」（`AnalyzeSeconds`）とは別に持つ。** あちらは 1 局面を
+	// 見続けるための値で「無制限」のことが多く、それを連続解析に使うと
+	// **押すたびに秒数を選び直す**ことになっていた。
+	// ⚠️ **無制限（0）は無い**（1 手目で考え続けて次へ進めない）ので、値で持って
+	// **0 = まだ選んでいない**とする（ポインタにしない）。
+	//
+	// **既定値はここに書かない**（解決は `Config.BatchThinkSeconds`）。
+	BatchSeconds int `json:"batchSeconds,omitempty"`
 
 	// KifuFollowMinutes は棋譜の自動更新で**何分ごとに取り直すか**（2026-09-26）。
 	//
@@ -941,6 +953,21 @@ func (c Config) ThinkSeconds() int {
 		return 0
 	}
 	return *c.AnalyzeSeconds
+}
+
+// BatchThinkSeconds は連続解析の 1 手の秒数を返す（**必ず 1 以上**。無制限は無い）。
+//
+// まだ選んでいなければ「考える秒数」を引き継ぐ（それまで連続解析はそちらで回っていた
+// ので、上げた直後に秒数が変わらないように）。それも無制限なら既定。
+// ⚠️ **「未設定なら既定」の解決はここ 1 か所**（`ThinkSeconds` と同じ約束）。
+func (c Config) BatchThinkSeconds() int {
+	if c.BatchSeconds > 0 {
+		return c.BatchSeconds
+	}
+	if s := c.ThinkSeconds(); s > 0 {
+		return s
+	}
+	return DefaultAnalyzeSeconds
 }
 
 // DefaultKifuFollowMinutes は棋譜の自動更新の間隔の既定（分）。

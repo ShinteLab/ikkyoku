@@ -29,12 +29,18 @@ export interface PopupItem {
   // ただの行。⚠️ **印の場所は入っていなくても空けておくこと** —— 詰めると
   // 押すたびに文字が横へ動き、同じ行をもう一度押すのに狙い直すことになる。
   checked?: boolean;
+  // note は行の右端に添える薄い字（連続解析の秒数ごとの所要時間など）。
+  // **選ぶ材料を行の中に置くためのもの**で、押した結果は label が言う。
+  note?: string;
   onPick(): void;
 }
 
 export interface PopupOptions {
   // label は読み上げ用（`aria-label`）。
   label: string;
+  // title は項目の上に出す見出し（押せない 1 行。**何を選ぶのか**が項目だけで読めないとき）。
+  // ⚠️ **フォーカスの巡回に入れない**（矢印キーで止まると Enter で何も起きない）。
+  title?: string;
   items: PopupItem[];
   // focus は初期フォーカスを当てる項目（既定は先頭）。
   //
@@ -81,6 +87,12 @@ export function openPopup(x: number, y: number, opts: PopupOptions): PopupHandle
       b.appendChild(dot);
     }
     b.appendChild(document.createTextNode(item.label));
+    if (item.note) {
+      const note = document.createElement("span");
+      note.className = "popup-note";
+      note.textContent = item.note;
+      b.appendChild(note);
+    }
     b.addEventListener("click", () => {
       handle.close();
       item.onPick();
@@ -95,6 +107,12 @@ export function openPopup(x: number, y: number, opts: PopupOptions): PopupHandle
     });
     return b;
   });
+  if (opts.title) {
+    const head = document.createElement("div");
+    head.className = "popup-title";
+    head.textContent = opts.title;
+    box.appendChild(head);
+  }
   box.append(...buttons);
   // メニューの上の右クリックで webview の既定メニューを重ねない。
   box.addEventListener("contextmenu", (e) => e.preventDefault());
