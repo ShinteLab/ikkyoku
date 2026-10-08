@@ -220,6 +220,17 @@ type StudyState struct {
 	// ⚠️ **どの窓でも同じ入切を見せるための口。** 取り直す間隔を刻むのは
 	// フロントの持ち主の窓（`FollowKifu` を呼ぶ）。`SourceURL` が空なら必ず偽。
 	KifuFollow bool `json:"kifuFollow"`
+	// CanResign は**今ここで手番の側が投了できるか**（駒台の「投了」。2026-10-09）。
+	// 本譜の先端を見ていて、まだ終局しておらず、URL から読んだ棋譜でないとき。
+	// ⚠️ **中継を追っているかは見ていない**（Go 側に無い）—— 押させないのはフロント。
+	CanResign bool `json:"canResign"`
+	// CanUnresign は**投了を取り消せるか**（投了の行の右クリック）。自分で投了していて、
+	// まだ棋譜タブに登録していないとき。
+	CanUnresign bool `json:"canUnresign"`
+	// CanRegister は**棋譜タブに登録できるか**（投了の行の右クリック。`KifuService.SaveStudy`）。
+	// 本譜が終局で終わっていて、まだ棋譜タブと結んでおらず、URL から読んだ棋譜でないとき。
+	// ⚠️ **フロントで同じ判定を書かないこと**（判断は `registerableLocked` の 1 か所）。
+	CanRegister bool `json:"canRegister"`
 
 	// RootSFEN は根の局面（採ったときの局面）。**エンジンに渡すのはこれ + Played。**
 	RootSFEN string `json:"rootSfen"`
@@ -799,16 +810,6 @@ func (s *StudyService) mergeReloadLocked(next *position.Study) position.GraftRes
 	return got
 }
 
-// currentGameID は今の検討が結んでいる棚の棋譜 id（結んでいなければ空）。
-//
-// ⚠️ **公開しない**（Service の公開メソッドはフロントの API になる）。
-// 画面へ出したいなら `StudyState` に載せること。
-func (s *StudyService) currentGameID() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.gameID
-}
-
 // currentSession は今の検討の控えの id（**控えの書き直しが今の検討とぶつからないか**
 // を見るため。公開しない）。
 func (s *StudyService) currentSession() string {
@@ -1080,6 +1081,62 @@ func (s *StudyService) Promote(id int) (st StudyState, err error) {
 		return s.state(), err
 	}
 	return s.changed(), nil
+}
+
+// Resign は**手番の側が投了する**（駒台の「投了」。2026-10-09）。
+//
+// **終局した検討だけが棋譜タブに入れられる**（`KifuService.SaveStudy`）。対局の
+// 途中で誤って登録する事故を防ぐため、登録の口は投了の行にしか無い。
+//
+// ⚠️ **本譜の先端でしか投了させない**（`position.Study.CanResign`）。
+// ⚠️ **URL から読んだ棋譜では断る** —— 終局は取得元が決める（自動更新で載る）。
+// ⚠️ **中継を追っているあいだはフロントが押させない**（追従の状態は Go 側に無い）。
+func (s *StudyService) Resign() (st StudyState, err error) {
+	defer func() { s.publish(st, err) }()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.study == nil {
+		return s.state(), fmt.Errorf("まだ局面がありません")
+	}
+	if s.sourceURL != "" {
+		return s.state(), fmt.Errorf("URL から読んだ棋譜の終局は取得元が決めます")
+	}
+	if err := s.study.Resign(); err != nil {
+		return s.state(), err
+	}
+	return s.changed(), nil
+}
+
+// Unresign は**自分で投了したのを取り消す**（投了の行の右クリック。2026-10-09）。
+//
+// ⚠️ **棋譜に書いてあった終局は取り消さない**（記録なので）。
+// ⚠️ **棋譜タブに登録したあとは取り消さない** —— 登録した棋譜は投了で終わっているので、
+// 検討の側だけ終局を外すと食い違う。
+func (s *StudyService) Unresign() (st StudyState, err error) {
+	defer func() { s.publish(st, err) }()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.study == nil {
+		return s.state(), fmt.Errorf("まだ局面がありません")
+	}
+	if s.gameID != "" {
+		return s.state(), fmt.Errorf("棋譜タブに登録済みなので投了を取り消せません")
+	}
+	if err := s.study.Unresign(); err != nil {
+		return s.state(), err
+	}
+	return s.changed(), nil
+}
+
+// endedOnMainLocked は**本譜が終局で終わっているか**（登録できるかの判断と、KIF に投了の行を書くかの判断）。
+//
+// ⚠️ **終局の手が本譜の先端であること** —— 「分岐にする」で終局の手より前を本譜から
+// 外すと、終局は変化の上に残る。そのまま登録すると投了の無い（「未」の）棋譜になる。
+func (s *StudyService) endedOnMainLocked() bool {
+	end := s.study.RecordEnd()
+	return end != 0 && end == mainTipID(s.study)
 }
 
 // DropFrom はその手**とその先（子孫の枝も全部）**を消す（**手順リストの右クリック**）。
@@ -1478,6 +1535,28 @@ func (s *StudyService) state() StudyState {
 		SourceURL:   s.sourceURL,
 		GameID:      s.gameID,
 		KifuFollow:  s.kifuFollow,
+		CanResign:   s.sourceURL == "" && s.study.CanResign(),
+		CanUnresign: s.gameID == "" && s.study.RecordEndByHand(),
+		CanRegister: s.registerableLocked() == nil,
 		Rev:         s.rev,
 	}
+}
+
+// registerableLocked は**今の検討を棋譜タブに登録できるか**（できなければ理由。2026-10-09）。
+//
+// ⚠️ **終局していなければ断る** —— 対局の途中で誤って登録する事故を防ぐのがこの機能の
+// 目的（以前は手順の見出しの「再読み込み」の隣にボタンがあって押し間違えた）。
+// ⚠️ **URL から読んだ棋譜は中継カードの「保存」で入れる**（取得元の原本のまま入る）。
+func (s *StudyService) registerableLocked() error {
+	switch {
+	case s.study == nil:
+		return fmt.Errorf("まだ局面がありません")
+	case s.gameID != "":
+		return fmt.Errorf("この検討は既に棋譜タブの棋譜と結んでいます（棋譜タブの「解析する」で続きから開けます）")
+	case s.sourceURL != "":
+		return fmt.Errorf("URL から読んだ棋譜は入力タブの「保存」で棋譜タブに入れてください")
+	case !s.endedOnMainLocked():
+		return fmt.Errorf("終局していません（投了すると棋譜タブに登録できます）")
+	}
+	return nil
 }

@@ -108,7 +108,9 @@ import type { Stock } from "../bindings/github.com/ShinteLab/ikkyoku/position/mo
 // 認識の観測情報。**型を手で書き写さない**(Go 側は suteme の型をそのまま通しており、
 // ここで別に定義すると矩形の意味がずれても気づけない)。
 import type { Debug } from "../bindings/github.com/ShinteLab/suteme";
-import { confirmStopFollow, noteFollowing, setFollowStopper } from "./followguard";
+import {
+  confirmStopFollow, isFollowing, noteFollowing, onFollowingChange, setFollowStopper,
+} from "./followguard";
 
 // 「撮れた」ことだけを伝えるイベントのペイロード（Go 側 CaptureShot / `capture:shot`）。
 //
@@ -2108,6 +2110,58 @@ export function mountMainScreen(root: HTMLElement): void {
     (black ? studyHandSlots.black : studyHandSlots.white).appendChild(zone);
     return zone;
   });
+  // 投了（2026-10-09）。**駒台の盤の真ん中寄りの端**（置き方は style.css の `.resign-btn`）。
+  //
+  // **投了すると終局になり、投了の行の右クリックから棋譜タブに登録できる。** 対局の
+  // 途中で誤って登録する事故を防ぐため、登録の口は投了の行にしか無い（`movelist.ts`）。
+  // ⚠️ **押せるのは手番の側だけ**（KIF の「91 投了」も手番の側の投了と読まれる）。
+  // **両側に常に置いて押せない側は `disabled`**（手番のマークと同じく出たり消えたりさせない）。
+  // ⚠️ **投了できるかは Go 側**（`StudyState.canResign`。本譜の先端で、終局していないとき）。
+  // ⚠️ **中継を追っているあいだは押させない**（盤の駒と同じ。追従の状態は Go 側に無い）。
+  // ⚠️ **確認は挟まない** —— 投了の行の右クリックで取り消せる。
+  const studyResignBtns = studyHandZones.map((zone) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "resign-btn";
+    b.textContent = "投了";
+    b.dataset.black = zone.dataset.black;
+    b.addEventListener("click", () => void resignStudy());
+    zone.appendChild(b);
+    return b;
+  });
+  // 投了のボタンの出し入れに要る値（**局面の写しではない**。showStudy が入れる）。
+  let studyCanResign = false;
+  let studyTurnNow = 0;
+  let studyFromURL = false;
+  const syncResign = () => {
+    for (const b of studyResignBtns) {
+      const black = b.dataset.black === "true";
+      const side = black ? "先手" : "後手";
+      const mine = studyTurnNow === (black ? 1 : 2);
+      // URL から読んだ棋譜は終局を取得元が決めるので、ボタンごと出さない。
+      b.hidden = studyFromURL;
+      b.disabled = !(studyCanResign && mine && !isFollowing());
+      b.title = isFollowing()
+        ? "中継を追っているあいだは投了できません"
+        : !mine
+          ? `${side}の手番ではありません`
+          : studyCanResign
+            ? `${side}が投了します`
+            : "本譜の最後の手で、終局していないときだけ投了できます";
+    }
+  };
+  onFollowingChange(() => syncResign());
+  const resignStudy = async () => {
+    if (isFollowing()) {
+      return;
+    }
+    try {
+      showStudy(await StudyService.Resign());
+      sidePane.setStatus("");
+    } catch (err) {
+      sidePane.setStatus(String(err instanceof Error ? err.message : err));
+    }
+  };
   // 訂正タブ側の一行。訂正の操作が通らなかった理由と、確定できない理由を出す。
   const editStatus = root.querySelector<HTMLParagraphElement>("#edit-status")!;
 
@@ -2512,6 +2566,11 @@ ${st.turnLabel}${n}`;
     // ⚠️ **手番のマークは局面と一緒に更新する。** 1 手ごとに入れ替わるので、
     // 落とすと**前の手番のまま光り続ける**（連続モードでは毎手ずれる）。
     showStudyTurn(loaded ? st.turn : 0);
+    // 投了のボタンも手番と一緒（押せるのは手番の側だけ）。
+    studyCanResign = loaded && !!st.canResign;
+    studyTurnNow = loaded ? st.turn : 0;
+    studyFromURL = loaded && (st.sourceUrl ?? "") !== "";
+    syncResign();
     // ⚠️ **局面と一緒に更新する。** 根を入れ替えると対局者も変わる。
     showPlayers(st.black ?? "", st.white ?? "", st.handicap ?? "");
     if (!o?.fromBoard) {

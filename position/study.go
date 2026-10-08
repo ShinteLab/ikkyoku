@@ -232,6 +232,11 @@ type Study struct {
 	// ⚠️ **`end` と組で持つ**（`SetRecordEnd` が両方を入れ替える）。片方だけ
 	// 残ると、関係の無い手に「投了」が出る。
 	endMark string
+	// endHand は**人が投了した**終局か（解析タブの「投了」。2026-10-09）。
+	//
+	// ⚠️ **棋譜に書いてあった終局とは別の事実**（`variation` と `end` の関係と同じ）。
+	// 取り消せるのはこちらだけ —— 棋譜の終局は記録なので消せてはいけない。
+	endHand bool
 }
 
 // NewStudy は確定した局面を根にして検討を始める。
@@ -679,17 +684,67 @@ func (s *Study) RecordEndMark() string {
 // SetRecordEnd は対局が終わった節点と終局の種別を覚える（**棋譜に終局が書いてあったとき**）。
 //
 // ⚠️ **推測で立てないこと。** 「詰んでいるから終わり」も「これ以上手が無いから
-// 終わり」も**棋譜の事実ではない**。立ててよいのは**棋譜に終局印があった**ときだけ
-// （`kifu.Document.EndMark`）。
+// 終わり」も**棋譜の事実ではない**。立ててよいのは**棋譜に終局印があった**ときと、
+// **人が投了したとき**（`Resign`）だけ。
 //
 // ⚠️ **知らない節点なら忘れること**（0 に戻す）。据え直しで節点が入れ替わったのに
 // 前の id を持ち続けると、**関係の無い手に「対局の終わり」の印が出る。**
 func (s *Study) SetRecordEnd(id int, mark string) {
+	s.endHand = false
 	if _, ok := s.index[id]; !ok || id == 0 {
 		s.end, s.endMark = 0, ""
 		return
 	}
 	s.end, s.endMark = id, mark
+}
+
+// RecordEndByHand は**今の終局が人の投了か**（取り消せるのはこちらだけ）。
+func (s *Study) RecordEndByHand() bool { return s.end != 0 && s.endHand }
+
+// CanResign は**今ここで投了できるか**（2026-10-09）。
+//
+// できるのは**本譜の先端を見ていて、まだ終局していない**ときだけ。投了するのは
+// その局面の手番の側（KIF の「91 投了」も手番の側の投了と読まれる）。
+// ⚠️ **本譜の途中では投了させない** —— 後ろの手がまとめて投了図以下に回る事故になる。
+// ⚠️ **1 手も指していない局面でも断る**（終局は手に付ける印で、根には付けられない）。
+func (s *Study) CanResign() bool {
+	return s.end == 0 && s.cur != s.top && s.cur == s.mainTipNode()
+}
+
+// Resign は**手番の側が投了する**（2026-10-09）。本譜はここで終わり、
+// ここから先に指した手は投了図以下（変化）になる。
+func (s *Study) Resign() error {
+	if s.end != 0 {
+		return fmt.Errorf("ikkyoku/position: もう終局しています")
+	}
+	if s.cur == s.top {
+		return fmt.Errorf("ikkyoku/position: まだ 1 手も指していません")
+	}
+	if s.cur != s.mainTipNode() {
+		return fmt.Errorf("ikkyoku/position: 投了できるのは本譜の最後の手からです")
+	}
+	s.end, s.endMark, s.endHand = s.cur.id, "投了", true
+	return nil
+}
+
+// Unresign は**人が投了したのを取り消す**（2026-10-09）。
+//
+// ⚠️ **棋譜に書いてあった終局は取り消さない**（記録なので消せてはいけない）。
+func (s *Study) Unresign() error {
+	if !s.RecordEndByHand() {
+		return fmt.Errorf("ikkyoku/position: 取り消せるのは自分で投了したときだけです")
+	}
+	s.end, s.endMark, s.endHand = 0, "", false
+	return nil
+}
+
+// mainTipNode は本譜の先端の節点（`MainTip` と同じところ。局面は組み立てない）。
+func (s *Study) mainTipNode() *treeNode {
+	n := s.top
+	for k := s.mainNext(n); k != nil; k = s.mainNext(n) {
+		n = k
+	}
+	return n
 }
 
 // MainLine は本譜（根から `kids[0]` を辿った並び）の手を返す。
@@ -1238,7 +1293,7 @@ func (s *Study) DropFrom(id int) ([]int, error) {
 	// ⚠️ **終わった手が消えたなら終局も忘れる**（2026-10-09）。id は使い回さないので
 	// 残しても悪さはしないが、控えに死んだ id と「投了」が残り続ける。
 	if _, alive := s.index[s.end]; !alive {
-		s.end, s.endMark = 0, ""
+		s.end, s.endMark, s.endHand = 0, "", false
 	}
 
 	// 消えた先を見ていたなら親へ（見ていた節点が残っているならそのまま）。

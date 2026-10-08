@@ -11,7 +11,7 @@
 // Go 側の 1 つの手順**で、両方の窓が `study:changed` で追随する。
 //
 // ⚠️ **畳み方だけはここが持つ**（画面だけの状態。Go には持たせない）。
-import { StudyService } from "../bindings/github.com/ShinteLab/ikkyoku/app";
+import { KifuService, StudyService } from "../bindings/github.com/ShinteLab/ikkyoku/app";
 import type { StudyState } from "../bindings/github.com/ShinteLab/ikkyoku/app/models";
 import { confirmStopFollow, isFollowing } from "./followguard";
 import { openPopup, type PopupHandle, type PopupItem } from "./popup";
@@ -310,8 +310,8 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
     // 終局（"投了" など。2026-10-09）。**終わった手の直後に 1 行**（棋譜の「91 投了」）。
     //
     // ⚠️ **手ではないので押せない行にする**（`button` にしない・`data-id` を付けない）。
-    // 節点ではないので、戻る先も消す相手も無い。右クリックは「開始局面」と同じく
-    // 何も出さない（`data-id` が無いので id 0 として弾かれる）。
+    // 節点ではないので、戻る先も消す相手も無い。右クリックは手のメニューではなく
+    // 「棋譜に登録」「投了を取り消す」を出す（`askEndMenu`。出せるものが無ければ何も出さない）。
     // ⚠️ **付いている手と同じ深さ・同じ列で並べる**（時間とコメントの列を揃える）。
     // 消える範囲を光らせるときは、付いている手と一緒に光る（`data-end-of`）。
     const endRow = (num: string, mark: string, of: number, depth: number) => {
@@ -324,6 +324,10 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
       const body = document.createElement("div");
       body.className = "move-chip is-end";
       body.dataset.endOf = String(of);
+      // 登録済みかはホバーで分かれば足りる（行に文字を足さない）。
+      if (state?.gameId) {
+        body.title = "棋譜タブに登録済み";
+      }
       const i = document.createElement("span");
       i.className = "move-num";
       i.textContent = num;
@@ -491,6 +495,46 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
     askDrop(x, y, id, label, count);
   };
 
+  // askEndMenu は終局の行（「91 投了」）を右クリックしたときのメニュー（2026-10-09）。
+  //
+  // **棋譜タブへ登録する口はここだけ。** 終局していなければ行そのものが無いので、
+  // 対局の途中で誤って登録することが起きない（以前は手順の見出しの「再読み込み」の
+  // 隣にあって押し間違えた）。⚠️ **手順の見出しに戻さないこと。**
+  // ⚠️ **出す条件は Go 側**（`canRegister` / `canUnresign`）。どちらも無ければ何も出さない。
+  // ⚠️ **確認は挟まない** —— 登録は何も消さないし、投了の取り消しはもう一度投了すれば戻る。
+  const askEndMenu = (x: number, y: number) => {
+    closeAsk();
+    if (!state?.loaded) {
+      return;
+    }
+    const items: PopupItem[] = [];
+    if (state.canRegister) {
+      items.push({
+        label: "棋譜に登録",
+        onPick: () =>
+          void (async () => {
+            try {
+              await KifuService.SaveStudy();
+            } catch (err) {
+              onError(String(err instanceof Error ? err.message : err));
+            }
+            // 登録すると棋譜タブと結ばれる（`study:changed` も来るが、呼んだ窓はその場で描く）。
+            onState(await StudyService.State());
+          })(),
+      });
+    }
+    if (state.canUnresign) {
+      items.push({
+        label: "投了を取り消す",
+        onPick: () => void run(() => StudyService.Unresign()),
+      });
+    }
+    if (items.length === 0) {
+      return;
+    }
+    ask = openPopup(x, y, { label: "終局", items });
+  };
+
   // askMoveMenu は手を右クリックしたときのメニュー。
   //
   // ⚠️ **ここでは何も起きない**（消すほうは、2 手以上なら押すと確認が出る）。
@@ -543,6 +587,11 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
     }
     // ⚠️ **webview の既定メニューを止める**（訂正タブの盤と同じ）。
     e.preventDefault();
+    // 終局の行（「91 投了」）は手ではないので、**手のメニューは出さない**。
+    if (chip.classList.contains("is-end")) {
+      askEndMenu(e.clientX, e.clientY);
+      return;
+    }
     const id = Number(chip.dataset.id ?? "0");
     // 「開始局面」は手ではないので消せない（消したいなら 1 手目を押す）。
     if (id < 1 || !state?.loaded) {

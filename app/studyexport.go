@@ -84,11 +84,24 @@ func (s *StudyService) exportKIF() (string, error) {
 		}
 		doc.Moves = append(doc.Moves, m)
 	}
+	// **本譜が終局で終わっているなら終局の行も書く**（2026-10-09。「91 投了」）。
+	// ⚠️ **落とさないこと** —— 落とすと棋譜タブに「未」（終局していない）の棋譜として入り、
+	// 開き直したときに投了図以下の区別も消える。書くのは `core/kifu`（`FormatLine`）。
+	if s.endedOnMainLocked() {
+		doc.Moves = append(doc.Moves, kifu.Move{Num: len(doc.Moves) + 1, Name: s.study.RecordEndMark()})
+	}
 	// ⚠️ **消費時間は棋譜から受け取ったときだけ出す**（`ShowTime`）。撮った局面から
 	// 始めた検討は時間をどこからも受け取っていないので、立てると
 	// **" ( 0:00/00:00:00)" が全手に並ぶ。**
 	doc.ShowTime = timed
 	return doc.String(), nil
+}
+
+// registerable は**今の検討を棋譜タブに登録できるか**（`registerableLocked` のロックを取る版）。
+func (s *StudyService) registerable() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.registerableLocked()
 }
 
 // setGameID は棚に入れた棋譜と結ぶ（`KifuService.SaveStudy` から）。
