@@ -107,7 +107,7 @@
 
 - ⚠️ **変えたら必ず出すこと。** 出す場所は `Adopt` / `LoadKifu`（＝`loadKifuFrom`）/
   `LoadKifuURL` / `ReloadKifu` / `NewGame` / `Play` / `PlayLine` / `AddLine` / `Branch` /
-  `Promote` / `DropFrom` / `GoTo` / `Clear`。**足したメソッドで忘れると、
+  `Promote` / `DropFrom` / `GoTo` / `Clear` / `Resign` / `Unresign`。**足したメソッドで忘れると、
   そこだけ別の窓が更新されない**（画面からは「たまに古い」に見える）
 - ⚠️ **失敗したときは出さない**（状態は変わっていない）。判断は `publish` の 1 か所
 - ⚠️ **ロックを外してから出すこと。** 先はフロントなので、ロックを持ったまま渡すと
@@ -143,7 +143,7 @@
 | `handsfixed_test.go` / `mateengine_test.go` | `_docs/app-handicap-mate.md` |
 | `followstudy_test.go` | `_docs/app-follow.md` |
 | `studyservice_test.go`（`PlayLine`）・`evalgraph_test.go` / `evalgraph_end_test.go`・`players_test.go` | `_docs/app-study.md` |
-| `studystore_test.go` / `studyexport_test.go` / `studykey_test.go` | `_docs/app-studystore.md` |
+| `studystore_test.go` / `studyexport_test.go` / `studykey_test.go` / `resign_test.go` | `_docs/app-studystore.md` |
 | `kifunote_test.go`（棋譜の消費時間とコメント） | `_docs/position-study.md` |
 
 - `issueservice_test.go` — **⚠ の一覧**（2026-10-04）。**直ったら消えること**・**同じ鍵は
