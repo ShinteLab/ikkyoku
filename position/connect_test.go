@@ -518,26 +518,50 @@ var anagumaCost2 = [81]float64{
 	1.00, 1.00, 0.15, 0.82, 0.15, 0.66, 0.43, 0.81, 1.00,
 }
 
+// furibishaShot / furibishaCost は同じ日の別の中継（録画 `follow/20261008-103837/013-4d3e_2g2f-guess.png`）を読み直した盤と確信度。
+// ▲3五同歩 のあと △2六歩 ▲同歩 △同銀 と進んだ 1 枚で、8六 の角・7六 の飛・7七 の桂を「歩」、4八 の金を「角」、
+// 3八 の玉を「金」、2二 の飛を「香」、1九 の香を「歩」と読んでいる。
+const furibishaShot = "kn5nl/lsgg3l1/ppppbp2p/4p4/P1PP2s2/1PP4P1/2PSPP2P/4BGGS1/L6NP"
+
+var furibishaCost = [81]float64{
+	1.00, 0.65, 0.15, 0.15, 0.15, 0.15, 0.15, 0.42, 1.00,
+	1.00, 0.81, 0.89, 1.00, 0.15, 0.15, 0.15, 0.63, 0.15,
+	1.00, 1.00, 1.00, 1.00, 0.75, 1.00, 0.15, 0.15, 1.00,
+	0.15, 0.15, 0.15, 0.15, 1.00, 0.15, 0.15, 0.15, 0.15,
+	1.00, 0.15, 1.00, 1.00, 0.15, 0.15, 0.82, 0.15, 0.15,
+	0.15, 0.41, 1.00, 0.15, 0.15, 0.15, 0.15, 1.00, 0.15,
+	0.15, 0.15, 0.60, 0.85, 1.00, 1.00, 0.15, 0.15, 1.00,
+	0.15, 0.15, 0.15, 0.15, 0.39, 0.62, 0.60, 1.00, 0.15,
+	1.00, 0.15, 0.15, 0.15, 0.15, 0.15, 0.15, 1.00, 0.79,
+}
+
 // ⚠️ **手順が触れていないマスの、種類だけの読み違いは修復の予算から払わないこと**（`staleKinds`。2026-10-08 に実機で踏んだ）。
 //
 // **実機の症状**: ▲8四歩 のあと △同歩 ▲同飛 △8三歩 ▲8六飛 と進んだが、どの 1 枚も動いていない駒を 4〜6 マス
 // 種類違いに読んでいた（半分に数えても 1.1〜1.7 で、予算 1.0 を超える）。正しい手順が修復に収まらず、
 // 「隔たりが大きすぎます」が続いて 1 手も進まなかった。動いていない駒の種類には、何手指されたかの情報が無い。
+// 同じ日の別の中継では、△2六歩 ▲同歩 △同銀 の 1 枚で深く探せず、`Rank` の 1 手（△同銀）と次の ▲2六歩（同歩ではない）を
+// 足して手番が 1 つずれた。
 func TestConnectRepairIgnoresStaleKindMisreads(t *testing.T) {
+	// furibishaFrom は ▲3五同歩 まで進めた局面。
+	const furibishaFrom = "kn5nl/lsgg3r1/ppppbp2p/4ps3/P1PP2pp1/1BR3P2/2NSPP1PP/4GGKS1/L6NL b P 1"
 	cases := []struct {
 		name  string
+		from  string
+		after []string
 		shot  string
 		cost  [81]float64
 		moves string
 	}{
-		{"△同歩 ▲同飛", anagumaShot2, anagumaCost2, "8c8d 8h8d"},
+		{"△同歩 ▲同飛", anagumaAfter8d, nil, anagumaShot2, anagumaCost2, "8c8d 8h8d"},
 		// ⚠️ 2 手の [8c8d 8h8d] も 8三 の歩（確信度 1.00）を「無い」と覆せば予算に収まる。打ち直した △8三歩 まで採ること
 		// （`cheaperDeeper`）。
-		{"△同歩 ▲同飛 △8三歩", anagumaShot3, anagumaCost3, "8c8d 8h8d P*8c"},
+		{"△同歩 ▲同飛 △8三歩", anagumaAfter8d, nil, anagumaShot3, anagumaCost3, "8c8d 8h8d P*8c"},
+		{"△2六歩 ▲同歩 △同銀", furibishaFrom, []string{"3f3e"}, furibishaShot, furibishaCost, "2e2f 2g2f 4d3e"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			from := mustPos(t, anagumaAfter8d)
+			from := after(t, c.from, c.after...)
 			r := connect(t, from, c.shot, position.ConnectOptions{Tolerance: position.DefaultTolerance, Cost: relayConf(c.cost)})
 			if r.Stop != position.StopFound || !r.Unique || strings.Join(r.Moves, " ") != c.moves {
 				t.Fatalf("%s で繋がるはず: stop=%v moves=%v solutions=%v cost=%v", c.moves, r.Stop, r.Moves, r.Solutions, r.Cost)

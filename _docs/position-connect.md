@@ -222,8 +222,8 @@
   ⚠️ **空いたマスを「読めていない」で済ませた浅い答えより、少なく覆して合う 1 手深い答えを採ること**
   （`TestConnectRepairPrefersCheaperDeeper`。2026-10-08 のゲーム画面の録画を読み直した盤と確信度。
   `cheaperDeeper` を外すと実機と同じ [8g8f 8e8f 4h3g] で落ちる）・
-  ⚠️ **動いていない駒を 5〜6 マス種類違いに読んだ 1 枚からも、△同歩 ▲同飛 と △同歩 ▲同飛 △8三歩 が一意に繋がること**
-  （`TestConnectRepairIgnoresStaleKindMisreads`。2026-10-08 の穴熊の中継の録画を読み直した盤と確信度。`staleKinds` を外すと
+  ⚠️ **動いていない駒を 5〜7 マス種類違いに読んだ 1 枚からも、△同歩 ▲同飛・△同歩 ▲同飛 △8三歩・△2六歩 ▲同歩 △同銀 が
+  一意に繋がること**（`TestConnectRepairIgnoresStaleKindMisreads`。2026-10-08 の 2 つの中継の録画を読み直した盤と確信度。`staleKinds` を外すと
   実機と同じ「隔たりが大きすぎます」、`cheaperDeeper` を 1 段で止めると 2 手で止まる）・
   ⚠️ **見なかった種類の読み違いも `Fixed` に出ること**（`TestConnectRepairShowsStaleKindAsFixed`）・
   ⚠️ **1 手も指さずに予算内なら `StopSame`**
