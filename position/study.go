@@ -119,6 +119,7 @@ type Node struct {
 	// 木の形（`kids[0]` と印）で決まるので、**画面に出ている字下げからは読めない。**
 	CanPromote bool `json:"canPromote,omitempty"`
 	// Main は**本譜か**（根から `kids[0]` だけを辿って届く手）。
+	// ⚠️ **対局の終わり（`RecordEnd`）より先は本譜ではない**（投了図以下は変化。2026-10-09）。
 	//
 	// ⚠️ **「親の最初の子」ではない**（2026-08-13 に意味を変えた）。枝の中の
 	// 最初の子は「先に足した」以上の意味を持たないので、そこまで本筋扱いすると
@@ -339,6 +340,17 @@ func (s *Study) Nodes() []Node {
 			// 変わると、**画面のどこへ動いたのか目で追えない。**
 			for _, k := range n.kids {
 				out = append(out, k.node(depth+1, false).promotable(true))
+				walk(k, depth+1, head)
+			}
+		case mode == main && s.end != 0 && n.id == s.end:
+			// **対局はここで終わり**（棋譜に終局が書いてあった。2026-10-09）。
+			// 投了図から指した手は**終局の手数の変化**（KIF の「変化：91手」）なので、
+			// 「分岐にする」で下げた手と同じく**全部 1 段下げて頭にする**。
+			// ⚠️ **本譜の続きとして並べないこと** —— `MainLine` も評価値グラフも
+			// ここで止まるのに、手順リストだけ本譜に見えていた（実機で指摘された）。
+			// ⚠️ **「本線にする」は出さない**（`openFork` と揃える。投了図以下は本譜に戻せない）。
+			for _, k := range n.kids {
+				out = append(out, k.node(depth+1, false))
 				walk(k, depth+1, head)
 			}
 		case mode == main:
@@ -1147,7 +1159,7 @@ func (s *Study) Promote(id int) error {
 	// ⚠️ **断るのは「続きがもう決まっている」ときだけ**（`openFork`）。
 	// **1 本しか無くても、それが変化の頭なら選べる** —— 読み筋を 1 本だけ
 	// 足したときがそれ。**`len(kids) >= 2` を条件にしないこと。**
-	if !openFork(n.parent) {
+	if !openFork(n.parent, s.end) {
 		return fmt.Errorf("ikkyoku/position: もう本線が決まっています: %d", id)
 	}
 	p := n.parent
@@ -1164,7 +1176,7 @@ func (s *Study) Promote(id int) error {
 //
 // ⚠️ **`Nodes` の「全部 1 段下げる」場合と揃えてあること。** 食い違うと、
 // **画面では同格に並んでいるのにメニューに出ない**（あるいはその逆）になる。
-func openFork(p *treeNode) bool {
+func openFork(p *treeNode, end int) bool {
 	if len(p.kids) == 0 {
 		return false
 	}
@@ -1174,7 +1186,7 @@ func openFork(p *treeNode) bool {
 	if p.kids[0].variation {
 		return true
 	}
-	if onMainLine(p) {
+	if onMainLine(p, end) {
 		// 本譜の上なら、`kids[0]` がそのまま続き。
 		return false
 	}
@@ -1188,9 +1200,12 @@ func openFork(p *treeNode) bool {
 
 // onMainLine は根から本譜（`kids[0]` かつ「分岐にする」で下げていない）を
 // 辿って届く節点か。
-func onMainLine(n *treeNode) bool {
+//
+// ⚠️ **対局の終わり（`end`）より先は本譜ではない**（2026-10-09。`Nodes` が投了図以下を
+// 1 段下げるのと揃える）。
+func onMainLine(n *treeNode, end int) bool {
 	for ; n.parent != nil; n = n.parent {
-		if n.variation || n.parent.kids[0] != n {
+		if n.variation || n.parent.kids[0] != n || (end != 0 && n.parent.id == end) {
 			return false
 		}
 	}

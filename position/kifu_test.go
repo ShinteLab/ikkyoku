@@ -122,6 +122,49 @@ func TestFromKIFEndMark(t *testing.T) {
 	}
 }
 
+// **投了図から指した手は終局の手数の変化**（2026-10-09。実機で指摘された）。
+//
+// KIF で言えば本譜の 5 手目が「投了」で、投了図から指した手は「変化：5手」。
+// ⚠️ 本譜の続きとして並べると、`MainLine` と評価値グラフは投了で止まるのに
+// 手順リストだけ本譜に見える。⚠️ 「本線にする」も出さない（本譜に戻せない）。
+func TestFromKIFAfterEndIsVariation(t *testing.T) {
+	study, _, err := position.FromKIF(sampleKIF)
+	if err != nil {
+		t.Fatalf("FromKIF: %v", err)
+	}
+	end := study.RecordEnd()
+	if err := study.Play("2g2f"); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	if err := study.Play("8c8d"); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	nodes := study.Nodes()
+	if len(nodes) != 6 {
+		t.Fatalf("手順の数 = %d, want 6", len(nodes))
+	}
+	last := nodes[3]
+	if last.ID != end || last.Depth != 0 || !last.Main || last.End != "投了" {
+		t.Fatalf("終わった手が本譜のままでない: %+v", last)
+	}
+	head, cont := nodes[4], nodes[5]
+	if head.Parent != end || head.Main || head.Depth != 1 {
+		t.Errorf("投了図から指した手が 1 段下げた変化になっていない: %+v", head)
+	}
+	if head.CanPromote {
+		t.Errorf("投了図以下に「本線にする」が出ている: %+v", head)
+	}
+	if err := study.Promote(head.ID); err == nil {
+		t.Errorf("投了図以下を本線にできてしまう")
+	}
+	if cont.Main || cont.Depth <= head.Depth {
+		t.Errorf("変化の続きが変化の頭より深くない: head=%+v cont=%+v", head, cont)
+	}
+	if got := len(study.MainLine()); got != 4 {
+		t.Errorf("本譜の手数 = %d, want 4（投了で止まる）", got)
+	}
+}
+
 // 終局が書いていない棋譜（対局中）には印を付けない。
 func TestFromKIFNoEndMarkWhileOngoing(t *testing.T) {
 	src := strings.TrimSuffix(sampleKIF, "   5 投了\n")

@@ -366,7 +366,8 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
           }),
       );
       // ⚠️ **手数は終わった手の次**（90 手目で終わったら「91 投了」）。
-      // **投了図以下の手はこの行より下**に並ぶ（Go の並びのまま）。
+      // **投了図以下の手はこの行の下に 1 段下げた変化**として並ぶ（Go の並びのまま。
+      // KIF の「変化：91手」）。⚠️ **ここで並べ替えたり字下げを足したりしないこと。**
       if (m.end) {
         movesPanel.appendChild(
           endRow(String((state.first ?? 0) + m.number + 1), m.end, m.id, m.depth));
