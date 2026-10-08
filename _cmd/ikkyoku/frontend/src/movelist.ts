@@ -314,7 +314,7 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
     // 「棋譜に登録」「投了を取り消す」を出す（`askEndMenu`。出せるものが無ければ何も出さない）。
     // ⚠️ **付いている手と同じ深さ・同じ列で並べる**（時間とコメントの列を揃える）。
     // 消える範囲を光らせるときは、付いている手と一緒に光る（`data-end-of`）。
-    const endRow = (num: string, mark: string, of: number, depth: number) => {
+    const endRow = (num: string, mark: string, note: string, of: number, depth: number) => {
       const row = document.createElement("div");
       row.className = "move-row";
       row.style.setProperty("--move-depth", String(depth));
@@ -324,10 +324,9 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
       const body = document.createElement("div");
       body.className = "move-chip is-end";
       body.dataset.endOf = String(of);
-      // 登録済みかはホバーで分かれば足りる（行に文字を足さない）。
-      if (state?.gameId) {
-        body.title = "棋譜タブに登録済み";
-      }
+      // 終局の説明（千日手を自動で立てたとき。「連続王手の千日手（▲の反則負け）」）と
+      // 登録済みかは**ホバーで分かれば足りる**（行に文字を足さない）。⚠️ **文言は Go 側**（`Node.EndNote`）。
+      body.title = [note, state?.gameId ? "棋譜タブに登録済み" : ""].filter((x) => x).join("\n");
       const i = document.createElement("span");
       i.className = "move-num";
       i.textContent = num;
@@ -374,7 +373,7 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
       // KIF の「変化：91手」）。⚠️ **ここで並べ替えたり字下げを足したりしないこと。**
       if (m.end) {
         movesPanel.appendChild(
-          endRow(String((state.first ?? 0) + m.number + 1), m.end, m.id, m.depth));
+          endRow(String((state.first ?? 0) + m.number + 1), m.end, m.endNote ?? "", m.id, m.depth));
       }
     }
     // 今見ている手が画面の外にあると、進めても手順が動いていないように見える。

@@ -117,6 +117,9 @@ func FromKIF(text string) (*Study, KIFLoad, error) {
 	if mark := doc.EndMark(); mark != "" && load.Loaded == load.Total {
 		study.SetRecordEnd(study.CurrentID(), mark)
 	}
+	// **終局が書いていなくても、千日手ならそこで終わっている**（2026-10-09。中継の棋譜は
+	// 千日手の行が載る前に取れることがある）。⚠️ **1 手ごとではなく最後に 1 回**（本譜を丸ごと辿る）。
+	study.settleRepetition()
 	return study, load, nil
 }
 

@@ -55,6 +55,8 @@ type StudySnapshot struct {
 	// ⚠️ **落とさないこと** —— 落とすと開き直したときに棋譜の終局と見分けが付かず、
 	// 自分の投了を取り消せなくなる。
 	EndHand bool `json:"endHand,omitempty"`
+	// EndNote は終局の説明（千日手を自動で立てたときだけ。2026-10-09）。
+	EndNote string `json:"endNote,omitempty"`
 	// NextID は次に配る id。
 	//
 	// ⚠️ **消した id を使い回さないために持つ。** 最大の id + 1 で済ませると、
@@ -113,6 +115,7 @@ func (s *Study) Snapshot() (StudySnapshot, error) {
 		End:         s.end,
 		EndMark:     s.endMark,
 		EndHand:     s.end != 0 && s.endHand,
+		EndNote:     s.endNote,
 		NextID:      s.nextID,
 		Comment:     s.top.note.Comment,
 	}
@@ -217,7 +220,9 @@ func RestoreStudy(snap StudySnapshot) (*Study, error) {
 
 	// ⚠️ **知らない節点なら忘れる**（`SetRecordEnd` が見る）。
 	s.SetRecordEnd(snap.End, snap.EndMark)
-	s.endHand = s.end != 0 && snap.EndHand
+	if s.end != 0 {
+		s.endHand, s.endNote = snap.EndHand, snap.EndNote
+	}
 	cur, ok := s.index[snap.Current]
 	if !ok {
 		cur = s.top

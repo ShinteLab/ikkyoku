@@ -105,6 +105,31 @@ func TestStudyResignRefusedForURL(t *testing.T) {
 	}
 }
 
+// **千日手で終わった対局も登録できる**（2026-10-09）。ルールで決まる終局なので
+// 投了と違って取り消しは出さない（4 回目の手を消せば終局も消える）。
+func TestStudyRepetitionEnablesRegister(t *testing.T) {
+	s := adopted(t)
+	cycle := []string{"2h3h", "8b7b", "3h2h", "7b8b"}
+	for i := 0; i < 3; i++ {
+		for _, m := range cycle {
+			if _, err := s.Play(m); err != nil {
+				t.Fatalf("Play(%s): %v", m, err)
+			}
+		}
+	}
+	st := s.State()
+	if !st.CanRegister || st.CanUnresign || st.CanResign {
+		t.Fatalf("千日手のあと: resign=%v register=%v unresign=%v", st.CanResign, st.CanRegister, st.CanUnresign)
+	}
+	got, err := s.exportKIF()
+	if err != nil {
+		t.Fatalf("exportKIF: %v", err)
+	}
+	if !strings.Contains(got, "13 千日手") {
+		t.Errorf("KIF に千日手の行がありません:\n%s", got)
+	}
+}
+
 // 貼り付けた終局済みの棋譜は登録できるが、棋譜の終局は取り消せない。
 func TestStudyRecordedEndCannotUnresign(t *testing.T) {
 	s := adopted(t)

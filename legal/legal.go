@@ -83,6 +83,24 @@ func Moves(positionSFEN string) (out []Move, err error) {
 	return out, nil
 }
 
+// InCheck は局面 SFEN で**手番の側が王手されているか**を返す（2026-10-09）。
+//
+// **連続王手の千日手を見分けるため**（`position.Study` が同じ局面の 4 回目で使う）。
+// ⚠️ **履歴は見ない**（このパッケージは局面 1 つにだけ答える）。千日手を数えるのは
+// 手順を持っている `position` の側。
+func InCheck(positionSFEN string) (check bool, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			check, err = false, fmt.Errorf("この局面の王手を判定できませんでした: %v", r)
+		}
+	}()
+	b, err := shogi.NewBoard("sfen " + positionSFEN)
+	if err != nil {
+		return false, fmt.Errorf("この局面を読めませんでした: %w", err)
+	}
+	return b.InCheck(), nil
+}
+
 // Parse は USI の手文字列を座標にする（**局面は見ない**。合法かどうかも問わない）。
 //
 // 解析タブの盤に**直前の手**（居た場所と動いた場所）を出すのに使う（2026-10-07。
