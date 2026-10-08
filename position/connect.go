@@ -316,7 +316,7 @@ func Connect(ctx context.Context, from *Position, target *Board, opt ConnectOpti
 
 	// 下界。**ここで落ちれば `legal.Moves` を 1 回も呼ばない。**
 	// 認識の誤りの大半（駒が何枚も湧いた・消えた）はここで即死する。
-	if newDiff(root.Board, target, nil, 0, opt.Unseen).same() {
+	if newDiff(root.Board, target, nil, 0, opt.Unseen, staleKinds{}).same() {
 		return ConnectResult{Depth: 0, Stop: StopSame}, nil
 	}
 
@@ -348,7 +348,7 @@ func Connect(ctx context.Context, from *Position, target *Board, opt ConnectOpti
 		// ⚠️ **手順が無く、かつ元の局面との違いが予算に収まるなら「変わっていない」。**
 		// 認識が数マス外しただけで盤は 1 手も進んでいなかった、という形。
 		// **空の手順を据えにいかないための逃げ道**（`dfs` が 0 手を解にしない）。
-		if newDiff(root.Board, target, opt.Cost, opt.Tolerance, opt.Unseen).cost <= opt.Tolerance+costEpsilon {
+		if newDiff(root.Board, target, opt.Cost, opt.Tolerance, opt.Unseen, newStaleKinds(root.Board, target, opt.Unseen)).cost <= opt.Tolerance+costEpsilon {
 			return ConnectResult{Depth: 0, Nodes: rep.Nodes, Stop: StopSame}, nil
 		}
 		// **厳密一致の側の理由を返す**（修復まで届かなかったことは言わない）。
@@ -367,7 +367,13 @@ func Connect(ctx context.Context, from *Position, target *Board, opt ConnectOpti
 func search(ctx context.Context, root *Position, target *Board, opt ConnectOptions,
 	cost *CellCost, tolerance float64, collect int) (ConnectResult, error) {
 	depth := opt.maxDepth()
-	d0 := newDiff(root.Board, target, cost, tolerance, opt.Unseen)
+	// ⚠️ **動いていないマスの種類だけの読み違いを見ないのは、修復のときだけ**（`staleKinds`）。
+	// 厳密一致は「認識と合法性が完全に一致した」ことを言うので、1 マスでも違えば通さない。
+	var stale staleKinds
+	if tolerance > 0 {
+		stale = newStaleKinds(root.Board, target, opt.Unseen)
+	}
+	d0 := newDiff(root.Board, target, cost, tolerance, opt.Unseen, stale)
 	if h := d0.bound(root.Turn); h > depth {
 		// ⚠️ **探索していなくても手掛かりは返すこと。** ここで落ちるのは
 		// 「隔たりが大きすぎる」ときなので、**どこが違うのかが一番知りたい。**
@@ -396,16 +402,16 @@ func search(ctx context.Context, root *Position, target *Board, opt ConnectOptio
 	}
 
 	s := &connect{ctx: ctx, root: root.Board, target: target, maxNodes: opt.maxNodes(),
-		want: collect, cost: cost, tolerance: tolerance, unseen: opt.Unseen, bestCost: math.Inf(1)}
+		want: collect, cost: cost, tolerance: tolerance, unseen: opt.Unseen, stale: stale, bestCost: math.Inf(1)}
 	for limit := h; limit <= depth; limit++ {
 		s.limit = limit
 		s.path = s.path[:0]
 		s.seen = map[posKey]bool{keyOf(root): true}
 		if over := s.dfs(root, 0); len(s.sols) > 0 {
 			r := s.result(limit)
-			if tolerance > 0 && s.forgaveEmpty(r.Cost) {
-				// ⚠️ **修復では、1 手深い手順がもっと安く合うなら、そちらを採る**（2026-10-08。`cheaperDeeper`）。
-				// 探すのは、答えが「空きと読めたマスに駒がある」と覆したときだけ（深く探すと 1 枚が約 10 倍重い）。
+			if tolerance > 0 && s.forgaveOccupancy(r.Cost) {
+				// ⚠️ **修復では、深い手順がもっと安く合うなら、そちらを採る**（2026-10-08。`cheaperDeeper`）。
+				// 探すのは、答えが駒の有無か先後を覆したときだけ（深く探すと 1 枚が約 10 倍重い）。
 				if deeper, ok := s.cheaperDeeper(root, limit+1, opt.maxDepth(), r.Cost); ok {
 					return deeper, nil
 				}
@@ -418,7 +424,7 @@ func search(ctx context.Context, root *Position, target *Board, opt ConnectOptio
 	return s.miss(StopUnreachable), nil
 }
 
-// cheaperDeeper は**修復の答えが見つかったあと、1 手深い手順で、もっと少なく覆して合うもの**を探す（2026-10-08）。
+// cheaperDeeper は**修復の答えが見つかったあと、深い手順で、もっと少なく覆して合うもの**を探す（2026-10-08）。
 //
 // 修復は浅い手数から探して最初に見つかった手数で止まり、深さの上限も下界 + `MaxWaste`（と `blindBound`）で決まる。
 // 「空き」の読みは安く覆せる（0.15）ので、**駒が本当に動いて空いたマスを「読み違い」として覆した浅い手順**が、
@@ -428,35 +434,57 @@ func search(ctx context.Context, root *Position, target *Board, opt ConnectOptio
 //
 // ⚠️ **予算を今の答えの費用より小さく絞ること**（厳密に安いものだけ採る）—— 同じだけ覆す深い手順は、同じ変化を
 // 遠回りで説明しているだけで、往復して戻る偽の手順もここに入る。絞った予算は刈り（`floor`）にも効くので軽い。
-// ⚠️ **1 手だけ深く探す**（上限は `MaxDepth`）。⚠️ **打ち切ったら浅い答えのまま**（探し切れていない）。
-// ⚠️ **呼ぶのは浅い答えが「空きと読めたマスに駒がある」と覆したときだけ**（`forgaveEmpty`）。深く探すと
+// ⚠️ **`MaxDepth` まで 1 手ずつ深く探す**（2026-10-08。動いていない駒の種類の読み違いを見なくなった
+// （`staleKinds`）ぶん浅い答えが予算に収まりやすくなり、1 手深いだけでは ▲同桂 △同歩 ▲2四歩 の 3 手に
+// 届かなくなった）。⚠️ **打ち切ったら浅い答えのまま**（探し切れていない）。
+// ⚠️ **呼ぶのは浅い答えが駒の有無か先後を覆したときだけ**（`forgaveOccupancy`）。深く探すと
 // 中継の 1 枚（`BenchmarkConnectRelay`）が 7.7ms → 72ms になった。種類の読み違いだけを覆した答えは、
 // 深い手順でも同じマスを覆すことになるので、探しても安くならない。
 func (s *connect) cheaperDeeper(root *Position, limit, maxDepth int, best float64) (ConnectResult, bool) {
-	tol := best - costEpsilon
-	if limit > maxDepth || tol <= 0 {
-		return ConnectResult{}, false
-	}
+	// ⚠️ **受理の判定（`dfs`）は予算に costEpsilon の遊びを足す**ので、ここで 2 つ分引く。1 つ分だと打ち消し合い、
+	// **同じ費用の浅い節点を途中で受理して、その先の安い手順まで降りない**（[8c8d 8h8d] で止まり △8三歩 に届かなかった）。
 	d := &connect{ctx: s.ctx, root: s.root, target: s.target, maxNodes: s.maxNodes, want: s.want,
-		cost: s.cost, tolerance: tol, unseen: s.unseen, bestCost: math.Inf(1), limit: limit,
-		seen: map[posKey]bool{keyOf(root): true}}
-	over := d.dfs(root, 0)
-	if over || len(d.sols) == 0 {
+		cost: s.cost, unseen: s.unseen, stale: s.stale, bestCost: math.Inf(1)}
+	var got ConnectResult
+	found := false
+	for ; limit <= maxDepth; limit++ {
+		d.tolerance = best - 2*costEpsilon
+		if d.tolerance <= costEpsilon {
+			break
+		}
+		d.limit = limit
+		d.path = d.path[:0]
+		d.sols = d.sols[:0]
+		d.seen = map[posKey]bool{keyOf(root): true}
+		if over := d.dfs(root, 0); over {
+			// ⚠️ **打ち切ったら、そこまでに見つけた答えのまま**（探し切れていない深さの答えは採らない）。
+			break
+		}
+		// ⚠️ **見つけても止めずに、もっと深く、もっと安いものを探す**（2 手 0.8 → 3 手 0.65 → 4 手 0 の順に見つかった。
+		// `TestConnectRepairPrefersCheaperDeeper`）。予算はそのたびに絞るので、往復して戻る手順は通らない。
+		if len(d.sols) > 0 {
+			got, found = d.result(limit), true
+			best = got.Cost
+		}
+	}
+	if !found {
 		return ConnectResult{}, false
 	}
-	r := d.result(limit)
-	r.Nodes += s.nodes
-	return r, true
+	got.Nodes = s.nodes + d.nodes
+	return got, true
 }
 
-// forgaveEmpty は、費用 best の答えのどれかが**空きと読めたマスに駒がある**と覆したか（`cheaperDeeper` を呼ぶか）。
-func (s *connect) forgaveEmpty(best float64) bool {
+// forgaveOccupancy は、費用 best の答えのどれかが**駒の有無か先後を覆したか**（`cheaperDeeper` を呼ぶか）。
+//
+// 空きと読めたマスに駒がある（本当に駒が動いて空いた）と、駒が読めたマスが空いている（打ち直した歩を
+// 読み違いとして消した。△同歩 ▲同飛 △8三歩 の 8三）の両方。種類だけを覆した答えは呼ばない。
+func (s *connect) forgaveOccupancy(best float64) bool {
 	for _, sol := range s.sols {
 		if sol.cost > best+costEpsilon {
 			continue
 		}
 		for _, f := range sol.fixed {
-			if f.Was.IsEmpty() && !f.Now.IsEmpty() {
+			if f.Was.IsEmpty() != f.Now.IsEmpty() || (!f.Was.IsEmpty() && f.Was.Black() != f.Now.Black()) {
 				return true
 			}
 		}
@@ -501,10 +529,12 @@ type connect struct {
 	tolerance float64
 	// unseen は読めていないマス（**厳密一致でも修復でも同じ表**。`ConnectOptions.Unseen`）。
 	unseen *CellMask
-	nodes  int
-	path   []string
-	seen   map[posKey]bool
-	sols   []solution
+	// stale は**動いていないかぎり見ない、種類だけの読み違い**（修復のときだけ。`staleKinds`）。
+	stale staleKinds
+	nodes int
+	path  []string
+	seen  map[posKey]bool
+	sols  []solution
 	// best は**一番近づけた節点**（繋がらなかったときに「どこが説明できないか」
 	// を言うため）。⚠️ **厳密一致のときも取ること** —— 手掛かりが要るのは
 	// むしろそちら。
@@ -586,7 +616,7 @@ func (s *connect) dfs(pos *Position, g int) bool {
 	if s.ctx != nil && s.ctx.Err() != nil {
 		return true // 止めたのは呼び出し側。**到達不能ではない**ので打ち切り扱い
 	}
-	d := newDiff(pos.Board, s.target, s.cost, s.tolerance, s.unseen)
+	d := newDiff(pos.Board, s.target, s.cost, s.tolerance, s.unseen, s.stale)
 	if d.cost < s.bestCost {
 		s.bestCost, s.bestFixes, s.bestDepth = d.cost, d.fixes(pos.Board, s.target, s.unseen), g
 	}
@@ -715,6 +745,8 @@ type diff struct {
 	cost float64
 	// forgive は予算内で見逃せるマスの数（**下界を緩める量**）。
 	forgive int
+	// stale は**見なかった種類の読み違い**の数（`staleKinds`。`fixes` で出すため）。
+	stale int
 	// mismatches / cheap は**修復のときだけ**: 食い違ったマスの数と、費用の安い順の先頭（`floor`）。
 	mismatches int
 	cheap      [16]float64
@@ -723,12 +755,13 @@ type diff struct {
 	sideArrive, sideNeedBlack, sideNeedWhite int
 }
 
-// unseen のマスは**食い違いにも駒数にも数えない**（`CellMask`）。
+// unseen のマスは**食い違いにも駒数にも数えない**（`CellMask`）。stale のマスも、根から動いていないあいだは同じ
+// （`staleKinds`）。
 //
 // ⚠️ **値で返し、ヒープに確保しないこと**（2026-10-07）。ここは節点の子ごとに呼ばれ、
 // 修復で 3 手を探すと 50 万回を超える。`*diff` と見逃し用のスライスを確保していたので
 // **時間の 6 割が GC** になり、追従の打ち切り（1.5 秒）に届いた（`BenchmarkConnectRelay`）。
-func newDiff(cur, tgt *Board, cost *CellCost, budget float64, unseen *CellMask) diff {
+func newDiff(cur, tgt *Board, cost *CellCost, budget float64, unseen *CellMask, stale staleKinds) diff {
 	var d diff
 	hidden := false
 	// ⚠️ **厳密一致では見逃し用の作業をしないこと。** ここは節点ごとに呼ばれるので、
@@ -748,6 +781,13 @@ func newDiff(cur, tgt *Board, cost *CellCost, budget float64, unseen *CellMask) 
 				continue
 			}
 			c, t := cur.cells[r][f], tgt.cells[r][f]
+			// ⚠️ **根から動いていない、種類だけの読み違いのマスも飛ばす**（`staleKinds`）。駒数の下界も
+			// 使わない —— 数えるマスから外れたマスへ出入りした駒で、見えている範囲の駒数が変わるため（unseen と同じ）。
+			if stale.skip(r, f, c) {
+				hidden = true
+				d.stale++
+				continue
+			}
 			if c != t {
 				// **食い違ったマスは A か D のどちらか一方**（両方には入らない）。
 				if !t.IsEmpty() {
@@ -817,6 +857,48 @@ func newDiff(cur, tgt *Board, cost *CellCost, budget float64, unseen *CellMask) 
 	return d
 }
 
+// staleKinds は**根と撮った盤で、先後は合って種類だけ違うマス**（修復のときだけ。2026-10-08）。
+//
+// **手順がそのマスに触れていないあいだは、食い違いに数えない**（費用にも、下界にも）。指し手は必ずどこかの
+// マスの「空き／先後」を変えるので、**動いていない駒の種類の違いには、何手指されたかの情報が無い**。それを
+// 予算から払っていると、種類を読み違える中継（玉を金・桂や香を歩・後手の飛を歩と読む。1 枚に 4〜6 マス）では
+// どの手順も予算（`DefaultTolerance`）に収まらず、**正しい ▲同飛 △8三歩 も「隔たりが大きすぎます」で落ち続けた**
+// （2026-10-08 の中継。▲8四歩 のあと 1 手も進まなかった。`TestConnectRepairIgnoresStaleKindMisreads`）。
+//
+// ⚠️ **手順が触れたら（今の駒が根と違ったら）普通に数えること** —— 取り返して同じ側の別の駒が来た
+// （▲同飛）・成ったのは、種類の違いこそが証拠になる（`kindOnlyWeight`）。
+// ⚠️ **厳密一致では使わないこと**（`search`）。⚠️ **`Fixed` には出す**（読みを覆したのは本当なので）。
+type staleKinds struct {
+	root *Board
+	mask *CellMask
+}
+
+// newStaleKinds は根 root と撮った盤 tgt から stale のマスを拾う（無ければゼロ値）。
+func newStaleKinds(root, tgt *Board, unseen *CellMask) staleKinds {
+	var m *CellMask
+	for r := 0; r < 9; r++ {
+		for f := 0; f < 9; f++ {
+			c, t := root.cells[r][f], tgt.cells[r][f]
+			if unseen.at(r, f) || c == t || c.IsEmpty() || t.IsEmpty() || c.Black() != t.Black() {
+				continue
+			}
+			if m == nil {
+				m = &CellMask{}
+			}
+			m[r][f] = true
+		}
+	}
+	if m == nil {
+		return staleKinds{}
+	}
+	return staleKinds{root: root, mask: m}
+}
+
+// skip は、盤の (rank, file) の駒 c が stale のマスで、根から動いていないか。
+func (k staleKinds) skip(rank, file int, c Cell) bool {
+	return k.mask != nil && k.mask[rank][file] && c == k.root.cells[rank][file]
+}
+
 // floor は**あと r 手指しても残る食い違いの費用の下限**（修復のときだけ意味がある。2026-10-07）。
 //
 // 1 手で中身が変わるマスは高々 2 つ（元と行き先。打つ手は 1 つ）なので、r 手では高々 2r マスしか
@@ -858,7 +940,7 @@ func forgivable(mismatch []float64, budget float64) int {
 //
 // ⚠️ **読めていないマスは出さない**（覆したのではなく、もともと読めていない）。
 func (d *diff) fixes(cur, tgt *Board, unseen *CellMask) []Fix {
-	if d.arrive == 0 && d.vacate == 0 {
+	if d.arrive == 0 && d.vacate == 0 && d.stale == 0 {
 		return nil
 	}
 	out := make([]Fix, 0, d.arrive+d.vacate)

@@ -94,7 +94,7 @@ func MatchCost(cand, target *Board, opt ConnectOptions) float64 {
 	if cand == nil || target == nil {
 		return 0
 	}
-	return newDiff(cand, target, opt.Cost, 0, opt.Unseen).cost
+	return newDiff(cand, target, opt.Cost, 0, opt.Unseen, staleKinds{}).cost
 }
 
 // Rank は from から**1 手で**行ける局面（と、何も指さない場合）を、
@@ -125,7 +125,7 @@ func Rank(from *Position, target *Board, opt ConnectOptions) (RankResult, error)
 
 	// **何も指していない**も候補（中継がまだ進んでいないことは普通にある）。
 	add := func(moves []string, board *Board) {
-		d := newDiff(board, target, cost, 0, opt.Unseen)
+		d := newDiff(board, target, cost, 0, opt.Unseen, staleKinds{})
 		c := Candidate{Moves: moves, Cost: d.cost, Fixed: d.fixes(board, target, opt.Unseen)}
 		if out.Total > 0 {
 			c.Fit = 1 - c.Cost/out.Total

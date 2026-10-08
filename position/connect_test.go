@@ -482,6 +482,106 @@ func TestConnectRepairPrefersCheaperDeeper(t *testing.T) {
 	}
 }
 
+// anagumaAfter8d は中継（2026-10-08。録画 `follow/20261008-101441/`）の ▲8四歩 まで進めた局面（後手は居飛車穴熊）。
+const anagumaAfter8d = "kn2g2nl/lsg2srb1/pppppp1pp/1P4p2/3P5/2P6/P1BSPPPPP/1R4K2/LN1G1GSNL w - 1"
+
+// anagumaShot3 / anagumaCost3 は録画 `x005-same-3.png` を読み直した盤と確信度（△同歩 ▲同飛 △8三歩 のあと）。
+// 動いていない 6 マスで種類を読み違えている: 5一 の金と 2一 の桂を「歩」、3八 の玉を「金」、4九 の金・3九 の銀・
+// 1九 の香を「歩」。
+const anagumaShot3 = "kn2p2pl/lsg2srb1/pppppp1pp/1R4p2/3P5/2P6/P1BSPPPPP/6G2/LN1G1PPNP"
+
+var anagumaCost3 = [81]float64{
+	1.00, 1.00, 0.15, 0.15, 0.60, 0.15, 0.15, 0.58, 1.00,
+	1.00, 0.86, 1.00, 0.15, 0.15, 0.94, 0.88, 0.92, 0.15,
+	1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 0.15, 1.00, 1.00,
+	0.15, 0.81, 0.15, 0.15, 0.15, 0.15, 1.00, 0.15, 0.15,
+	0.15, 0.15, 0.15, 1.00, 0.15, 0.15, 0.15, 0.15, 0.15,
+	0.15, 0.15, 0.81, 0.15, 0.15, 0.15, 0.15, 0.15, 0.15,
+	1.00, 0.15, 0.53, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00,
+	0.15, 0.15, 0.15, 0.15, 0.15, 0.15, 0.51, 0.15, 0.15,
+	1.00, 1.00, 0.15, 0.82, 0.15, 0.34, 0.77, 1.00, 0.51,
+}
+
+// anagumaShot2 / anagumaCost2 は録画 `x005-same-1.png`（△同歩 ▲同飛 のあと）。2一 の桂・3二 の飛・2九 の桂を「歩」、
+// 2二 の角と 3八 の玉を「銀」と読み、8四 に来た飛も「歩」と読んでいる。
+const anagumaShot2 = "kn2g2pl/lsg2sps1/p1pppp1pp/1P4p2/3P5/2P6/P1BSPPPPP/6S2/LN1G1GSPL"
+
+var anagumaCost2 = [81]float64{
+	1.00, 1.00, 0.15, 0.15, 0.45, 0.15, 0.15, 0.79, 0.64,
+	1.00, 0.82, 0.88, 0.15, 0.15, 1.00, 1.00, 0.40, 0.15,
+	1.00, 0.15, 1.00, 1.00, 1.00, 1.00, 0.15, 1.00, 1.00,
+	0.15, 1.00, 0.15, 0.15, 0.15, 0.15, 1.00, 0.15, 0.15,
+	0.15, 0.15, 0.15, 1.00, 0.15, 0.15, 0.15, 0.15, 0.15,
+	0.15, 0.15, 1.00, 0.15, 0.15, 0.15, 0.15, 0.15, 0.15,
+	1.00, 0.15, 0.64, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00,
+	0.15, 0.15, 0.15, 0.15, 0.15, 0.15, 0.46, 0.15, 0.15,
+	1.00, 1.00, 0.15, 0.82, 0.15, 0.66, 0.43, 0.81, 1.00,
+}
+
+// ⚠️ **手順が触れていないマスの、種類だけの読み違いは修復の予算から払わないこと**（`staleKinds`。2026-10-08 に実機で踏んだ）。
+//
+// **実機の症状**: ▲8四歩 のあと △同歩 ▲同飛 △8三歩 ▲8六飛 と進んだが、どの 1 枚も動いていない駒を 4〜6 マス
+// 種類違いに読んでいた（半分に数えても 1.1〜1.7 で、予算 1.0 を超える）。正しい手順が修復に収まらず、
+// 「隔たりが大きすぎます」が続いて 1 手も進まなかった。動いていない駒の種類には、何手指されたかの情報が無い。
+func TestConnectRepairIgnoresStaleKindMisreads(t *testing.T) {
+	cases := []struct {
+		name  string
+		shot  string
+		cost  [81]float64
+		moves string
+	}{
+		{"△同歩 ▲同飛", anagumaShot2, anagumaCost2, "8c8d 8h8d"},
+		// ⚠️ 2 手の [8c8d 8h8d] も 8三 の歩（確信度 1.00）を「無い」と覆せば予算に収まる。打ち直した △8三歩 まで採ること
+		// （`cheaperDeeper`）。
+		{"△同歩 ▲同飛 △8三歩", anagumaShot3, anagumaCost3, "8c8d 8h8d P*8c"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			from := mustPos(t, anagumaAfter8d)
+			r := connect(t, from, c.shot, position.ConnectOptions{Tolerance: position.DefaultTolerance, Cost: relayConf(c.cost)})
+			if r.Stop != position.StopFound || !r.Unique || strings.Join(r.Moves, " ") != c.moves {
+				t.Fatalf("%s で繋がるはず: stop=%v moves=%v solutions=%v cost=%v", c.moves, r.Stop, r.Moves, r.Solutions, r.Cost)
+			}
+			// ⚠️ **覆したことは隠さない**（読み違えたマスは Fixed に出る）。
+			for _, f := range r.Fixed {
+				if f.Was.IsEmpty() || f.Now.IsEmpty() || f.Was.Black() != f.Now.Black() {
+					t.Errorf("種類だけの読み違いのほかに覆したマスがあります: %+v", f)
+				}
+			}
+		})
+	}
+}
+
+// ⚠️ **見なかった種類の読み違いも、覆したマスとしては出すこと**（`staleKinds`。読みを覆したのは本当なので）。
+//
+// 1四 の後手の歩を香と読んだ 1 枚から △3四歩 を繋ぐ。1四 は手順が触れていないので費用には数えないが、
+// 画面に出す `Fixed` からは消さない（黙って直さない）。
+func TestConnectRepairShowsStaleKindAsFixed(t *testing.T) {
+	from := mustPos(t, "lnsgkgsnl/1r5b1/pppppppp1/8p/9/2P6/PP1PPPPPP/1B5R1/LNSGKGSNL w - 1")
+	shot := "lnsgkgsnl/1r5b1/pppppp1p1/6p1l/9/2P6/PP1PPPPPP/1B5R1/LNSGKGSNL" // △3四歩 + 1四 の歩を香と読んだ
+	r := connect(t, from, shot, position.ConnectOptions{Tolerance: position.DefaultTolerance, Cost: uniformCost(1)})
+	if r.Stop != position.StopFound || !r.Unique || strings.Join(r.Moves, " ") != "3c3d" {
+		t.Fatalf("△3四歩 で繋がるはず: %+v", r)
+	}
+	if r.Cost != 0 {
+		t.Errorf("動いていない 1四 の読み違いを費用に数えています: cost=%v", r.Cost)
+	}
+	if len(r.Fixed) != 1 || r.Fixed[0].Rank != 3 || r.Fixed[0].File != 8 {
+		t.Errorf("1四 を覆したことが Fixed に出ていません: %+v", r.Fixed)
+	}
+}
+
+// uniformCost はどのマスも v の費用表。
+func uniformCost(v float64) *position.CellCost {
+	c := &position.CellCost{}
+	for r := range c {
+		for f := range c[r] {
+			c[r][f] = v
+		}
+	}
+	return c
+}
+
 // ⚠️ **厳密一致を先に試すこと。** 認識と合法性が完全に一致したなら、それが
 // 一番強い証拠。**覆す余地があっても覆さない。**
 func TestConnectPrefersExact(t *testing.T) {
