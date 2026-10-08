@@ -45,6 +45,11 @@ type StudySnapshot struct {
 	// ⚠️ **落とさないこと。** 落とすと、開き直したときに**投了図以下の印が消える**
 	// （棋譜から読み直す口が無いので、二度と戻らない）。
 	End int `json:"end,omitempty"`
+	// EndMark は終局の種別（"投了" など。2026-10-09）。
+	//
+	// ⚠️ **落とさないこと**（`End` と同じ理由。棋譜から読み直す口が無い）。
+	// これより前の控えには無い —— そのときは `RecordEndMark` が "終局" と返す。
+	EndMark string `json:"endMark,omitempty"`
 	// NextID は次に配る id。
 	//
 	// ⚠️ **消した id を使い回さないために持つ。** 最大の id + 1 で済ませると、
@@ -101,7 +106,8 @@ func (s *Study) Snapshot() (StudySnapshot, error) {
 		Nodes:       []NodeSnapshot{},
 		Current:     s.cur.id,
 		End:         s.end,
-		NextID:      s.nextID,
+		EndMark:     s.endMark,
+		NextID:     s.nextID,
 		Comment:     s.top.note.Comment,
 	}
 	// ⚠️ **前順（親が先・兄弟は順番どおり）で並べること。** 復元は
@@ -204,7 +210,7 @@ func RestoreStudy(snap StudySnapshot) (*Study, error) {
 	}
 
 	// ⚠️ **知らない節点なら忘れる**（`SetRecordEnd` が見る）。
-	s.SetRecordEnd(snap.End)
+	s.SetRecordEnd(snap.End, snap.EndMark)
 	cur, ok := s.index[snap.Current]
 	if !ok {
 		cur = s.top

@@ -64,6 +64,78 @@ func TestFromKIF(t *testing.T) {
 	}
 }
 
+// **終局の種別は最後の手に付く**（2026-10-09。手順リストが「5 投了」の行を出す）。
+//
+// ⚠️ 節点は増やさない（上の `TestFromKIF` が 4 を見ている）。ここで見るのは
+// 「どの手に」「何が」付くかと、控えを通しても・その手を消しても食い違わないこと。
+func TestFromKIFEndMark(t *testing.T) {
+	study, _, err := position.FromKIF(sampleKIF)
+	if err != nil {
+		t.Fatalf("FromKIF: %v", err)
+	}
+	ends := func(s *position.Study) map[int]string {
+		got := map[int]string{}
+		for _, n := range s.Nodes() {
+			if n.End != "" {
+				got[n.Number] = n.End
+			}
+		}
+		return got
+	}
+	if got := ends(study); len(got) != 1 || got[4] != "投了" {
+		t.Fatalf("終局の印 = %v, want 4 手目に「投了」だけ", got)
+	}
+
+	// 控えを通しても残ること（棋譜から読み直す口が無い）。
+	snap, err := study.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	back, err := position.RestoreStudy(snap)
+	if err != nil {
+		t.Fatalf("RestoreStudy: %v", err)
+	}
+	if got := ends(back); got[4] != "投了" {
+		t.Errorf("控えから戻すと終局の印が消える: %v", got)
+	}
+
+	// 種別を持たない古い控えでも、終わった手は分かっているので行は出す。
+	snap.EndMark = ""
+	old, err := position.RestoreStudy(snap)
+	if err != nil {
+		t.Fatalf("RestoreStudy: %v", err)
+	}
+	if got := ends(old); got[4] != "終局" {
+		t.Errorf("古い控えの終局の印 = %v, want 4 手目に「終局」", got)
+	}
+
+	// 終わった手を消したら終局も忘れること（関係の無い手に出さない）。
+	last := study.Nodes()[3].ID
+	if _, err := study.DropFrom(last); err != nil {
+		t.Fatalf("DropFrom: %v", err)
+	}
+	if study.RecordEnd() != 0 || study.RecordEndMark() != "" {
+		t.Errorf("消した手の終局が残っている: end=%d mark=%q", study.RecordEnd(), study.RecordEndMark())
+	}
+	if got := ends(study); len(got) != 0 {
+		t.Errorf("消したあとも終局の印が出る: %v", got)
+	}
+}
+
+// 終局が書いていない棋譜（対局中）には印を付けない。
+func TestFromKIFNoEndMarkWhileOngoing(t *testing.T) {
+	src := strings.TrimSuffix(sampleKIF, "   5 投了\n")
+	study, _, err := position.FromKIF(src)
+	if err != nil {
+		t.Fatalf("FromKIF: %v", err)
+	}
+	for _, n := range study.Nodes() {
+		if n.End != "" {
+			t.Errorf("%d 手目に終局の印 %q が付いた", n.Number, n.End)
+		}
+	}
+}
+
 // ⚠️ 途中で指せない手が出ても、そこまでの手順は残す（設計原則3）。
 func TestFromKIFStopsAtIllegalMove(t *testing.T) {
 	src := "手数----指手---------消費時間--\n" +

@@ -307,6 +307,44 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
       row.appendChild(b);
       return row;
     };
+    // 終局（"投了" など。2026-10-09）。**終わった手の直後に 1 行**（棋譜の「91 投了」）。
+    //
+    // ⚠️ **手ではないので押せない行にする**（`button` にしない・`data-id` を付けない）。
+    // 節点ではないので、戻る先も消す相手も無い。右クリックは「開始局面」と同じく
+    // 何も出さない（`data-id` が無いので id 0 として弾かれる）。
+    // ⚠️ **付いている手と同じ深さ・同じ列で並べる**（時間とコメントの列を揃える）。
+    // 消える範囲を光らせるときは、付いている手と一緒に光る（`data-end-of`）。
+    const endRow = (num: string, mark: string, of: number, depth: number) => {
+      const row = document.createElement("div");
+      row.className = "move-row";
+      row.style.setProperty("--move-depth", String(depth));
+      const pad = document.createElement("span");
+      pad.className = "move-toggle is-empty";
+      pad.setAttribute("aria-hidden", "true");
+      const body = document.createElement("div");
+      body.className = "move-chip is-end";
+      body.dataset.endOf = String(of);
+      const i = document.createElement("span");
+      i.className = "move-num";
+      i.textContent = num;
+      const t = document.createElement("span");
+      t.className = "move-text";
+      t.textContent = mark;
+      const main = document.createElement("span");
+      main.className = "move-main";
+      main.appendChild(t);
+      body.append(i, main);
+      if (hasTime || hasComment) {
+        body.classList.add("is-noted");
+        if (hasTime) {
+          const tm = document.createElement("span");
+          tm.className = "move-time";
+          body.appendChild(tm);
+        }
+      }
+      row.append(pad, body);
+      return row;
+    };
     movesPanel.appendChild(
       chip("", "開始局面", 0, "採ったときの局面に戻ります", { comment: rootComment }));
     for (const m of rows) {
@@ -327,6 +365,12 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
             time: m.time ?? "", comment: m.comment ?? "",
           }),
       );
+      // ⚠️ **手数は終わった手の次**（90 手目で終わったら「91 投了」）。
+      // **投了図以下の手はこの行より下**に並ぶ（Go の並びのまま）。
+      if (m.end) {
+        movesPanel.appendChild(
+          endRow(String((state.first ?? 0) + m.number + 1), m.end, m.id, m.depth));
+      }
     }
     // 今見ている手が画面の外にあると、進めても手順が動いていないように見える。
     movesPanel.querySelector<HTMLElement>(".move-chip.is-current")?.scrollIntoView({
@@ -365,7 +409,10 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
     const chips = [...movesPanel.querySelectorAll<HTMLElement>(".move-chip")];
     const parent = new Map<number, number>();
     for (const el of chips) {
-      parent.set(Number(el.dataset.id ?? "0"), Number(el.dataset.parent ?? "-1"));
+      // ⚠️ **終局の行（`data-id` が無い）は親の表に入れない** —— 入れると id 0 の親を潰す。
+      if (el.dataset.id !== undefined) {
+        parent.set(Number(el.dataset.id), Number(el.dataset.parent ?? "-1"));
+      }
     }
     const doomed = (id: number): boolean => {
       for (let n = id; n > 0; n = parent.get(n) ?? -1) {
@@ -376,8 +423,9 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
       return false;
     };
     for (const el of chips) {
-      el.classList.toggle(
-        "is-doomed", from > 0 && doomed(Number(el.dataset.id ?? "0")));
+      // 終局の行は**付いている手と一緒に**消える（その手が消えれば終局も消える）。
+      const id = Number(el.dataset.id ?? el.dataset.endOf ?? "0");
+      el.classList.toggle("is-doomed", from > 0 && doomed(id));
     }
   };
 

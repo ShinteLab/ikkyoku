@@ -134,6 +134,12 @@ type Node struct {
 	//
 	// ⚠️ **解析で足した手・盤で指した手には付かない**（棋譜の手ではないので、元から無い）。
 	Comment string `json:"comment,omitempty"`
+	// End は**この手で対局が終わった**ときの終局の種別（"投了" など。2026-10-09）。
+	//
+	// 手順リストはこの手の直後に「91 投了」の行を出す。⚠️ **終局は節点にしない** ——
+	// 指し手ではないので、節点にすると解析・分岐・中継の繋ぎ先が 1 手ずれる。
+	// 立つのは `Study.RecordEnd` の手だけ（棋譜に終局が書いてあったとき）。
+	End string `json:"end,omitempty"`
 }
 
 // MoveNote は**棋譜に書いてあった、その手の注記**（消費時間とコメント。2026-10-04）。
@@ -220,6 +226,11 @@ type Study struct {
 	// 持っているのは「どこで対局が終わったか」だけで、**手を消す/消さないの
 	// 判断には使っていない。**
 	end int
+	// endMark は終局の種別（"投了" など。`kifu.Document.EndMark`。2026-10-09）。
+	//
+	// ⚠️ **`end` と組で持つ**（`SetRecordEnd` が両方を入れ替える）。片方だけ
+	// 残ると、関係の無い手に「投了」が出る。
+	endMark string
 }
 
 // NewStudy は確定した局面を根にして検討を始める。
@@ -399,6 +410,14 @@ func (s *Study) Nodes() []Node {
 		}
 	}
 	walk(s.top, 0, main)
+	if s.end != 0 {
+		for i := range out {
+			if out[i].ID == s.end {
+				out[i].End = s.RecordEndMark()
+				break
+			}
+		}
+	}
 	return out
 }
 
@@ -631,7 +650,21 @@ func (s *Study) branches(n *treeNode) bool {
 // RecordEnd は**実際の対局が終わった節点**（0 なら分かっていない）。
 func (s *Study) RecordEnd() int { return s.end }
 
-// SetRecordEnd は対局が終わった節点を覚える（**棋譜に終局が書いてあったとき**）。
+// RecordEndMark は終局の種別（"投了" など。終わっていなければ空）。
+//
+// ⚠️ **種別を覚えていない控え（2026-10-09 より前）は "終局" と返す** ——
+// 終わった節点は分かっているので、種別が分からないだけで行を消さない。
+func (s *Study) RecordEndMark() string {
+	if s.end == 0 {
+		return ""
+	}
+	if s.endMark == "" {
+		return "終局"
+	}
+	return s.endMark
+}
+
+// SetRecordEnd は対局が終わった節点と終局の種別を覚える（**棋譜に終局が書いてあったとき**）。
 //
 // ⚠️ **推測で立てないこと。** 「詰んでいるから終わり」も「これ以上手が無いから
 // 終わり」も**棋譜の事実ではない**。立ててよいのは**棋譜に終局印があった**ときだけ
@@ -639,12 +672,12 @@ func (s *Study) RecordEnd() int { return s.end }
 //
 // ⚠️ **知らない節点なら忘れること**（0 に戻す）。据え直しで節点が入れ替わったのに
 // 前の id を持ち続けると、**関係の無い手に「対局の終わり」の印が出る。**
-func (s *Study) SetRecordEnd(id int) {
+func (s *Study) SetRecordEnd(id int, mark string) {
 	if _, ok := s.index[id]; !ok || id == 0 {
-		s.end = 0
+		s.end, s.endMark = 0, ""
 		return
 	}
-	s.end = id
+	s.end, s.endMark = id, mark
 }
 
 // MainLine は本譜（根から `kids[0]` を辿った並び）の手を返す。
@@ -1187,6 +1220,11 @@ func (s *Study) DropFrom(id int) ([]int, error) {
 		}
 	}
 	walk(n)
+	// ⚠️ **終わった手が消えたなら終局も忘れる**（2026-10-09）。id は使い回さないので
+	// 残しても悪さはしないが、控えに死んだ id と「投了」が残り続ける。
+	if _, alive := s.index[s.end]; !alive {
+		s.end, s.endMark = 0, ""
+	}
 
 	// 消えた先を見ていたなら親へ（見ていた節点が残っているならそのまま）。
 	if _, alive := s.index[s.cur.id]; !alive {

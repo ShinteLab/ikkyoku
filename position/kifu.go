@@ -113,8 +113,9 @@ func FromKIF(text string) (*Study, KIFLoad, error) {
 	// ⚠️ **最後まで読めたときだけ立てること。** 途中で止まったなら、
 	// **そこは対局の終わりではない**（読めなかっただけ）。立てると
 	// 棋譜の途中に「対局の終わり」の印が出る。
-	if doc.EndMark() != "" && load.Loaded == load.Total {
-		study.SetRecordEnd(study.CurrentID())
+	// **種別（"投了" など）も覚える**（2026-10-09。手順リストの最後に「91 投了」と出す）。
+	if mark := doc.EndMark(); mark != "" && load.Loaded == load.Total {
+		study.SetRecordEnd(study.CurrentID(), mark)
 	}
 	return study, load, nil
 }

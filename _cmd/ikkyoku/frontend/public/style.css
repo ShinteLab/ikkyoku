@@ -5168,6 +5168,21 @@ html.is-graph #app {
   border-right-color: var(--on-accent-sep);
 }
 
+/* 終局の行（「91 投了」。2026-10-09）。**手ではないので押せない** —— 指の形にせず、
+   ホバーでも光らせない。字は薄く（棋譜の記録ではあるが、戻れる手と見分けるため）。
+   ⚠️ **`is-doomed` より前に書くこと**（付いている手と一緒に赤く光る）。 */
+.move-chip.is-end {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+/* ⚠️ **`:not(.is-doomed)` を外さないこと** —— こちらのほうが詳細度が高いので、
+   外すと消える範囲の赤がホバーで抜ける。 */
+.move-chip.is-end:not(.is-doomed):hover {
+  border-color: transparent;
+  background: transparent;
+}
+
 /* 右クリックで消そうとしている範囲（2026-08-13）。**押した手とその先の全部**が
    消えるので、聞いているあいだ**消える側を赤く見せる**。⚠️ 「その手以下が
    消える」は文字で言うより見せたほうが早い（消す量は 1 手とは限らない）。

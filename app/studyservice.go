@@ -793,7 +793,7 @@ func (s *StudyService) mergeReloadLocked(next *position.Study) position.GraftRes
 	// 通るので、**毎回 0 に戻すと投了図以下の印が出たり消えたりする。**
 	if next.RecordEnd() != 0 {
 		if id, _, err := s.study.MainTip(); err == nil {
-			s.study.SetRecordEnd(id)
+			s.study.SetRecordEnd(id, next.RecordEndMark())
 		}
 	}
 	return got
