@@ -107,7 +107,7 @@ func (s *Study) Snapshot() (StudySnapshot, error) {
 		Current:     s.cur.id,
 		End:         s.end,
 		EndMark:     s.endMark,
-		NextID:     s.nextID,
+		NextID:      s.nextID,
 		Comment:     s.top.note.Comment,
 	}
 	// ⚠️ **前順（親が先・兄弟は順番どおり）で並べること。** 復元は
