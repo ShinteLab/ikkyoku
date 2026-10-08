@@ -808,3 +808,28 @@ func TestConnectRepairDoesNotExplainWeakPiece(t *testing.T) {
 		t.Fatalf("▲2五歩 だけで繋がるはず: stop=%v moves=%v solutions=%v cost=%v", r.Stop, r.Moves, r.Solutions, r.Cost)
 	}
 }
+
+// ⚠️ **何も指していないほうが安く説明できるなら、修復で手を足さないこと**（2026-10-08 に実機で踏んだ）。
+//
+// 録画 `follow/20261008-142803/020-2c1c_1a1c.png` を読み直した盤と確信度。盤の右側に光が当たり、2三 のと金を「空き」（0.15）、
+// 1三 の歩を「香」と読んでいる（1〜2 筋は実際には動いていない）。`staleKinds` で予算が空いたぶん、▲1三と △同桂（費用 0.90）が
+// 予算に収まって入った。何も指していなければ 0.15 で済む。
+func TestConnectRepairNotWorseThanNothing(t *testing.T) {
+	from := mustPos(t, "ln1g3nl/1kss1g3/1pp2p1+Pp/p2pSb3/3N5/PPPPPP3/1S1G2P1P/1KG5B/L2r3NL b R3P 1")
+	shot := "ln1g3pr/1gss1g3/1pp2p2p/p2pGb3/3N5/PPPPPP3/1S1P2P1P/1KG5L/L2p3NL"
+	cost := [81]float64{
+		0.70, 1.00, 0.15, 1.00, 0.15, 0.15, 0.15, 0.40, 0.42,
+		0.15, 0.55, 1.00, 0.42, 0.15, 1.00, 0.15, 0.15, 0.15,
+		0.15, 1.00, 1.00, 0.15, 0.15, 0.43, 0.15, 0.15, 1.00,
+		0.58, 0.15, 0.15, 1.00, 0.63, 0.83, 0.15, 0.15, 0.15,
+		0.15, 0.15, 0.15, 0.42, 0.15, 0.15, 0.15, 0.15, 0.15,
+		1.00, 1.00, 0.84, 1.00, 1.00, 1.00, 0.15, 0.15, 0.15,
+		0.15, 1.00, 0.15, 0.59, 0.15, 0.15, 1.00, 0.15, 1.00,
+		0.15, 0.80, 0.42, 0.15, 0.15, 0.15, 0.15, 0.15, 0.78,
+		1.00, 0.15, 0.15, 0.81, 0.15, 0.15, 0.15, 0.74, 0.85,
+	}
+	r := connect(t, from, shot, position.ConnectOptions{Tolerance: position.DefaultTolerance, Cost: relayConf(cost)})
+	if r.Stop != position.StopSame || len(r.Moves) != 0 {
+		t.Fatalf("何も指していないはず: stop=%v moves=%v solutions=%v cost=%v", r.Stop, r.Moves, r.Solutions, r.Cost)
+	}
+}

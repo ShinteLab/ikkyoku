@@ -339,6 +339,11 @@ func Connect(ctx context.Context, from *Position, target *Board, opt ConnectOpti
 	if err != nil {
 		return ConnectResult{}, err
 	}
+	// ⚠️ **何も指していないより駒の有無と先後でよく合う答えだけを採る**（`sideBetter`。2026-10-08）。
+	// 合わなければ繋がらなかったのと同じに扱う（予算に収まれば「変わっていない」）。
+	if rep.Stop == StopFound && !sideBetter(root, target, rep.Solutions, opt.Cost, opt.Unseen) {
+		rep = ConnectResult{Nodes: rep.Nodes, Stop: StopUnreachable}
+	}
 	if rep.Stop != StopFound {
 		rep.Nodes += r.Nodes
 		// ⚠️ **手掛かりは厳密一致の側のものを使う。** あちらは費用の表を持たない
@@ -359,6 +364,48 @@ func Connect(ctx context.Context, from *Position, target *Board, opt ConnectOpti
 	}
 	rep.Nodes += r.Nodes
 	return rep.trim(opt.maxSolutions()), nil
+}
+
+// sideBetter は、修復の答えのどれかが**何も指していない根より、駒の有無と先後の食い違いが少ないか**（2026-10-08）。
+//
+// 手を足すなら、足したことで撮った盤とよく合うようにならなければならない。動いていない駒の種類の読み違いを
+// 数えなくなった（`staleKinds`）ぶん予算が空き、光で読めなかった 2三 のと金（空きの読み）を ▲1三と △同桂 で
+// 説明した（`TestConnectRepairNotWorseThanNothing`）—— 2一 で読めた後手の駒を消すので、何も指していないより食い違う。
+// ⚠️ **種類は比べない**（費用の合計で比べると、来た飛車を歩と読んだ ▲同飛 が「何も指していない」に負ける。
+// 種類は認識が一番外すところ）。⚠️ **見えないマスは数えない**。
+func sideBetter(root *Position, target *Board, sols [][]string, cost *CellCost, unseen *CellMask) bool {
+	base := sideCost(root.Board, target, cost, unseen)
+	for _, sol := range sols {
+		p := root.Clone()
+		ok := true
+		for _, m := range sol {
+			if p.ApplyMove(m) != nil {
+				ok = false
+				break
+			}
+		}
+		if ok && sideCost(p.Board, target, cost, unseen) < base-costEpsilon {
+			return true
+		}
+	}
+	return false
+}
+
+// sideCost は盤 cur と撮った盤 tgt で**駒の有無か先後が食い違うマス**の費用の合計（種類は見ない）。
+func sideCost(cur, tgt *Board, cost *CellCost, unseen *CellMask) float64 {
+	sum := 0.0
+	for r := 0; r < 9; r++ {
+		for f := 0; f < 9; f++ {
+			if unseen.at(r, f) {
+				continue
+			}
+			c, t := cur.cells[r][f], tgt.cells[r][f]
+			if c.IsEmpty() != t.IsEmpty() || (!c.IsEmpty() && c.Black() != t.Black()) {
+				sum += cost.at(r, f)
+			}
+		}
+	}
+	return sum
 }
 
 // search は 1 回ぶんの反復深化（厳密一致も修復も同じ骨格）。
