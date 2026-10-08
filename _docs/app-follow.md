@@ -329,6 +329,22 @@ followProbe ─> Rank（候補から選ぶ。29µs）─┬─ 読めていな�
     回すと玉の 2 マスを直して △4二玉 で説明が付き、正しく追えているのに止まった
     （**平手から 1 手しか違わない局面は、回しても 1 手ぶんの直しで説明が付いてしまう**）
 
+- ⚠️ **推測で足した末尾の手は、後の 1 枚で差し替える**（`followRewindCheck` / `followRewindApply`。`followrewind.go`。
+  2026-10-08。理由は `_docs/design-follow.md`）。`FollowAuto` の下見のあと、先端から足すより先に見る。
+  - ⚠️ **差し替えるのは本譜の末尾から続く推測の手（`position.Study.MainGuessTail`）だけ・最大 3 手**（`followRewindMax`）。
+    印の無い手（ぴったり一致・棋譜・人が指した手）の手前で止まる（`TestFollowRewindKeepsUnguessedMoves`）
+  - ⚠️ **比べるのは先後と駒の有無の食い違いだけ**（`followSideCost`。駒の種類は見ない —— 種類の読み違いに合わせて正しい手を
+    差し替えない）。戻した側が**厳密に**少ないか、同じで**少ない手数・同じ偶奇**（先端からは往復して戻る手でしか辻褄が合わない）
+    のときだけ。⚠️ **先端がぴったり合うなら探さない**（長考中は毎周それ。`Connect` を回さない）
+  - ⚠️ **戻した局面からの答えが一意のときだけ**・⚠️ **戻した手と同じ手で始まる答えは採らない**（もっと浅く戻せば済む）
+  - ⚠️ **2 枚続けて同じ差し替えで据える**（ユーザーの判断。`TestFollowRewindNeedsTwoFrames`）。変わっていない 1 枚
+    （`FollowConfirm`）でも確かめてよい（`TestFollowRewindConfirmsOnUnchangedFrame`）。控えたら**先端から足す手の控えは捨てる**
+  - ⚠️ **手や頭が被った 1 枚・費用表の無い 1 枚では試さない**（控えた差し替えも捨てずに待つ。`TestFollowRewindIgnoresCoveredFrame`）
+  - ⚠️ **元の手は消さずに枝に残す**（ユーザーの判断）。差し替えは `GraftGuess`（新しい手を本譜側）、取り消しは `Branch`。
+    ⚠️ **見つけたときから本譜が変わっていたら据えない**・⚠️ **控えと速い経路の比べる相手（`cellBase`）は捨てる**（元の先端の話）
+  - ⚠️ **黙って差し替えないこと** —— `FollowAuto.Rewound` を立て、`Note` に「〜を〜に差し替えました（元の手は枝に残っています）」
+    を入れる（フロントは帯に出す）。ログは「手を差し替えました（追跡）」
+
 **画素差分と盤の有無のふるいは撮る側**（`_docs/cmd-capture.md`。2026-09-18）。
 ⚠️ **ふるいが無くても正しさは保たれる** —— CM や解説の画面は `Rank` の
 `Readable` が落とすので、**ふるいは速さの話**。調整の手順はスキル `ikkyoku-follow`。
@@ -386,6 +402,11 @@ followProbe ─> Rank（候補から選ぶ。29µs）─┬─ 読めていな�
   なること**（`TestFollowAutoPromotionSecondFrame`）・**比べる相手が無ければ頼まないこと**（`TestFollowAutoNoComparisonWithoutBase`）・
   後手の駒と後手目線（`TestFollowAutoPromotionGoteRotated`。△8七飛成）・⚠️ **速い経路では証拠を読んだマスより先に使うこと**
   （`TestFollowCellsPromotionByLooks`）
+- `followrewind_test.go` — **推測で足した末尾の手の差し替え**（2026-10-08）。⚠️ **2 枚目で差し替え、元の手が枝に残ること**
+  （`TestFollowRewindReplacesGuessedTail`。▲4八飛 を推測で足したが本当は ▲7六歩）・**戻すだけで合うなら取り消すこと**
+  （`TestFollowRewindUndoesGuessedMove`）・⚠️ **実機で手番がずれた △同銀 ▲2六歩 を △2六歩 ▲同歩 △同銀 に差し替えること**
+  （`TestFollowRewindRecoversMissedMove`。2026-10-08 の中継の録画を読み直した盤と確信度）・印の無い手を差し替えないこと・
+  手が被った 1 枚では差し替えないこと・1 枚だけでは差し替えないこと・変わっていない 1 枚で確かめられること
 - `followunseen_test.go` — **手や頭が被って見えないマス**（2026-10-06）。⚠️ **行き先が見えない 1 枚が
   何枚続いても足さず（控えもせず）、印が消えた次の 2 枚で足すこと**（`TestFollowAutoWaitsForUnseenArrival`。
   **頭が動かないと同じ 1 枚が続く**ので、2 枚の確かめだけでは止まらない形）・**頭が上辺に被っていても

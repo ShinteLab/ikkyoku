@@ -697,6 +697,11 @@ func (s *StudyService) FollowAuto(boardSFEN string, cellConfidence []float64, ce
 			}
 		}
 	}
+	// ⚠️ **推測で足した末尾の手を差し替えるかを先に見る**（2026-10-08。`followRewindCheck`）。
+	// 先端がずれたままでは、ここから先の 1 枚はどれも繋がらない。
+	if a, done, err := s.followRewindCheck(board, cost, unseen, p); done {
+		return a, err
+	}
 	if !ok {
 		// ⚠️ **控えと矛盾しない 1 枚なら、控えは捨てない**（2026-10-06 に実機で踏んだ。`pendingStillFits`）。
 		if s.pendingStillFits(board, cost, unseen) {
@@ -770,6 +775,10 @@ func (s *StudyService) followConfirmed(p FollowProbe, k int, board *position.Boa
 // 控えが無ければ何もしない（`FollowSame`）。⚠️ **本譜の先端が控えたときから動いていたら捨てる**
 // （手で指した・戻したなど。違う局面の先に繋がないため）。
 func (s *StudyService) FollowConfirm() (FollowAuto, error) {
+	// **控えた差し替え**（`followRewindCheck`）なら、そちらを据える（2 枚目で確かめた）。
+	if rw := s.takeRewind(); rw != nil {
+		return s.followRewindApply(rw)
+	}
 	s.mu.Lock()
 	pend := s.pending
 	s.pending = nil
@@ -1840,6 +1849,9 @@ type FollowAuto struct {
 	Reason string `json:"reason"`
 	// Note は本譜を押しのけたときの断り。
 	Note string `json:"note"`
+	// Rewound は**推測で足した末尾の手を差し替えた**か（2026-10-08。`followRewindApply`）。真なら Note に
+	// 何を何に差し替えたかが入る（フロントは帯に出す）。Moves / Text は新しく本譜に入った手（取り消しだけなら空）。
+	Rewound bool `json:"rewound"`
 	// State は結果の解析タブの状態。**そのまま描ける。**
 	State StudyState `json:"state"`
 	// Flipped は**盤が上下逆に映っている疑い**（2026-09-15）。

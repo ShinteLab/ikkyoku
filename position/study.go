@@ -667,6 +667,31 @@ func (s *Study) MainLine() []string {
 	return out
 }
 
+// MainGuessTail は**本譜の末尾から続く、推測の印（`Node.Guess`）の付いた手**の節点 id を古い順に返す
+// （2026-10-08。中継の追従が、推測で足した末尾の手を後の 1 枚で差し替えるため）。
+//
+// ⚠️ **印の無い手で止まる**（ぴったり一致した手・棋譜の手・人が指した手は差し替えの対象にしない）。
+func (s *Study) MainGuessTail() []int {
+	var line []*treeNode
+	for n := s.top; ; {
+		k := s.mainNext(n)
+		if k == nil {
+			break
+		}
+		n = k
+		line = append(line, n)
+	}
+	i := len(line)
+	for i > 0 && line[i-1].guess {
+		i--
+	}
+	out := make([]int, 0, len(line)-i)
+	for _, n := range line[i:] {
+		out = append(out, n.id)
+	}
+	return out
+}
+
 // MainTip は**本譜の先端**の節点 id と、その局面を返す（手が 1 つも無ければ 0 と根）。
 //
 // **中継を追うときの繋ぎ先**（`position.Connect` に渡す元の局面）。
