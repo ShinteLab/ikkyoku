@@ -784,3 +784,27 @@ func BenchmarkConnectRelay(b *testing.B) {
 		}
 	}
 }
+
+// ⚠️ **読みの弱い駒を、手を足して説明しないこと**（`cheaperDeeper` は確かな読みのマスを覆したときだけ。2026-10-08）。
+//
+// 光の差し込んだ 1五 を「先手の香」（0.40）と読んだ 1 枚（録画 `follow/20261008-140929/`）。▲2五歩 で 1五 を覆す（0.40）
+// のが正しいのに、1 手深く探して ▲1五角打 △2五角打 ▲同歩（覆さずに済む）を採った。
+func TestConnectRepairDoesNotExplainWeakPiece(t *testing.T) {
+	from := mustPos(t, "ln1g3nl/1ks3g2/1ppppp1pp/p4sr2/6p2/PPP2P1P1/1SNPPSP1P/1KG1G2R1/L6NL b Bb 1")
+	shot := "ln1g3pp/1ks3g2/1ppppp1pl/p4sr2/6pPL/PPP2P3/1SPPPSP1P/1KG1P2R1/L6PL"
+	cost := [81]float64{
+		0.86, 1.00, 0.15, 0.83, 0.15, 0.15, 0.15, 0.62, 0.60,
+		0.15, 1.00, 0.61, 0.15, 0.15, 0.15, 0.80, 0.15, 0.15,
+		0.15, 1.00, 1.00, 1.00, 1.00, 1.00, 0.15, 1.00, 0.42,
+		1.00, 0.15, 0.15, 0.15, 0.15, 0.61, 1.00, 0.15, 0.15,
+		0.15, 0.15, 0.15, 0.15, 0.15, 0.15, 0.81, 0.82, 0.40,
+		1.00, 0.80, 1.00, 0.15, 0.15, 1.00, 0.15, 0.15, 0.15,
+		0.15, 1.00, 0.41, 1.00, 1.00, 1.00, 1.00, 0.15, 0.81,
+		0.15, 0.63, 1.00, 0.15, 0.40, 0.15, 0.15, 0.82, 0.15,
+		1.00, 0.15, 0.15, 0.15, 0.15, 0.15, 0.15, 0.68, 0.79,
+	}
+	r := connect(t, from, shot, position.ConnectOptions{Tolerance: position.DefaultTolerance, Cost: relayConf(cost)})
+	if r.Stop != position.StopFound || !r.Unique || strings.Join(r.Moves, " ") != "2f2e" {
+		t.Fatalf("▲2五歩 だけで繋がるはず: stop=%v moves=%v solutions=%v cost=%v", r.Stop, r.Moves, r.Solutions, r.Cost)
+	}
+}

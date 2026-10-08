@@ -476,21 +476,32 @@ func (s *connect) cheaperDeeper(root *Position, limit, maxDepth int, best float6
 
 // forgaveOccupancy は、費用 best の答えのどれかが**駒の有無か先後を覆したか**（`cheaperDeeper` を呼ぶか）。
 //
-// 空きと読めたマスに駒がある（本当に駒が動いて空いた）と、駒が読めたマスが空いている（打ち直した歩を
+// 空きと読めたマスに駒がある（本当に駒が動いて空いた）と、駒が読めたマスが空いている・先後が違う（打ち直した歩を
 // 読み違いとして消した。△同歩 ▲同飛 △8三歩 の 8三）の両方。種類だけを覆した答えは呼ばない。
+// ⚠️ **駒と読めたマスを覆したのは、読みが確かなとき（`sureCellCost` 以上）だけ数えること**（2026-10-08 に実機で踏んだ）。
+// 光の差し込んだ空きの 1五 を「先手の香」（0.40）と読んだ 1 枚で、深く探して ▲1五角打 △2五角打 ▲同歩 を採った
+// （幻の駒を角打ちで説明した。`TestConnectRepairDoesNotExplainWeakPiece`）。弱い読みの駒は覆して済ませる。
 func (s *connect) forgaveOccupancy(best float64) bool {
 	for _, sol := range s.sols {
 		if sol.cost > best+costEpsilon {
 			continue
 		}
 		for _, f := range sol.fixed {
-			if f.Was.IsEmpty() != f.Now.IsEmpty() || (!f.Was.IsEmpty() && f.Was.Black() != f.Now.Black()) {
+			switch {
+			case f.Was.IsEmpty() && !f.Now.IsEmpty():
+				return true
+			case !f.Was.IsEmpty() && (f.Now.IsEmpty() || f.Was.Black() != f.Now.Black()) &&
+				s.cost.at(f.Rank, f.File) >= sureCellCost:
 				return true
 			}
 		}
 	}
 	return false
 }
+
+// sureCellCost は**読みが確かなマス**と見なす費用（＝確信度）の下限（2026-10-08。`forgaveOccupancy`）。
+// app の `followArrivedMinCost`（駒が来た跡と見なす読み）と同じ線にしてある。
+const sureCellCost = 0.5
 
 // miss は繋がらなかった結果に**一番近づけたところ**を載せて返す。
 func (s *connect) miss(why StopReason) ConnectResult {

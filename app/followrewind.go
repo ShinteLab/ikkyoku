@@ -255,6 +255,9 @@ func followReplay(from *position.Position, moves []string) (*position.Position, 
 // followSideCost は盤 cand を正しいとしたとき、撮った盤 read と**駒の有無か先後が食い違うマス**の費用の合計。
 //
 // ⚠️ **駒の種類は見ない**（`followRewindProbe`）。費用はマスごとの確信度（空きは下限の 0.15）。
+// ⚠️ **読みの弱い駒（`followArrivedMinCost` 未満）は数えない**（2026-10-08 に実機で踏んだ）。光の差し込んだ空きの 1五 を
+// 「先手の香」（0.40）と読んだ 1 枚で、▲2五歩 を ▲1五角打 △2五角打 ▲同歩 に差し替えた（幻の駒を手で説明した。
+// `TestFollowRewindIgnoresWeakPhantomPiece`）。駒が来た跡と見なす読み（`followArrived`）と同じ線。
 func followSideCost(cand, read *position.Board, cost *position.CellCost) float64 {
 	sum := 0.0
 	for r := 0; r < 9; r++ {
@@ -262,6 +265,9 @@ func followSideCost(cand, read *position.Board, cost *position.CellCost) float64
 			a, err1 := cand.At(r, f)
 			b, err2 := read.At(r, f)
 			if err1 != nil || err2 != nil {
+				continue
+			}
+			if !b.IsEmpty() && cost[r][f] < followArrivedMinCost {
 				continue
 			}
 			if a.IsEmpty() != b.IsEmpty() || (!a.IsEmpty() && a.Black() != b.Black()) {

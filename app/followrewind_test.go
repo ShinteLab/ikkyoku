@@ -238,3 +238,42 @@ func TestFollowRewindRecoversMissedMove(t *testing.T) {
 		t.Fatalf("本譜 = %v, want [2e2f 2g2f 4d3e]", got)
 	}
 }
+
+// glareFrame / glareFrameConf は 2026-10-08 の中継の録画 `follow/20261008-140929/018-B@1e_B@2e_2f2e-guess.png` を
+// 読み直した盤と確信度。**盤の右側（1〜2 筋）に光が差し込み**、空きの 1五 を「先手の香」（0.40）と読んでいる。
+// 実際は ▲2五歩 だけで、先手・後手とも角を 1 枚ずつ持っている。
+const glareFrame = "ln1g3pp/1ks3g2/1ppppp1pl/p4sr2/6pPL/PPP2P3/1SPPPSP1P/1KG1P2R1/L6PL"
+
+var glareFrameConf = []float64{
+	0.86, 1.00, 0.15, 0.83, 0.15, 0.15, 0.15, 0.62, 0.60,
+	0.15, 1.00, 0.61, 0.15, 0.15, 0.15, 0.80, 0.15, 0.15,
+	0.15, 1.00, 1.00, 1.00, 1.00, 1.00, 0.15, 1.00, 0.42,
+	1.00, 0.15, 0.15, 0.15, 0.15, 0.61, 1.00, 0.15, 0.15,
+	0.15, 0.15, 0.15, 0.15, 0.15, 0.15, 0.81, 0.82, 0.40,
+	1.00, 0.80, 1.00, 0.15, 0.15, 1.00, 0.15, 0.15, 0.15,
+	0.15, 1.00, 0.41, 1.00, 1.00, 1.00, 1.00, 0.15, 0.81,
+	0.15, 0.63, 1.00, 0.15, 0.40, 0.15, 0.15, 0.82, 0.15,
+	1.00, 0.15, 0.15, 0.15, 0.15, 0.15, 0.15, 0.68, 0.79,
+}
+
+// ⚠️ **読みの弱い駒（光の差し込んだマスの幻の駒）を、手を足して説明しないこと**（2026-10-08 に実機で踏んだ）。
+//
+// **実機の症状**: 光の差し込んだ 1五 を「先手の香」（0.40）と読んだ 1 枚で、推測で足した ▲2五歩 を
+// ▲1五角打 △2五角打 ▲同歩 に差し替えた（幻の駒を角打ちで説明した。駒台は読んでいないので持ち駒が狂っても気づけない）。
+// ▲2五歩 のまま 1五 を読み違いとして扱うのが正しい。
+func TestFollowRewindIgnoresWeakPhantomPiece(t *testing.T) {
+	s := studyAt(t, "ln1g3nl/1ks3g2/1ppppp1pp/p4sr2/6p2/PPP2P1P1/1SNPPSP1P/1KG1G2R1/L6NL b Bb 1")
+	guessMoves(t, s, "2f2e")
+	for i := 0; i < 3; i++ {
+		a, err := s.FollowAuto(glareFrame, glareFrameConf, nil, []PromoEvidence{})
+		if err != nil {
+			t.Fatalf("FollowAuto: %v", err)
+		}
+		if a.Rewound || a.Applied {
+			t.Fatalf("%d 枚目: 光の差し込んだ 1 枚から手を足しました: %+v", i+1, a)
+		}
+	}
+	if got := mainLine(s); !slices.Equal(got, []string{"2f2e"}) {
+		t.Fatalf("本譜 = %v, want [2f2e]", got)
+	}
+}
