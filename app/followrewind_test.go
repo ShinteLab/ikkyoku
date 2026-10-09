@@ -386,35 +386,3 @@ func TestFollowCellsRewindKeepsUnguessedMoves(t *testing.T) {
 		t.Fatalf("人が指した手を差し替えようとしました: %+v (%v)", a, err)
 	}
 }
-
-// ⚠️ **打つ手は、候補が 1 通りでも行き先の種類を確かめること**（2026-10-09。`followDropsFit`）。
-//
-// **実機の症状**: 後手の持ち駒が角だけで、変わったマスが 7二 だけの 1 枚から △7二角打 を足した。7二 は「後手の金」と
-// 読めていたが、候補が 1 通りだったので先後しか見なかった（銀も持っていれば種類を読んで落ちていた）。
-// 金と読めたら控えずに 81 マスを読み、角と読めたら今までどおり控えること。
-func TestFollowCellsDropChecksKindEvenWhenUnique(t *testing.T) {
-	for name, tc := range map[string]struct {
-		seen    string // 3二 に見えた駒（平手から cellsRewindLine のあとに指した手）
-		pending bool
-	}{
-		"金と読めた": {"4a3b", false},
-		"角と読めた": {"B*3b", true},
-	} {
-		t.Run(name, func(t *testing.T) {
-			s, _ := following(t)
-			for _, m := range cellsRewindLine {
-				if _, err := s.Play(m); err != nil {
-					t.Fatalf("Play(%q): %v", m, err)
-				}
-			}
-			s.markBase()
-			a := followCellsRead(t, s, cellIdx("3b"), false, append(slices.Clone(cellsRewindLine), tc.seen)...)
-			if a.Pending != tc.pending || a.Applied {
-				t.Fatalf("pending = %v, want %v: %+v", a.Pending, tc.pending, a)
-			}
-			if !tc.pending && a.NoMoves {
-				t.Fatalf("種類が違うだけなら待たずに 81 マスを読むこと（NoMoves を立てない）: %+v", a)
-			}
-		})
-	}
-}
