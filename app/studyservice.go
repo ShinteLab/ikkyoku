@@ -810,6 +810,18 @@ func (s *StudyService) mergeReloadLocked(next *position.Study) position.GraftRes
 	return got
 }
 
+// Session は今の検討の id（根を入れ替えるたびに振り直る。2026-10-09）。
+//
+// `_cmd/ikkyoku` の `CaptureService` が、**中継を追う盤（マスタ）にする訂正した 1 枚が、
+// 今の根を採った 1 枚か**を確かめるのに使う（棋譜や新規対局で根を入れ替えたら使わない）。
+//
+// ⚠️ **`//wails:ignore` を外さないこと**（`main` から渡す口。フロントの API ではない）。
+//
+//wails:ignore
+func (s *StudyService) Session() string {
+	return s.currentSession()
+}
+
 // currentSession は今の検討の控えの id（**控えの書き直しが今の検討とぶつからないか**
 // を見るため。公開しない）。
 func (s *StudyService) currentSession() string {

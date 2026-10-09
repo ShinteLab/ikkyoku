@@ -287,6 +287,8 @@ func main() {
 	// **枠の HWND を触るのは CaptureService** なので、設定タブからの切り替えは
 	// ここで繋いだこのフックを通る（SettingsService はウィンドウを持っていない）。
 	settingsSvc.OnClickThrough = captureSvc.applyClickThrough
+	// 中継を追う盤（マスタ）を訂正した 1 枚にするとき、それが今の根を採った 1 枚かを確かめる（2026-10-09）。
+	captureSvc.studySession = studySvc.Session
 	// 「中継を追うあいだは盤の読みを優先する」（2026-10-07。`enginepriority.go`）。
 	captureSvc.followFirst = cfg.FollowFirst
 	captureSvc.engineNames = func() []string {
