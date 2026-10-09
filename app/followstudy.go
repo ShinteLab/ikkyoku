@@ -894,6 +894,8 @@ func (s *StudyService) cellsMask(cells []int) *position.CellMask {
 // ⚠️ **1 枚だけでは足さない**のは同じ（`followPending`）。次の 1 枚が変わっていなければ
 // `FollowConfirm` で足す。⚠️ **比べる相手の 1 枚に至った手のマスは、見た目だけ変わってよい**（色付け）。
 func (s *StudyService) FollowCells(changed []int, read []CellPiece, promo []PromoEvidence) (FollowAuto, error) {
+	// 控えた差し替えは、この 1 枚が同じ差し替えを言うまで「残しているだけ」にする（`followCellsRewind`）。
+	s.holdRewind()
 	mask := s.cellsMask(changed)
 	rotated := s.src.followRotated()
 
@@ -957,6 +959,11 @@ func (s *StudyService) FollowCells(changed []int, read []CellPiece, promo []Prom
 		return s.followLooksOnly(glowN), nil
 	}
 	if len(rests) == 0 {
+		// ⚠️ **推測で足した末尾の手が違っていたなら、ここで差し替えを見る**（2026-10-09。`followCellsRewind`）。
+		// 先端から先しか探さないと、待つあいだに 81 マスを読む周まで差し替えが出ない。
+		if a, done, err := s.followCellsRewind(base, since, mask, extra, read, rotated); done {
+			return a, err
+		}
 		// ⚠️ **合う手順が 1 つも無いことを添えること**（`NoMoves`。2026-10-08）。フロントはすぐ 81 マスを読まず、
 		// 組が変わるのを待つ（駒を掴んで行き先が光っているだけの 1 枚が多い）。
 		// ⚠️ **ただし駒のあったマスが 2 つ以上変わった組は待たない**（`followOccupied`）—— 駒をつまんだときに駒のあったマスで
