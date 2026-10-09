@@ -1002,14 +1002,6 @@ export function mountMainScreen(root: HTMLElement): void {
               <span id="study-live-kifu" class="live-badge is-kifu" hidden
                     title="棋譜の URL を取り直して、新しい手に付いていきます">棋譜を自動更新中</span>
               <button id="study-flip" class="ghost-btn view-flip" type="button" hidden></button>
-              <!-- 投了（手前の駒台の側。2026-10-09）。**駒台の枠の外**（中に入れると駒を打とうとして
-                   押す）。⚠️ **一番下に置く**（手前の駒台に一番近い）。どちらの側の投了かは
-                   視点で決まる（syncResign）。 -->
-              <button id="study-resign-near" class="resign-btn" type="button" hidden>投了</button>
-            </div>
-            <!-- 投了（奥の駒台の側）。**左の列の下段は元から空いている**ので、盤の大きさに効かない。 -->
-            <div class="resign-far">
-              <button id="study-resign-far" class="resign-btn" type="button" hidden>投了</button>
             </div>
             <div id="study-hand-white-slot" class="hand-slot" hidden></div>
             <div id="study-stage" class="board-stage">
@@ -2118,35 +2110,47 @@ export function mountMainScreen(root: HTMLElement): void {
     (black ? studyHandSlots.black : studyHandSlots.white).appendChild(zone);
     return zone;
   });
-  // 投了（2026-10-09）。**駒台の枠の外**の 2 か所 —— 手前の駒台の上（視点のボタンの下）と
-  // 奥の駒台の下（左の列の下段）。置き場所は `_docs/ui/layout.md` の「投了のボタン」。
+  // 投了（2026-10-09）。**駒台の外側の縁、手番のマークの横の角**（奥の駒台なら上、
+  // 手前の駒台なら下。置き場所は style.css の `.resign-btn` と `_docs/ui/layout.md` の「投了のボタン」）。
   //
   // **投了すると終局になり、投了の行の右クリックから棋譜タブに登録できる。** 対局の
   // 途中で誤って登録する事故を防ぐため、登録の口は投了の行にしか無い（`movelist.ts`）。
-  // ⚠️ **駒台の中に戻さないこと**（2026-10-09 に一度入れて外した）。駒を打つときに押すのも
-  // 手番の側の駒台で、投了が押せるのも手番の側なので、**駒を取ろうとして投了する**。
-  // ⚠️ **ボタンは場所（手前/奥）に付いていて、どちらの側の投了かは視点で決まる**
-  // （反転しても動かない —— 視点のボタンと同じ。表す側だけ入れ替わる）。
+  // ⚠️ **駒台の中・盤の真ん中寄りに戻さないこと**（2026-10-09 に 2 度置いて外した）。
+  // 駒台の中は駒を取ろうとして押し、盤の真ん中寄りは視点のボタンと間違えて押す。
+  // **外側の縁は誰も押さない**（手番のマークしか無い）。
+  // ⚠️ **駒台の中の要素として置き、絶対配置で外側へ出す**（手番のマークと同じ）——
+  // 視点を反転すると駒台ごと動き、高さも食わない（盤が小さくならない）。
   // ⚠️ **押せるのは手番の側だけ**（KIF の「91 投了」も手番の側の投了と読まれる）。
-  // **両方に常に置いて押せない側は `disabled`**（手番のマークと同じく出たり消えたりさせない）。
+  // **両側に常に置いて押せない側は `disabled`**（手番のマークと同じく出たり消えたりさせない）。
   // ⚠️ **投了できるかは Go 側**（`StudyState.canResign`。本譜の先端で、終局していないとき）。
   // ⚠️ **中継を追っているあいだは押させない**（盤の駒と同じ。追従の状態は Go 側に無い）。
   // ⚠️ **押したら確認を出す**（初めは「やめる」。Enter の連打で投了しない）。
-  const studyResignNear = root.querySelector<HTMLButtonElement>("#study-resign-near")!;
-  const studyResignFar = root.querySelector<HTMLButtonElement>("#study-resign-far")!;
+  const studyResignBtns = studyHandZones.map((zone) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "resign-btn";
+    b.textContent = "投了";
+    b.hidden = true;
+    b.dataset.black = zone.dataset.black;
+    // ⚠️ **駒台のクリック（打つ駒を選ぶ）に流さない**（study.ts は `.stock-chip` しか見ないが念のため）。
+    b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      askResign(b, e);
+    });
+    zone.appendChild(b);
+    return b;
+  });
   // 投了のボタンの出し入れに要る値（**局面の写しではない**。showStudy が入れる）。
   let studyCanResign = false;
   let studyTurnNow = 0;
   let studyFromURL = false;
   let studyLoadedForResign = false;
   let studyDropped = false;
-  // resignSide はそのボタンが**どちらの側の投了か**（手前の駒台の側か、奥の駒台の側か）。
-  const resignSide = (b: HTMLButtonElement): boolean =>
-    (b === studyResignNear) !== studyFlipped;
+  const resignSide = (b: HTMLButtonElement): boolean => b.dataset.black === "true";
   const sideName = (black: boolean) =>
     black ? (studyDropped ? "▲下手" : "▲先手") : (studyDropped ? "△上手" : "△後手");
   const syncResign = () => {
-    for (const b of [studyResignNear, studyResignFar]) {
+    for (const b of studyResignBtns) {
       const black = resignSide(b);
       const side = sideName(black);
       const mine = studyTurnNow === (black ? 1 : 2);
@@ -2177,8 +2181,6 @@ export function mountMainScreen(root: HTMLElement): void {
       ],
     });
   };
-  studyResignNear.addEventListener("click", (e) => askResign(studyResignNear, e));
-  studyResignFar.addEventListener("click", (e) => askResign(studyResignFar, e));
   const resignStudy = async () => {
     if (isFollowing()) {
       return;
@@ -4305,8 +4307,6 @@ ${st.turnLabel}${n}`;
     // 駒台は「逆順に並べる側」が入れ替わるので並べ直す。
     showStudyHand(studyHands);
     paintFlipButton(studyFlip, studyFlipped);
-    // 投了のボタンは場所に付いているので、**表す側が入れ替わる**（手前/奥 → 先手/後手）。
-    syncResign();
   };
 
   // setStudyViewpoint は**解析タブの**視点を決める。**「自分がどちら側か」を渡す**

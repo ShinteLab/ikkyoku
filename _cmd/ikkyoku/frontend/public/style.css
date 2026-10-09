@@ -4113,29 +4113,20 @@ html.is-graph #app {
   top: -20px;
 }
 
-/* 投了（解析タブ。2026-10-09）。**駒台の枠の外**の 2 か所 —— 手前の駒台の上
-   （`.view-side` の一番下）と、奥の駒台の下（`.resign-far`。左の列の下段）。
-   ⚠️ **駒台の中に戻さないこと**（一度入れて外した）。駒を打つときに押すのも手番の側の
-   駒台なので、**駒を取ろうとして投了する**。
-   ⚠️ **どちらも元から空いているセル**なので盤の大きさに効かない（行も列も増えない）。
+/* 投了（解析タブ。2026-10-09）。**駒台の外側の縁、手番のマークの横の角**
+   （奥の駒台なら上、手前の駒台なら下。盤から遠い側の角）。
+   ⚠️ **駒台の中にも、盤の真ん中寄りにも戻さないこと**（2 度置いて外した）。駒台の中は
+   駒を取ろうとして押し、盤の真ん中寄りは視点のボタンと間違えて押す。外側の縁は誰も押さない。
+   ⚠️ **手番のマークと同じく絶対配置**（高さを食わない＝盤が小さくならない。視点を反転すると
+   駒台ごと動くので、縁と角も入れ替える）。高さと縁からの距離もマークに揃える。
    ⚠️ **押せるのは手番の側だけ**（`disabled`。出したり消したりしない —— 手番のマークと同じ）。 */
-/* ⚠️ **幅は駒台と同じにして盤側へ寄せる**（駒台は `justify-self: end`）。列の幅は対局者名で
-   広がることがあるので、列の真ん中に置くと駒台の真下から外れる。 */
-.resign-far {
-  grid-column: 1;
-  grid-row: 3;
-  align-self: start;
-  justify-self: end;
-  display: flex;
-  justify-content: center;
-  width: calc(var(--board-size) * 0.2);
-  margin-top: 6px;
-}
-
 .resign-btn {
-  flex: 0 0 auto;
-  padding: 1px 8px;
-  font-size: 12px;
+  position: absolute;
+  z-index: 1;
+  height: 18px;
+  padding: 0 5px;
+  font-size: 11px;
+  line-height: 16px;
   color: var(--text-2c);
   background: var(--surface-3);
   border: 1px solid var(--line);
@@ -4152,6 +4143,30 @@ html.is-graph #app {
 .resign-btn:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+#study-hand-white-slot .resign-btn {
+  top: -20px;
+  left: 0;
+}
+
+#study-hand-black-slot .resign-btn {
+  bottom: -20px;
+  right: 0;
+}
+
+.is-flipped #study-hand-white-slot .resign-btn {
+  top: auto;
+  bottom: -20px;
+  left: auto;
+  right: 0;
+}
+
+.is-flipped #study-hand-black-slot .resign-btn {
+  bottom: auto;
+  top: -20px;
+  right: auto;
+  left: 0;
 }
 
 /* 先手側のスロットには「足りない駒」と駒台が縦に積まれる(足りない駒が上)。
