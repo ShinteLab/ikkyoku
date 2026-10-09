@@ -102,6 +102,7 @@ export function mountFrame(root: HTMLElement): void {
     <div class="frame-footer" role="status">
       <div class="frame-footer-body">
         <span class="frame-footer-text"></span>
+        <span class="frame-footer-choices"></span>
         <button id="frame-footer-close" class="frame-btn is-icon" type="button"
                 aria-label="閉じる" title="閉じる">${iconMarkup(FiX)}</button>
       </div>
@@ -167,21 +168,36 @@ export function mountFrame(root: HTMLElement): void {
   const footerBody = footer.querySelector<HTMLDivElement>(".frame-footer-body")!;
   const footerText = footer.querySelector<HTMLSpanElement>(".frame-footer-text")!;
   const footerClose = root.querySelector<HTMLButtonElement>("#frame-footer-close")!;
+  // footerChoices は**人に選んでもらう候補**のボタン（2026-10-09。打った駒が決まらないとき）。
+  // ⚠️ **押したら `follow:choose` を投げるだけ**（足すのはメイン画面。状態の持ち主はあちら）。
+  const footerChoices = footer.querySelector<HTMLSpanElement>(".frame-footer-choices")!;
   type FooterKind = "" | "warn" | "error";
+  type FooterChoice = { label: string; moves: string[] };
   // footerPx は**今 Go に伸ばしてもらっている高さ**（＝帯に付けてよい高さ）。
   let footerPx = 0;
   // footerWant は最後に頼まれた中身（順番待ちのあいだに来た分は、最後の 1 つだけ描けばよい）。
-  let footerWant: { text: string; kind: FooterKind } = { text: "", kind: "" };
+  let footerWant: { text: string; kind: FooterKind; choices: FooterChoice[] } = { text: "", kind: "", choices: [] };
   let footerQueue: Promise<void> = Promise.resolve();
   const painted = () =>
     new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
   const applyFooter = async () => {
-    const { text, kind } = footerWant;
+    const { text, kind, choices } = footerWant;
     if (text) {
       footerText.textContent = text;
       footerText.title = text; // 3 行で切れたときの全文
       footer.classList.toggle("is-warn", kind === "warn");
       footer.classList.toggle("is-error", kind === "error");
+      // ⚠️ **ボタンも測る前に描くこと**（帯の高さは中身の高さで決まる）。
+      footerChoices.replaceChildren(
+        ...choices.map((c) => {
+          const b = document.createElement("button");
+          b.type = "button";
+          b.className = "frame-btn";
+          b.textContent = c.label;
+          b.addEventListener("click", () => void Events.Emit("follow:choose", { moves: c.moves }));
+          return b;
+        }),
+      );
     }
     // ⚠️ **測るのは中身の高さ**（帯そのものは高さ 0 で切っているので、中身は描かれたまま測れる）。
     const want = text ? Math.ceil(footerBody.getBoundingClientRect().height) : 0;
@@ -196,6 +212,7 @@ export function mountFrame(root: HTMLElement): void {
     if (!text) {
       footerText.textContent = "";
       footerText.title = "";
+      footerChoices.replaceChildren();
     }
     if (want === footerPx) {
       return;
@@ -203,14 +220,14 @@ export function mountFrame(root: HTMLElement): void {
     await painted();
     footerPx = await CaptureService.SetFrameFooter(want);
   };
-  const showFooter = (text: string, kind: FooterKind) => {
-    footerWant = { text, kind };
+  const showFooter = (text: string, kind: FooterKind, choices: FooterChoice[] = []) => {
+    footerWant = { text, kind, choices };
     footerQueue = footerQueue.then(applyFooter).catch((err) => {
       console.warn("[frame] 枠の下の帯を出し入れできませんでした", err);
     });
   };
-  Events.On("follow:notice", (e: { data: { text?: string; kind?: FooterKind } }) => {
-    showFooter(e.data?.text ?? "", e.data?.kind ?? "");
+  Events.On("follow:notice", (e: { data: { text?: string; kind?: FooterKind; choices?: FooterChoice[] } }) => {
+    showFooter(e.data?.text ?? "", e.data?.kind ?? "", e.data?.choices ?? []);
   });
   // ✕ は**この枠で閉じるだけ**（メイン画面の状態は変えない。次の知らせが来ればまた出る）。
   footerClose.addEventListener("click", () => showFooter("", ""));
@@ -220,7 +237,7 @@ export function mountFrame(root: HTMLElement): void {
     window.clearTimeout(footerResize);
     footerResize = window.setTimeout(() => {
       if (footerWant.text) {
-        showFooter(footerWant.text, footerWant.kind);
+        showFooter(footerWant.text, footerWant.kind, footerWant.choices);
       }
     }, 150);
   });
