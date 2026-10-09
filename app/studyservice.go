@@ -319,6 +319,9 @@ func (s *StudyService) Adopt() (st StudyState, err error) {
 	if _, err := p.SFEN(); err != nil {
 		return s.State(), err
 	}
+	if err := foulOf(p); err != nil {
+		return s.State(), err
+	}
 
 	s.mu.Lock()
 	// **根ごと入れ替える。** 前の手順と（呼び出し側が消す）解析結果は捨てる ——
@@ -340,6 +343,23 @@ func (s *StudyService) Adopt() (st StudyState, err error) {
 
 	log.Info("局面を解析タブへ採りました", "sfen", st.SFEN, "rotated", rotated)
 	return st, nil
+}
+
+// foulOf は**駒落ちでも詰将棋でもない局面の反則**を返す（無ければ nil。2026-10-09）。
+//
+// 対局の局面に二歩・行き所のない駒・玉の数の食い違い・駒数の超過は出ないので、出ていれば読み違い。
+// 確定させると、そのまま解析にも中継の追い始めにも使われる（二歩の局面から追い始めた。実機で踏んだ）。
+// ⚠️ **駒落ち（`HandsFixed`）と詰将棋（`MateProblem`）は見ない** —— 玉が 1 枚・駒数が合わないのが
+// 正しい局面があり、人がその属性を付けて「この局面はこういうものだ」と言っている。
+// 中身は `position.Position.Warnings()` そのもの（⚠️ **自前で検証を書かない**）。
+func foulOf(p *position.Position) error {
+	if p.HandsFixed || p.MateProblem {
+		return nil
+	}
+	if w := p.Warnings(); len(w) > 0 {
+		return fmt.Errorf("反則があるので確定できません（駒落ち・詰将棋の指定がありません）: %s", strings.Join(w, " / "))
+	}
+	return nil
 }
 
 // KifuLoad は棋譜を読み込んだ結果（入力タブの「棋譜を貼り付ける」）。
