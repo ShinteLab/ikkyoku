@@ -114,7 +114,8 @@ func (s *StudyService) dropRewindUnlessFits(board *position.Board, cost *positio
 		anc, ok2 := followReplay(root, line[:prev.keep])
 		if ok1 && ok2 {
 			if after, ok3 := followReplay(anc, prev.moves); ok3 {
-				keep = followSideCost(after.Board, board, cost) <= followSideCost(tip.Board, board, cost)+followSideEps
+				skip := promotedCells(tip.Board)
+				keep = followSideCost(after.Board, board, cost, skip) <= followSideCost(tip.Board, board, cost, skip)+followSideEps
 			}
 		}
 	}
@@ -261,13 +262,15 @@ func (s *StudyService) followRewindProbe(board *position.Board, cost *position.C
 	}
 
 	// **先端側の一番よい説明**（何も指していない／下見が並べた候補）。同じだけ説明できるなら手数の少ないほう。
-	tipCost, tipPlies := followSideCost(tip.Board, board, cost), 0
+	// ⚠️ **先端の盤で成駒が載っているマスは比べない**（2026-10-09。`promotedCells`）。
+	skip := promotedCells(tip.Board)
+	tipCost, tipPlies := followSideCost(tip.Board, board, cost, skip), 0
 	for _, c := range p.Candidates {
 		after, ok := followReplay(tip, c.Moves)
 		if !ok {
 			continue
 		}
-		v := followSideCost(after.Board, board, cost)
+		v := followSideCost(after.Board, board, cost, skip)
 		if v < tipCost-followSideEps || (v <= tipCost+followSideEps && len(c.Moves) < tipPlies) {
 			tipCost, tipPlies = v, len(c.Moves)
 		}
@@ -306,7 +309,7 @@ func (s *StudyService) followRewindProbe(board *position.Board, cost *position.C
 		if !ok {
 			continue
 		}
-		alt := followSideCost(after.Board, board, cost)
+		alt := followSideCost(after.Board, board, cost, skip)
 		better := alt < tipCost-followSideEps
 		fewer := tipPlies > 0 && alt <= tipCost+followSideEps && len(moves) < k+tipPlies && (k+tipPlies-len(moves))%2 == 0
 		if !better && !fewer {
@@ -408,16 +411,38 @@ func followReplay(from *position.Position, moves []string) (*position.Position, 
 	return p, true
 }
 
+// promotedCells は盤 b で**成駒が載っているマス**を返す（2026-10-09。差し替えの比べで数えないマス）。
+//
+// ⚠️ **成駒は読めないものとして扱う**（成駒は学習データにほぼ入らない。`followPickByRead` と同じ前提）。読めないだけで
+// なく**先後まで外す**: 中継で 1一 の馬を、1 枚ごとに「先手の桂 0.40」「後手の歩 0.78」「先手の龍 0.40」と読み、
+// 後手の歩と読んだ 2 枚続けて ▲1一角成 を取り消した（取り消すと 1一 に後手の香が戻って「合う」。2二 の角が無いことは
+// 空きの読みなので 0.15 しか数えない）。⚠️ **比べるどの盤にも同じマスを使う**（先端の盤で決める。片方だけ外すと比べにならない）。
+func promotedCells(b *position.Board) *position.CellMask {
+	m := &position.CellMask{}
+	for r := 0; r < 9; r++ {
+		for f := 0; f < 9; f++ {
+			if c, err := b.At(r, f); err == nil && !c.IsEmpty() && c.Promoted() {
+				m[r][f] = true
+			}
+		}
+	}
+	return m
+}
+
 // followSideCost は盤 cand を正しいとしたとき、撮った盤 read と**駒の有無か先後が食い違うマス**の費用の合計。
 //
 // ⚠️ **駒の種類は見ない**（`followRewindProbe`）。費用はマスごとの確信度（空きは下限の 0.15）。
+// skip のマスは数えない（`promotedCells`。nil なら全部数える）。
 // ⚠️ **読みの弱い駒（`followArrivedMinCost` 未満）は数えない**（2026-10-08 に実機で踏んだ）。光の差し込んだ空きの 1五 を
 // 「先手の香」（0.40）と読んだ 1 枚で、▲2五歩 を ▲1五角打 △2五角打 ▲同歩 に差し替えた（幻の駒を手で説明した。
 // `TestFollowRewindIgnoresWeakPhantomPiece`）。駒が来た跡と見なす読み（`followArrived`）と同じ線。
-func followSideCost(cand, read *position.Board, cost *position.CellCost) float64 {
+func followSideCost(cand, read *position.Board, cost *position.CellCost, skip *position.CellMask) float64 {
 	sum := 0.0
 	for r := 0; r < 9; r++ {
 		for f := 0; f < 9; f++ {
+			if skip != nil && skip[r][f] {
+				continue
+			}
 			a, err1 := cand.At(r, f)
 			b, err2 := read.At(r, f)
 			if err1 != nil || err2 != nil {

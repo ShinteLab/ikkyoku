@@ -335,7 +335,8 @@ followProbe ─> Rank（候補から選ぶ。29µs）─┬─ 読めていな�
     印の無い手（ぴったり一致・棋譜・人が指した手）の手前で止まる（`TestFollowRewindKeepsUnguessedMoves`）
   - ⚠️ **比べるのは先後と駒の有無の食い違いだけ**（`followSideCost`。駒の種類は見ない —— 種類の読み違いに合わせて正しい手を
     差し替えない）。⚠️ **読みの弱い駒（`followArrivedMinCost` 未満）は数えない**（光の差し込んだ空きを「先手の香」0.40 と読んだ
-    1 枚で、▲2五歩 を ▲1五角打 △2五角打 ▲同歩 に差し替えた。`TestFollowRewindIgnoresWeakPhantomPiece`）。戻した側が**厳密に**少ないか、同じで**少ない手数・同じ偶奇**（先端からは往復して戻る手でしか辻褄が合わない）
+    1 枚で、▲2五歩 を ▲1五角打 △2五角打 ▲同歩 に差し替えた。`TestFollowRewindIgnoresWeakPhantomPiece`）。⚠️ **先端の盤で成駒が載っているマスは比べない**（2026-10-09。`promotedCells`。どの盤にも同じマスを使う。1一 の馬を「後手の歩」0.78 と
+    読んだ 2 枚で ▲1一角成 を取り消した。`TestFollowRewindIgnoresPromotedPieceMisread`）。戻した側が**厳密に**少ないか、同じで**少ない手数・同じ偶奇**（先端からは往復して戻る手でしか辻褄が合わない）
     のときだけ。⚠️ **先端がぴったり合うなら探さない**（長考中は毎周それ。`Connect` を回さない）
   - ⚠️ **戻した局面からの答えが一意のときだけ**・⚠️ **戻した手と同じ手で始まる答えは採らない**（もっと浅く戻せば済む）
   - ⚠️ **2 枚続けて同じ差し替えで据える**（ユーザーの判断。`TestFollowRewindNeedsTwoFrames`）。変わっていない 1 枚
@@ -418,7 +419,8 @@ followProbe ─> Rank（候補から選ぶ。29µs）─┬─ 読めていな�
   （`TestFollowRewindRecoversMissedMove`。2026-10-08 の中継の録画を読み直した盤と確信度）・印の無い手を差し替えないこと・
   手が被った 1 枚では差し替えないこと・1 枚だけでは差し替えないこと・変わっていない 1 枚で確かめられること・
   ⚠️ **何も言えない 1 枚では控えを捨てず、変わっていない 1 枚では据えないこと**（`TestFollowRewindSurvivesSilentFrame`。2026-10-09）・
-  ⚠️ **速い経路でも、角打ちの推測を金の移動に差し替えること**（`TestFollowCellsRewindsGuessedDrop`。2026-10-09 の中継の形）
+  ⚠️ **速い経路でも、角打ちの推測を金の移動に差し替えること**（`TestFollowCellsRewindsGuessedDrop`。2026-10-09 の中継の形）・
+  ⚠️ **成駒の載ったマスの読み違いで取り消さないこと**（`TestFollowRewindIgnoresPromotedPieceMisread`。2026-10-09 の ▲1一角成）
 - `followunseen_test.go` — **手や頭が被って見えないマス**（2026-10-06）。⚠️ **行き先が見えない 1 枚が
   何枚続いても足さず（控えもせず）、印が消えた次の 2 枚で足すこと**（`TestFollowAutoWaitsForUnseenArrival`。
   **頭が動かないと同じ 1 枚が続く**ので、2 枚の確かめだけでは止まらない形）・**頭が上辺に被っていても
