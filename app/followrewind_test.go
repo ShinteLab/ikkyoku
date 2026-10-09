@@ -386,3 +386,30 @@ func TestFollowCellsRewindKeepsUnguessedMoves(t *testing.T) {
 		t.Fatalf("人が指した手を差し替えようとしました: %+v (%v)", a, err)
 	}
 }
+
+// ⚠️ **成駒の載ったマスの読みで、推測の手を取り消さないこと**（2026-10-09。`promotedCells`）。
+//
+// **実機の症状**（中継）: ▲1一角成 のあと、1一 の馬を「後手の歩」（0.78）と読んだ 1 枚が 2 枚続き、取り消すと 1一 に後手の香が
+// 戻って「合う」ので取り消した。2二 に角が無いことは空きの読みなので 0.15 しか数えない。成駒は読めないものとして扱い、
+// 先端の盤で成駒が載っているマスは比べない。
+func TestFollowRewindIgnoresPromotedPieceMisread(t *testing.T) {
+	s := studyAt(t, "4k3l/7B1/9/9/9/9/9/9/4K4 b - 1")
+	guessMoves(t, s, "2b1a+")
+	// 撮った 1 枚: 1一 の馬を後手の歩と読んだ。2二 は空き（確信度 0）、5一・5九 の玉ははっきり読めている。
+	frame := "4k3p/9/9/9/9/9/9/9/4K4"
+	conf := make([]float64, 81)
+	conf[4], conf[76] = 1, 1 // 5一・5九
+	conf[8] = 0.78           // 1一
+	for i := 0; i < 3; i++ {
+		a, err := s.FollowAuto(frame, conf, nil, []PromoEvidence{})
+		if err != nil {
+			t.Fatalf("FollowAuto: %v", err)
+		}
+		if a.Rewound || a.Pending {
+			t.Fatalf("%d 枚目: 成駒の読み違いで ▲1一角成 を取り消そうとしました: %+v", i+1, a)
+		}
+	}
+	if got := mainLine(s); !slices.Equal(got, []string{"2b1a+"}) {
+		t.Fatalf("本譜 = %v, want [2b1a+]", got)
+	}
+}
