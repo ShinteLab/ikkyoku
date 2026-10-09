@@ -220,7 +220,7 @@ type StudyState struct {
 	// ⚠️ **どの窓でも同じ入切を見せるための口。** 取り直す間隔を刻むのは
 	// フロントの持ち主の窓（`FollowKifu` を呼ぶ）。`SourceURL` が空なら必ず偽。
 	KifuFollow bool `json:"kifuFollow"`
-	// CanResign は**今ここで手番の側が投了できるか**（駒台の「投了」。2026-10-09）。
+	// CanResign は**今ここで手番の側が投了できるか**（駒台のそばの「投了」。2026-10-09）。
 	// 本譜の先端を見ていて、まだ終局しておらず、URL から読んだ棋譜でないとき。
 	// ⚠️ **中継を追っているかは見ていない**（Go 側に無い）—— 押させないのはフロント。
 	CanResign bool `json:"canResign"`
@@ -1083,7 +1083,7 @@ func (s *StudyService) Promote(id int) (st StudyState, err error) {
 	return s.changed(), nil
 }
 
-// Resign は**手番の側が投了する**（駒台の「投了」。2026-10-09）。
+// Resign は**手番の側が投了する**（駒台のそばの「投了」。2026-10-09）。
 //
 // **終局した検討だけが棋譜タブに入れられる**（`KifuService.SaveStudy`）。対局の
 // 途中で誤って登録する事故を防ぐため、登録の口は投了の行にしか無い。
