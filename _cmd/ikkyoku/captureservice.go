@@ -132,6 +132,17 @@ type CaptureService struct {
 	// （実機で踏んだ。「盤が映っていないのかも」と枠をずらしたら止まった）。
 	// **枠を動かすのは狙いを直す操作**であって、追う盤を変える操作ではない。
 	anchorRegion ikkyoku.Region
+	// shotAnchor / shotRegion / shotImage は**最後に画面から撮った 1 枚の盤の見た目**と、
+	// そのときの撮影範囲と画像（2026-10-09。`noteShot`）。
+	//
+	// **「追う」を押した瞬間に盤が映っていないときの、代わりのマスタ**（`AnchorBoard`）。
+	// 追い始める局面は解析タブが持っているので、押した瞬間に要るのは「どれが本物の盤か」だけで、
+	// 訂正のために撮った 1 枚には本物の盤が写っている。**CM や解説者の映っているあいだに押しても始められる。**
+	// ⚠️ **入れるのは `Capture`（画面から撮った 1 枚）だけ** —— 画像ファイルの 1 枚は
+	// 画面と座標系が違う（記述子は画像の中の座標）。⚠️ **ゼロ値は「無い」。**
+	shotAnchor recognize.Signature
+	shotRegion ikkyoku.Region
+	shotImage  image.Image
 	// quietOutcome は直近の `CaptureQuiet` の結果の種類（`board` / `none` / `off`）。
 	//
 	// ⚠️ **変わり目だけログに出すため**（2026-09-15）。追従は 1 秒ごとに回るので
@@ -994,7 +1005,25 @@ func (s *CaptureService) Capture() (CaptureResult, error) {
 		return CaptureResult{}, err
 	}
 
-	return s.deliver(img, path, ImageSourceScreen), nil
+	result := s.deliver(img, path, ImageSourceScreen)
+	s.noteShot(img, region, result.Debug)
+	return result, nil
+}
+
+// noteShot は**画面から撮った 1 枚の盤の見た目**を控える（2026-10-09。`shotAnchor`）。
+//
+// 使うのは「追う」を押した瞬間に盤が映っていなかったときだけ（`AnchorBoard`）で、
+// **撮ることそのものはこれを読まない**（1 回のキャプチャは他のキャプチャから独立したまま）。
+// ⚠️ **盤が取れなかった 1 枚では前の控えを消さない** —— 枠が同じなら前の盤はまだ使える
+// （使えるかは `fallbackAnchor` が撮影範囲で決める）。
+func (s *CaptureService) noteShot(img image.Image, region ikkyoku.Region, d *recognize.Debug) {
+	sig, ok := recognize.SignatureOf(d)
+	if !ok {
+		return
+	}
+	s.mu.Lock()
+	s.shotAnchor, s.shotRegion, s.shotImage = sig, region, img
+	s.mu.Unlock()
 }
 
 // CaptureQuiet は**知らせずに撮る**（中継の追従。2026-09-15）。
@@ -1469,6 +1498,11 @@ func (s *CaptureService) noteQuiet(r CaptureResult) {
 // ⚠️ **覚えるのは人が「追う」と言ったときだけ。** 撮るたびに覚え直すと、
 // **大盤に切り替わった 1 枚でマスタがそちらへ移ってしまう**（そこから先は
 // ずっと大盤を追う）。
+//
+// **押した瞬間に盤が映っていなくても始める**（2026-10-09）。そのときは最後に画面から撮った
+// 1 枚の盤をマスタにする（`fallbackAnchor`）。⚠️ **映っていれば今の 1 枚を優先する** ——
+// 撮ってから押すまでに中継の画面構成が変わっていたら、古い盤では本物の盤を「別の盤」として
+// 見送り続ける。返すのは今撮った 1 枚（盤が無ければ「盤が映っていません」の 1 周になる）。
 func (s *CaptureService) AnchorBoard() (CaptureResult, error) {
 	s.mu.Lock()
 	s.boardAnchor, s.anchorRegion, s.quietOutcome = recognize.Signature{}, ikkyoku.Region{}, ""
@@ -1481,15 +1515,24 @@ func (s *CaptureService) AnchorBoard() (CaptureResult, error) {
 	if err != nil {
 		return r, err
 	}
+	region, _, err := s.captureRegion()
+	if err != nil {
+		return r, err
+	}
+	// master は録画に残すマスタ画像（nil なら今撮った 1 枚）。
+	var master image.Image
 	sig, ok := recognize.SignatureOf(r.Debug)
 	if !ok {
-		return r, fmt.Errorf("盤が映っていないので、追う盤を決められません")
+		s.mu.Lock()
+		shot, shotRegion, shotImage := s.shotAnchor, s.shotRegion, s.shotImage
+		s.mu.Unlock()
+		if sig, err = fallbackAnchor(shot, shotRegion, region); err != nil {
+			return r, err
+		}
+		master = shotImage
+		log.Info("盤が映っていないので、撮った 1 枚の盤を追う盤にします")
 	}
-	dir := s.startFollowDir()
-	region, _, rerr := s.captureRegion()
-	if rerr != nil {
-		return r, rerr
-	}
+	dir := s.startFollowDir(master)
 	s.mu.Lock()
 	s.boardAnchor, s.anchorRegion = sig, region
 	s.mu.Unlock()
@@ -1498,15 +1541,33 @@ func (s *CaptureService) AnchorBoard() (CaptureResult, error) {
 	return r, nil
 }
 
+// fallbackAnchor は**押した瞬間に盤が映っていなかったときのマスタ**を決める（2026-10-09）。
+//
+// shot は最後に画面から撮った 1 枚の盤（`shotAnchor`）、shotRegion はそのときの撮影範囲、
+// region は今の撮影範囲。⚠️ **撮影範囲が違えば使わない** —— 記述子は画像の中の座標なので、
+// 枠を動かしたあとの盤は必ず食い違う（そこから全部見送られる）。
+func fallbackAnchor(shot recognize.Signature, shotRegion, region ikkyoku.Region) (recognize.Signature, error) {
+	if shot.Board.Dx() <= 0 {
+		return recognize.Signature{}, fmt.Errorf("盤が映っていないので、追う盤を決められません")
+	}
+	if shotRegion != region {
+		return recognize.Signature{}, fmt.Errorf("盤が映っていないので、追う盤を決められません（撮ったあとに枠が動いたので、撮った 1 枚の盤も使えません）")
+	}
+	return shot, nil
+}
+
 // startFollowDir は録画の保存先を作り、**マスタ画像**を残す（2026-09-15）。
 //
 // ⚠️ **マスタを残すのが要点。** 追いかける基準そのものなので、
 // **これが無いと「なぜ別の盤だと判断したか」を後から確かめられない**
 // （`recognize.Signature` は矩形と色しか持っていない）。
 //
+// master はマスタにした 1 枚（nil なら今撮った 1 枚）。撮った 1 枚の盤を使ったときは
+// そちらを渡す（2026-10-09）—— 盤の映っていない今の 1 枚を残しても基準にならない。
+//
 // ⚠️ **失敗しても追跡を止めないこと**（設計原則3）。録画はおまけで、
 // **残らなくても中継は追える。**
-func (s *CaptureService) startFollowDir() string {
+func (s *CaptureService) startFollowDir(master image.Image) string {
 	base, err := ikkyoku.DefaultOutDir()
 	if err != nil {
 		log.Warn("録画の保存先が決められません", "error", err)
@@ -1515,9 +1576,12 @@ func (s *CaptureService) startFollowDir() string {
 	// ⚠️ **今撮った 1 枚をそのまま使うこと**（`CaptureQuiet` が控えている）。
 	// 撮り直すと**マスタと記述子が別のフレームになる** —— 数えるのは同じ盤でも、
 	// 手が被った瞬間などに**画像と判断がずれる**。
-	s.mu.Lock()
-	img := s.lastQuiet
-	s.mu.Unlock()
+	img := master
+	if img == nil {
+		s.mu.Lock()
+		img = s.lastQuiet
+		s.mu.Unlock()
+	}
 	dir := filepath.Join(base, "follow", time.Now().Format("20060102-150405"))
 	if img != nil {
 		if _, err := ikkyoku.SavePNGAs(img, dir, "master.png"); err != nil {
