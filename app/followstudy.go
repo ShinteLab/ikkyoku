@@ -1084,6 +1084,12 @@ func (s *StudyService) FollowCells(changed []int, read []CellPiece, promo []Prom
 	} else {
 		why = append(why, "行き先を読んだ")
 	}
+	// ⚠️ **打つ手は、行き先が打った駒の種類に読めること**（2026-10-09。`followDropsFit`）。候補が 1 通りでも、
+	// 2 通りに分かれたとき（`followPickByRead`）と同じく種類で確かめる —— 打った駒は盤から決まらない。
+	if ok, bad, got := followDropsFit(base, since, moves, read, rotated); !ok {
+		log.Info("打った駒の種類が行き先の読みと違います（81 マスを読みます）", "moves", moves, "マス", bad, "読んだ駒", got)
+		return FollowAuto{Kind: FollowUnreachable, Reason: "打った駒の種類が行き先の読みと違います", State: s.State()}, nil
+	}
 	// ⚠️ **成らない手は、行き先の見た目が動く前の駒と同じであること**（2026-10-08。`followLooksDiffer`）。
 	// ゲーム画面で銀をつまむと、浮いた銀のマスと光った行き先のマスが変わり、「銀が 1 マス動いた」と読めてしまう。
 	// 行き先の読みは光ったマスを手前側の歩と読み、先後が合うので通って、つまんだだけの △5三銀 を足した。
@@ -1335,6 +1341,36 @@ func followBackedByRead(base *position.Position, since, moves []string, read []C
 		// 撮った画像の手前側は、後手目線なら後手。
 		if !found || !readable || (up != rotated) != c.Black() {
 			return false, squareText(i/9, i%9), cp.Piece + "/" + cp.Side
+		}
+	}
+	return true, "", ""
+}
+
+// followDropsFit は手順 moves の**打つ手の行き先が、打った駒の種類に読めているか**を返す（2026-10-09）。
+//
+// **実機の症状**（2026-10-09 の中継）: 後手の持ち駒が角だけの局面で、7二 を「後手の金」と読んだ 1 枚から
+// △7二角打 を足した（本当は △7二金）。候補が 1 通りだったので、行き先は先後だけ確かめて（`followBackedByRead`）
+// 種類を見なかった。銀も持っていれば銀打と角打に分かれ、種類を読んでどちらも合わずに落ちていた。
+// **打つ手は、どの駒を打ったかが盤から決まらない**ので、「駒の種類は見ない」（動かす手の決めごと）を当てない。
+// ⚠️ **合うの意味は `followCellFits`**（分かれたときと同じ。読めない "?" も合わない —— 81 マスを読む）。
+// ⚠️ **打ったあとに動いた・取られた駒は見ない**（行き先にもう居ない）。
+func followDropsFit(base *position.Position, since, moves []string, read []CellPiece, rotated bool) (ok bool, bad, got string) {
+	final := followBoard(base, since, moves)
+	if final == nil {
+		return false, "", ""
+	}
+	for _, mv := range moves {
+		if len(mv) != 4 || mv[1] != '*' || mv[2] < '1' || mv[2] > '9' || mv[3] < 'a' || mv[3] > 'i' {
+			continue
+		}
+		r, f := int(mv[3]-'a'), 9-int(mv[2]-'0')
+		c, err := final.At(r, f)
+		if err != nil || c.IsEmpty() || c.Promoted() || !strings.EqualFold(c.Mark(), mv[0:1]) {
+			continue
+		}
+		cp, found := followReadAt(read, r*9+f, rotated)
+		if !found || !followCellFits(c, cp.Piece) {
+			return false, squareText(r, f), cp.Piece + "/" + cp.Side
 		}
 	}
 	return true, "", ""

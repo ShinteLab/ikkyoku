@@ -149,6 +149,10 @@ func Rank(from *Position, target *Board, opt ConnectOptions) (RankResult, error)
 			if !backed(from.Board, next.Board, target, opt.Unseen) {
 				continue
 			}
+			// ⚠️ **打つ手は、行き先がはっきり別の種類に読めたら候補にしない**（`dropsBacked`。2026-10-09）。
+			if !dropsBacked([]string{m.USI}, next.Board, target, cost) {
+				continue
+			}
 			add([]string{m.USI}, next.Board)
 		}
 	}

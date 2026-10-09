@@ -26,6 +26,9 @@ import (
 	"math"
 	"sort"
 
+	"github.com/ShinteLab/core/sfen"
+	coreusi "github.com/ShinteLab/core/usi"
+
 	"github.com/ShinteLab/ikkyoku/legal"
 )
 
@@ -687,7 +690,8 @@ func (s *connect) dfs(pos *Position, g int) bool {
 	// 必ず通る（撮った盤とぴったり同じなので）。効くのは修復のときだけ。
 	// ⚠️ **読めていないマスが混じると、厳密一致でも効く**（読めていないマスは食い違いに
 	// 数えないので、行き先をそこへ逃がした手順が費用 0 で通ってしまう）。
-	if g > 0 && d.cost <= s.tolerance+costEpsilon && backed(s.root, pos.Board, s.target, s.unseen) {
+	if g > 0 && d.cost <= s.tolerance+costEpsilon && backed(s.root, pos.Board, s.target, s.unseen) &&
+		dropsBacked(s.path, pos.Board, s.target, s.cost) {
 		s.sols = append(s.sols, solution{
 			moves: append([]string(nil), s.path...),
 			cost:  d.cost,
@@ -1049,6 +1053,46 @@ func backed(from, cand, tgt *Board, unseen *CellMask) bool {
 			if t.IsEmpty() || t.Black() != c.Black() {
 				return false
 			}
+		}
+	}
+	return true
+}
+
+// dropKindMinCost は**打った駒の行き先を「別の種類の駒」と言い切る**、そのマスの読みの確かさ（費用表の値）の下限
+// （2026-10-09）。⚠️ **当て推量**（app の `followArrivedMinCost` と同じ線にしてある）。
+const dropKindMinCost = 0.5
+
+// dropsBacked は手順 moves の**打つ手の行き先が、撮った盤（tgt）ではっきり別の種類の駒に読めていないか**を返す
+// （2026-10-09。`backed` の打つ手版）。final は moves を指し終えた盤、cost は費用表（nil ならどのマスも確か）。
+//
+// **打つ手は、どの駒を打ったかが盤から決まらない。** 種類そのものが手の中身なので、`backed` の「駒の種類までは
+// 見ない」（動かす手は動いた駒が局面から分かる）をそのまま当てない。**実機の症状**（2026-10-09 の中継）: 後手の持ち駒が
+// 角だけの局面で、7二 を「後手の金」と読んだ 1 枚から △7二角打 を足した（本当は △7二金）。銀も持っていれば銀打と角打に
+// 分かれて種類を読み、どちらも合わずに落ちていた —— 持ち駒の顔ぶれで判断が変わっていた。
+// ⚠️ **見るのは種類だけ**（成りは見ない。打った駒は成っていないが、成駒の読みは外れやすい）。
+// ⚠️ **読みの弱いマス（`dropKindMinCost` 未満）・空き・相手の駒は見ない**（空きと先後は `backed` が見る）。
+// ⚠️ **打ったあとに動いた・取られた駒は見ない**（行き先にもう居ない）。
+func dropsBacked(moves []string, final, tgt *Board, cost *CellCost) bool {
+	for _, move := range moves {
+		mv, ok := coreusi.ParseMove(move)
+		if !ok || mv.Drop == 0 {
+			continue
+		}
+		r, f, err := squareIndex(mv.ToX, mv.ToY)
+		if err != nil {
+			continue
+		}
+		base, _ := sfen.ParsePieceLetter(mv.Drop)
+		c := final.cells[r][f]
+		if c.IsEmpty() || c.promoted || c.piece != base {
+			continue
+		}
+		t := tgt.cells[r][f]
+		if t.IsEmpty() || t.Black() != c.Black() || cost.at(r, f) < dropKindMinCost {
+			continue
+		}
+		if t.piece != c.piece {
+			return false
 		}
 	}
 	return true
