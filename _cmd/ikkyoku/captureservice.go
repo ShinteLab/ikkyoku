@@ -132,17 +132,21 @@ type CaptureService struct {
 	// （実機で踏んだ。「盤が映っていないのかも」と枠をずらしたら止まった）。
 	// **枠を動かすのは狙いを直す操作**であって、追う盤を変える操作ではない。
 	anchorRegion ikkyoku.Region
-	// shotAnchor / shotRegion / shotImage は**最後に画面から撮った 1 枚の盤の見た目**と、
-	// そのときの撮影範囲と画像（2026-10-09。`noteShot`）。
-	//
-	// **「追う」を押した瞬間に盤が映っていないときの、代わりのマスタ**（`AnchorBoard`）。
-	// 追い始める局面は解析タブが持っているので、押した瞬間に要るのは「どれが本物の盤か」だけで、
-	// 訂正のために撮った 1 枚には本物の盤が写っている。**CM や解説者の映っているあいだに押しても始められる。**
+	// lastShot は**最後に画面から撮った 1 枚**の盤の見た目（2026-10-09。`noteShot`）。
 	// ⚠️ **入れるのは `Capture`（画面から撮った 1 枚）だけ** —— 画像ファイルの 1 枚は
-	// 画面と座標系が違う（記述子は画像の中の座標）。⚠️ **ゼロ値は「無い」。**
-	shotAnchor recognize.Signature
-	shotRegion ikkyoku.Region
-	shotImage  image.Image
+	// 画面と座標系が違う（記述子は画像の中の座標）。
+	lastShot shotAnchor
+	// followShot は**解析タブの根を採った（訂正した）1 枚**（2026-10-09。`SetFollowShot`）。
+	//
+	// **訂正してから追うときのマスタはこれ**（`AnchorBoard`）。押した瞬間の 1 枚は使わない ——
+	// 押したときに棋士の手が盤に被っていて、初手から「別の盤」になった（実機で踏んだ）。
+	// 訂正した 1 枚は人が盤を確かめた 1 枚なので、マスタとしてこれより確かなものは無い。
+	// ⚠️ **今の根を採った 1 枚のときだけ使う**（`session` を `studySession` と突き合わせる。
+	// 棋譜や新規対局で根を入れ替えたあとに、前の 1 枚の盤を追わない）。
+	followShot shotAnchor
+	// studySession は解析タブの今の検討の id を返す（`main` が `StudyService.Session` を入れる）。
+	// ⚠️ **nil なら訂正した 1 枚は使わない**（押した瞬間の 1 枚で決める。今までどおり）。
+	studySession func() string
 	// quietOutcome は直近の `CaptureQuiet` の結果の種類（`board` / `none` / `off`）。
 	//
 	// ⚠️ **変わり目だけログに出すため**（2026-09-15）。追従は 1 秒ごとに回るので
@@ -1006,24 +1010,60 @@ func (s *CaptureService) Capture() (CaptureResult, error) {
 	}
 
 	result := s.deliver(img, path, ImageSourceScreen)
-	s.noteShot(img, region, result.Debug)
+	s.noteShot(img, region, path, result.Debug)
 	return result, nil
 }
 
-// noteShot は**画面から撮った 1 枚の盤の見た目**を控える（2026-10-09。`shotAnchor`）。
+// shotAnchor は**撮った 1 枚の盤の見た目**と、そのときの撮影範囲・画像・パス（2026-10-09）。
+// ⚠️ **ゼロ値は「無い」**（`ok`）。
+type shotAnchor struct {
+	sig    recognize.Signature
+	region ikkyoku.Region
+	img    image.Image
+	path   string
+	// session は根を採った検討の id（`followShot` のときだけ埋まる）。
+	session string
+}
+
+func (a shotAnchor) ok() bool { return a.sig.Board.Dx() > 0 }
+
+// noteShot は**画面から撮った 1 枚の盤の見た目**を控える（2026-10-09。`lastShot`）。
 //
-// 使うのは「追う」を押した瞬間に盤が映っていなかったときだけ（`AnchorBoard`）で、
+// 使うのは訂正してから追うときだけ（`SetFollowShot` → `AnchorBoard`）で、
 // **撮ることそのものはこれを読まない**（1 回のキャプチャは他のキャプチャから独立したまま）。
-// ⚠️ **盤が取れなかった 1 枚では前の控えを消さない** —— 枠が同じなら前の盤はまだ使える
-// （使えるかは `fallbackAnchor` が撮影範囲で決める）。
-func (s *CaptureService) noteShot(img image.Image, region ikkyoku.Region, d *recognize.Debug) {
-	sig, ok := recognize.SignatureOf(d)
-	if !ok {
-		return
+// ⚠️ **盤が取れなかった 1 枚でも入れ替える**（パスだけ持たせる）—— その 1 枚を訂正して採っても、
+// 前の 1 枚の盤をマスタにしない。
+func (s *CaptureService) noteShot(img image.Image, region ikkyoku.Region, path string, d *recognize.Debug) {
+	shot := shotAnchor{path: path}
+	if sig, ok := recognize.SignatureOf(d); ok {
+		shot.sig, shot.region, shot.img = sig, region, img
 	}
 	s.mu.Lock()
-	s.shotAnchor, s.shotRegion, s.shotImage = sig, region, img
+	s.lastShot = shot
 	s.mu.Unlock()
+}
+
+// SetFollowShot は**解析タブの根を採った 1 枚**を、中継を追う盤（マスタ）として覚える（2026-10-09）。
+//
+// フロントが「この局面を解析する」で根を採った直後に、訂正タブの画像のパスを渡す
+// （画像の無い局面・画像ファイルの局面なら空か、撮った 1 枚と違うパスになる）。
+// ⚠️ **最後に画面から撮った 1 枚と同じパスで、盤が取れていたときだけ覚える**。それ以外は忘れる
+// （押した瞬間の 1 枚で決める。今までどおり）。
+func (s *CaptureService) SetFollowShot(path string) {
+	session := ""
+	if s.studySession != nil {
+		session = s.studySession()
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	shot := s.lastShot
+	if path == "" || shot.path != path || !shot.ok() || session == "" {
+		s.followShot = shotAnchor{}
+		return
+	}
+	shot.session = session
+	s.followShot = shot
+	log.Info("訂正した 1 枚を、中継を追う盤として覚えました", "path", path, "board", shot.sig.Board)
 }
 
 // CaptureQuiet は**知らせずに撮る**（中継の追従。2026-09-15）。
@@ -1490,7 +1530,7 @@ func (s *CaptureService) noteQuiet(r CaptureResult) {
 	}
 }
 
-// AnchorBoard は**今映っている盤を「これから追う盤」として覚える**（2026-09-15）。
+// AnchorBoard は**「これから追う盤」（マスタ）を決めて覚える**（2026-09-15）。
 //
 // ⚠️ **記述子だけを覚える**（局面は覚えない）。手が進めば駒は動くので、
 // **同じ盤かどうかの判断には使えない。**
@@ -1499,10 +1539,11 @@ func (s *CaptureService) noteQuiet(r CaptureResult) {
 // **大盤に切り替わった 1 枚でマスタがそちらへ移ってしまう**（そこから先は
 // ずっと大盤を追う）。
 //
-// **押した瞬間に盤が映っていなくても始める**（2026-10-09）。そのときは最後に画面から撮った
-// 1 枚の盤をマスタにする（`fallbackAnchor`）。⚠️ **映っていれば今の 1 枚を優先する** ——
-// 撮ってから押すまでに中継の画面構成が変わっていたら、古い盤では本物の盤を「別の盤」として
-// 見送り続ける。返すのは今撮った 1 枚（盤が無ければ「盤が映っていません」の 1 周になる）。
+// **訂正してから追うときは、訂正した 1 枚の盤をマスタにする**（2026-10-09。`SetFollowShot` / `pickAnchor`）。
+// ⚠️ **押した瞬間の 1 枚をマスタにしない** —— 押したときに棋士の手が盤に被っていて、
+// 初手から「別の盤」になった（実機で踏んだ）。押した瞬間に盤が映っていなくても始められる。
+// 押した瞬間の 1 枚を使うのは、訂正した 1 枚が無いとき（棋譜・新規対局で根を入れ替えた）と、
+// 撮ったあとに枠を動かしたときだけ。返すのは今撮った 1 枚（最初の 1 周として流す）。
 func (s *CaptureService) AnchorBoard() (CaptureResult, error) {
 	s.mu.Lock()
 	s.boardAnchor, s.anchorRegion, s.quietOutcome = recognize.Signature{}, ikkyoku.Region{}, ""
@@ -1519,18 +1560,32 @@ func (s *CaptureService) AnchorBoard() (CaptureResult, error) {
 	if err != nil {
 		return r, err
 	}
+	session := ""
+	if s.studySession != nil {
+		session = s.studySession()
+	}
+	s.mu.Lock()
+	shot := s.followShot
+	s.mu.Unlock()
+	live, liveOK := recognize.SignatureOf(r.Debug)
+	sig, fromShot, err := pickAnchor(shot, session, live, liveOK, region)
+	if err != nil {
+		return r, err
+	}
 	// master は録画に残すマスタ画像（nil なら今撮った 1 枚）。
 	var master image.Image
-	sig, ok := recognize.SignatureOf(r.Debug)
-	if !ok {
-		s.mu.Lock()
-		shot, shotRegion, shotImage := s.shotAnchor, s.shotRegion, s.shotImage
-		s.mu.Unlock()
-		if sig, err = fallbackAnchor(shot, shotRegion, region); err != nil {
-			return r, err
+	if fromShot {
+		master = shot.img
+		// ⚠️ **今撮った 1 枚もマスタと突き合わせる**（最初の 1 周として流すので、手が被った 1 枚や
+		// 大盤を、確かめないまま繋ぎに渡さない）。
+		if liveOK {
+			if same, why := sig.Matches(live); !same {
+				r.OffBoard, r.OffBoardReason = true, why
+			}
 		}
-		master = shotImage
-		log.Info("盤が映っていないので、撮った 1 枚の盤を追う盤にします")
+		log.Info("訂正した 1 枚の盤を追う盤にします", "path", shot.path)
+	} else if shot.ok() && shot.session == session {
+		log.Info("撮ったあとに枠が動いたので、今映っている盤を追う盤にします")
 	}
 	dir := s.startFollowDir(master)
 	s.mu.Lock()
@@ -1541,19 +1596,22 @@ func (s *CaptureService) AnchorBoard() (CaptureResult, error) {
 	return r, nil
 }
 
-// fallbackAnchor は**押した瞬間に盤が映っていなかったときのマスタ**を決める（2026-10-09）。
+// pickAnchor は**追う盤（マスタ）**を決める（2026-10-09）。fromShot は訂正した 1 枚を使ったか。
 //
-// shot は最後に画面から撮った 1 枚の盤（`shotAnchor`）、shotRegion はそのときの撮影範囲、
-// region は今の撮影範囲。⚠️ **撮影範囲が違えば使わない** —— 記述子は画像の中の座標なので、
-// 枠を動かしたあとの盤は必ず食い違う（そこから全部見送られる）。
-func fallbackAnchor(shot recognize.Signature, shotRegion, region ikkyoku.Region) (recognize.Signature, error) {
-	if shot.Board.Dx() <= 0 {
-		return recognize.Signature{}, fmt.Errorf("盤が映っていないので、追う盤を決められません")
+// shot は根を採った（訂正した）1 枚（`followShot`）、session は解析タブの今の検討の id、
+// live / liveOK は押した瞬間の 1 枚の盤、region は今の撮影範囲。
+//   - **訂正した 1 枚が今の根のもので、枠も動いていなければそれ**（押した瞬間の 1 枚は見ない）
+//   - ⚠️ **撮影範囲が違えば使わない** —— 記述子は画像の中の座標なので、枠を動かしたあとの盤は
+//     必ず食い違う（そこから全部見送られる）。枠を動かすのは狙いを直す操作なので、今の 1 枚で決め直す
+//   - それ以外は押した瞬間の 1 枚。盤が映っていなければ始めない
+func pickAnchor(shot shotAnchor, session string, live recognize.Signature, liveOK bool, region ikkyoku.Region) (recognize.Signature, bool, error) {
+	if shot.ok() && session != "" && shot.session == session && shot.region == region {
+		return shot.sig, true, nil
 	}
-	if shotRegion != region {
-		return recognize.Signature{}, fmt.Errorf("盤が映っていないので、追う盤を決められません（撮ったあとに枠が動いたので、撮った 1 枚の盤も使えません）")
+	if !liveOK {
+		return recognize.Signature{}, false, fmt.Errorf("盤が映っていないので、追う盤を決められません")
 	}
-	return shot, nil
+	return live, false, nil
 }
 
 // startFollowDir は録画の保存先を作り、**マスタ画像**を残す（2026-09-15）。
