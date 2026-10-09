@@ -277,3 +277,112 @@ func TestFollowRewindIgnoresWeakPhantomPiece(t *testing.T) {
 		t.Fatalf("本譜 = %v, want [2f2e]", got)
 	}
 }
+
+// ⚠️ **何も言えない 1 枚では、控えた差し替えを捨てないこと**（2026-10-09。`dropRewindUnlessFits`）。
+//
+// **実機の症状**: △7二角打 を △7二金 に差し替える案が 3 回出たが、そのたびに次に読んだ 1 枚（光ったマスが多く
+// 「隔たりが大きすぎます」）で捨てられ、差し替わるまで 64 秒かかった。その 1 枚は先端を支持していない。
+// ⚠️ **残した差し替えは、変わっていない 1 枚（`FollowConfirm`）では据えないこと**（同じ差し替えを言う 1 枚で据える）。
+func TestFollowRewindSurvivesSilentFrame(t *testing.T) {
+	s, _ := following(t)
+	guessMoves(t, s, "2h4h")
+	if a, err := s.FollowAuto(boardAfter(t, "7g7f"), evenConf(0.9), nil, []PromoEvidence{}); err != nil || !a.Pending {
+		t.Fatalf("1 枚目で控えていません: %+v (%v)", a, err)
+	}
+	// 何も言えない 1 枚（5 段目に幻の駒が並んだ。どこからも繋がらないが、▲7六歩 の側のほうが合っている）。
+	noisy := strings.Replace(boardAfter(t, "7g7f"), "/9/2P6/", "/lllllllll/2P6/", 1)
+	if a, err := s.FollowAuto(noisy, evenConf(0.9), nil, []PromoEvidence{}); err != nil || a.Rewound || a.Applied {
+		t.Fatalf("何も言えない 1 枚で差し替えたか足しました: %+v (%v)", a, err)
+	}
+	if a, err := s.FollowConfirm(); err != nil || a.Rewound {
+		t.Fatalf("残しているだけの差し替えを、変わっていない 1 枚で据えました: %+v (%v)", a, err)
+	}
+	a, err := s.FollowAuto(boardAfter(t, "7g7f"), evenConf(0.9), nil, []PromoEvidence{})
+	if err != nil || !a.Rewound {
+		t.Fatalf("同じ差し替えを言う 1 枚で据えていません: %+v (%v)", a, err)
+	}
+	if got := mainLine(s); !slices.Equal(got, []string{"7g7f"}) {
+		t.Fatalf("本譜 = %v, want [7g7f]", got)
+	}
+}
+
+// cellsRewindLine は △3二角打 を推測で足す前の手順（▲7六歩 △3四歩 ▲2二角成 △同銀 ▲2六歩。後手は角を持っている）。
+var cellsRewindLine = []string{"7g7f", "3c3d", "8h2b+", "3a2b", "2g2f"}
+
+// cellsRewindStudy は cellsRewindLine を指し、△3二角打 を推測で足して、その 1 枚を速い経路の比べる相手にした解析タブ。
+func cellsRewindStudy(t *testing.T) *StudyService {
+	t.Helper()
+	s, _ := following(t)
+	for _, m := range cellsRewindLine {
+		if _, err := s.Play(m); err != nil {
+			t.Fatalf("Play(%q): %v", m, err)
+		}
+	}
+	guessMoves(t, s, "B*3b")
+	s.markBase()
+	return s
+}
+
+// ⚠️ **速い経路でも、推測で足した末尾の手を差し替えること**（2026-10-09。`followCellsRewind`）。
+//
+// **実機の形**（手で操作するデジタル盤）: 金をドラッグしているあいだ、元のマスに金が残ったまま行き先に金の絵が重なり、
+// 変わったマスが行き先だけになって角打ちを推測で足した。次の 1 枚で元のマス 4一 が空き、金の動ける 3一・4二・5二 が光った。
+// 先端から先には合う手順が無いが、角打ちを戻せば △3二金 で説明が付く（3二 の見た目は金のまま変わらない）。
+// ⚠️ 行き先（3二）を読んで後手の駒を確かめてから控え、⚠️ 2 枚目で差し替えること。
+func TestFollowCellsRewindsGuessedDrop(t *testing.T) {
+	s := cellsRewindStudy(t)
+	changed := cellIdx("4a", "3a", "4b", "5b")
+	a := followCellsRead(t, s, changed, false, append(slices.Clone(cellsRewindLine), "4a3b")...)
+	if !a.Pending || a.Rewound || a.Applied {
+		t.Fatalf("1 枚目で控えていないか、差し替えました: %+v", a)
+	}
+	if got := mainLine(s); got[len(got)-1] != "B*3b" {
+		t.Fatalf("1 枚目で本譜が動きました: %v", got)
+	}
+	a, err := s.FollowConfirm()
+	if err != nil || !a.Rewound {
+		t.Fatalf("変わっていない 1 枚で差し替えていません: %+v (%v)", a, err)
+	}
+	if got := mainLine(s); !slices.Equal(got, append(slices.Clone(cellsRewindLine), "4a3b")) {
+		t.Fatalf("本譜 = %v", got)
+	}
+	if !hasBranch(s, "B*3b") {
+		t.Error("元の手（△3二角打）が枝に残っていません")
+	}
+}
+
+// ⚠️ **速い経路で控えた差し替えも、何も言えない 1 枚では捨てず、同じ差し替えを言う 1 枚で据えること**。
+func TestFollowCellsRewindSurvivesUnclearFrame(t *testing.T) {
+	s := cellsRewindStudy(t)
+	changed := cellIdx("4a", "3a", "4b", "5b")
+	seen := append(slices.Clone(cellsRewindLine), "4a3b")
+	if a := followCellsRead(t, s, changed, false, seen...); !a.Pending {
+		t.Fatalf("1 枚目で控えていません: %+v", a)
+	}
+	// 何も説明できない 1 枚（先手の 9九 だけが変わった）。
+	if a, err := s.FollowCells(cellIdx("9i"), nil, nil); err != nil || a.Rewound || a.Applied || a.Pending {
+		t.Fatalf("説明できない 1 枚で何かしました: %+v (%v)", a, err)
+	}
+	if a, err := s.FollowConfirm(); err != nil || a.Rewound {
+		t.Fatalf("残しているだけの差し替えを、変わっていない 1 枚で据えました: %+v (%v)", a, err)
+	}
+	a := followCellsRead(t, s, changed, false, seen...)
+	if !a.Rewound {
+		t.Fatalf("同じ差し替えを言う 1 枚で据えていません: %+v", a)
+	}
+}
+
+// ⚠️ **印の無い手は速い経路でも差し替えないこと**（今までどおり「説明できる手がありません」で待つ）。
+func TestFollowCellsRewindKeepsUnguessedMoves(t *testing.T) {
+	s, _ := following(t)
+	for _, m := range append(slices.Clone(cellsRewindLine), "B*3b") {
+		if _, err := s.Play(m); err != nil {
+			t.Fatalf("Play(%q): %v", m, err)
+		}
+	}
+	s.markBase()
+	a, err := s.FollowCells(cellIdx("4a", "3a", "4b", "5b"), nil, nil)
+	if err != nil || a.Pending || a.Rewound || len(a.ReadCells) > 0 || !a.NoMoves {
+		t.Fatalf("人が指した手を差し替えようとしました: %+v (%v)", a, err)
+	}
+}

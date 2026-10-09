@@ -319,6 +319,9 @@ func (s *StudyService) Adopt() (st StudyState, err error) {
 	if _, err := p.SFEN(); err != nil {
 		return s.State(), err
 	}
+	if err := foulOf(p); err != nil {
+		return s.State(), err
+	}
 
 	s.mu.Lock()
 	// **根ごと入れ替える。** 前の手順と（呼び出し側が消す）解析結果は捨てる ——
@@ -340,6 +343,24 @@ func (s *StudyService) Adopt() (st StudyState, err error) {
 
 	log.Info("局面を解析タブへ採りました", "sfen", st.SFEN, "rotated", rotated)
 	return st, nil
+}
+
+// foulOf は**局面として成り立っていない点**を返す（無ければ nil。2026-10-09）。
+//
+// 確定させると、そのまま解析にも中継の追い始めにも使われる（二歩の局面から追い始めた。実機で踏んだ）。
+// 中身は `position.Position.Warnings()` そのもので、**属性ごとに許すものはあちらが既に外している**:
+//
+//   - 平手（属性なし）… 何も許さない（二歩・行き所のない駒・玉の数・駒数の超過。足りない駒は未決で先に断る）
+//   - 駒落ち（`HandsFixed`）… **駒が少ないことだけ**許す（二歩などは平手と同じく駄目）
+//   - 詰将棋（`MateProblem`）… **攻方（先手）の玉が無いことだけ**許す（玉方の玉は要る。二歩なども駄目）
+//
+// ⚠️ **ここで属性を見て許すものを足さないこと**（許す範囲は `Warnings()` の 1 か所で決める。
+// 訂正タブの警告と、確定を断る理由が食い違わないように）。⚠️ **自前で検証を書かない**。
+func foulOf(p *position.Position) error {
+	if w := p.Warnings(); len(w) > 0 {
+		return fmt.Errorf("局面がおかしいので確定できません: %s", strings.Join(w, " / "))
+	}
+	return nil
 }
 
 // KifuLoad は棋譜を読み込んだ結果（入力タブの「棋譜を貼り付ける」）。

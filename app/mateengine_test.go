@@ -70,8 +70,12 @@ func TestSetEngineMate(t *testing.T) {
 // 通常の解析を巻き込まない）。
 func TestSolveMateWithoutMateEngine(t *testing.T) {
 	pos := NewPositionService()
-	if _, err := pos.LoadEmpty(); err != nil {
-		t.Fatalf("LoadEmpty: %v", err)
+	// ⚠️ **玉方の玉は置くこと**（2026-10-09。玉が 1 枚も無い詰将棋は確定できない。`foulOf`）。
+	if _, err := pos.Load("4k4/9/9/9/9/9/9/9/9"); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if _, err := pos.SetMateProblem(true); err != nil {
+		t.Fatalf("SetMateProblem: %v", err)
 	}
 	study := NewStudyService(pos)
 	if _, err := study.Adopt(); err != nil {

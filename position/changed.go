@@ -175,3 +175,99 @@ func changedFits(from, to *Board, changed, extra *CellMask) bool {
 	}
 	return seen
 }
+
+// SideChangedMoves は from から、**比べる相手の盤 base と先後・駒の有無だけで比べて**、変わったマスの組
+// （changed）と合う手順を返す（最大 maxDepth 手。2026-10-09。推測で足した手の差し替え用）。
+//
+// `ChangedMoves` との違いは 2 つ。どちらも**比べる相手の 1 枚が、覚えている局面と種類まで合っているとは限らない**
+// （推測で足した手は種類を外していることがある）ための緩め:
+//
+//   - **駒の種類は比べない**（先後と駒の有無だけ）。△7二角打 を推測で足したあと本当は △7二金 だったとき、
+//     7二 の見た目は変わらないので、種類まで比べると合う手順が無くなる
+//   - **どちらの盤でも空きのマスは、変わっていてよい**（光ったマス。駒を動かした・つまんだときに行き先が光る画面がある）
+//
+// from は base の局面より前の局面（推測の手を戻したところ）でよい。reach は**動かしてよいマスに足すマス**
+// （戻した手のマス。行き先が変わったマスに入っていないことがある —— 上の 7二）。
+// 返すのは**いちばん短い手数で合う手順のすべて**（1 つでなければ呼び出し側は決め打ちしないこと）。
+//
+// ⚠️ **先後か駒の有無が変わったのに、変わったマスに入っていないマスがあれば合わない**（見えていない手は採らない）。
+// ⚠️ **駒のあるマスが変わったのに、先後も駒の有無も変わらないなら合わない**（光っただけでは説明しない）。
+func SideChangedMoves(from *Position, base *Board, changed, extra, reach *CellMask, maxDepth int) ([][]string, error) {
+	if from == nil || from.Board == nil || base == nil {
+		return nil, fmt.Errorf("ikkyoku/position: 割り出す元の局面がありません")
+	}
+	if from.Turn == TurnUnknown {
+		return nil, fmt.Errorf("ikkyoku/position: 手番が決まっていないので割り出せません")
+	}
+	if changed.Count() == 0 {
+		return nil, nil
+	}
+	allowed := func(r, f int) bool { return changed.at(r, f) || extra.at(r, f) || reach.at(r, f) }
+	for depth := 1; depth <= maxDepth; depth++ {
+		var out [][]string
+		var walk func(p *Position, line []string) error
+		walk = func(p *Position, line []string) error {
+			if len(line) == depth {
+				if SideFits(base, p.Board, changed, extra) {
+					out = append(out, append([]string(nil), line...))
+				}
+				return nil
+			}
+			sfenStr, err := p.SFEN()
+			if err != nil {
+				return err
+			}
+			moves, err := legal.Moves(sfenStr)
+			if err != nil {
+				return err
+			}
+			for _, m := range moves {
+				// ⚠️ **動かしてよいマスの外なら入らない**（枝を刈る。`ChangedMoves` と同じ）。
+				if m.FromRank >= 0 && !allowed(m.FromRank, m.FromFile) {
+					continue
+				}
+				if !allowed(m.ToRank, m.ToFile) {
+					continue
+				}
+				next := p.Clone()
+				if err := next.ApplyMove(m.USI); err != nil {
+					continue
+				}
+				if err := walk(next, append(line, m.USI)); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		if err := walk(from, nil); err != nil {
+			return nil, err
+		}
+		if len(out) > 0 {
+			return out, nil
+		}
+	}
+	return nil, nil
+}
+
+// SideFits は**盤 base から盤 to への変化が、先後と駒の有無だけで見て変わったマスの組と合うか**を返す（2026-10-09）。
+// 合うの意味は `SideChangedMoves`。⚠️ **先後も駒の有無も 1 マスも変わらなければ偽**。
+func SideFits(base, to *Board, changed, extra *CellMask) bool {
+	if base == nil || to == nil {
+		return false
+	}
+	seen := false
+	for r := 0; r < 9; r++ {
+		for f := 0; f < 9; f++ {
+			a, b := base.cells[r][f], to.cells[r][f]
+			moved := a.IsEmpty() != b.IsEmpty() || (!a.IsEmpty() && a.Black() != b.Black())
+			switch {
+			case moved && !changed.at(r, f):
+				return false
+			case !moved && changed.at(r, f) && !extra.at(r, f) && !(a.IsEmpty() && b.IsEmpty()):
+				return false
+			}
+			seen = seen || moved
+		}
+	}
+	return seen
+}

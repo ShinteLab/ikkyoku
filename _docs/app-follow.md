@@ -341,6 +341,15 @@ followProbe ─> Rank（候補から選ぶ。29µs）─┬─ 読めていな�
   - ⚠️ **2 枚続けて同じ差し替えで据える**（ユーザーの判断。`TestFollowRewindNeedsTwoFrames`）。変わっていない 1 枚
     （`FollowConfirm`）でも確かめてよい（`TestFollowRewindConfirmsOnUnchangedFrame`）。控えたら**先端から足す手の控えは捨てる**
   - ⚠️ **手や頭が被った 1 枚・費用表の無い 1 枚では試さない**（控えた差し替えも捨てずに待つ。`TestFollowRewindIgnoresCoveredFrame`）
+  - ⚠️ **差し替えを言わない 1 枚では、先端の盤のほうがよく合うときだけ控えを捨てる**（2026-10-09。`dropRewindUnlessFits`。
+    「隔たりが大きすぎます」のような何も言えない 1 枚で捨てて 64 秒かかった。`TestFollowRewindSurvivesSilentFrame`）。
+    ⚠️ **残した控え（`held`）は変わっていない 1 枚（`FollowConfirm` → `takeRewind`）では据えない** —— 同じ差し替えを言う 1 枚で据える
+  - ⚠️ **速い経路でも見る**（2026-10-09。`followCellsRewind`。`FollowCells` で先端から合う手順が 1 つも無かったとき、`NoMoves` より先）。
+    比べるのは**先後と駒の有無だけ**で、**どちらの盤でも空きのマスは変わっていてよい**（`position.SideChangedMoves`。光ったマス）。
+    ⚠️ **先端そのものが合うなら見ない**・⚠️ **一意のときだけ**・⚠️ **行き先に指した側の駒を読んでから控える**（読んでいなければ
+    `ReadCells` で頼む）・⚠️ **控えは 81 マスの読みの差し替えと共通**（`followRewindHold`）。⚠️ **`FollowCells` は頭で控えに `held` を
+    立てる**（`holdRewind`。同じ 1 枚が同じ差し替えを言えば据わり、言わなければ残るだけ）。
+    `TestFollowCellsRewindsGuessedDrop` / `TestFollowCellsRewindSurvivesUnclearFrame` / `TestFollowCellsRewindKeepsUnguessedMoves`
   - ⚠️ **元の手は消さずに枝に残す**（ユーザーの判断）。差し替えは `GraftGuess`（新しい手を本譜側）、取り消しは `Branch`。
     ⚠️ **見つけたときから本譜が変わっていたら据えない**・⚠️ **控えと速い経路の比べる相手（`cellBase`）は捨てる**（元の先端の話）
   - ⚠️ **黙って差し替えないこと** —— `FollowAuto.Rewound` を立て、`Note` に「〜を〜に差し替えました（元の手は枝に残っています）」
@@ -407,7 +416,9 @@ followProbe ─> Rank（候補から選ぶ。29µs）─┬─ 読めていな�
   （`TestFollowRewindReplacesGuessedTail`。▲4八飛 を推測で足したが本当は ▲7六歩）・**戻すだけで合うなら取り消すこと**
   （`TestFollowRewindUndoesGuessedMove`）・⚠️ **実機で手番がずれた △同銀 ▲2六歩 を △2六歩 ▲同歩 △同銀 に差し替えること**
   （`TestFollowRewindRecoversMissedMove`。2026-10-08 の中継の録画を読み直した盤と確信度）・印の無い手を差し替えないこと・
-  手が被った 1 枚では差し替えないこと・1 枚だけでは差し替えないこと・変わっていない 1 枚で確かめられること
+  手が被った 1 枚では差し替えないこと・1 枚だけでは差し替えないこと・変わっていない 1 枚で確かめられること・
+  ⚠️ **何も言えない 1 枚では控えを捨てず、変わっていない 1 枚では据えないこと**（`TestFollowRewindSurvivesSilentFrame`。2026-10-09）・
+  ⚠️ **速い経路でも、角打ちの推測を金の移動に差し替えること**（`TestFollowCellsRewindsGuessedDrop`。2026-10-09 の中継の形）
 - `followunseen_test.go` — **手や頭が被って見えないマス**（2026-10-06）。⚠️ **行き先が見えない 1 枚が
   何枚続いても足さず（控えもせず）、印が消えた次の 2 枚で足すこと**（`TestFollowAutoWaitsForUnseenArrival`。
   **頭が動かないと同じ 1 枚が続く**ので、2 枚の確かめだけでは止まらない形）・**頭が上辺に被っていても
