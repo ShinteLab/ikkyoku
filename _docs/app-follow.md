@@ -365,7 +365,11 @@ followProbe ─> Rank（候補から選ぶ。29µs）─┬─ 読めていな�
     ⚠️ **先端そのものが合うなら見ない**・⚠️ **一意のときだけ**・⚠️ **行き先に指した側の駒を読んでから控える**（読んでいなければ
     `ReadCells` で頼む）・⚠️ **控えは 81 マスの読みの差し替えと共通**（`followRewindHold`）。⚠️ **`FollowCells` は頭で控えに `held` を
     立てる**（`holdRewind`。同じ 1 枚が同じ差し替えを言えば据わり、言わなければ残るだけ）。
-    `TestFollowCellsRewindsGuessedDrop` / `TestFollowCellsRewindSurvivesUnclearFrame` / `TestFollowCellsRewindKeepsUnguessedMoves`
+    `TestFollowCellsRewindsGuessedDrop` / `TestFollowCellsRewindSurvivesUnclearFrame` / `TestFollowCellsRewindKeepsUnguessedMoves`。
+    ⚠️ **消える手の行き先も読み、元の手の駒（同じ側）が読めたら差し替えないこと**（2026-10-10。`followGone` / `followGoneSeen`）。
+    「空きのマスは変わっていてよい」があるので、打った駒が写ったままでも、そのマスが変わっただけで「その手は無かった」に
+    できてしまう。実盤の中継で、▲7九銀打 △5九金打 ▲同玉 を ▲5九玉 の 1 手に替えた（7九 に手か影が掛かった 1 枚。
+    `TestFollowCellsRewindKeepsMoveWhosePieceIsSeen`）
   - ⚠️ **元の手は消さずに枝に残す**（ユーザーの判断）。差し替えは `GraftGuess`（新しい手を本譜側）、取り消しは `Branch`。
     ⚠️ **見つけたときから本譜が変わっていたら据えない**・⚠️ **控えと速い経路の比べる相手（`cellBase`）は捨てる**（元の先端の話）
   - ⚠️ **黙って差し替えないこと** —— `FollowAuto.Rewound` を立て、`Note` に「〜を〜に差し替えました（元の手は枝に残っています）」

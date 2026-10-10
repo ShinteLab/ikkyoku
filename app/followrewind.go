@@ -213,14 +213,27 @@ func (s *StudyService) followCellsRewind(base *position.Position, since []string
 		}
 		moves := cands[0]
 		arrivals := followArrivals(anc, nil, moves)
-		if !followReadCovers(read, arrivals, rotated) {
+		// ⚠️ **消える手の行き先も読むこと**（2026-10-10。`followGone`）。
+		gone := followGone(anc, old, moves)
+		need := slices.Clone(arrivals)
+		for _, i := range gone {
+			if !slices.Contains(need, i) {
+				need = append(need, i)
+			}
+		}
+		if !followReadCovers(read, need, rotated) {
 			log.Follow.Info("変わったマスなら推測で足した手を差し替えられそうです（行き先を読んで確かめます）",
 				"元の手", old, "新しい手", moves)
 			return FollowAuto{Kind: FollowChoices, Reason: "行き先のマスを読みます",
-				ReadCells: followImageCells(arrivals, rotated), State: s.State()}, true, nil
+				ReadCells: followImageCells(need, rotated), State: s.State()}, true, nil
 		}
 		if ok, bad, got := followBackedByRead(anc, nil, moves, read, rotated); !ok {
 			log.Follow.Info("差し替える手の行き先に指した側の駒が読めません", "新しい手", moves, "マス", bad, "読んだ駒", got)
+			return FollowAuto{}, false, nil
+		}
+		if sq, got, seen := followGoneSeen(anc, old, gone, read, rotated); seen {
+			log.Follow.Info("差し替えると消える手の駒が、まだ読めています（差し替えません）",
+				"元の手", old, "新しい手", moves, "マス", sq, "読んだ駒", got)
 			return FollowAuto{}, false, nil
 		}
 		rw := &followRewind{line: line, keep: keep, moves: slices.Clone(moves),
@@ -531,4 +544,45 @@ func followKindCost(cand, read *position.Board, cost *position.CellCost, skip *p
 		}
 	}
 	return sum
+}
+
+// followGone は**差し替えると消える手の行き先**（解析の向きの 81 マスの番号。2026-10-10）。元の手順 old で駒が置かれ、
+// 差し替える手順 moves で指した盤では空くマス。
+//
+// **実機の症状**（実盤の中継）: ▲7九銀打 △5九金打 ▲同玉 を足したあと、変わったマスが 7九 だけの 1 枚（銀に手か影が掛かった）で、
+// 速い経路の差し替えがこの 3 手を ▲5九玉 の 1 手に替えた（7九 の銀が消えたことにすれば説明が付く）。読んだのは新しい手の
+// 行き先だけで、銀が写ったままの 7九 は読んでいなかった（`TestFollowCellsRewindKeepsMoveWhosePieceIsSeen`）。
+func followGone(anc *position.Position, old, moves []string) []int {
+	after := followBoard(anc, nil, moves)
+	if after == nil {
+		return nil
+	}
+	var out []int
+	for _, i := range followArrivals(anc, nil, old) {
+		if c, err := after.At(i/9, i%9); err == nil && c.IsEmpty() {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+// followGoneSeen は、消える手の行き先 gone のどれかに**元の手の駒（同じ側）が読めているか**。読めていれば、その手は本当に
+// 指されているので差し替えない。⚠️ **先後まで見る**（`followBackedByRead` と同じ。種類は問わない）。
+func followGoneSeen(anc *position.Position, old []string, gone []int, read []CellPiece, rotated bool) (sq, got string, seen bool) {
+	before := followBoard(anc, nil, old)
+	if before == nil {
+		return "", "", false
+	}
+	for _, i := range gone {
+		c, err := before.At(i/9, i%9)
+		if err != nil || c.IsEmpty() {
+			continue
+		}
+		cp, found := followReadAt(read, i, rotated)
+		up, readable := cellPieceUp(cp)
+		if found && readable && (up != rotated) == c.Black() {
+			return squareText(i/9, i%9), cp.Piece + "/" + cp.Side, true
+		}
+	}
+	return "", "", false
 }
