@@ -2976,7 +2976,11 @@ ${st.turnLabel}${n}`;
 
   // followStop は追跡を止めて、理由を帯に出す（`followNotice`）。
   // kind が空なら**人が自分で止めた**ときで、読めば済むのでしばらくして消す。
+  // ⚠️ **どの止まり方でも追う盤を忘れさせること**（`ClearBoardAnchor`。2026-10-10）。以前はボタンと
+  // 確認で止めたときだけ呼んでいて、エラーや盤が上下逆で止まると、外部エンジンの優先度が下がったまま
+  // 残り（設定 `followFirst`）、次に追ったときの録画が前の回のディレクトリに混ざっていた。
   const followStop = (message: string, kind: FollowNoticeKind = "") => {
+    void CaptureService.ClearBoardAnchor();
     setFollowing(false);
     followNotice(message, kind, kind === "");
   };
@@ -2988,7 +2992,6 @@ ${st.turnLabel}${n}`;
     if (!followOn) {
       return;
     }
-    void CaptureService.ClearBoardAnchor();
     followStop("中継の追跡を止めました");
   };
   setFollowStopper(followStopByGuard);
@@ -3289,7 +3292,6 @@ ${st.turnLabel}${n}`;
 
   studyFollowBtn.addEventListener("click", () => {
     if (followOn) {
-      void CaptureService.ClearBoardAnchor();
       followStop("中継の追跡を止めました");
       return;
     }
