@@ -4718,8 +4718,14 @@ html.is-graph #app {
   background: var(--danger);
 }
 
-/* 見出し（押せない 1 行。連続解析の範囲など）。 */
+/* 見出し（押せない 1 行。連続解析の範囲など）。
+   ⚠️ **一覧が中でスクロールしても残す**（sticky。2026-10-10）—— 窓が低いと秒数の一覧は
+   ボタンの真下でスクロールになり、見出しが流れると何を選んでいるのか読めなくなる。
+   地を塗らないと、下を流れる項目が透けて重なる。 */
 .popup-title {
+  position: sticky;
+  top: -4px;
+  background: var(--surface);
   padding: 4px 10px 6px;
   font-size: 12px;
   color: var(--text-dim);

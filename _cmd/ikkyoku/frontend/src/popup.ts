@@ -59,19 +59,22 @@ export interface PopupHandle {
 //
 // **選ばずに閉じたら `onPick` は呼ばれない**（誤操作の取り消し）。
 export function openPopup(x: number, y: number, opts: PopupOptions): PopupHandle {
-  return open({ left: x, top: y, right: x, bottom: y }, 2, opts);
+  return open({ left: x, top: y, right: x, bottom: y }, 2, false, opts);
 }
 
 // openPopupBelow は**ボタンの真下**にメニューを出す（2026-10-10。連続解析の秒数）。
-// 下に収まらなければ**ボタンの真上**に出す（ボタンを覆わない）。
+// 下に全部が収まらなくても、**数行ぶん空いていれば真下に出して中でスクロール**させる
+// （今の値の行が見えるところまで送る）。真下がほとんど空いていないときだけ真上に出す。
 //
-// ⚠️ **押した点を渡す `openPopup` で代用しないこと** —— 点だと、下に収まらないときに
-// 「点を下の角にする」へ倒れるので、ボタンの下端から上へ伸びて**ボタンを覆い**、
-// それでも収まらなければ窓の上端まで押し出されて、**押した場所から離れて出た**
-// （秒数の一覧は 11 行あるので、手順の見出しの高さからだとよく起きた）。
+// ⚠️ **「収まらなければ真上」にしないこと**（2026-10-10 に実機で踏んだ）—— 秒数の一覧は
+// 11 行あり、真上に丸ごと出すと一覧の上端が窓の上のほうまで伸びて、**ボタンから離れて
+// 出たように見える**（押した点を渡す `openPopup` だった頃とほとんど変わらなかった）。
 export function openPopupBelow(anchor: Element, opts: PopupOptions): PopupHandle {
-  return open(anchor.getBoundingClientRect(), 0, opts);
+  return open(anchor.getBoundingClientRect(), 0, true, opts);
 }
+
+// belowRows は `openPopupBelow` が真下に出すのに要る行数（これだけ見えればスクロールで足りる）。
+const belowRows = 4;
 
 interface Anchor {
   left: number;
@@ -81,7 +84,8 @@ interface Anchor {
 }
 
 // open は anchor の外側にメニューを置く。dx は横のずらし（点のときだけ。下の d と同じ理由）。
-function open(at: Anchor, dx: number, opts: PopupOptions): PopupHandle {
+// preferBelow は**収まらなくても真下に出す**か（`openPopupBelow`）。
+function open(at: Anchor, dx: number, preferBelow: boolean, opts: PopupOptions): PopupHandle {
   const box = document.createElement("div");
   box.className = "popup-menu";
   box.setAttribute("role", "menu");
@@ -149,17 +153,21 @@ function open(at: Anchor, dx: number, opts: PopupOptions): PopupHandle {
   // そのまま先頭の項目を押す**。
   const d = 2;
   // 縦: 下 → 上 → どちらにも収まらなければ**広いほうに出して中でスクロール**させる。
+  // `openPopupBelow` は、真下に数行ぶん空いていれば上を試さずに真下でスクロールさせる。
   // ⚠️ **窓の端へ押し出さないこと**（2026-10-10）—— 押し出すと押した場所から離れて出る。
   const h = box.getBoundingClientRect().height;
   const below = window.innerHeight - m - (at.bottom + d);
   const above = at.top - d - m;
+  const row = buttons[0]?.getBoundingClientRect().height ?? 0;
+  const head = h - row * buttons.length;
+  const roomy = preferBelow && below >= Math.min(h, head + row * belowRows);
   let top: number;
   if (h <= below) {
     top = at.bottom + d;
-  } else if (h <= above) {
+  } else if (!roomy && h <= above) {
     top = at.top - d - h;
   } else {
-    const room = Math.max(below, above, 0);
+    const room = roomy ? below : Math.max(below, above, 0);
     const inner = box.clientWidth;
     box.style.maxHeight = `${room}px`;
     box.style.overflowY = "auto";
@@ -168,7 +176,7 @@ function open(at: Anchor, dx: number, opts: PopupOptions): PopupHandle {
     if (bar > 0) {
       box.style.width = `${box.getBoundingClientRect().width + bar}px`;
     }
-    top = below >= above ? at.bottom + d : at.top - d - room;
+    top = roomy || below >= above ? at.bottom + d : at.top - d - room;
   }
   // 横: 左端を揃え、はみ出すなら右端を揃える（押した場所を右の角にする）。
   const w = box.getBoundingClientRect().width;
