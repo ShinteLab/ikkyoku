@@ -26,7 +26,7 @@ import type {
 import type { EngineColorOption } from "../bindings/github.com/ShinteLab/ikkyoku/models";
 import { iconMarkup } from "./icon";
 import { mountMoveList } from "./movelist";
-import { openPopup } from "./popup";
+import { openPopup, openPopupBelow } from "./popup";
 import type {
   AnalyzeDone,
   AnalyzeFailure,
@@ -1495,12 +1495,12 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
   // エンジンの起動や局面の移動のぶんは入っていない —— だから「約」）。
   // ⚠️ **選んだ秒数は保存する**（次に押したときの初期値。ボタンの「3秒毎」もこれ）。
   // ⚠️ **選ばずに閉じたら始めない**（`openPopup` の約束）。
+  // ⚠️ **出す場所はボタンの真下（収まらなければ真上）**（`openPopupBelow`。2026-10-10）。
   const askBatchSeconds = () => {
-    const r = batchRun.getBoundingClientRect();
     const n = batchCount();
     const choices = batchSecondsChoices();
     const now = choices.indexOf(batchSecondsSaved);
-    openPopup(r.left, r.bottom, {
+    openPopupBelow(batchRun, {
       label: "連続解析の秒数",
       title: n <= 1
         ? `${batchFrom()}手目を解析`

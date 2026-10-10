@@ -59,6 +59,29 @@ export interface PopupHandle {
 //
 // **選ばずに閉じたら `onPick` は呼ばれない**（誤操作の取り消し）。
 export function openPopup(x: number, y: number, opts: PopupOptions): PopupHandle {
+  return open({ left: x, top: y, right: x, bottom: y }, 2, opts);
+}
+
+// openPopupBelow は**ボタンの真下**にメニューを出す（2026-10-10。連続解析の秒数）。
+// 下に収まらなければ**ボタンの真上**に出す（ボタンを覆わない）。
+//
+// ⚠️ **押した点を渡す `openPopup` で代用しないこと** —— 点だと、下に収まらないときに
+// 「点を下の角にする」へ倒れるので、ボタンの下端から上へ伸びて**ボタンを覆い**、
+// それでも収まらなければ窓の上端まで押し出されて、**押した場所から離れて出た**
+// （秒数の一覧は 11 行あるので、手順の見出しの高さからだとよく起きた）。
+export function openPopupBelow(anchor: Element, opts: PopupOptions): PopupHandle {
+  return open(anchor.getBoundingClientRect(), 0, opts);
+}
+
+interface Anchor {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+// open は anchor の外側にメニューを置く。dx は横のずらし（点のときだけ。下の d と同じ理由）。
+function open(at: Anchor, dx: number, opts: PopupOptions): PopupHandle {
   const box = document.createElement("div");
   box.className = "popup-menu";
   box.setAttribute("role", "menu");
@@ -120,22 +143,42 @@ export function openPopup(x: number, y: number, opts: PopupOptions): PopupHandle
   // ⚠️ **`position: fixed` で body に置く**（盤や手順の箱に入れると、はみ出した
   // ぶんが切られるうえ、スクロールで一緒に動く）。
   document.body.appendChild(box);
-  const r = box.getBoundingClientRect();
   const m = 8;
   // ⚠️ **押した場所の真上に項目を置かないこと**（角を 2px ずらす）。真上だと、
   // 成る/成らずのように左クリックで開くもので**ダブルクリックの 2 回目が
   // そのまま先頭の項目を押す**。
   const d = 2;
-  const place = (at: number, size: number, limit: number) => {
-    let p = at + d;
-    if (p + size > limit - m) {
-      // はみ出すなら反対側へ開く（押した場所を右下の角にする）。
-      p = at - d - size;
+  // 縦: 下 → 上 → どちらにも収まらなければ**広いほうに出して中でスクロール**させる。
+  // ⚠️ **窓の端へ押し出さないこと**（2026-10-10）—— 押し出すと押した場所から離れて出る。
+  const h = box.getBoundingClientRect().height;
+  const below = window.innerHeight - m - (at.bottom + d);
+  const above = at.top - d - m;
+  let top: number;
+  if (h <= below) {
+    top = at.bottom + d;
+  } else if (h <= above) {
+    top = at.top - d - h;
+  } else {
+    const room = Math.max(below, above, 0);
+    const inner = box.clientWidth;
+    box.style.maxHeight = `${room}px`;
+    box.style.overflowY = "auto";
+    // スクロールバーのぶん幅を足す（足さないと項目の右端が切れる。`box-sizing: border-box`）。
+    const bar = inner - box.clientWidth;
+    if (bar > 0) {
+      box.style.width = `${box.getBoundingClientRect().width + bar}px`;
     }
-    return Math.min(Math.max(p, m), limit - size - m);
-  };
-  box.style.left = `${place(x, r.width, window.innerWidth)}px`;
-  box.style.top = `${place(y, r.height, window.innerHeight)}px`;
+    top = below >= above ? at.bottom + d : at.top - d - room;
+  }
+  // 横: 左端を揃え、はみ出すなら右端を揃える（押した場所を右の角にする）。
+  const w = box.getBoundingClientRect().width;
+  let left = at.left + dx;
+  if (left + w > window.innerWidth - m) {
+    left = at.right - dx - w;
+  }
+  left = Math.min(Math.max(left, m), window.innerWidth - w - m);
+  box.style.left = `${left}px`;
+  box.style.top = `${Math.max(top, m)}px`;
   buttons[opts.focus ?? 0]?.focus();
 
   const onKey = (e: KeyboardEvent) => {
