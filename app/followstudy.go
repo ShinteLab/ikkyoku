@@ -455,6 +455,11 @@ func followArrived(fixed []position.Fix, cost *position.CellCost) bool {
 // ⚠️ **公開しないこと**（2026-10-07 に外した）。公開するとフロントの API になり、
 // 下見を通さない手順を本譜へ足せる口が残る。
 func (s *StudyService) followApply(moves []string, rev int, goTo bool) (a FollowApplied, err error) {
+	return s.followGraft(moves, rev, goTo, true)
+}
+
+// followGraft は `followApply` の本体。guess が偽なら推測の印を付けない（人が選んだ手。`FollowChoose`）。
+func (s *StudyService) followGraft(moves []string, rev int, goTo, guess bool) (a FollowApplied, err error) {
 	// ⚠️ **`publish` はロックの外で走らせること**（`defer` は LIFO）。
 	defer func() { s.publish(a.State, err) }()
 	if len(moves) == 0 {
@@ -472,7 +477,13 @@ func (s *StudyService) followApply(moves []string, rev int, goTo bool) (a Follow
 		return FollowApplied{}, fmt.Errorf("局面が変わりました。もう一度お試しください")
 	}
 
-	g := s.study.GraftGuess(append(s.study.MainLine(), moves...), len(moves))
+	line := append(s.study.MainLine(), moves...)
+	var g position.GraftResult
+	if guess {
+		g = s.study.GraftGuess(line, len(moves))
+	} else {
+		g = s.study.Graft(line)
+	}
 	if g.Note != "" && g.Added == 0 {
 		return FollowApplied{}, fmt.Errorf("%s", g.Note)
 	}
@@ -695,6 +706,18 @@ func (s *StudyService) FollowAuto(boardSFEN string, cellConfidence []float64, ce
 						Fit: p.Fit, Unseen: unseen.Count(), State: s.State()}, nil
 				}
 			}
+		}
+	}
+	// ⚠️ **打つ駒の種類だけで分かれたら、盤上の駒と見た目を比べ、それでも決まらなければ人に聞く**（2026-10-09。
+	// `followDropLooks`）。決まらないまま 1 本選ばない —— 打った駒の誤りはその駒が動くまで盤に表れない。
+	if !ok {
+		a, np, done, err := s.followDropLooks(p, board, cost, unseen, promo, rotated)
+		if done || err != nil {
+			return a, err
+		}
+		if np != nil {
+			p = *np
+			moves, ok = followAddable(p)
 		}
 	}
 	// ⚠️ **推測で足した末尾の手を差し替えるかを先に見る**（2026-10-08。`followRewindCheck`）。
@@ -1904,13 +1927,18 @@ type FollowAuto struct {
 	// 駒台の駒をつまんで、打てるマスが光っている 1 枚。真ならフロントは 81 マスを読まず、`CaptureService.CellsUnmoved` で
 	// その組を覚えさせる（ふるいは同じ組を「変わっていない」に数え、保険の 1 枚は残る）。
 	LooksOnly bool `json:"looksOnly"`
+	// DropChoices は**打った駒の種類が決まらず、人に聞く候補**（2026-10-09。`offerDrop`）。空でなければフロントは枠の下の帯に
+	// 並べ、選ばれたら `StudyService.FollowChoose` に `Moves` を渡す。
+	DropChoices []FollowChoice `json:"dropChoices,omitempty"`
 }
 
 // CellPair は**動いた駒の、動く前のマスと動いた先のマス**（撮った画像の向きの 81 マスの番号。2026-10-07）。
 // From は速い経路の比べる相手の 1 枚（`CaptureService.cellBase`）、To は今の 1 枚で見る。
+// Same が真なら**どちらも今の 1 枚で見る**（2026-10-09。打った駒と盤上の駒の比べ。`followDropPairs`）。
 type CellPair struct {
-	From int `json:"from"`
-	To   int `json:"to"`
+	From int  `json:"from"`
+	To   int  `json:"to"`
+	Same bool `json:"same,omitempty"`
 }
 
 // PromoEvidence は CellPair を測った**見た目の近さ**（`ikkyoku.PieceSimilarity`。-1〜1。2026-10-07）。
@@ -1919,6 +1947,8 @@ type PromoEvidence struct {
 	From int     `json:"from"`
 	To   int     `json:"to"`
 	Sim  float64 `json:"sim"`
+	// Same は測った組の `CellPair.Same`（打った駒の比べ。成・不成の証拠には使わない）。
+	Same bool `json:"same,omitempty"`
 }
 
 // 成・不成を見た目で決めるしきい値（2026-10-07）。⚠️ **仮の値**（実機で詰めること）。
@@ -2173,6 +2203,9 @@ func (s *StudyService) followApplyPromo(board *position.Board, cost *position.Ce
 		return
 	}
 	for _, ev := range promo {
+		if ev.Same {
+			continue // 打った駒の比べ（`followDropLooks`）
+		}
 		promoted, decided := promoVerdict(ev.Sim)
 		from, to := ev.From, ev.To
 		if rotated {

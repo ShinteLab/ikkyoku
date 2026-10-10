@@ -2881,6 +2881,8 @@ ${st.turnLabel}${n}`;
   };
   // followOk は**読めて、追っている盤が映っている**周の状態（変わっていない・足した・まだ繋がらない 1 枚）。
   const followOk = "正常に盤面を認識しています";
+  // followDropKey は**帯に出している、打った駒の候補**（2026-10-09。空なら出していない）。同じ候補を毎周出し直さないため。
+  let followDropKey = "";
 
   // followNotice は中継の追従で**人に知らせる 1 行**を、**枠の下の帯**に出す（2026-10-07。空なら消す）。
   //
@@ -2895,7 +2897,10 @@ ${st.turnLabel}${n}`;
   const followNoticeFadeMs = 4000;
   let followNoticeTimer: number | undefined;
   let followNoticeInSide = false;
-  const followNotice = (text: string, kind: FollowNoticeKind = "", fade = false) => {
+  // choices は**人に選んでもらう候補**（2026-10-09。打った駒が決まらないとき。帯にボタンで並ぶ）。
+  // ⚠️ **枠が出ていないときは文だけ**（追っているあいだは枠が出ている —— 出ていなければ撮れずに止まる）。
+  type FollowNoticeChoice = { label: string; moves: string[] };
+  const followNotice = (text: string, kind: FollowNoticeKind = "", fade = false, choices: FollowNoticeChoice[] = []) => {
     if (followNoticeTimer !== undefined) {
       window.clearTimeout(followNoticeTimer);
       followNoticeTimer = undefined;
@@ -2910,7 +2915,7 @@ ${st.turnLabel}${n}`;
       void Events.Emit("follow:notice", { text: "", kind: "" });
       return;
     }
-    void Events.Emit("follow:notice", { text, kind });
+    void Events.Emit("follow:notice", { text, kind, choices });
     if (text && fade) {
       followNoticeTimer = window.setTimeout(() => followNotice(""), followNoticeFadeMs);
     }
@@ -2945,6 +2950,7 @@ ${st.turnLabel}${n}`;
       followWatch = undefined;
     }
     followPending = false;
+    followDropKey = "";
     if (on) {
       followTickAt = Date.now();
       followLost = 0;
@@ -2966,13 +2972,32 @@ ${st.turnLabel}${n}`;
 
   // 追っているあいだに枠を隠そうとした（✕・Alt+F4・タイトルバーのトグル。2026-10-10）。
   // 断ったのは Go 側（`HideFrame`）で、ここは理由を帯に出すだけ。
+  // 打った駒の候補を出していたら、断った文で消えるので、次の 1 周で出し直させる（`followDropKey`）。
   Events.On("frame:hide-refused", (e: { data: string }) => {
+    followDropKey = "";
     followNotice(e.data, "error", true);
   });
 
   // ⚠️ **枠のボタンからも入り切りできること。** 状態を持っているのはこちらだけで、
   // 枠は映すだけ（2 か所が別々に覚えると食い違う）。
   Events.On("follow:toggle", () => studyFollowBtn.click());
+  // **帯で選ばれた、打った駒の候補**（2026-10-09。`frame.ts` が投げる）。足すのはここ（状態の持ち主はメイン画面）。
+  // ⚠️ **選べなくなっていたら理由を帯に出すだけ**（追跡は止めない。次の 1 枚でまた聞く）。
+  Events.On("follow:choose", async (e: { data: { moves?: string[] } }) => {
+    const moves = e.data?.moves;
+    if (!followOn || !moves || moves.length === 0) {
+      return;
+    }
+    followDropKey = "";
+    followNotice("");
+    try {
+      const got = await StudyService.FollowChoose(moves);
+      showStudy(got.state);
+      publishFollow(followOk);
+    } catch (err) {
+      followNotice(String(err instanceof Error ? err.message : err), "warn", true);
+    }
+  });
 
   // followStop は追跡を止めて、理由を帯に出す（`followNotice`）。
   // kind が空なら**人が自分で止めた**ときで、読めば済むのでしばらくして消す。
@@ -3157,7 +3182,9 @@ ${st.turnLabel}${n}`;
 
   // followEvidence は**動く前と後の駒の見た目を測って**成・不成の証拠にする（2026-10-07）。
   // ⚠️ **ここで成ったかを決めないこと**（しきい値は Go 側の `app`）。測れなかった組（負の値）は渡さない。
-  const followEvidence = async (pairs: { from: number; to: number }[]) => {
+  // ⚠️ **`same` を落とさないこと**（2026-10-09）。打った駒と盤上の駒の比べ（どちらも今の 1 枚）で、Go 側はそれで
+  // 成・不成の証拠と見分ける。
+  const followEvidence = async (pairs: { from: number; to: number; same?: boolean }[]) => {
     let sims: number[] = [];
     try {
       sims = (await CaptureService.ComparePieces(pairs)) ?? [];
@@ -3165,7 +3192,7 @@ ${st.turnLabel}${n}`;
       sims = [];
     }
     return pairs
-      .map((p, i) => ({ from: p.from, to: p.to, sim: sims[i] ?? -1 }))
+      .map((p, i) => ({ from: p.from, to: p.to, sim: sims[i] ?? -1, same: !!p.same }))
       // ⚠️ **捨てるのは測れなかった組（ちょうど -1）だけ**（2026-10-08）。似ていない駒どうしは近さが負になりうる
       // （つまんだ銀と光ったマス）。負の値まで捨てると「見た目が違う」証拠が消える。
       .filter((e) => e.sim > -1);
@@ -3176,6 +3203,11 @@ ${st.turnLabel}${n}`;
     if (got.applied) {
       // ⚠️ **「足しました」をどこにも書かないこと**（足した手は手順に出る。`publishFollow`）。
       // 追従が足す手は全部推測の印（`Node.Guess`）が付く。印は手順の橙の丸だけ。
+      if (followDropKey) {
+        // 打った駒の候補を出していたら片付ける（別の 1 枚で決まった）。
+        followDropKey = "";
+        followNotice("");
+      }
       // **推測で足した末尾の手を差し替えた**ときは、何を何にしたかを帯に出す（2026-10-08。`followRewindApply`）。
       // ⚠️ **黙って差し替えないこと**（元の手は枝に残っているので、違えば人が戻せる）。
       if (got.rewound && got.note) {
@@ -3235,6 +3267,30 @@ ${st.turnLabel}${n}`;
       followLost = 0;
       publishFollow(followOk);
       return false;
+    }
+    // **打った駒の種類が決まらない**（2026-10-09。見た目でも決まらなかった）。帯に候補を並べて人に選んでもらう。
+    // ⚠️ **見失いに数えない**（人の答えを待っているだけ）。⚠️ **同じ候補を毎周出し直さない**（帯が伸び縮みする）。
+    if (got.dropChoices && got.dropChoices.length > 0) {
+      const key = got.dropChoices.map((c) => (c.moves ?? []).join(",")).join("|");
+      if (key !== followDropKey) {
+        followDropKey = key;
+        void CaptureService.SaveFollowMiss(followWaiting, "drop");
+        // 「決まりません」は状態の行が言う（下の `publishFollow`）。こちらは候補を並べるだけ。
+        followNotice(
+          "打った駒の候補",
+          "",
+          false,
+          got.dropChoices.map((c) => ({ label: (c.text ?? []).join(" ") || (c.moves ?? []).join(" "), moves: c.moves ?? [] })),
+        );
+      }
+      followLost = 0;
+      publishFollow("打った駒が決まりません", "warn");
+      return false;
+    }
+    if (followDropKey) {
+      // 候補が出なくなった（別の 1 枚で決まった・盤が変わった）。帯の候補は片付ける。
+      followDropKey = "";
+      followNotice("");
     }
     followLost += 1;
     // ⚠️ **繋げなかった周の画像を残す**（2026-09-15。上限つき）。

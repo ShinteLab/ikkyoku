@@ -57,6 +57,8 @@ type StudyService struct {
 	pending *followPending
 	// rewind は追従が 1 枚目で見つけた、推測で足した末尾の手の差し替え（`followRewind`。2026-10-08）。
 	rewind *followRewind
+	// dropOffer は人に聞いている、打った駒の候補（`offerDrop` / `FollowChoose`。2026-10-09）。
+	dropOffer *followDropOffer
 	// cellBase は**速い経路の比べる相手の 1 枚が、どの局面だったか**（`followBase`。2026-10-07）。
 	cellBase *followBase
 	// lastFrame は**追従が最後に 81 マスで読んだ盤**（解析の向き。2026-10-08。`CellsLookUnmoved` が使う）。

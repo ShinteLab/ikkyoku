@@ -105,6 +105,7 @@ export function mountFrame(root: HTMLElement): void {
         <div class="frame-footer-status" hidden></div>
         <div class="frame-footer-notice" hidden>
           <span class="frame-footer-text"></span>
+          <span class="frame-footer-choices"></span>
           <button id="frame-footer-close" class="frame-btn is-icon" type="button"
                   aria-label="閉じる" title="閉じる">${iconMarkup(FiX)}</button>
         </div>
@@ -167,7 +168,8 @@ export function mountFrame(root: HTMLElement): void {
   //   - **状態の行**（`follow:state` の status。2026-10-10）: 追っているあいだずっと出る 1 行。
   //     ⚠️ **1 行で切ること**（折り返すと文の長さで帯の高さが変わり、周ごとに枠が伸び縮みする）。
   //     全文はホバー
-  //   - **知らせ**（`follow:notice`）: 止めた理由・差し替えた手など。たまにしか来ない。✕ で閉じられる
+  //   - **知らせ**（`follow:notice`）: 止めた理由・差し替えた手など。たまにしか来ない。✕ で閉じられる。
+  //     **人に選んでもらう候補のボタン**も並ぶ（2026-10-09。打った駒が決まらないとき）
   //
   // ⚠️ **順番を守ること**（帯が撮る範囲に入らないための約束。`captureservice.go` の `SetFrameFooter`）:
   //   - 伸ばすとき: **先に Go がウィンドウを伸ばし、それから帯に高さを付ける**
@@ -181,10 +183,14 @@ export function mountFrame(root: HTMLElement): void {
   const footerNotice = footer.querySelector<HTMLDivElement>(".frame-footer-notice")!;
   const footerText = footer.querySelector<HTMLSpanElement>(".frame-footer-text")!;
   const footerClose = root.querySelector<HTMLButtonElement>("#frame-footer-close")!;
+  // footerChoices は**人に選んでもらう候補**のボタン（2026-10-09。打った駒が決まらないとき）。
+  // ⚠️ **押したら `follow:choose` を投げるだけ**（足すのはメイン画面。状態の持ち主はあちら）。
+  const footerChoices = footer.querySelector<HTMLSpanElement>(".frame-footer-choices")!;
+  type FooterChoice = { label: string; moves: string[] };
   // footerPx は**今 Go に伸ばしてもらっている高さ**（＝帯に付けてよい高さ）。
   let footerPx = 0;
   // 最後に頼まれた中身（順番待ちのあいだに来た分は、最後の 1 つだけ描けばよい）。
-  let noticeWant: { text: string; kind: FooterKind } = { text: "", kind: "" };
+  let noticeWant: { text: string; kind: FooterKind; choices: FooterChoice[] } = { text: "", kind: "", choices: [] };
   let statusWant: { text: string; kind: FooterKind } = { text: "", kind: "" };
   let footerQueue: Promise<void> = Promise.resolve();
   const painted = () =>
@@ -205,6 +211,17 @@ export function mountFrame(root: HTMLElement): void {
     // 増えても帯は高さで切っているので、伸ばす前に撮る範囲へはみ出さない。
     paintPart(footerStatus, footerStatus, statusWant);
     paintPart(footerNotice, footerText, noticeWant);
+    // ⚠️ **ボタンも測る前に描くこと**（帯の高さは中身の高さで決まる）。
+    footerChoices.replaceChildren(
+      ...(noticeWant.text ? noticeWant.choices : []).map((c) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "frame-btn";
+        b.textContent = c.label;
+        b.addEventListener("click", () => void Events.Emit("follow:choose", { moves: c.moves }));
+        return b;
+      }),
+    );
     // ⚠️ **測るのは中身の高さ**（帯そのものは高さで切っているので、中身は描かれたまま測れる）。
     const any = !!(statusWant.text || noticeWant.text);
     const want = any ? Math.ceil(footerBody.getBoundingClientRect().height) : 0;
@@ -227,8 +244,8 @@ export function mountFrame(root: HTMLElement): void {
       console.warn("[frame] 枠の下の帯を出し入れできませんでした", err);
     });
   };
-  const showFooter = (text: string, kind: FooterKind) => {
-    noticeWant = { text, kind };
+  const showFooter = (text: string, kind: FooterKind, choices: FooterChoice[] = []) => {
+    noticeWant = { text, kind, choices };
     queueFooter();
   };
   // setFooterStatus は状態の行を入れる（空なら消す）。`follow:state` は**1 周ごとに来る**ので
@@ -240,8 +257,8 @@ export function mountFrame(root: HTMLElement): void {
     statusWant = { text, kind };
     queueFooter();
   }
-  Events.On("follow:notice", (e: { data: { text?: string; kind?: FooterKind } }) => {
-    showFooter(e.data?.text ?? "", e.data?.kind ?? "");
+  Events.On("follow:notice", (e: { data: { text?: string; kind?: FooterKind; choices?: FooterChoice[] } }) => {
+    showFooter(e.data?.text ?? "", e.data?.kind ?? "", e.data?.choices ?? []);
   });
   // ✕ は**この枠で知らせを閉じるだけ**（状態の行は残る。メイン画面の状態は変えない。次の知らせが来ればまた出る）。
   footerClose.addEventListener("click", () => showFooter("", ""));

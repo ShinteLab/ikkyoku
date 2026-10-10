@@ -216,11 +216,17 @@ func (s *CaptureService) ComparePieces(pairs []ikkyokuapp.CellPair) []float64 {
 	names := make([]string, len(pairs))
 	usable := base != nil && cur != nil && len(rects) == 81 &&
 		bounds.Eq(base.Bounds()) && bounds.Eq(cur.Bounds())
+	// ⚠️ **`Same` の組はどちらも今の 1 枚で見る**（2026-10-09。打った駒と盤上の駒の比べ）。比べる相手の 1 枚は要らない。
+	usableSame := cur != nil && len(rects) == 81 && bounds.Eq(cur.Bounds())
 	for i, p := range pairs {
 		out[i] = -1
 		names[i] = cellName(p.From) + ">" + cellName(p.To) + "="
-		if usable && p.From >= 0 && p.From < 81 && p.To >= 0 && p.To < 81 {
-			if v, ok := ikkyoku.PieceSimilarity(base, rects[p.From], cur, rects[p.To]); ok {
+		from, ok := base, usable
+		if p.Same {
+			from, ok = cur, usableSame
+		}
+		if ok && p.From >= 0 && p.From < 81 && p.To >= 0 && p.To < 81 {
+			if v, ok := ikkyoku.PieceSimilarity(from, rects[p.From], cur, rects[p.To]); ok {
 				out[i] = v
 			}
 		}

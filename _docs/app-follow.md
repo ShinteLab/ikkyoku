@@ -413,6 +413,10 @@ followProbe ─> Rank（候補から選ぶ。29µs）─┬─ 読めていな�
   なること**（`TestFollowAutoPromotionSecondFrame`）・**比べる相手が無ければ頼まないこと**（`TestFollowAutoNoComparisonWithoutBase`）・
   後手の駒と後手目線（`TestFollowAutoPromotionGoteRotated`。△8七飛成）・⚠️ **速い経路では証拠を読んだマスより先に使うこと**
   （`TestFollowCellsPromotionByLooks`）
+- `followdrop_test.go` — **打った駒の種類が決まらないとき**（2026-10-09。`followdrop.go`）。⚠️ 歯止めは ——
+  **打つ駒の種類だけで分かれたら、今の 1 枚どうしで見た目を比べるよう頼むこと**・**見た目で決まった種類で、2 枚続けて同じ答えの
+  ときに足すこと**・**決まらなければ人に聞き（`DropChoices`）、選ばれた手は推測の印を付けずに足すこと**（`FollowChoose`。
+  2 度目は断る）・**比べる駒が盤上に無い種類があれば、比べずに人に聞くこと**
 - `followrewind_test.go` — **推測で足した末尾の手の差し替え**（2026-10-08）。⚠️ **2 枚目で差し替え、元の手が枝に残ること**
   （`TestFollowRewindReplacesGuessedTail`。▲4八飛 を推測で足したが本当は ▲7六歩）・**戻すだけで合うなら取り消すこと**
   （`TestFollowRewindUndoesGuessedMove`）・⚠️ **実機で手番がずれた △同銀 ▲2六歩 を △2六歩 ▲同歩 △同銀 に差し替えること**
