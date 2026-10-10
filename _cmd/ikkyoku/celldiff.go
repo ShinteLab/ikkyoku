@@ -86,7 +86,7 @@ func (s *CaptureService) CellsUnclear() {
 	s.mu.Lock()
 	s.gateDirty, s.gateMoving = true, 0
 	s.mu.Unlock()
-	log.Info("変わったマスを説明できる手がありません（組が変わるのを待ちます）", "変わったマス", len(fc.cells))
+	log.Follow.Info("変わったマスを説明できる手がありません（組が変わるのを待ちます）", "変わったマス", len(fc.cells))
 }
 
 // ForgetUnmoved は**「駒は動いていない」と覚えた組を忘れる**（2026-10-08）。
@@ -195,7 +195,7 @@ func (s *CaptureService) ReadCells(cells []int) ([]ikkyokuapp.CellPiece, error) 
 			names[i] += "(" + pieces[i].Side + ")" // 種類は読めないが向きは読めた
 		}
 	}
-	log.Info("違いの出るマスを読みました（追跡）", "マス", strings.Join(names, ","))
+	log.Follow.Info("違いの出るマスを読みました（追跡）", "マス", strings.Join(names, ","))
 	return out, nil
 }
 
@@ -232,7 +232,7 @@ func (s *CaptureService) ComparePieces(pairs []ikkyokuapp.CellPair) []float64 {
 		}
 		names[i] += strconv.FormatFloat(out[i], 'f', 3, 64)
 	}
-	log.Info("動く前と後の駒の見た目を比べました（追跡）", "組", strings.Join(names, ","))
+	log.Follow.Info("動く前と後の駒の見た目を比べました（追跡）", "組", strings.Join(names, ","))
 	return out
 }
 
@@ -272,7 +272,7 @@ func (s *CaptureService) fastCells(fc frameCells) bool {
 		return false
 	}
 	if len(fc.cells) > cellFastMax {
-		log.Info("変わったマスが多いです（光っているだけか確かめ、違えば 81 マスを読みます）（追跡）", "変わったマス", len(fc.cells))
+		log.Follow.Info("変わったマスが多いです（光っているだけか確かめ、違えば 81 マスを読みます）（追跡）", "変わったマス", len(fc.cells))
 		return true
 	}
 	if len(fc.cells) > 0 {
@@ -280,7 +280,7 @@ func (s *CaptureService) fastCells(fc frameCells) bool {
 		for _, i := range fc.cells {
 			names = append(names, cellName(i))
 		}
-		log.Info("変わったマス（先端と合っていた 1 枚と）", "マス", strings.Join(names, ","), "ふるい", why)
+		log.Follow.Info("変わったマス（先端と合っていた 1 枚と）", "マス", strings.Join(names, ","), "ふるい", why)
 	}
 	return true
 }

@@ -1,6 +1,6 @@
 """追従のログを手ごとに集計する（使い捨て）。
 
-python follow_report.py <ikkyoku_YYYYMMDD.log>
+python follow_report.py <ikkyoku-follow_YYYYMMDD.log>（2026-10-09 までは ikkyoku_YYYYMMDD.log）
 最後の「追う盤を決めました」から後を見る。
 各「撮った盤面を本譜の先に繋ぎました」について:
   - 動き出した時刻（直前の追加より後の、最初の「動いているので止まるのを待っています」）

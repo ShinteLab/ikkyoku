@@ -93,7 +93,8 @@ type appWindows struct {
 }
 
 func main() {
-	// ログは実行ファイルの隣（ikkyoku_<日付>.log）。wails3 dev のときはコンソールにも出す
+	// ログは実行ファイルの隣（ikkyoku_<日付>.log。中継の追従は ikkyoku-follow_<日付>.log）。
+	// wails3 dev のときはコンソールにも出す（追従のログは出さない）
 	// （consoleLog。devbuild.go / prodbuild.go）。⚠️ **書けなくても起動は止めない。**
 	logCloser, logErr := log.Init(log.Options{Console: consoleLog})
 	if logErr != nil {

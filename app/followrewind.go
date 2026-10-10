@@ -82,7 +82,7 @@ func (s *StudyService) followRewindHold(rw *followRewind, fit float64) (FollowAu
 		return s.followRewindApply(rw)
 	}
 	s.setPending(nil)
-	log.Info("推測で足した手を差し替えられそうです（次の 1 枚で確かめます）",
+	log.Follow.Info("推測で足した手を差し替えられそうです（次の 1 枚で確かめます）",
 		"戻す手数", len(rw.line)-rw.keep, "元の手", rw.line[rw.keep:], "新しい手", rw.moves, "根拠", rw.why)
 	return FollowAuto{Kind: FollowUnique, Pending: true, Reason: "確かめています",
 		Guess: true, Fit: fit, State: s.State()}, nil
@@ -131,7 +131,7 @@ func (s *StudyService) dropRewindUnlessFits(board *position.Board, cost *positio
 	held := *prev
 	held.held = true
 	s.rewind = &held
-	log.Info("控えた差し替えは、この 1 枚では打ち消されないので残します", "元の手", prev.line[prev.keep:], "新しい手", prev.moves)
+	log.Follow.Info("控えた差し替えは、この 1 枚では打ち消されないので残します", "元の手", prev.line[prev.keep:], "新しい手", prev.moves)
 }
 
 // holdRewind は控えた差し替えに `held` を立てる（新しい 1 枚を見始めたとき。`FollowCells`）。
@@ -214,13 +214,13 @@ func (s *StudyService) followCellsRewind(base *position.Position, since []string
 		moves := cands[0]
 		arrivals := followArrivals(anc, nil, moves)
 		if !followReadCovers(read, arrivals, rotated) {
-			log.Info("変わったマスなら推測で足した手を差し替えられそうです（行き先を読んで確かめます）",
+			log.Follow.Info("変わったマスなら推測で足した手を差し替えられそうです（行き先を読んで確かめます）",
 				"元の手", old, "新しい手", moves)
 			return FollowAuto{Kind: FollowChoices, Reason: "行き先のマスを読みます",
 				ReadCells: followImageCells(arrivals, rotated), State: s.State()}, true, nil
 		}
 		if ok, bad, got := followBackedByRead(anc, nil, moves, read, rotated); !ok {
-			log.Info("差し替える手の行き先に指した側の駒が読めません", "新しい手", moves, "マス", bad, "読んだ駒", got)
+			log.Follow.Info("差し替える手の行き先に指した側の駒が読めません", "新しい手", moves, "マス", bad, "読んだ駒", got)
 			return FollowAuto{}, false, nil
 		}
 		rw := &followRewind{line: line, keep: keep, moves: slices.Clone(moves),
@@ -377,7 +377,7 @@ func (s *StudyService) followRewindApply(rw *followRewind) (a FollowAuto, err er
 	if len(rw.moves) == 0 {
 		note = fmt.Sprintf("%s を取り消しました（元の手は枝に残っています）", strings.Join(oldText, " "))
 	}
-	log.Info("手を差し替えました（追跡）", "手数", rw.keep+1, "戻した手数", k,
+	log.Follow.Info("手を差し替えました（追跡）", "手数", rw.keep+1, "戻した手数", k,
 		"元の手", strings.Join(oldText, " "), "新しい手", strings.Join(newText, " "),
 		"usi", strings.Join(rw.moves, " "), "根拠", rw.why)
 	return FollowAuto{Kind: FollowUnique, Applied: true, Rewound: true, Guess: true,

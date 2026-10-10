@@ -49,7 +49,7 @@ func (s *CaptureService) syncEnginePriority() {
 	}
 	n, err := setEnginePriority(set, want)
 	if err != nil {
-		log.Warn("エンジンの優先度を変えられません", "error", err)
+		log.Follow.Warn("エンジンの優先度を変えられません", "error", err)
 		return
 	}
 	s.mu.Lock()
@@ -57,9 +57,9 @@ func (s *CaptureService) syncEnginePriority() {
 	s.mu.Unlock()
 	if want != lowered {
 		if want {
-			log.Info("追っているあいだ、外部エンジンの優先度を下げました（盤の読みを優先）", "プロセス", n)
+			log.Follow.Info("追っているあいだ、外部エンジンの優先度を下げました（盤の読みを優先）", "プロセス", n)
 		} else {
-			log.Info("外部エンジンの優先度を戻しました", "プロセス", n)
+			log.Follow.Info("外部エンジンの優先度を戻しました", "プロセス", n)
 		}
 	}
 }

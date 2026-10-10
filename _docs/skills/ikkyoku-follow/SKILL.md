@@ -81,8 +81,9 @@ description: ikkyoku（一局）の「中継を追う」（Phase 6 の追従）�
 
 ## ログの読み方
 
-**ログは実行ファイルの隣の `ikkyoku_<日付>.log`**（`wails3 dev` なら `_cmd/ikkyoku/bin/`。
-dev のときはターミナルにも出る）。追従だけ細かく見たいときは、同じ場所に
+**追従のログは実行ファイルの隣の `ikkyoku-follow_<日付>.log`**（`wails3 dev` なら `_cmd/ikkyoku/bin/`）。
+2026-10-10 から本体の `ikkyoku_<日付>.log` と分けた（`log.Follow`）。**ターミナルには出ない**
+（Warn 以上だけは本体のファイルとターミナルにも出る）。それより前の日は本体のファイルに混ざっている。追従だけ細かく見たいときは、同じ場所に
 `ikkyoku-log.json` を置いてパッケージごとにレベルを上げる（書き方は `log/AGENTS.md`）。
 
 **Go 側は「変わり目だけ」出す**（`noteQuiet`）。同じ行が続かないのは正常。
@@ -141,7 +142,7 @@ dev のときはターミナルにも出る）。追従だけ細かく見たい�
 3. 流し終わったら、ログを手ごとに集計する:
 
    ```bash
-   PYTHONIOENCODING=utf-8 python _docs/skills/ikkyoku-follow/references/follow_report.py _cmd/ikkyoku/bin/ikkyoku_<日付>.log
+   PYTHONIOENCODING=utf-8 python _docs/skills/ikkyoku-follow/references/follow_report.py _cmd/ikkyoku/bin/ikkyoku-follow_<日付>.log
    ```
 
    最後の「追う盤を決めました」から後を見て、足した手ごとに **時刻・経路（速い / 81 マス）・手・遅れ（秒）・
@@ -184,7 +185,7 @@ dev のときはターミナルにも出る）。追従だけ細かく見たい�
 から決めた仮の値。成る手の録画が溜まったら `references/promo_similarity.py` で計り直す（numpy と Pillow が要る）:
 
 ```bash
-python _docs/skills/ikkyoku-follow/references/promo_similarity.py --logs "_cmd/ikkyoku/bin/ikkyoku_202610*.log" --follow "$APPDATA/ikkyoku/captures/follow" --csv promo.csv
+python _docs/skills/ikkyoku-follow/references/promo_similarity.py --logs "_cmd/ikkyoku/bin/ikkyoku-follow_202610*.log" --follow "$APPDATA/ikkyoku/captures/follow" --csv promo.csv
 ```
 
 - ログから録画ごとの盤の矩形と目線を引き、手を足した 1 枚どうしで指した駒の元と行き先を比べる。近さの低い順に並び、

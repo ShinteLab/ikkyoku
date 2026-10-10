@@ -227,7 +227,7 @@ func (s *StudyService) offerDrop(ds *followDropSplit, p FollowProbe, unseen *pos
 		for _, c := range choices {
 			texts = append(texts, strings.Join(c.Text, " "))
 		}
-		log.Info("打った駒が決まりません（人に聞きます）", "候補", strings.Join(texts, " / "))
+		log.Follow.Info("打った駒が決まりません（人に聞きます）", "候補", strings.Join(texts, " / "))
 	}
 	return FollowAuto{Kind: FollowChoices, Reason: "打った駒が決まりません", DropChoices: choices,
 		Fit: p.Fit, Unseen: unseen.Count(), State: s.State()}
@@ -285,13 +285,13 @@ func (s *StudyService) followDropLooks(p FollowProbe, board *position.Board, cos
 		return s.offerDrop(ds, p, unseen), nil, true, nil
 	}
 	if promo == nil {
-		log.Info("打った駒の種類で分かれたので、盤上の駒と見た目を比べます", "候補", len(ds.cands), "組", len(pairs))
+		log.Follow.Info("打った駒の種類で分かれたので、盤上の駒と見た目を比べます", "候補", len(ds.cands), "組", len(pairs))
 		return FollowAuto{Kind: FollowChoices, Reason: "打った駒を見た目で確かめます", Compare: pairs,
 			Fit: p.Fit, Unseen: unseen.Count(), State: s.State()}, nil, true, nil
 	}
 	letter, sims, decided := followPickDrop(pairs, letters, promo)
 	if !decided {
-		log.Info("打った駒を見た目で決められません", "近さ", sims)
+		log.Follow.Info("打った駒を見た目で決められません", "近さ", sims)
 		return s.offerDrop(ds, p, unseen), nil, true, nil
 	}
 	s.mu.Lock()
@@ -307,7 +307,7 @@ func (s *StudyService) followDropLooks(p FollowProbe, board *position.Board, cos
 	if !followSetDrop(board, cost, ds, letter, black) {
 		return s.offerDrop(ds, p, unseen), nil, true, nil
 	}
-	log.Info("見た目を比べて打った駒を決めました", "マス", squareText(ds.to/9, ds.to%9), "駒", string(letter), "近さ", sims)
+	log.Follow.Info("見た目を比べて打った駒を決めました", "マス", squareText(ds.to/9, ds.to%9), "駒", string(letter), "近さ", sims)
 	np, e := s.followProbe(board, cost, unseen, cost != nil, rotated)
 	if e != nil {
 		return FollowAuto{}, nil, true, e

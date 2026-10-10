@@ -13,10 +13,10 @@
 
 使い方（numpy と Pillow が要る）:
 
-    python promo_similarity.py --logs "<ログのある場所>/ikkyoku_20261007.log" [--logs ...]
+    python promo_similarity.py --logs "<ログのある場所>/ikkyoku-follow_20261010.log" [--logs ...]
                                [--follow "<captures>/follow"] [--csv out.csv]
 
-    --logs    ikkyoku_<日付>.log（何個でも。glob も可）。録画のディレクトリ名と盤の矩形・目線をここから引く
+    --logs    ikkyoku-follow_<日付>.log（2026-10-09 までは ikkyoku_<日付>.log。何個でも。glob も可）。録画のディレクトリ名と盤の矩形・目線をここから引く
     --follow  録画の親ディレクトリ。既定は環境変数 IKKYOKU_FOLLOW_DIR、無ければ %APPDATA%/ikkyoku/captures/follow
     --csv     1 手 1 行で書き出す（近さ・成ったか・録画・ファイル・手）
 
@@ -110,7 +110,7 @@ def main():
         except (AttributeError, ValueError):
             pass
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--logs", action="append", required=True, help="ikkyoku_<日付>.log（glob 可。何個でも）")
+    ap.add_argument("--logs", action="append", required=True, help="ikkyoku-follow_<日付>.log（glob 可。何個でも）")
     ap.add_argument("--follow", default=None, help="録画の親ディレクトリ（<captures>/follow）")
     ap.add_argument("--csv", default=None, help="1 手 1 行で書き出す先")
     args = ap.parse_args()

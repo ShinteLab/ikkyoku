@@ -639,7 +639,7 @@ func (s *CaptureService) HideFrame() {
 	following := s.following
 	s.mu.Unlock()
 	if following {
-		log.Info("中継を追っているので枠を隠しません")
+		log.Follow.Info("中継を追っているので枠を隠しません")
 		if s.app != nil {
 			s.app.Event.Emit("frame:hide-refused", hideRefusedMessage)
 		}
@@ -1092,7 +1092,7 @@ func (s *CaptureService) SetFollowShot(path string) {
 	}
 	shot.session = session
 	s.followShot = shot
-	log.Info("訂正した 1 枚を、中継を追う盤として覚えました", "path", path, "board", shot.sig.Board)
+	log.Follow.Info("訂正した 1 枚を、中継を追う盤として覚えました", "path", path, "board", shot.sig.Board)
 }
 
 // CaptureQuiet は**知らせずに撮る**（中継の追従。2026-09-15）。
@@ -1213,7 +1213,7 @@ func (s *CaptureService) readQuiet(img image.Image, region ikkyoku.Region, resul
 	started := time.Now()
 	board, err := recognize.FromImage(img)
 	// **かかった時間を毎回出す**（2026-10-07）。エンジンと CPU を取り合うと 2 秒強が 8 秒に延びた。
-	log.Info("81 マスを読みました（追跡）", "ms", time.Since(started).Milliseconds())
+	log.Follow.Info("81 マスを読みました（追跡）", "ms", time.Since(started).Milliseconds())
 	if err != nil {
 		result.RecognizeError = err.Error()
 		return result
@@ -1248,10 +1248,10 @@ func (s *CaptureService) readQuiet(img image.Image, region ikkyoku.Region, resul
 				// ⚠️ **比べる相手も捨てること**（画像の中の座標が変わったので、もう比べられない）。
 				s.setCellBaseLocked(nil)
 				s.mu.Unlock()
-				log.Info("枠が動いたので追う盤を取り直しました", "board", got.Board)
+				log.Follow.Info("枠が動いたので追う盤を取り直しました", "board", got.Board)
 			} else if same, why := anchor.Matches(got); !same {
 				result.OffBoard, result.OffBoardReason = true, why
-				log.Info("別の盤と判断しました", "reason", why,
+				log.Follow.Info("別の盤と判断しました", "reason", why,
 					"master", anchor.Board, "got", got.Board,
 					"colorGap", anchor.ColorGap(got))
 			}
@@ -1362,7 +1362,7 @@ func (s *CaptureService) gate(img image.Image, fc frameCells) string {
 	insurance := func() string {
 		// ⚠️ **ここが「黙って止まらない」ための保険**（2026-09-18）。
 		// **ふるいが外していても、いずれ読む。**
-		log.Info("変化が無いまま続いたので 1 枚読みます（ふるいの取りこぼしの確認）",
+		log.Follow.Info("変化が無いまま続いたので 1 枚読みます（ふるいの取りこぼしの確認）",
 			"省いた周", s.gateSkipped,
 			"いちばん大きかった差", fmt.Sprintf("%.5f", s.gateMaxSkip),
 			"しきい値", gateChangedRatio)
@@ -1387,7 +1387,7 @@ func (s *CaptureService) gate(img image.Image, fc frameCells) string {
 		}
 		if cellsStill && len(fc.cells) > 0 {
 			// 盤全体は動いているが、指し手のマスは落ち着いた（ゲーム画面の演出。`gateReadCells`）。
-			log.Info("盤全体は動いていますが、変わったマスが 2 枚続けて同じなので止まったと見なします（追跡）",
+			log.Follow.Info("盤全体は動いていますが、変わったマスが 2 枚続けて同じなので止まったと見なします（追跡）",
 				"変わったマス", len(fc.cells))
 			return read(gateReadCells)
 		}
@@ -1555,7 +1555,7 @@ func (s *CaptureService) noteQuiet(r CaptureResult) {
 	s.quietOutcome = kind
 	s.mu.Unlock()
 	if changed {
-		log.Info(msg, "reason", r.OffBoardReason, "confidence", r.Confidence)
+		log.Follow.Info(msg, "reason", r.OffBoardReason, "confidence", r.Confidence)
 	}
 }
 
@@ -1612,16 +1612,16 @@ func (s *CaptureService) AnchorBoard() (CaptureResult, error) {
 				r.OffBoard, r.OffBoardReason = true, why
 			}
 		}
-		log.Info("訂正した 1 枚の盤を追う盤にします", "path", shot.path)
+		log.Follow.Info("訂正した 1 枚の盤を追う盤にします", "path", shot.path)
 	} else if shot.ok() && shot.session == session {
-		log.Info("撮ったあとに枠が動いたので、今映っている盤を追う盤にします")
+		log.Follow.Info("撮ったあとに枠が動いたので、今映っている盤を追う盤にします")
 	}
 	dir := s.startFollowDir(master)
 	s.mu.Lock()
 	s.boardAnchor, s.anchorRegion = sig, region
 	s.mu.Unlock()
 	go s.syncEnginePriority()
-	log.Info("追う盤を決めました", "board", sig.Board, "color", sig.Color, "dir", dir)
+	log.Follow.Info("追う盤を決めました", "board", sig.Board, "color", sig.Color, "dir", dir)
 	return r, nil
 }
 
@@ -1657,7 +1657,7 @@ func pickAnchor(shot shotAnchor, session string, live recognize.Signature, liveO
 func (s *CaptureService) startFollowDir(master image.Image) string {
 	base, err := ikkyoku.DefaultOutDir()
 	if err != nil {
-		log.Warn("録画の保存先が決められません", "error", err)
+		log.Follow.Warn("録画の保存先が決められません", "error", err)
 		return ""
 	}
 	// ⚠️ **今撮った 1 枚をそのまま使うこと**（`CaptureQuiet` が控えている）。
@@ -1672,7 +1672,7 @@ func (s *CaptureService) startFollowDir(master image.Image) string {
 	dir := filepath.Join(base, "follow", time.Now().Format("20060102-150405"))
 	if img != nil {
 		if _, err := ikkyoku.SavePNGAs(img, dir, "master.png"); err != nil {
-			log.Warn("マスタ画像を残せません", "error", err)
+			log.Follow.Warn("マスタ画像を残せません", "error", err)
 			return ""
 		}
 	}
@@ -1707,11 +1707,11 @@ func (s *CaptureService) SaveFollowFrame(number int, moves []string, guess bool)
 	name := followFrameName(number, moves, guess)
 	path, err := ikkyoku.SavePNGAs(img, dir, name)
 	if err != nil {
-		log.Warn("採用した画像を残せません", "name", name, "error", err)
+		log.Follow.Warn("採用した画像を残せません", "name", name, "error", err)
 		return ""
 	}
 	// 直前の「手を足しました（追跡）」と並べて、その手を決めた 1 枚に辿れるようにする（2026-10-08）。
-	log.Info("録画を残しました（追跡）", "name", name)
+	log.Follow.Info("録画を残しました（追跡）", "name", name)
 	return path
 }
 
@@ -1745,10 +1745,10 @@ func (s *CaptureService) SaveFollowMiss(number int, kind string) string {
 	name := followMissName(number, kind, n)
 	path, err := ikkyoku.SavePNGAs(img, dir, name)
 	if err != nil {
-		log.Warn("繋げなかった画像を残せません", "name", name, "error", err)
+		log.Follow.Warn("繋げなかった画像を残せません", "name", name, "error", err)
 		return ""
 	}
-	log.Info("繋げなかった周を残しました", "name", name)
+	log.Follow.Info("繋げなかった周を残しました", "name", name)
 	return path
 }
 
@@ -1828,7 +1828,7 @@ func (s *CaptureService) ClearBoardAnchor() {
 	// ⚠️ **エンジンの優先度を戻すこと**（追う盤を忘れたので「追っていない」になり、下げていれば戻す）。
 	s.syncEnginePriority()
 	if shots > 0 {
-		log.Info("追跡を止めました", "撮った枚数", shots, "認識した枚数", reads,
+		log.Follow.Info("追跡を止めました", "撮った枚数", shots, "認識した枚数", reads,
 			"省いた割合", fmt.Sprintf("%.0f%%", 100*float64(shots-reads)/float64(shots)))
 	}
 }
