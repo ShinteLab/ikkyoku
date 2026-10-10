@@ -11,7 +11,7 @@
 // ⚠️ **局面も持たない。** 描くのは渡された `StudyState` そのもので、
 // 操作は Service を呼ぶだけ。どちらの窓から押しても、変わるのは Go 側の 1 つの手順。
 import { Events } from "@wailsio/runtime";
-import { FiMessageSquare, FiRefreshCw, FiRadio } from "react-icons/fi";
+import { FiMessageSquare, FiRefreshCw, FiRss } from "react-icons/fi";
 
 import {
   AnalyzeService,
@@ -270,10 +270,14 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
                    窓でも同じ入切が見えるように。刻むのは持ち主の窓だけ。
                    ⚠️ **絵は変わらないので、今どちらかは aria-pressed の色だけが伝える。**
                    ⚠️ **盤の脇の「中継を追う」（study-follow）とは別物。** あちらは
-                   **画面を撮って**盤から手を起こす（Phase 6）。こちらは **URL の棋譜**。 -->
-              <button id="study-kifu-follow" class="icon-btn" type="button" hidden
+                   **画面を撮って**盤から手を起こす（Phase 6）。こちらは **URL の棋譜**。
+                   ⚠️ **絵は枠の「中継を追う」（電波。FiRadio）と同じにしないこと**（2026-10-10）——
+                   同じ絵だと同じ機能に見える。こちらは URL から取り直すのでフィードの絵（FiRss）。
+                   ⚠️ **入のときの色は盤の札（棋譜を自動更新中）と同じ緑**（is-kifu-live）。
+                   既定の入（青）だと、札と同じものの入切だと読めなかった。 -->
+              <button id="study-kifu-follow" class="icon-btn is-kifu-live" type="button" hidden
                       aria-pressed="false"
-                      aria-label="棋譜を自動更新">${iconMarkup(FiRadio)}</button>
+                      aria-label="棋譜を自動更新">${iconMarkup(FiRss)}</button>
               <!-- ⚠️ **「棋譜に登録」のアイコンは外した**（2026-09-26）。棋譜タブに
                    入れるのは終局してからで、しかも再読み込みの隣では押し間違える。
                    **棋譜タブに入れたときに同じ出どころの検討が結ばれる**ので

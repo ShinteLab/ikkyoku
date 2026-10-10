@@ -4955,6 +4955,20 @@ html.is-graph #app {
   background: var(--pressed-bg-hover);
 }
 
+/* 棋譜の自動更新の「入」（2026-10-10）。**盤の札（`.live-badge.is-kifu`）と同じ緑**にして、
+   札がこのボタンの入切だと読めるようにする（既定の入の青だと別物に見えた）。
+   ⚠️ **塗り方も札に揃える**（字と縁が `--success`、地はそれを薄めたもの）。 */
+.icon-btn.is-kifu-live[aria-pressed="true"] {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 14%, transparent);
+  border-color: var(--success);
+}
+
+.icon-btn.is-kifu-live[aria-pressed="true"]:hover:not(:disabled) {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 24%, transparent);
+}
+
 /* 取り直しの最中。**押せないことが見て分かる程度には落とす**
    （中継が重いと数秒かかる）。 */
 .icon-btn:disabled {
