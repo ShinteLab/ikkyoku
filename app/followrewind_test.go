@@ -505,3 +505,43 @@ func TestFollowCellsRewindKeepsMoveWhosePieceIsSeen(t *testing.T) {
 		t.Fatalf("本譜 = %v, want %v", got, seen)
 	}
 }
+
+// ⚠️ **速い経路の差し替えで、種類の変わるマスの読みが元の盤と合い、新しい盤と合わなければ差し替えないこと**（2026-10-10 に中継で踏んだ）。
+//
+// **実機の症状**（実盤の中継）: ▲5九歩打 のあと、変わったマスが 5八 だけの 1 枚（△5八桂成 の手が掛かった）で、速い経路の差し替えが
+// ▲5九歩打 を ▲5九金（5八 の金が動いた）に替えた。5九 は「歩」と読めていたが、差し替えは先後と駒の有無しか比べない。
+// ここでは同じ形を平手から作る（▲4八角打 を、4九 の金が 4八 へ動いた手に替えようとする。4八 には角が写ったまま）。
+// デジタル盤の △7二角打 → △7二金（7二 が金と読める。`TestFollowCellsRewindsGuessedDrop`）は新しい盤と合うので今までどおり替える。
+func TestFollowCellsRewindKeepsDropWhoseKindIsSeen(t *testing.T) {
+	s, _ := following(t)
+	line := []string{"7g7f", "3c3d", "8h2b+", "3a2b"}
+	for _, m := range line {
+		if _, err := s.Play(m); err != nil {
+			t.Fatalf("Play(%q): %v", m, err)
+		}
+	}
+	guessMoves(t, s, "B*4h")
+	s.markBase() // 角を打った 1 枚を比べる相手にした
+	seen := append(slices.Clone(line), "B*4h")
+
+	changed := cellIdx("4i") // 4九 に手が掛かっただけ
+	a, err := s.FollowCells(changed, nil, nil)
+	if err != nil {
+		t.Fatalf("FollowCells: %v", err)
+	}
+	if len(a.ReadCells) > 0 {
+		a, err = s.FollowCells(changed, readAfter(t, false, a.ReadCells, seen...), nil)
+		if err != nil {
+			t.Fatalf("FollowCells: %v", err)
+		}
+	}
+	if a.Rewound || a.Pending {
+		t.Fatalf("角と読めている 4八 を金に差し替えようとしました: %+v", a.Reason)
+	}
+	if a2, err := s.FollowConfirm(); err != nil || a2.Rewound {
+		t.Fatalf("差し替えました: %+v (%v)", a2.Reason, err)
+	}
+	if got := mainLine(s); !slices.Equal(got, seen) {
+		t.Fatalf("本譜 = %v, want %v", got, seen)
+	}
+}
