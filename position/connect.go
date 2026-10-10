@@ -348,7 +348,7 @@ func Connect(ctx context.Context, from *Position, target *Board, opt ConnectOpti
 
 	// 下界。**ここで落ちれば `legal.Moves` を 1 回も呼ばない。**
 	// 認識の誤りの大半（駒が何枚も湧いた・消えた）はここで即死する。
-	if newDiff(root.Board, target, nil, 0, opt.Unseen, staleKinds{}).same() {
+	if newDiff(root.Board, target, nil, 0, opt.Unseen, newPromoSkip(root.Board, opt.Unseen)).same() {
 		return ConnectResult{Depth: 0, Stop: StopSame}, nil
 	}
 
@@ -455,7 +455,8 @@ func search(ctx context.Context, root *Position, target *Board, opt ConnectOptio
 	}
 	// ⚠️ **動いていないマスの種類だけの読み違いを見ないのは、修復のときだけ**（`staleKinds`）。
 	// 厳密一致は「認識と合法性が完全に一致した」ことを言うので、1 マスでも違えば通さない。
-	var stale staleKinds
+	// ⚠️ **根で成駒が載っているマスは、厳密一致でも動いていないあいだは見ない**（`staleKinds.promo`）。
+	stale := newPromoSkip(root.Board, opt.Unseen)
 	if tolerance > 0 {
 		stale = newStaleKinds(root.Board, target, opt.Unseen)
 	}
@@ -980,32 +981,61 @@ func newDiff(cur, tgt *Board, cost *CellCost, budget float64, unseen *CellMask, 
 type staleKinds struct {
 	root *Board
 	mask *CellMask
+	// promo は**根で成駒が載っているマス**（2026-10-10）。⚠️ **厳密一致でも修復でも、動いていないあいだは見ない**
+	// （`newPromoSkip`）。成駒は学習データにほぼ入らず読めないのが普通で、先後まで外す。中継で、動いていない 1一 の
+	// 先手の馬を「後手の金」と読んだ 1 枚から、▲同金 の 2 手で済むところを、後手が馬を取る △1二金打 △1一金 を挟んだ
+	// 5 手が「ぴったり合う」として通った（深く探すようにした `DeepDepth` で届いた）。差し替えの比べ（app の
+	// `promotedCells`）と同じ前提。取られた・動いたなら元のマスや行き先が変わるので、そちらで見つかる。
+	promo *CellMask
 	// trusted は**この 1 枚の種類の読みを信じるか**（stale のマスが `kindTrustMax` 以下。2026-10-10）。
 	// ⚠️ **ゼロ値は偽**（今までどおり種類の違いは半分）—— 厳密一致や `Rank` が渡すゼロ値の振る舞いを変えない。
 	trusted bool
 }
 
-// newStaleKinds は根 root と撮った盤 tgt から stale のマスを拾う（無ければゼロ値）。
+// newStaleKinds は根 root と撮った盤 tgt から stale のマスと成駒のマス（`promo`）を拾う。
+// ⚠️ **成駒のマスは種類の読みを信じるかの数に入れない**（読めないのが普通なので、その 1 枚の読みの出来を表さない）。
 func newStaleKinds(root, tgt *Board, unseen *CellMask) staleKinds {
-	var m *CellMask
+	k := newPromoSkip(root, unseen)
 	n := 0
 	for r := 0; r < 9; r++ {
 		for f := 0; f < 9; f++ {
 			c, t := root.cells[r][f], tgt.cells[r][f]
-			if unseen.at(r, f) || c == t || c.IsEmpty() || t.IsEmpty() || c.Black() != t.Black() {
+			if unseen.at(r, f) || c == t || c.IsEmpty() || t.IsEmpty() || c.Black() != t.Black() || c.Promoted() {
 				continue
 			}
-			if m == nil {
-				m = &CellMask{}
+			if k.mask == nil {
+				k.mask = &CellMask{}
 			}
-			m[r][f] = true
+			k.mask[r][f] = true
 			n++
 		}
 	}
-	if m == nil {
-		return staleKinds{trusted: true}
+	k.root = root
+	k.trusted = n <= kindTrustMax
+	return k
+}
+
+// newPromoSkip は**根で成駒が載っているマスだけ**を見ないマスにする（厳密一致・`Rank` 用。`promo`）。種類の読みは信じない側。
+//
+// ⚠️ **見えないマス（`unseen`）がある 1 枚では見る**（今までどおり）。成駒が取られたことは、ふつうは取った駒の元のマスが
+// 空くことでも分かるが、元のマスが手や頭で見えないと、跡は成駒のマスにしか残らない（一段目に隠れた △3一銀 が 2二 の馬を
+// 取った 1 枚。`TestConnectUnseenDropsCountBound`）。
+func newPromoSkip(root *Board, unseen *CellMask) staleKinds {
+	if unseen.Count() > 0 {
+		return staleKinds{}
 	}
-	return staleKinds{root: root, mask: m, trusted: n <= kindTrustMax}
+	var m *CellMask
+	for r := 0; r < 9; r++ {
+		for f := 0; f < 9; f++ {
+			if c := root.cells[r][f]; !c.IsEmpty() && c.Promoted() && !unseen.at(r, f) {
+				if m == nil {
+					m = &CellMask{}
+				}
+				m[r][f] = true
+			}
+		}
+	}
+	return staleKinds{root: root, promo: m}
 }
 
 // KindsTrusted は撮った盤 target の**駒の種類の読みを信じてよいか**（2026-10-10。`kindTrustMax`）。
@@ -1015,9 +1045,12 @@ func KindsTrusted(root, target *Board, unseen *CellMask) bool {
 	return newStaleKinds(root, target, unseen).trusted
 }
 
-// skip は、盤の (rank, file) の駒 c が stale のマスで、根から動いていないか。
+// skip は、盤の (rank, file) の駒 c が stale のマスか成駒のマスで、根から動いていないか。
 func (k staleKinds) skip(rank, file int, c Cell) bool {
-	return k.mask != nil && k.mask[rank][file] && c == k.root.cells[rank][file]
+	if k.root == nil || c != k.root.cells[rank][file] {
+		return false
+	}
+	return (k.mask != nil && k.mask[rank][file]) || (k.promo != nil && k.promo[rank][file])
 }
 
 // floor は**あと r 手指しても残る食い違いの費用の下限**（修復のときだけ意味がある。2026-10-07）。
