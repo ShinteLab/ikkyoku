@@ -2202,6 +2202,8 @@ export function mountMainScreen(root: HTMLElement): void {
   // ⚠️ **映すだけ**（入り切りの持ち主は `setFollowing` と `StudyState.kifuFollow`）。
   const studyLiveFollow = root.querySelector<HTMLElement>("#study-live-follow")!;
   const studyLiveKifu = root.querySelector<HTMLElement>("#study-live-kifu")!;
+  // 棋譜の自動更新が入っているか（`StudyState.kifuFollow` の写し。**書き換えるのは `showStudy` だけ**）。
+  let kifuFollowOn = false;
 
   // 視点（手前が先手 / 手前が後手）。**表示だけの反転で、局面には効かない。**
   // 切り替えの中身は下の「視点」の節にまとめてある（ここは値の置き場所だけ）。
@@ -2616,7 +2618,8 @@ ${st.turnLabel}${n}`;
     // 中継を追うボタンも局面があるときだけ（繋ぐ先が無いと足せない）。
     studyFollowBtn.hidden = !loaded;
     // 棋譜の自動更新の札。⚠️ **条件は自動更新のアイコンと同じ**（URL から読んだときだけ。sidepane.ts）。
-    studyLiveKifu.hidden = !(loaded && (st.sourceUrl ?? "") !== "" && !!st.kifuFollow);
+    kifuFollowOn = loaded && (st.sourceUrl ?? "") !== "" && !!st.kifuFollow;
+    studyLiveKifu.hidden = !kifuFollowOn;
     // ⚠️ **待っている手数はここで取ること。** 追跡のループの中だけで数えると、
     // **人が手順を消したり分岐にしたりしたときに古いまま**になる
     // （`study:changed` もここへ来る）。
@@ -3362,6 +3365,13 @@ ${st.turnLabel}${n}`;
     setFollowing(true);
     // 前に止めたときの知らせ（「止めました」など）が残っていれば消す。
     followNotice("");
+    // ⚠️ **棋譜の自動更新は止める**（2026-10-10。同じ対局を両方で追う意味はほぼ無いので、
+    // 後から押したほうが勝つ。聞かない）。逆向きは `sidepane.ts`。理由は `_docs/app-kifu-load.md` の「自動更新」。
+    if (kifuFollowOn) {
+      void StudyService.SetKifuFollow(false)
+        .then(() => sidePane.setStatus("棋譜の自動更新を止めて、中継の追跡を始めました"))
+        .catch((err) => sidePane.setStatus(String(err instanceof Error ? err.message : err)));
+    }
     void CaptureService.AnchorBoard()
       .then((first) => {
         if (!followOn) {
