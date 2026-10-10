@@ -693,9 +693,39 @@ html.is-frame #app {
 
 .frame-footer-body {
   display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 4px 4px 8px;
+}
+
+/* 状態の行（2026-10-10。追っているあいだずっと出る）。
+   ⚠️ **1 行で切ること** —— 折り返すと文の長さで帯の高さが変わり、周ごとに枠が伸び縮みする。 */
+.frame-footer-status {
+  padding: 2px 0;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.frame-footer-status.is-warn {
+  color: var(--warn);
+}
+
+.frame-footer-status.is-error {
+  color: var(--danger);
+}
+
+.frame-footer-notice {
+  display: flex;
   align-items: flex-start;
   gap: 6px;
-  padding: 4px 4px 4px 8px;
+}
+
+/* display: flex は hidden に勝つ（frontend/src/AGENTS.md の 11）。 */
+.frame-footer-status[hidden],
+.frame-footer-notice[hidden] {
+  display: none;
 }
 
 /* 長い文は 3 行で切る（帯の高さの上限は Go の guide.FooterMaxPx。全文はホバーで出る）。 */
@@ -711,11 +741,11 @@ html.is-frame #app {
   overflow: hidden;
 }
 
-.frame-footer.is-warn .frame-footer-text {
+.frame-footer-notice.is-warn .frame-footer-text {
   color: var(--warn);
 }
 
-.frame-footer.is-error .frame-footer-text {
+.frame-footer-notice.is-error .frame-footer-text {
   color: var(--danger);
 }
 
