@@ -833,3 +833,106 @@ func TestConnectRepairNotWorseThanNothing(t *testing.T) {
 		t.Fatalf("何も指していないはず: stop=%v moves=%v solutions=%v cost=%v", r.Stop, r.Moves, r.Solutions, r.Cost)
 	}
 }
+
+// hakureiRoot / hakureiLine / hakureiShot / hakureiCost は録画 `follow/20261010-122957/009-…-guess.png`（中継）の根・本譜と、
+// その 1 枚を読み直した盤と確信度。大盤と解説の画面のあいだに ▲2五桂 △4五桂 ▲同歩 △2五歩 ▲4四歩 △2三飛 の 6 手
+// （△2五歩 と △2三飛 は入れ替わりうる）が進んだ。
+const hakureiRoot = "l6rl/1kg2b3/1png1snpp/p1psppp2/7P1/P1PSSPP2/1P1P2N1P/1BK1G4/LN1G3RL b 2P 1"
+
+var hakureiLine = []string{"6i6h", "4c5b", "2i4i", "2a4a", "2e2d", "2c2d", "P*2c", "4a2a"}
+
+const hakureiShot = "l7l/1kg1sb3/1png3rp/p1pspPp2/7p1/P1PSS1P2/1P1P4P/1BKGG4/LN3R2L"
+
+var hakureiCost = [81]float64{
+	1.00, 0.15, 0.15, 0.15, 0.15, 0.15, 0.15, 0.15, 1.00,
+	0.15, 1.00, 1.00, 0.15, 1.00, 1.00, 0.15, 0.15, 0.15,
+	0.15, 1.00, 1.00, 1.00, 0.15, 0.15, 0.15, 1.00, 1.00,
+	1.00, 0.15, 1.00, 1.00, 1.00, 1.00, 1.00, 0.15, 0.15,
+	0.15, 0.15, 0.15, 0.15, 0.15, 0.15, 0.15, 1.00, 0.15,
+	1.00, 0.15, 1.00, 1.00, 1.00, 0.15, 1.00, 0.15, 0.15,
+	0.15, 1.00, 0.15, 1.00, 0.15, 0.15, 0.15, 0.15, 1.00,
+	0.15, 1.00, 1.00, 1.00, 1.00, 0.15, 0.15, 0.15, 0.15,
+	1.00, 1.00, 0.15, 0.15, 0.15, 1.00, 0.15, 0.15, 1.00,
+}
+
+// ⚠️ **MaxDepth の外にある、もっとよく合う手順を探すこと**（`DeepDepth`。2026-10-10 に中継で踏んだ）。
+//
+// **実機の症状**: 上の 6 手が写った 1 枚で、深さ 4 の修復 ▲4五歩 △2五歩 ▲4四歩 △2三飛（空きと読めた 3七・3三 を
+// 「読めていない」として覆した。0.15 × 2）が通り、続けて ▲2五桂 △同桂（2五 の歩を桂に覆した）が継ぎ足されて、
+// 2五 の駒と先手の持ち駒が狂った。ぴったり合う 6 手は深さ 6 で 72 節点しか要らない。
+// ⚠️ **1 マスでも種類を読み違えた 1 枚（実際に 1一 の香を飛と読んだ）でも同じ答えになること**（そちらはぴったりの手順が
+// 無いので、修復の答えより安い深い手順を探す `cheaperDeeper` の側で届く）。
+// ⚠️ **順番は決まらないが、行き着く局面（持ち駒まで）は全部同じであること**（追従が推測の印を付けて進んでよい形）。
+func TestConnectDeepDepthFindsBetterFit(t *testing.T) {
+	from := after(t, hakureiRoot, hakureiLine...)
+	opt := position.ConnectOptions{Tolerance: position.DefaultTolerance, Cost: relayConf(hakureiCost)}
+
+	// 前提: 深さを渡さなければ、今までどおり 4 手の修復が通る（ここが取り違えの入口だった）。
+	if r := connect(t, from, hakureiShot, opt); r.Stop != position.StopFound || r.Depth != 4 {
+		t.Fatalf("前提が崩れています: stop=%v depth=%d sols=%v", r.Stop, r.Depth, r.Solutions)
+	}
+
+	misread := "l7r" + hakureiShot[3:] // 1一 の香を後手の飛と読んだ 1 枚
+	for _, shot := range []string{hakureiShot, misread} {
+		deep := opt
+		deep.DeepDepth = 8
+		r := connect(t, from, shot, deep)
+		if r.Stop != position.StopFound || r.Depth != 6 || r.Cost != 0 {
+			t.Fatalf("%s: 6 手に届いていません: stop=%v depth=%d cost=%v sols=%v", shot[:3], r.Stop, r.Depth, r.Cost, r.Solutions)
+		}
+		if r.More || len(r.Solutions) < 2 {
+			t.Fatalf("%s: 順番違いが並んでいません: more=%v sols=%v", shot[:3], r.More, r.Solutions)
+		}
+		end := ""
+		for i, sol := range r.Solutions {
+			p := from.Clone()
+			for _, m := range sol {
+				if err := p.ApplyMove(m); err != nil {
+					t.Fatalf("ApplyMove(%q): %v", m, err)
+				}
+			}
+			got, err := p.SFEN()
+			if err != nil {
+				t.Fatalf("SFEN: %v", err)
+			}
+			if i == 0 {
+				end = got
+			} else if got != end {
+				t.Fatalf("%s: 行き着く局面が揃っていません: %v → %s / %s", shot[:3], sol, got, end)
+			}
+		}
+		if !strings.HasPrefix(end, "l7l/1kg1sb3/1png3rp/p1pspPp2/7p1/P1PSS1P2/1P1P4P/1BKGG4/LN3R2L b N2Pn2p ") {
+			t.Errorf("%s: 行き着いた局面 = %s", shot[:3], end)
+		}
+	}
+}
+
+// BenchmarkConnectDeep は**深く探してやっと繋がる 1 枚**の時間の歯止め（`DeepDepth`。2026-10-10）。
+// 1一 を読み違えた 1 枚はぴったりの手順が無く、厳密一致を深さ 8 まで空振りしてから修復と `cheaperDeeper` に進む。
+//
+// ⚠️ **追従の打ち切り（`app.followTimeout` 1.5 秒）に届くと、繋がるはずの 6 手を落として 4 手の修復に戻る。**
+func BenchmarkConnectDeep(b *testing.B) {
+	from, err := position.FromFullSFEN(hakureiRoot)
+	if err != nil {
+		b.Fatal(err)
+	}
+	for _, m := range hakureiLine {
+		if err := from.ApplyMove(m); err != nil {
+			b.Fatal(err)
+		}
+	}
+	board, err := position.FromSFEN("l7r" + hakureiShot[3:])
+	if err != nil {
+		b.Fatal(err)
+	}
+	opt := position.ConnectOptions{Tolerance: position.DefaultTolerance, Cost: relayConf(hakureiCost), DeepDepth: 8}
+	for i := 0; i < b.N; i++ {
+		r, err := position.Connect(context.Background(), from, board, opt)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if r.Stop != position.StopFound || r.Depth != 6 {
+			b.Fatalf("6 手に届いていません: %v depth=%d", r.Stop, r.Depth)
+		}
+	}
+}

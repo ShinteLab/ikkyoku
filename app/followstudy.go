@@ -191,7 +191,7 @@ func (s *StudyService) followProbe(board *position.Board, cost *position.CellCos
 	s.mu.Unlock()
 
 	// ⚠️ **`fromImage` が「推測してよいか」の唯一の判断。**
-	opt := position.ConnectOptions{Unseen: unseen}
+	opt := position.ConnectOptions{Unseen: unseen, DeepDepth: followDeepDepth}
 	if fromImage {
 		opt.Cost, opt.Tolerance = cost, position.DefaultTolerance
 	}
@@ -1740,7 +1740,12 @@ func (s *StudyService) followFrom(board *position.Board, cost *position.CellCost
 
 	// unexplained は 1 周目の下見が「駒が来たのに説明が付かない」だったか（`looksFlipped` を呼ぶ条件）。
 	unexplained := false
-	for i := 0; i < followCatchUp; i++ {
+	// ⚠️ **1 枚から据える答えは 1 つだけ**（2026-10-10。判断の単位は 1 枚）。2 回目の下見は、据えた先端が
+	// この 1 枚とぴったり合うか（`AtFrame`）を見るためだけに回し、**そこから手を継ぎ足さない**。
+	// 以前は足せる限り 12 回まで繰り返したので、`Connect` の約束（深さ 4・修復の予算・一意性）が 1 回ごとにしか
+	// 効かず、空きを覆した 4 手の修復に、2五 の歩を桂に覆した 2 手の修復を継いで 6 手を取り違えた（中継で踏んだ）。
+	// 何手も写った 1 枚は `Connect` が 1 回で取る（ぴったり合う手順は `followDeepDepth` まで探す）。
+	for i := 0; i < 2; i++ {
 		p, e := s.followProbe(board, cost, unseen, cost != nil, rotated)
 		if e != nil {
 			if a.Applied {
@@ -1767,6 +1772,13 @@ func (s *StudyService) followFrom(board *position.Board, cost *position.CellCost
 			// ⚠️ **駒の種類の読み違いは問わない**（`KindOnly`。比べる相手に要るのは駒の有無と先後で、
 			// 成った駒を少し読み違えるだけで相手になれず、速い経路が止まっていた）。
 			a.AtFrame = p.Kind == FollowSame && (cost == nil || p.KindOnly) && unseen.Count() == 0
+			break
+		}
+		if i > 0 {
+			// **据えた答えでは、この 1 枚を説明しきれていない。** 残りは継ぎ足さない（推測の上に推測を積まない）。
+			// この 1 枚は先端と合っていないので、速い経路の比べる相手にもしない（`AtFrame` は偽のまま）。
+			log.Follow.Info("据えた答えのあとにも指された跡が残りますが、同じ 1 枚からは継ぎ足しません",
+				"moves", p.Candidates[0].Moves, "kind", p.Kind)
 			break
 		}
 		// ⚠️ **順番が決まらなくても、行き先が決まっているなら進む**
@@ -1850,12 +1862,14 @@ func (s *StudyService) followFrom(board *position.Board, cost *position.CellCost
 	return a, nil
 }
 
-// followCatchUp は**1 枚の画像から足す手数の上限**。
+// followDeepDepth は**認識とぴったり合う手順と、修復の答えより厳密に安く合う手順**を探す手数の上限
+// （`position.ConnectOptions.DeepDepth`。2026-10-10）。
 //
-// ⚠️ **上限を置くこと** —— `followProbe` が毎回「足せる」と言い続ける状況
-// （費用表が壊れている等）で**無限に手が生える**のを防ぐ。
-// 12 手あれば、認識 2 秒 × 早指しでも十分に追いつく。
-const followCatchUp = 12
+// 修復の最初の答えは `position.DefaultMaxDepth`（4 手）までで探すが、それよりよく合う手順は深くても探す。
+// 大盤のあいだに 6 手進んだ中継の 1 枚で、4 手の修復が通って取り違えた（ぴったり合う 6 手は 5ms で見つかる。
+// 1 マス読み違えた 1 枚では修復より安い側で約 190ms。`position.BenchmarkConnectDeep`）。
+// ⚠️ **当て推量**。深くしても `MaxWaste`（下界 + 2 手）で切れるので、効くのは本当に隔たりが大きい 1 枚だけ。
+const followDeepDepth = 8
 
 // FollowAuto は 1 手ぶんの追従の結果。
 type FollowAuto struct {
