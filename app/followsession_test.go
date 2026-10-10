@@ -19,7 +19,7 @@ type fakeCamera struct {
 	hold      chan struct{}
 	entered   chan struct{}
 	following []bool
-	cleared   int
+	ended     int
 	misses    []string
 	frames    int
 }
@@ -62,12 +62,17 @@ func (c *fakeCamera) SaveFollowMiss(_ int, kind string) {
 	c.misses = append(c.misses, kind)
 	c.mu.Unlock()
 }
-func (c *fakeCamera) SetFollowing(on bool) {
+func (c *fakeCamera) BeginFollow() {
 	c.mu.Lock()
-	c.following = append(c.following, on)
+	c.following = append(c.following, true)
 	c.mu.Unlock()
 }
-func (c *fakeCamera) ClearBoardAnchor() { c.mu.Lock(); c.cleared++; c.mu.Unlock() }
+func (c *fakeCamera) EndFollow() {
+	c.mu.Lock()
+	c.following = append(c.following, false)
+	c.ended++
+	c.mu.Unlock()
+}
 
 // sessionUpdates は `follow:update` を溜める。
 type sessionUpdates struct {
@@ -146,8 +151,8 @@ func TestFollowSessionAddsAfterTwoFrames(t *testing.T) {
 	}
 	cam.mu.Lock()
 	defer cam.mu.Unlock()
-	if cam.cleared != 1 || !slices.Equal(cam.following, []bool{true, false}) {
-		t.Fatalf("追う盤を忘れていないか、撮る側の入り切りが戻っていません: cleared=%d following=%v", cam.cleared, cam.following)
+	if cam.ended != 1 || !slices.Equal(cam.following, []bool{true, false}) {
+		t.Fatalf("撮る側の持ち物を捨てていないか、入り切りが戻っていません: ended=%d following=%v", cam.ended, cam.following)
 	}
 	if cam.frames != 1 {
 		t.Errorf("手を決めた 1 枚を録画していません: frames=%d", cam.frames)
@@ -227,5 +232,36 @@ func TestFollowSessionNeedsCamera(t *testing.T) {
 	s, _ := following(t)
 	if err := s.StartFollow(); err == nil {
 		t.Fatalf("撮る側が無いのに始めました")
+	}
+}
+
+// ⚠️ **答えの控えは追い始めと止めたときに捨てること**（2026-10-11。`followSession.resetLocked`）。前の回の控えを、次の回の
+// 最初の「変わっていない」1 枚で足さない。
+func TestFollowSessionDropsHoldsAtStartAndStop(t *testing.T) {
+	board := boardAfter(t, "7g7f")
+	cam := &fakeCamera{anchor: FollowShot{Skipped: "unchanged"}}
+	s, _ := sessionFollowing(t, cam)
+	// 追っていないあいだに 1 枚目の答えを控えた（前の回の名残）。
+	if a, err := s.FollowAuto(board, realConf(board, 0.9), nil, nil); err != nil || !a.Pending {
+		t.Fatalf("前提: 1 枚目で控えるはず: %+v（%v）", a, err)
+	}
+	held := func() bool {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return s.follow.pending != nil
+	}
+	if err := s.StartFollow(); err != nil {
+		t.Fatalf("StartFollow: %v", err)
+	}
+	if held() {
+		t.Fatalf("追い始めても前の回の控えが残っています")
+	}
+	time.Sleep(300 * time.Millisecond) // 「変わっていない」1 枚が何周か回る
+	if got := mainLine(s); len(got) != 0 {
+		t.Fatalf("前の回の控えを足しました: %v", got)
+	}
+	s.StopFollow()
+	if held() {
+		t.Fatalf("止めたのに控えが残っています")
 	}
 }

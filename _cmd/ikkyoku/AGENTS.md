@@ -64,6 +64,7 @@ CLI は無い。**
 | `main.go` | ウィンドウ 2 枚の生成・**Service の登録**・フック登録・起動時の自動フィット・終了時の後始末。⚠️ **Service の実体は `ikkyoku/app`**（`application.NewService()` は任意のパッケージの値を取れる）。⚠️ **import は別名にしてある** —— パッケージ名 `app` が `application.App` の変数 `app` とぶつかる。**main しか使わない小物も畳んである**（`/shinte-web/` の配信・ホットキーのアクセラレータ変換・ファイル選択ダイアログ） |
 | `captureservice.go` | Wails にバインドする Service。**ウィンドウと HWND を触るのでここに残っている**（枠の表示/非表示・素通し・自分を隠して撮る・メイン画面の塗り潰し・終了(`Quit`)・認識の呼び出し・ガイド枠の自動フィット `FitFrame`・**画像ファイルの読み込み `OpenImage`**）。⚠️ **撮る（`Capture`）と読み込む（`loadImage`）は `deliver` で合流する** —— そこから先（サムネイル・`capture:shot` / `capture:done`・認識）は 1 本だけ。⚠️ **寸法と幾何は `ikkyoku/guide`**（`captureRegion` はそれを使って HWND の矩形から領域を出すだけ） |
 | `celldiff.go` | **追従の速い経路の撮る側**（2026-10-07）。先端とぴったり合った 1 枚（`SetCellBase`）と今の 1 枚をマスごとに比べ、変わったマスの番号だけを返す（`CaptureResult.Cells`）。手を決めるのは `StudyService.FollowCells`。制約は `_docs/cmd-capture.md` の「速い経路」 |
+| `followstate.go` | **中継を追う 1 回の撮る側の持ち物**（`captureFollow`。2026-10-11）。追う盤・録画・比べる相手の 1 枚・マス割り・ふるいの数え。`BeginFollow` で作り直し `EndFollow` で丸ごと捨てる（どちらも中継セッションが `followCamera` 越しに呼ぶ）。⚠️ **追従の状態を足すならここ**（`CaptureService` に直に足さない）・⚠️ **追う前から入るもの（訂正した 1 枚・設定）と外部エンジンの優先度を下げたかは入れない**。制約は `_docs/cmd-capture.md` |
 | `followcamera.go` | **中継セッションの撮る側**（2026-10-11）。`CaptureService` を `app.FollowCamera` として包み、`main.go` が `StudyService.Camera` に入れる。1 周の段取りは `app` の中継セッション（`followsession.go`）。⚠️ **ここに判断を書かない**（`CaptureResult` を写すだけ。`Cells` の nil と空を潰さない）。中継セッションが呼ぶ `CaptureService` のメソッド（`CaptureQuiet` など）は `//wails:ignore`（画面から直に呼ばせない） |
 | `enginepriority.go` | **追っているあいだ盤の読みを優先する**（設定 `followFirst`。2026-10-07）の判断。外部エンジンの優先度を下げる・戻す（Win32 は `native_windows.go` の `setEnginePriority`）。制約は `_docs/cmd-capture.md` |
 | `window.go` | ウィンドウの位置・サイズ。**永続化**（`app-window.json`・既定値・画面内へのクランプ）と**追跡**（動くたびに記録。⚠️ **終了時には `Position()` を読めない**）の 2 つ。⚠️ **5 枚ぶん**（枠・メイン画面・**評価値グラフ**・**候補手**・**手順**）。⚠️ **古いファイルには `graph` / `side` / `moves` が無い**ので既定に倒すこと（倒さないと大きさ 0 の窓が出る） |
@@ -97,6 +98,8 @@ CLI は無い。**
   ⚠️ 歯止めは —— **訂正してから追うなら押した瞬間の 1 枚ではなく訂正した 1 枚にすること**（盤が映っていなくても始める）・
   **今の根を採った 1 枚のときだけ使うこと**・**撮ったあとに枠が動いていたら使わないこと**・
   **盤の取れなかった 1 枚を採ったら前の 1 枚の盤を使わないこと**
+- `followstate_test.go` — **撮る側の持ち物の一生**（2026-10-11）。⚠️ 歯止めは —— **追い始めで作り直し、止めたら丸ごと捨てること**・
+  **訂正した 1 枚（追う前から入るもの）は捨てないこと**
 - `celldiff_test.go` — **速い経路の撮る側**（2026-10-07）。⚠️ 歯止めは —— **比べる相手が無ければ使わないこと**・
   **ふるいが「変化して止まった」と言った 1 枚でしか使わないこと**（保険の 1 枚は答え合わせの役）・
   **変わったマスの番号が塗り替えたマスだけになること**。変わったマスの組で「止まった」と見なすふるい（`gateReadCells`）も

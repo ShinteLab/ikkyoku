@@ -40,8 +40,8 @@ func (c followCamera) SaveFollowFrame(number int, moves []string, guess bool) {
 	c.s.SaveFollowFrame(number, moves, guess)
 }
 func (c followCamera) SaveFollowMiss(number int, kind string) { c.s.SaveFollowMiss(number, kind) }
-func (c followCamera) SetFollowing(on bool)                   { c.s.SetFollowing(on) }
-func (c followCamera) ClearBoardAnchor()                      { c.s.ClearBoardAnchor() }
+func (c followCamera) BeginFollow()                           { c.s.BeginFollow() }
+func (c followCamera) EndFollow()                             { c.s.EndFollow() }
 
 // followShotOf は撮った結果のうち、中継の追従が使うものを写す。
 // ⚠️ **`Cells` の nil（測っていない）と空（何も変わっていない）を潰さないこと**（`FrameFits` は測った 1 枚なら空でも呼ぶ）。

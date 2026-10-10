@@ -14,7 +14,7 @@ import (
 // （エンジンと取り合うと 2 秒強が 8 秒に延び、成る手で見失った）。
 //
 // ⚠️ **既定は解析を優先**（設定が偽なら何もしない）—— 解析がこのアプリの本命。
-// ⚠️ **止めたら「通常」に戻すこと**（`ClearBoardAnchor`）。
+// ⚠️ **止めたら「通常」に戻すこと**（`EndFollow`）。
 // ⚠️ **追っているあいだに新しく起きたエンジンも下げる**ので、81 マスを読むたびに合わせ直す（数ミリ秒）。
 // ⚠️ **同梱エンジンには効かない**（ikkyoku と同じプロセスで動く）。
 
@@ -30,7 +30,7 @@ func (s *CaptureService) applyFollowFirst(v bool) {
 // syncEnginePriority は**今あるべき優先度**にエンジンを合わせる（追っていて設定が真なら下げ、そうでなければ戻す）。
 func (s *CaptureService) syncEnginePriority() {
 	s.mu.Lock()
-	want := s.followFirst && s.boardAnchor.Board.Dx() > 0
+	want := s.followFirst && s.fol.boardAnchor.Board.Dx() > 0
 	lowered, names := s.enginesLowered, s.engineNames
 	s.mu.Unlock()
 	if !want && !lowered {

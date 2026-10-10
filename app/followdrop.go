@@ -215,12 +215,12 @@ func (s *StudyService) offerDrop(ds *followDropSplit, p FollowProbe, unseen *pos
 			choices = append(choices, FollowChoice{Moves: slices.Clone(c), Text: followText(root, main, c)})
 		}
 	}
-	prev := s.dropOffer
-	s.dropOffer = &followDropOffer{tip: -1, cands: ds.cands}
+	prev := s.follow.dropOffer
+	s.follow.dropOffer = &followDropOffer{tip: -1, cands: ds.cands}
 	if s.study != nil {
-		s.dropOffer.tip = mainTipID(s.study)
+		s.follow.dropOffer.tip = mainTipID(s.study)
 	}
-	same := prev != nil && prev.tip == s.dropOffer.tip && slices.EqualFunc(prev.cands, ds.cands, slices.Equal[[]string])
+	same := prev != nil && prev.tip == s.follow.dropOffer.tip && slices.EqualFunc(prev.cands, ds.cands, slices.Equal[[]string])
 	s.mu.Unlock()
 	if !same {
 		var texts []string
@@ -242,8 +242,8 @@ func (s *StudyService) offerDrop(ds *followDropSplit, p FollowProbe, unseen *pos
 //wails:ignore
 func (s *StudyService) FollowChoose(moves []string) (FollowAuto, error) {
 	s.mu.Lock()
-	off := s.dropOffer
-	s.dropOffer = nil
+	off := s.follow.dropOffer
+	s.follow.dropOffer = nil
 	var tip, rev int
 	atTip := false
 	if s.study != nil {

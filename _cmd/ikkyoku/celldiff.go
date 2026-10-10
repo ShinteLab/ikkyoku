@@ -53,7 +53,7 @@ const (
 //wails:ignore
 func (s *CaptureService) SetCellBase() {
 	s.mu.Lock()
-	s.setCellBaseLocked(s.lastQuiet)
+	s.setCellBaseLocked(s.fol.lastQuiet)
 	s.mu.Unlock()
 }
 
@@ -64,9 +64,9 @@ func (s *CaptureService) SetCellBase() {
 // 決まらなかった組の印が別の相手の組に掛かったりする。版（`cellGen`）も進める（測っている最中に
 // 替わった 1 枚を、ふるいが前の版の組と比べないため）。
 func (s *CaptureService) setCellBaseLocked(img image.Image) {
-	s.cellBase = img
-	s.cellGen++
-	s.gateCells, s.cellsFailed, s.cellsUnmoved = frameCells{}, frameCells{}, frameCells{}
+	s.fol.cellBase = img
+	s.fol.cellGen++
+	s.fol.gateCells, s.fol.cellsFailed, s.fol.cellsUnmoved = frameCells{}, frameCells{}, frameCells{}
 }
 
 // CellsUnclear は**直前に撮った 1 枚の変わったマスの組を決まらなかった組として覚え、組が変わるのを待たせる**（2026-10-08）。
@@ -80,7 +80,7 @@ func (s *CaptureService) setCellBaseLocked(img image.Image) {
 //wails:ignore
 func (s *CaptureService) CellsUnclear() {
 	s.mu.Lock()
-	img := s.lastQuiet
+	img := s.fol.lastQuiet
 	s.mu.Unlock()
 	fc := s.cellsOf(img)
 	if !fc.ok || len(fc.cells) == 0 {
@@ -88,7 +88,7 @@ func (s *CaptureService) CellsUnclear() {
 	}
 	s.markCellsFailed(fc)
 	s.mu.Lock()
-	s.gateDirty, s.gateMoving = true, 0
+	s.fol.gateDirty, s.fol.gateMoving = true, 0
 	s.mu.Unlock()
 	log.Follow.Info("変わったマスを説明できる手がありません（組が変わるのを待ちます）", "変わったマス", len(fc.cells))
 }
@@ -102,7 +102,7 @@ func (s *CaptureService) CellsUnclear() {
 //wails:ignore
 func (s *CaptureService) ForgetUnmoved() {
 	s.mu.Lock()
-	s.cellsUnmoved = frameCells{}
+	s.fol.cellsUnmoved = frameCells{}
 	s.mu.Unlock()
 }
 
@@ -118,14 +118,14 @@ func (s *CaptureService) ForgetUnmoved() {
 //wails:ignore
 func (s *CaptureService) CellsUnmoved() {
 	s.mu.Lock()
-	img := s.lastQuiet
+	img := s.fol.lastQuiet
 	s.mu.Unlock()
 	fc := s.cellsOf(img)
 	if !fc.ok || len(fc.cells) == 0 {
 		return
 	}
 	s.mu.Lock()
-	s.cellsUnmoved = fc
+	s.fol.cellsUnmoved = fc
 	s.mu.Unlock()
 }
 
@@ -148,7 +148,7 @@ func (a frameCells) same(b frameCells) bool {
 // 1 枚につき 1 回だけ測り、ふるい（`gate`。2 枚続けて同じ組か）と速い経路（`fastCells`）の両方に渡す。
 func (s *CaptureService) cellsOf(img image.Image) frameCells {
 	s.mu.Lock()
-	base, rects, region, bounds, gen := s.cellBase, s.cellRects, s.cellRegion, s.cellBounds, s.cellGen
+	base, rects, region, bounds, gen := s.fol.cellBase, s.fol.cellRects, s.fol.cellRegion, s.fol.cellBounds, s.fol.cellGen
 	s.mu.Unlock()
 	if img == nil || base == nil || len(rects) != 81 || !bounds.Eq(img.Bounds()) {
 		return frameCells{}
@@ -175,7 +175,7 @@ func (s *CaptureService) markCellsFailed(fc frameCells) {
 		return
 	}
 	s.mu.Lock()
-	s.cellsFailed = frameCells{cells: slices.Clone(fc.cells), ok: true, gen: fc.gen}
+	s.fol.cellsFailed = frameCells{cells: slices.Clone(fc.cells), ok: true, gen: fc.gen}
 	s.mu.Unlock()
 }
 
@@ -190,7 +190,7 @@ func (s *CaptureService) markCellsFailed(fc frameCells) {
 //wails:ignore
 func (s *CaptureService) ReadCells(cells []int) ([]ikkyokuapp.CellPiece, error) {
 	s.mu.Lock()
-	img, rects, region := s.lastQuiet, s.cellRects, s.cellRegion
+	img, rects, region := s.fol.lastQuiet, s.fol.cellRects, s.fol.cellRegion
 	s.mu.Unlock()
 	pieces, err := recognize.ReadCells(img, region, rects, cells)
 	if err != nil {
@@ -222,7 +222,7 @@ func (s *CaptureService) ReadCells(cells []int) ([]ikkyokuapp.CellPiece, error) 
 //wails:ignore
 func (s *CaptureService) ComparePieces(pairs []ikkyokuapp.CellPair) []float64 {
 	s.mu.Lock()
-	base, cur, rects, bounds := s.cellBase, s.lastQuiet, s.cellRects, s.cellBounds
+	base, cur, rects, bounds := s.fol.cellBase, s.fol.lastQuiet, s.fol.cellRects, s.fol.cellBounds
 	s.mu.Unlock()
 	out := make([]float64, len(pairs))
 	names := make([]string, len(pairs))
@@ -261,7 +261,7 @@ func (s *CaptureService) noteCellRects(img image.Image, d *recognize.Debug) {
 		rects[c.Row*9+c.Col] = c.Rect
 	}
 	s.mu.Lock()
-	s.cellRects, s.cellRegion, s.cellBounds = rects, d.Region, img.Bounds()
+	s.fol.cellRects, s.fol.cellRegion, s.fol.cellBounds = rects, d.Region, img.Bounds()
 	s.mu.Unlock()
 }
 
@@ -278,7 +278,7 @@ func (s *CaptureService) fastCells(fc frameCells) bool {
 		return false
 	}
 	s.mu.Lock()
-	why := s.gateRead
+	why := s.fol.gateRead
 	s.mu.Unlock()
 	if why != gateReadSettled && why != gateReadCells {
 		return false

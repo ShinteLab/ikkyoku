@@ -7,9 +7,9 @@ package app
 // 控えの有無・帯の候補を画面（`mainscreen.ts`）が持っていて、判断が Go と画面に分かれていた（観点 4）。
 // 画面は「追う / 止める / 打った駒を選ぶ」を呼び、`follow:update` で来た様子を描くだけにした。
 //
-// ⚠️ **第 1 段で移したのは段取りとループと画面にあった状態だけ。** 撮る側（`CaptureService`。マスタ・比べる相手の
-// 1 枚・ふるい・録画）と解析タブ側（控え・差し替えの控え・比べる相手の局面）の状態の置き場所は変えていない（第 2 段）。
-// 始まりと終わり（撮る側の入り切り・追う盤を忘れる）はここの 1 か所から呼ぶ。
+// **追従の状態もここが持つ**（第 2 段。2026-10-11）。解析タブ側の答えの控え（控え・差し替えの控え・聞いている候補・比べる相手の
+// 局面・最後に読んだ盤）は `followSession` の下半分、撮る側（マスタ・比べる相手の 1 枚・ふるい・録画）は `CaptureService` の
+// `captureFollow`。どちらも**追い始めで作り直し、止めたときに捨てる**（`StartFollow` / `followStop` の 1 か所から）。
 //
 // ⚠️ **撮る側は `FollowCamera` として差し込む**（`StudyService.Camera`。`_cmd/ikkyoku` の `CaptureService` が満たす）。
 // app は Wails を知らないので、段取りは Go のテストで確かめられる（`followsession_test.go`）。
@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/ShinteLab/ikkyoku/log"
+	"github.com/ShinteLab/ikkyoku/position"
 )
 
 // FollowShot は撮る側が返す 1 枚のうち、中継の追従が使うもの（`_cmd/ikkyoku` の `CaptureResult` から写す）。
@@ -60,10 +61,11 @@ type FollowCamera interface {
 	SetCellBase()
 	SaveFollowFrame(number int, moves []string, guess bool)
 	SaveFollowMiss(number int, kind string)
-	// SetFollowing は追っているかを撮る側へ写す（追っているあいだは枠を隠させない・外部エンジンの優先度）。
-	SetFollowing(on bool)
-	// ClearBoardAnchor は追う盤を忘れる（どの止まり方でも呼ぶ）。
-	ClearBoardAnchor()
+	// BeginFollow は撮る側の持ち物を作り直す（追い始め。追っているあいだは枠を隠させない）。
+	BeginFollow()
+	// EndFollow は撮る側の持ち物を丸ごと捨てる（追う盤・録画・比べる相手の 1 枚・ふるい。どの止まり方でも呼ぶ）。
+	// 外部エンジンの優先度を下げていれば戻す。
+	EndFollow()
 }
 
 // FollowUpdate は中継セッションの様子（イベント `follow:update`。画面はこれを描くだけ）。
@@ -113,9 +115,15 @@ const (
 	followOk = "正常に盤面を認識しています"
 )
 
-// followSession は中継を追う 1 回の持ち物（`StudyService.follow`）。⚠️ **自分の mu で守る**（`StudyService.mu` とは別。
-// ループは StudyService のメソッドを呼ぶので、こちらの mu を持ったまま呼ばないこと）。
+// followSession は**中継を追う 1 回の解析タブ側の持ち物**（`StudyService.follow`）。撮る側の持ち物は `CaptureService` の
+// `captureFollow`（`FollowCamera.BeginFollow` / `EndFollow` で作り直す・捨てる）。
+//
+// **守る mu が 2 つある**: ループの状態（上半分）は自分の mu、答えの控え（下半分）は `StudyService.mu`
+// （控えは `FollowAuto` などが局面と一緒に読み書きするため）。⚠️ **こちらの mu を持ったまま StudyService のメソッドを呼ばないこと**。
+// ⚠️ **追い始め（`StartFollow`）と止めたとき（`followStop`）に、下半分も捨てる**（`resetLocked`）。前の回の控えを次の回の
+// 最初の 1 枚で足さない。
 type followSession struct {
+	// ---- ループの状態（mu で守る）----
 	mu sync.Mutex
 	// on は追っているか。gen は回の番号（止めるたびに進める。古い回のループの結果を捨てる）。
 	on  bool
@@ -124,17 +132,35 @@ type followSession struct {
 	done chan struct{}
 	// lost は繋がらない周が続いた数（`followLostLimit`）。
 	lost int
-	// pending は**解析タブ側が答えを控えていて、次の 1 枚で確かめる**ところか（`FollowAuto.Pending`）。
+	// awaiting は**解析タブ側が答えを控えていて、次の 1 枚で確かめる**ところか（`FollowAuto.Pending`）。
 	// ⚠️ **立っているときに「変わっていない」が来たら `FollowConfirm`**。⚠️ **読んだ周の後でしか確かめない** ——
 	// 別の盤・盤が無い・動いている周を挟んだら倒す。
-	pending bool
-	// pendingCells は控えた 1 枚の、比べる相手から変わったマス（確かめの周は測らないので、足したあと `FrameFits` に渡す）。
+	awaiting bool
+	// awaitingCells は控えた 1 枚の、比べる相手から変わったマス（確かめの周は測らないので、足したあと `FrameFits` に渡す）。
 	// ⚠️ **落とすと、81 マスで読んだ手のあと比べる相手が替わらない**（2026-10-07 に実機で踏んだ）。
-	pendingCells []int
+	awaitingCells []int
 	// dropKey は帯に出している打った駒の候補（空なら出していない）。同じ候補を毎周出し直さない。
 	dropKey string
 	// status / statusKind は最後に出した状態の行（読んでいない周は前のまま残す）。
 	status, statusKind string
+
+	// ---- 解析タブ側の答えの控え（StudyService.mu で守る）----
+
+	// pending は追従が 1 枚目で見つけた、まだ足していない答え（`followPending`。2026-10-05）。
+	pending *followPending
+	// rewind は追従が 1 枚目で見つけた、推測で足した末尾の手の差し替え（`followRewind`。2026-10-08）。
+	rewind *followRewind
+	// dropOffer は人に聞いている、打った駒の候補（`offerDrop` / `FollowChoose`。2026-10-09）。
+	dropOffer *followDropOffer
+	// base は**速い経路の比べる相手の 1 枚が、どの局面だったか**（`followBase`。2026-10-07。撮る側の `cellBase` と対）。
+	base *followBase
+	// lastFrame は**追従が最後に 81 マスで読んだ盤**（解析の向き。2026-10-08。`CellsLookUnmoved` が使う）。
+	lastFrame *position.Board
+}
+
+// resetLocked は答えの控えを捨てる（`StudyService.mu` を持って呼ぶ）。
+func (fs *followSession) resetLocked() {
+	fs.pending, fs.rewind, fs.dropOffer, fs.base, fs.lastFrame = nil, nil, nil, nil, nil
 }
 
 // StartFollow は**中継を追い始める**（「中継を追う」・枠のボタン・訂正タブの「そのまま追跡」）。追っていれば何もしない。
@@ -158,11 +184,14 @@ func (s *StudyService) StartFollow() error {
 	gen := fs.gen
 	fs.done = make(chan struct{})
 	done := fs.done
-	fs.lost, fs.pending, fs.pendingCells, fs.dropKey = 0, false, nil, ""
+	fs.lost, fs.awaiting, fs.awaitingCells, fs.dropKey = 0, false, nil, ""
 	fs.status, fs.statusKind = "", ""
 	fs.mu.Unlock()
 
-	cam.SetFollowing(true)
+	s.mu.Lock()
+	fs.resetLocked()
+	s.mu.Unlock()
+	cam.BeginFollow()
 	log.Follow.Info("中継の追跡を始めました")
 	s.followPublish(gen, "追う盤を決めています…", "", &FollowNotice{})
 	go s.followLoop(gen, done)
@@ -223,7 +252,7 @@ func (s *StudyService) FollowHideRefused(message string) {
 // followStop は追跡を止める。gen が -1 なら今の回を、そうでなければその回だけを止める（古い回のループは何もしない）。
 // 止めたら走っているループの終わりを知らせる口を返す（止めていなければ nil）。
 //
-// ⚠️ **どの止まり方でも追う盤を忘れさせること**（`ClearBoardAnchor`。2026-10-10。止まり方によって忘れ損ねると、
+// ⚠️ **どの止まり方でも撮る側の持ち物を捨てること**（`EndFollow`。2026-10-10。止まり方によって忘れ損ねると、
 // 外部エンジンの優先度が下がったまま残り、次に追ったときの録画が前の回のディレクトリに混ざった）。
 // kind が空なら**人が自分で止めた**ときで、読めば済むのでしばらくして消す。
 func (s *StudyService) followStop(gen int, message, kind string) <-chan struct{} {
@@ -236,13 +265,15 @@ func (s *StudyService) followStop(gen int, message, kind string) <-chan struct{}
 	fs.on = false
 	fs.gen++
 	done := fs.done
-	fs.pending, fs.pendingCells, fs.dropKey = false, nil, ""
+	fs.awaiting, fs.awaitingCells, fs.dropKey = false, nil, ""
 	fs.status, fs.statusKind = "", ""
 	fs.mu.Unlock()
 
+	s.mu.Lock()
+	fs.resetLocked()
+	s.mu.Unlock()
 	if cam := s.Camera; cam != nil {
-		cam.ClearBoardAnchor()
-		cam.SetFollowing(false)
+		cam.EndFollow()
 	}
 	log.Follow.Info("中継の追跡を止めました", "理由", message)
 	s.followEmit(FollowUpdate{On: false, Waiting: followWaitingOf(s.State()),
@@ -311,11 +342,11 @@ func (s *StudyService) followOnce(gen int, given *FollowShot) (bool, error) {
 	case shot.Skipped != "":
 		// ⚠️ **読まなかった周は見送りとして数えない**（長考中はほとんどこれ）。
 		fs.mu.Lock()
-		pend := fs.pending
+		pend := fs.awaiting
 		if shot.Skipped != "unchanged" || !pend {
-			fs.pending = false
+			fs.awaiting = false
 		}
-		pendCells := fs.pendingCells
+		pendCells := fs.awaitingCells
 		fs.mu.Unlock()
 		if shot.Skipped != "unchanged" || !pend {
 			s.followPublish(gen, "", "", nil) // 読んでいないので前の状態のまま
@@ -426,7 +457,7 @@ func (s *StudyService) followOnce(gen int, given *FollowShot) (bool, error) {
 // followSetPending は控えの有無と、控えた 1 枚の変わったマスを覚える。
 func (s *StudyService) followSetPending(on bool, cells []int) {
 	s.follow.mu.Lock()
-	s.follow.pending, s.follow.pendingCells = on, cells
+	s.follow.awaiting, s.follow.awaitingCells = on, cells
 	s.follow.mu.Unlock()
 }
 

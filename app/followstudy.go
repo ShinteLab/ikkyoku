@@ -699,7 +699,7 @@ func (s *StudyService) FollowAuto(boardSFEN string, cellConfidence []float64, ce
 	// 下見・控え・確かめが同じ盤を見るので、2 枚目でも同じ答えになる。
 	s.followApplyPromo(board, cost, promo, rotated)
 	s.mu.Lock()
-	s.lastFrame = board
+	s.follow.lastFrame = board
 	s.mu.Unlock()
 	// ⚠️ **修復してよいのは費用表があるときだけ**。
 	// 確信度が無ければ**どのマスを覆してよいかの根拠が無い**ので、厳密一致に倒す。
@@ -832,8 +832,8 @@ func (s *StudyService) FollowConfirm() (FollowAuto, error) {
 		return s.followRewindApply(rw)
 	}
 	s.mu.Lock()
-	pend := s.pending
-	s.pending = nil
+	pend := s.follow.pending
+	s.follow.pending = nil
 	s.mu.Unlock()
 	if pend == nil || pend.tip != s.mainTip() {
 		return FollowAuto{Kind: FollowSame, Reason: "盤面は変わっていません", State: s.State()}, nil
@@ -868,10 +868,10 @@ func (s *StudyService) markBase() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.study == nil {
-		s.cellBase = nil
+		s.follow.base = nil
 		return
 	}
-	s.cellBase = &followBase{root: rootSFEN(s.study), line: slices.Clone(s.study.MainLine())}
+	s.follow.base = &followBase{root: rootSFEN(s.study), line: slices.Clone(s.study.MainLine())}
 }
 
 // baseIf は a が `AtFrame` なら比べる相手の局面を覚えて、a をそのまま返す。
@@ -887,7 +887,7 @@ func (s *StudyService) baseIf(a FollowAuto, err error) (FollowAuto, error) {
 func (s *StudyService) followFromBase() (base *position.Position, since []string, extra *position.CellMask, ok bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	cb := s.cellBase
+	cb := s.follow.base
 	if cb == nil || s.study == nil || rootSFEN(s.study) != cb.root {
 		return nil, nil, nil, false
 	}
@@ -1220,7 +1220,7 @@ func followGlowOnly(base *position.Position, since []string, mask, extra *positi
 func (s *StudyService) CellsLookUnmoved(cells []int) bool {
 	mask := s.cellsMask(cells)
 	s.mu.Lock()
-	frame := s.lastFrame
+	frame := s.follow.lastFrame
 	var tip *position.Position
 	if s.study != nil {
 		_, tip, _ = s.study.MainTip()
@@ -1648,10 +1648,10 @@ func (s *StudyService) pendingMoves() []string {
 	tip := s.mainTip()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.pending == nil || s.pending.tip != tip {
+	if s.follow.pending == nil || s.follow.pending.tip != tip {
 		return nil
 	}
-	return slices.Clone(s.pending.moves)
+	return slices.Clone(s.follow.pending.moves)
 }
 
 // pendingStillFits は**足せる手が出なかった 1 枚が、控えた手順と矛盾しないか**を返す（2026-10-06）。
@@ -1672,7 +1672,7 @@ func (s *StudyService) pendingStillFits(board *position.Board, cost *position.Ce
 		return false
 	}
 	s.mu.Lock()
-	pend := s.pending
+	pend := s.follow.pending
 	if pend == nil || s.study == nil || pend.tip != mainTipID(s.study) {
 		s.mu.Unlock()
 		return false
@@ -1715,7 +1715,7 @@ type followPending struct {
 
 func (s *StudyService) setPending(p *followPending) {
 	s.mu.Lock()
-	s.pending = p
+	s.follow.pending = p
 	s.mu.Unlock()
 }
 
@@ -1728,15 +1728,15 @@ func (s *StudyService) takePendingPrefix(moves []string) int {
 	tip := s.mainTip()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.pending == nil || s.pending.tip != tip {
+	if s.follow.pending == nil || s.follow.pending.tip != tip {
 		return 0
 	}
 	k := 0
-	for k < len(moves) && k < len(s.pending.moves) && moves[k] == s.pending.moves[k] {
+	for k < len(moves) && k < len(s.follow.pending.moves) && moves[k] == s.follow.pending.moves[k] {
 		k++
 	}
 	if k > 0 {
-		s.pending = nil
+		s.follow.pending = nil
 	}
 	return k
 }
