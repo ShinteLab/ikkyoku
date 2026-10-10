@@ -1622,6 +1622,9 @@ func (s *CaptureService) AnchorBoard() (CaptureResult, error) {
 	s.mu.Unlock()
 	go s.syncEnginePriority()
 	log.Follow.Info("追う盤を決めました", "board", sig.Board, "color", sig.Color, "dir", dir)
+	// ⚠️ **始めたことと止めたことは本体のログにも出す**（2026-10-10）。追従のログは別のファイル（`log.Follow`）で、
+	// 本体だけ読んでいると、いつ追っていたのか（エンジンの優先度・CPU の取り合いが起きていた時間）が分からない。
+	log.Info("中継の追跡を始めました", "dir", dir)
 	return r, nil
 }
 
@@ -1813,6 +1816,8 @@ func safeNameRune(r rune) rune {
 // ClearBoardAnchor は追う盤を忘れる（追跡を止めたとき）。
 func (s *CaptureService) ClearBoardAnchor() {
 	s.mu.Lock()
+	// following は追っていたか（止め方によっては何度も呼ばれる。本体のログに出すのは追っていたときの 1 回だけ）。
+	following := s.boardAnchor.Board.Dx() > 0
 	// ⚠️ **録画も畳むこと。** 次に「追う」を押したら**別の対局**かもしれないので、
 	// 前の回の続きに書き足すと**1 つのディレクトリに 2 局が混ざる**。
 	s.boardAnchor, s.anchorRegion, s.quietOutcome = recognize.Signature{}, ikkyoku.Region{}, ""
@@ -1830,6 +1835,9 @@ func (s *CaptureService) ClearBoardAnchor() {
 	if shots > 0 {
 		log.Follow.Info("追跡を止めました", "撮った枚数", shots, "認識した枚数", reads,
 			"省いた割合", fmt.Sprintf("%.0f%%", 100*float64(shots-reads)/float64(shots)))
+	}
+	if following {
+		log.Info("中継の追跡を止めました", "撮った枚数", shots, "認識した枚数", reads)
 	}
 }
 
