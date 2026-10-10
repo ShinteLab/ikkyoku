@@ -261,10 +261,29 @@ func (s *StudyService) followRewindProbe(board *position.Board, cost *position.C
 		return nil
 	}
 
+	// **戻る候補**: 末尾から 1〜`followRewindMax` 手と、**比べる相手の 1 枚の局面**（先端とぴったり合った最後の局面。
+	// 2026-10-10）。後者は大盤などのあいだに何手も進み、推測の手が `followRewindMax` より長く積まれたときのため ——
+	// 中継で 6 手を取り違えたとき、正しい手順は 6 手戻らないと届かなかった。⚠️ **推測の手の外へは戻らない**。
+	ks := []int{}
+	for k := 1; k <= len(tail) && k <= followRewindMax; k++ {
+		ks = append(ks, k)
+	}
+	if _, since, _, bok := s.followFromBase(); bok && len(since) > followRewindMax && len(since) <= len(tail) {
+		ks = append(ks, len(since))
+	}
+	// ⚠️ **種類の読みを信じてよい 1 枚か**は、いちばん深く戻る局面と比べて決める（2026-10-10。`position.KindsTrusted`）。
+	// 先端と比べると、疑っている推測の手が置いた駒の種類違い（2五 の桂）まで「読み違い」に数えてしまう。
+	deep, ok := followReplay(root, line[:len(line)-ks[len(ks)-1]])
+	if !ok {
+		return nil
+	}
+	trusted := position.KindsTrusted(deep.Board, board, nil)
+
 	// **先端側の一番よい説明**（何も指していない／下見が並べた候補）。同じだけ説明できるなら手数の少ないほう。
 	// ⚠️ **先端の盤で成駒が載っているマスは比べない**（2026-10-09。`promotedCells`）。
 	skip := promotedCells(tip.Board)
 	tipCost, tipPlies := followSideCost(tip.Board, board, cost, skip), 0
+	tipKind := followKindCost(tip.Board, board, cost, skip)
 	for _, c := range p.Candidates {
 		after, ok := followReplay(tip, c.Moves)
 		if !ok {
@@ -273,35 +292,53 @@ func (s *StudyService) followRewindProbe(board *position.Board, cost *position.C
 		v := followSideCost(after.Board, board, cost, skip)
 		if v < tipCost-followSideEps || (v <= tipCost+followSideEps && len(c.Moves) < tipPlies) {
 			tipCost, tipPlies = v, len(c.Moves)
+			tipKind = followKindCost(after.Board, board, cost, skip)
 		}
 	}
-	if tipCost <= followSideEps && tipPlies == 0 {
+	if tipCost <= followSideEps && tipPlies == 0 && (!trusted || tipKind <= followSideEps) {
 		// 先端そのものがぴったり合っている（長考中はほとんどこれ）。戻す理由が無い。
 		return nil
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), followTimeout)
 	defer cancel()
-	for k := 1; k <= len(tail) && k <= followRewindMax; k++ {
+	for _, k := range ks {
 		keep := len(line) - k
 		anc, ok := followReplay(root, line[:keep])
 		if !ok {
 			return nil
 		}
-		r, err := position.Connect(ctx, anc, board, position.ConnectOptions{Cost: cost, Tolerance: position.DefaultTolerance})
+		opt := position.ConnectOptions{Cost: cost, Tolerance: position.DefaultTolerance}
+		if k > followRewindMax {
+			// 比べる相手の局面まで戻るときだけ深く探す（何手も進んだあいだに積んだ推測を、まとめて説明し直すため）。
+			opt.DeepDepth = followDeepDepth
+		}
+		r, err := position.Connect(ctx, anc, board, opt)
 		if err != nil {
 			return nil
 		}
+		old := line[keep:]
 		var moves []string
 		switch {
 		case r.Stop == position.StopSame:
 			// 戻すだけで撮った盤になる（取り消し）。
 		case r.Stop == position.StopFound && r.Unique:
 			moves = r.Moves
+		case r.Stop == position.StopFound && !r.More && followSameEnd(anc, r.Solutions):
+			// ⚠️ **順番だけが決まらない答え**（行き着く局面は同じ。2026-10-10）。追従が足すときと同じく、推測として 1 本採る。
+			// 戻した手と同じ手で始まらない順番を選ぶ（同じ手で始まるなら、もっと浅く戻せば済む）。
+			for _, sol := range r.Solutions {
+				if len(sol) > 0 && sol[0] != old[0] {
+					moves = sol
+					break
+				}
+			}
+			if moves == nil {
+				continue
+			}
 		default:
 			continue
 		}
-		old := line[keep:]
 		if len(moves) > 0 && moves[0] == old[0] {
 			continue
 		}
@@ -312,11 +349,21 @@ func (s *StudyService) followRewindProbe(board *position.Board, cost *position.C
 		alt := followSideCost(after.Board, board, cost, skip)
 		better := alt < tipCost-followSideEps
 		fewer := tipPlies > 0 && alt <= tipCost+followSideEps && len(moves) < k+tipPlies && (k+tipPlies-len(moves))%2 == 0
-		if !better && !fewer {
+		// ⚠️ **先後と駒の有無で同点なら、種類の読みを信じてよい 1 枚に限って種類で選ぶ**（2026-10-10。`position.KindsTrusted`）。
+		// 中継で取り違えた ▲2五桂 △同桂 と正しい ▲2五桂 △4五桂 ▲同歩 …… は先後と駒の有無では同じ盤で、2五 が歩（1.00）か
+		// 桂かでしか分かれない。⚠️ **手数の偶奇は揃えること**（違えば手番が食い違う）。
+		altKind := followKindCost(after.Board, board, cost, skip)
+		kinder := trusted && !better && alt <= tipCost+followSideEps && altKind < tipKind-followSideEps &&
+			(k+tipPlies-len(moves))%2 == 0
+		if !better && !fewer && !kinder {
 			continue
 		}
 		why := fmt.Sprintf("先後と駒の有無の食い違い %.2f → %.2f", tipCost, alt)
-		if !better {
+		switch {
+		case better:
+		case kinder:
+			why = fmt.Sprintf("先後と駒の有無は同じ %.2f・種類の食い違い %.2f → %.2f", alt, tipKind, altKind)
+		default:
 			why = fmt.Sprintf("同じ食い違い %.2f を %d 手 → %d 手で説明", alt, k+tipPlies, len(moves))
 		}
 		return &followRewind{line: line, keep: keep, moves: slices.Clone(moves), why: why}
@@ -452,6 +499,33 @@ func followSideCost(cand, read *position.Board, cost *position.CellCost, skip *p
 				continue
 			}
 			if a.IsEmpty() != b.IsEmpty() || (!a.IsEmpty() && a.Black() != b.Black()) {
+				sum += cost[r][f]
+			}
+		}
+	}
+	return sum
+}
+
+// followKindCost は盤 cand を正しいとしたとき、撮った盤 read と**先後は合って種類だけ違うマス**の費用の合計（2026-10-10）。
+//
+// 差し替えの比べで、先後と駒の有無が同点のときにだけ使う（`followRewindProbe`。種類の読みを信じてよい 1 枚に限る）。
+// skip と読みの弱い駒の扱いは `followSideCost` と同じ。
+func followKindCost(cand, read *position.Board, cost *position.CellCost, skip *position.CellMask) float64 {
+	sum := 0.0
+	for r := 0; r < 9; r++ {
+		for f := 0; f < 9; f++ {
+			if skip != nil && skip[r][f] {
+				continue
+			}
+			a, err1 := cand.At(r, f)
+			b, err2 := read.At(r, f)
+			if err1 != nil || err2 != nil || a.IsEmpty() || b.IsEmpty() || a.Black() != b.Black() {
+				continue
+			}
+			if cost[r][f] < followArrivedMinCost {
+				continue
+			}
+			if a != b {
 				sum += cost[r][f]
 			}
 		}

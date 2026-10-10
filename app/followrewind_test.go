@@ -413,3 +413,55 @@ func TestFollowRewindIgnoresPromotedPieceMisread(t *testing.T) {
 		t.Fatalf("本譜 = %v, want [2b1a+]", got)
 	}
 }
+
+// ⚠️ **推測で積んだ手を、比べる相手の 1 枚の局面から説明し直して差し替えること**（2026-10-10 に中継で踏んだ）。
+//
+// 中継で大盤のあいだに 6 手進み、追従は 4 手の修復 ▲4五歩 △2五歩 ▲4四歩 △2三飛 に ▲2五桂 △同桂 を継ぎ足した。
+// 正しい ▲2五桂 △4五桂 ▲同歩 …… とは先後と駒の有無では同じ盤で、2五 が歩（1.00）か桂かでしか分かれない。
+// ⚠️ **戻るのは推測の手の末尾 3 手より深い**（6 手）ので、比べる相手の局面（先端とぴったり合った △2一飛 の 1 枚）まで戻る。
+// ⚠️ **種類で選ぶのは、その 1 枚の種類の読みを信じてよいとき**（動いていない駒の読み違いは 1一 の 1 マスだけ）。
+func TestFollowRewindFromBaseAcrossFrames(t *testing.T) {
+	s := hakureiStudy(t)
+	s.markBase()
+	guessMoves(t, s, "4f4e", "2d2e", "4e4d", "2a2c")
+	guessMoves(t, s, "3g2e", "3c2e")
+
+	var a FollowAuto
+	for i := 0; i < 2; i++ {
+		var err error
+		if a, err = s.FollowAuto(hakureiShot, hakureiConf, nil, []PromoEvidence{}); err != nil {
+			t.Fatalf("FollowAuto: %v", err)
+		}
+	}
+	if !a.Rewound {
+		t.Fatalf("差し替えていません: %+v", a)
+	}
+	if got := tipSFEN(t, s); !strings.HasPrefix(got, hakureiWant) {
+		t.Errorf("局面 = %s, want %s…", got, hakureiWant)
+	}
+	if !hasBranch(s, "4f4e") {
+		t.Errorf("元の手が枝に残っていません")
+	}
+}
+
+// ⚠️ **種類の読みを信じられない 1 枚では、種類で差し替えないこと**（2026-10-10。`position.KindsTrusted`）。
+//
+// 上と同じ形で、動いていない駒の種類を 2 マス読み違えた 1 枚（1一 の香を飛・9一 の香を飛）。書体に慣れていない中継では、
+// 種類を外した読みにも確信度 1.00 が出る（録画 211 手の読み直し）。
+func TestFollowRewindIgnoresKindsWhenUntrusted(t *testing.T) {
+	s := hakureiStudy(t)
+	s.markBase()
+	guessMoves(t, s, "4f4e", "2d2e", "4e4d", "2a2c")
+	guessMoves(t, s, "3g2e", "3c2e")
+	shot := "r" + hakureiShot[1:]
+
+	for i := 0; i < 2; i++ {
+		a, err := s.FollowAuto(shot, hakureiConf, nil, []PromoEvidence{})
+		if err != nil {
+			t.Fatalf("FollowAuto: %v", err)
+		}
+		if a.Rewound {
+			t.Fatalf("種類を信じられない 1 枚で、種類で差し替えました: %+v", a)
+		}
+	}
+}
