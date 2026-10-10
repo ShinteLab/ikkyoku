@@ -2880,6 +2880,9 @@ ${st.turnLabel}${n}`;
     });
   };
   // followOk は**読めて、追っている盤が映っている**周の状態（変わっていない・足した・まだ繋がらない 1 枚）。
+  // ⚠️ **読んでいない周で出さないこと**（2026-10-10）。ふるいが省いた周（長考中はほとんど）は盤を見ていないので、
+  // 前の状態を残す（`publishFollow()`）。省いた周で出していたら、盤が映っていないあいだも
+  // 「盤が映っていません」と「正常に盤面を認識しています」が交互に出た（実機で出た）。
   const followOk = "正常に盤面を認識しています";
   // followDropKey は**帯に出している、打った駒の候補**（2026-10-09。空なら出していない）。同じ候補を毎周出し直さないため。
   let followDropKey = "";
@@ -3044,7 +3047,7 @@ ${st.turnLabel}${n}`;
     if (shot.skipped) {
       if (shot.skipped !== "unchanged" || !followPending) {
         followPending = false;
-        publishFollow(followOk);
+        publishFollow(); // 読んでいないので前の状態のまま（`followOk`）
         return false;
       }
       // **控えた 1 枚から変わっていない** ＝ 確かめが済んだ。読み直さずに足す。
@@ -3081,7 +3084,7 @@ ${st.turnLabel}${n}`;
         // 変わっていない次の 1 枚（`unchanged`）で、説明の付かない盤のまま控えた手を足さないため。
         await CaptureService.CellsUnclear();
         followPending = false;
-        publishFollow(followOk);
+        publishFollow(); // 盤を読んでいないので前の状態のまま（`followOk`）
         return false;
       }
       if (fast.applied || fast.pending || fast.atFrame) {
@@ -3265,7 +3268,7 @@ ${st.turnLabel}${n}`;
       // 残らなかった**。⚠️ **残すのは変わり目だけ**（Go 側が間引く）。
       void CaptureService.SaveFollowMiss(followWaiting, got.kind);
       followLost = 0;
-      publishFollow(followOk);
+      publishFollow(got.kind === "unreadable" ? "盤面として読めません" : followOk);
       return false;
     }
     // **打った駒の種類が決まらない**（2026-10-09。見た目でも決まらなかった）。帯に候補を並べて人に選んでもらう。
