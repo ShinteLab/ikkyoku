@@ -179,6 +179,17 @@ func (r StopReason) String() string {
 type ConnectOptions struct {
 	// MaxDepth は探す最大手数（0 なら DefaultMaxDepth）。
 	MaxDepth int
+	// DeepDepth は **MaxDepth を超えて探してよい最大手数**（MaxDepth 以下なら MaxDepth と同じ。2026-10-10）。
+	//
+	// 深く探すのは 2 つだけ: **認識とぴったり合う手順**と、**修復の答えより厳密に安く合う手順**（`cheaperDeeper`）。
+	// 修復そのもの（最初の答え）は今までどおり MaxDepth までで探す。中継の大盤のあいだに 6 手進んだ 1 枚で、
+	// 深さ 4 の修復（空きの読み 2 マスを覆した 4 手）が通り、ぴったり合う 6 手（深さ 6 で 72 節点・5ms）が
+	// 探されなかった。1 マスでも種類を読み違えた 1 枚ではぴったりの手順が無いので、修復の側でも深く探す。
+	// ⚠️ **MaxDepth を超えた層は打ち切りを許す** —— 打ち切ったら「深い答えは無かった」として、浅い側の答え
+	// （厳密一致なら修復へ進む・修復なら浅い答え）のまま。MaxDepth までの探し方と答えは今までどおり。
+	// ⚠️ **相手が往復して戻るぴったりの手順は出うる**（片側だけ 3 手進んだ盤は、手番が交互なので相手の 2 手が要る）。
+	// たいてい往復の選び方が多すぎて並べきれない（`More`）ので、それを 1 本選んで据えないこと。
+	DeepDepth int
 	// MaxNodes は展開する節点の上限（0 なら DefaultMaxNodes）。
 	MaxNodes int
 	// MaxSolutions は集める手順の本数（0 なら DefaultMaxSolutions）。
@@ -214,6 +225,14 @@ func (o ConnectOptions) maxDepth() int {
 		return DefaultMaxDepth
 	}
 	return o.MaxDepth
+}
+
+// deepDepth は MaxDepth を超えて探してよい最大手数（`DeepDepth`。MaxDepth より浅くはしない）。
+func (o ConnectOptions) deepDepth() int {
+	if d := o.maxDepth(); o.DeepDepth < d {
+		return d
+	}
+	return o.DeepDepth
 }
 
 func (o ConnectOptions) maxNodes() int {
@@ -414,6 +433,10 @@ func sideCost(cur, tgt *Board, cost *CellCost, unseen *CellMask) float64 {
 func search(ctx context.Context, root *Position, target *Board, opt ConnectOptions,
 	cost *CellCost, tolerance float64, collect int) (ConnectResult, error) {
 	depth := opt.maxDepth()
+	if tolerance == 0 {
+		// ⚠️ **厳密一致だけは MaxDepth より深く探してよい**（`DeepDepth`。2026-10-10）。
+		depth = opt.deepDepth()
+	}
 	// ⚠️ **動いていないマスの種類だけの読み違いを見ないのは、修復のときだけ**（`staleKinds`）。
 	// 厳密一致は「認識と合法性が完全に一致した」ことを言うので、1 マスでも違えば通さない。
 	var stale staleKinds
@@ -459,12 +482,17 @@ func search(ctx context.Context, root *Position, target *Board, opt ConnectOptio
 			if tolerance > 0 && s.forgaveOccupancy(r.Cost) {
 				// ⚠️ **修復では、深い手順がもっと安く合うなら、そちらを採る**（2026-10-08。`cheaperDeeper`）。
 				// 探すのは、答えが駒の有無か先後を覆したときだけ（深く探すと 1 枚が約 10 倍重い）。
-				if deeper, ok := s.cheaperDeeper(root, limit+1, opt.maxDepth(), r.Cost); ok {
+				if deeper, ok := s.cheaperDeeper(root, limit+1, opt.deepDepth(), r.Cost); ok {
 					return deeper, nil
 				}
 			}
 			return r, nil
 		} else if over {
+			if limit > opt.maxDepth() {
+				// ⚠️ **MaxDepth を超えた厳密一致の層で打ち切ったら「無かった」に倒す**（`DeepDepth`）。
+				// 「探し切れなかった」にすると修復へ進まなくなり、深くしたせいで今まで繋がった 1 枚が繋がらなくなる。
+				return s.miss(StopUnreachable), nil
+			}
 			return s.miss(StopBudget), nil
 		}
 	}
@@ -481,9 +509,11 @@ func search(ctx context.Context, root *Position, target *Board, opt ConnectOptio
 //
 // ⚠️ **予算を今の答えの費用より小さく絞ること**（厳密に安いものだけ採る）—— 同じだけ覆す深い手順は、同じ変化を
 // 遠回りで説明しているだけで、往復して戻る偽の手順もここに入る。絞った予算は刈り（`floor`）にも効くので軽い。
-// ⚠️ **`MaxDepth` まで 1 手ずつ深く探す**（2026-10-08。動いていない駒の種類の読み違いを見なくなった
-// （`staleKinds`）ぶん浅い答えが予算に収まりやすくなり、1 手深いだけでは ▲同桂 △同歩 ▲2四歩 の 3 手に
-// 届かなくなった）。⚠️ **打ち切ったら浅い答えのまま**（探し切れていない）。
+// ⚠️ **`DeepDepth`（無ければ `MaxDepth`）まで 1 手ずつ深く探す**（2026-10-08。動いていない駒の種類の読み違いを
+// 見なくなった（`staleKinds`）ぶん浅い答えが予算に収まりやすくなり、1 手深いだけでは ▲同桂 △同歩 ▲2四歩 の 3 手に
+// 届かなくなった）。2026-10-10 に `MaxDepth` の外まで延ばした —— 1一 の香を飛と読んだ中継の 1 枚で、ぴったりの
+// 手順が無いまま 4 手の修復が通り、種類の読み違いのほかは合う 6 手に届かなかった。
+// ⚠️ **打ち切ったら浅い答えのまま**（探し切れていない）。
 // ⚠️ **呼ぶのは浅い答えが駒の有無か先後を覆したときだけ**（`forgaveOccupancy`）。深く探すと
 // 中継の 1 枚（`BenchmarkConnectRelay`）が 7.7ms → 72ms になった。種類の読み違いだけを覆した答えは、
 // 深い手順でも同じマスを覆すことになるので、探しても安くならない。

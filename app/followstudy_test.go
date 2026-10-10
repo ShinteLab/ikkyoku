@@ -719,9 +719,11 @@ func TestFollowAutoIgnoresCoveredBoard(t *testing.T) {
 // 実機ではこれを取り違えて、上の ▲4八飛を採っていた。
 func TestFollowAutoDoesNotPickUnsettled(t *testing.T) {
 	s, _ := following(t)
-	// 先手の歩が 3 本進んでいる（後手は 1 筋の香で往復しただけ）。1 手では説明が付かず、
-	// 深さ 4 でも繋がらない。
-	board := boardAfter(t, "7g7f", "1a1b", "2g2f", "1b1a", "8g8f")
+	// 先手の歩が 5 本進んでいる（後手は 1 筋の香で往復しただけ）。1 手では説明が付かず、
+	// 深さ 4 の修復でも、ぴったり合う手順を深く探しても（`followDeepDepth` は 8 手。これは 9 手要る）繋がらない。
+	// ⚠️ **3 本だと深さ 5 で「後手が往復した」ぴったりの手順が並ぶ**（2026-10-10 に厳密一致を深く探すようにしてから。
+	// 並べきれないので足さないのは同じだが、ここで見たい `Unsettled` にならない）。
+	board := boardAfter(t, "7g7f", "1a1b", "2g2f", "1b1a", "8g8f", "1a1b", "6g6f", "1b1a", "9g9f")
 
 	// 前提: 下見では「行き先の違う候補」として並ぶこと。
 	p, err := probe(t, s, board, evenConf(0.5))
@@ -2010,5 +2012,75 @@ func TestFollowProbeLooksPastRankWhenMovesRemain(t *testing.T) {
 	}
 	if p.Kind != FollowUnique || len(p.Candidates) != 1 || strings.Join(p.Candidates[0].Moves, " ") != "7g6e 6d6e 2e2d" {
 		t.Fatalf("▲同桂 △同歩 ▲2四歩 を返していません: kind=%q reason=%q candidates=%+v", p.Kind, p.Reason, p.Candidates)
+	}
+}
+
+// ⚠️ **何手も写った 1 枚は 1 回の答えで取り、修復の答えを継ぎ足さないこと**（2026-10-10 に中継で踏んだ）。
+//
+// **実機の症状**（録画 `follow/20261010-122957/009-…-guess.png`）: 大盤と解説の画面のあいだに ▲2五桂 △4五桂 ▲同歩
+// △2五歩 ▲4四歩 △2三飛 の 6 手が進んだ 1 枚で、1 回目の下見が深さ 4 の修復 ▲4五歩 △2五歩 ▲4四歩 △2三飛 を返し、
+// 同じ 1 枚の 2 回目が ▲2五桂 △同桂（2五 の歩を桂に覆した）を継ぎ足した。盤の上では 2五 の種類しか違わないので、
+// そのまま追い続けた。盤と確信度は録画を読み直した値で、1一 の香を後手の飛と読んだ 1 枚（実際に出た）にしてある
+// （ぴったりの手順が無い側。修復の答えより安い深い手順で届く）。
+func TestFollowAutoTakesManyMovesInOneAnswer(t *testing.T) {
+	root, err := position.FromFullSFEN("l6rl/1kg2b3/1png1snpp/p1psppp2/7P1/P1PSSPP2/1P1P2N1P/1BK1G4/LN1G3RL b 2P 1")
+	if err != nil {
+		t.Fatalf("FromFullSFEN: %v", err)
+	}
+	for _, m := range []string{"6i6h", "4c5b", "2i4i", "2a4a", "2e2d", "2c2d", "P*2c", "4a2a"} {
+		if err := root.ApplyMove(m); err != nil {
+			t.Fatalf("ApplyMove(%q): %v", m, err)
+		}
+	}
+	s := NewStudyService(NewPositionService())
+	s.mu.Lock()
+	s.study = position.NewStudy(root)
+	s.mu.Unlock()
+
+	const shot = "l7r/1kg1sb3/1png3rp/p1pspPp2/7p1/P1PSS1P2/1P1P4P/1BKGG4/LN3R2L"
+	conf := []float64{
+		1.00, 0, 0, 0, 0, 0, 0, 0, 1.00,
+		0, 1.00, 1.00, 0, 1.00, 1.00, 0, 0, 0,
+		0, 1.00, 1.00, 1.00, 0, 0, 0, 1.00, 1.00,
+		1.00, 0, 1.00, 1.00, 1.00, 1.00, 1.00, 0, 0,
+		0, 0, 0, 0, 0, 0, 0, 1.00, 0,
+		1.00, 0, 1.00, 1.00, 1.00, 0, 1.00, 0, 0,
+		0, 1.00, 0, 1.00, 0, 0, 0, 0, 1.00,
+		0, 1.00, 1.00, 1.00, 1.00, 0, 0, 0, 0,
+		1.00, 1.00, 0, 0, 0, 1.00, 0, 0, 1.00,
+	}
+	a, err := followAuto(t, s, shot, conf)
+	if err != nil {
+		t.Fatalf("FollowAuto: %v", err)
+	}
+	if !a.Applied || a.Added != 6 || len(a.Moves) != 6 {
+		t.Fatalf("6 手を 1 回で足していません: applied=%v added=%d moves=%v reason=%q", a.Applied, a.Added, a.Moves, a.Reason)
+	}
+	// ⚠️ **順番は決まらないので推測の印**（行き着く局面は同じ）。
+	if !a.Guess {
+		t.Errorf("順番を選んだのに推測になっていません")
+	}
+	s.mu.Lock()
+	_, tip, err := s.study.MainTip()
+	s.mu.Unlock()
+	if err != nil {
+		t.Fatalf("MainTip: %v", err)
+	}
+	got, err := tip.SFEN()
+	if err != nil {
+		t.Fatalf("SFEN: %v", err)
+	}
+	// 2五 は後手の歩・先手の持ち駒は桂 1 歩 2（取り違えたときは 2五 が後手の桂・先手は歩 3 だった）。
+	if want := "l7l/1kg1sb3/1png3rp/p1pspPp2/7p1/P1PSS1P2/1P1P4P/1BKGG4/LN3R2L b N2Pn2p "; !strings.HasPrefix(got, want) {
+		t.Errorf("局面 = %s, want %s…", got, want)
+	}
+
+	// **同じ 1 枚をもう一度渡しても、1 手も増えないこと**（継ぎ足さない）。
+	again, err := followAuto(t, s, shot, conf)
+	if err != nil {
+		t.Fatalf("FollowAuto: %v", err)
+	}
+	if again.Applied {
+		t.Fatalf("同じ 1 枚から継ぎ足しました: %v", again.Moves)
 	}
 }
