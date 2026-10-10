@@ -1,6 +1,7 @@
 package log_test
 
 import (
+	stdlog "log"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -209,5 +210,96 @@ func TestNamedFileLazy(t *testing.T) {
 	log.Info("本体だけ")
 	if names, _ := filepath.Glob(filepath.Join(dir, log.NamedFile(log.FollowName)+"_*.log")); len(names) != 0 {
 		t.Errorf("named file should not be created until written: %v", names)
+	}
+}
+
+// initDiag は Options.Diag を指定して Init する（終わりに slog と標準の log を戻す）。
+func initDiag(t *testing.T, dir string, diag bool) {
+	t.Helper()
+	old := slog.Default()
+	c, err := log.Init(log.Options{Dir: dir, Diag: diag})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		c.Close() // 標準の log を戻してから slog を戻す
+		slog.SetDefault(old)
+	})
+}
+
+// dev（Diag）では診断を Debug まで診断のファイルに残す。標準の log（WebView2 の行）もそこへ。
+// 本体には Warn 以上だけ。
+func TestDiagDev(t *testing.T) {
+	dir := t.TempDir()
+	initDiag(t, dir, true)
+
+	log.Diag.Debug("表示状態")
+	log.Diag.Info("心拍を検知")
+	stdlog.Printf("[WebView2] Eval failed: x")
+	log.Diag.Warn("心拍が途切れた")
+
+	diag := todayFile(t, dir, log.NamedFile(log.DiagName))
+	for _, e := range []string{"表示状態", "心拍を検知", "[WebView2] Eval failed: x", "心拍が途切れた"} {
+		if !strings.Contains(diag, e) {
+			t.Errorf("diag file missing %q:\n%s", e, diag)
+		}
+	}
+	main := todayLog(t, dir)
+	for _, e := range []string{"表示状態", "心拍を検知", "WebView2"} {
+		if strings.Contains(main, e) {
+			t.Errorf("main file should not have %q:\n%s", e, main)
+		}
+	}
+	if !strings.Contains(main, "心拍が途切れた") {
+		t.Errorf("diag warnings should also go to the main file:\n%s", main)
+	}
+}
+
+// 配るビルド（Diag なし）では診断を残さない。ファイルも作らない。Warn 以上だけ本体に出す。
+func TestDiagRelease(t *testing.T) {
+	dir := t.TempDir()
+	initDiag(t, dir, false)
+
+	log.Diag.Debug("表示状態")
+	log.Diag.Info("心拍を検知")
+	stdlog.Printf("[WebView2] Environment created successfully")
+	log.Diag.Warn("心拍が途切れた")
+
+	if names, _ := filepath.Glob(filepath.Join(dir, log.NamedFile(log.DiagName)+"_*.log")); len(names) != 0 {
+		t.Errorf("diag file should not be created in release: %v", names)
+	}
+	main := todayLog(t, dir)
+	for _, e := range []string{"表示状態", "心拍を検知", "WebView2"} {
+		if strings.Contains(main, e) {
+			t.Errorf("main file should not have %q:\n%s", e, main)
+		}
+	}
+	if !strings.Contains(main, "心拍が途切れた") {
+		t.Errorf("diag warnings should still go to the main file:\n%s", main)
+	}
+}
+
+// LevelsFile の "loggers" に diag が無ければ、dev の既定（Debug）が残る。あればそちらが効く。
+func TestDiagLevelsFile(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, log.LevelsFile), []byte(
+		`{"root":"INFO","loggers":[{"name":"follow","level":"DEBUG"}]}`), 0o644)
+	initDiag(t, dir, true)
+	log.Diag.Debug("表示状態")
+	log.Follow.Debug("追従の debug")
+	if out := todayFile(t, dir, log.NamedFile(log.DiagName)); !strings.Contains(out, "表示状態") {
+		t.Errorf("diag default should survive a levels file without diag:\n%s", out)
+	}
+	if out := todayFile(t, dir, log.NamedFile(log.FollowName)); !strings.Contains(out, "追従の debug") {
+		t.Errorf("levels file should still apply:\n%s", out)
+	}
+
+	dir2 := t.TempDir()
+	os.WriteFile(filepath.Join(dir2, log.LevelsFile), []byte(
+		`{"root":"INFO","loggers":[{"name":"diag","level":"WARN"}]}`), 0o644)
+	initDiag(t, dir2, true)
+	log.Diag.Info("心拍を検知")
+	if names, _ := filepath.Glob(filepath.Join(dir2, log.NamedFile(log.DiagName)+"_*.log")); len(names) != 0 {
+		t.Errorf("diag level from the levels file should win: %v", names)
 	}
 }

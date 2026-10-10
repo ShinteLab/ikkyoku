@@ -66,6 +66,16 @@ const FollowName = "follow"
 // それで、無ければ呼び出し元のパッケージで決まる。
 var Follow = wlog.Named(FollowName)
 
+// DiagName は画面まわりの診断のログの名前（「メイン画面が真っ黒になる」の再現待ち）。
+const DiagName = "diag"
+
+// Diag は画面まわりの診断のログ（心拍・ウィンドウの表示状態）。Wails のログと標準の log の出力
+// （[WebView2] の行）も Init がここへ向ける。**dev のときだけ** ikkyoku-diag_<日付>.log に
+// Debug まで残す（黒くなるのは長時間動かしたときだけなので、起きたその場の記録が要る）。
+// 配るビルドでは残さない（Options.Diag）。どちらでも ⚠️ **Warn 以上は本体に出す**。
+// コンソールには出さない（2026-10-10）。
+var Diag = wlog.Named(DiagName)
+
 // callerSkip は runtime.Callers → output → 公開関数 → 呼び出し元 の段数。
 // ⚠️ **output は公開関数から直接呼ぶこと。** 間に関数を挟むと、記録される位置（と、
 // パッケージごとのレベルの判定）がこのパッケージになる。wenteasy/log の Info などを

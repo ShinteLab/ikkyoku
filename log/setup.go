@@ -2,10 +2,12 @@ package log
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
+	stdlog "log"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -22,6 +24,10 @@ type Options struct {
 	// Console は標準エラーにも出すか。wails3 dev で動かすとき（ターミナルで見るとき）に立てる。
 	// ⚠️ 配る exe（-H windowsgui）には標準エラーの行き先が無いので、立てても見えない。
 	Console bool
+	// Diag は画面まわりの診断のログ（log.Diag と、Init が向ける Wails・標準の log の出力）を
+	// ikkyoku-diag_<日付>.log に Debug まで残すか。**dev のときだけ立てる**（2026-10-10）。
+	// 偽なら Warn 以上だけ本体に出し、残りは捨てる（ファイルも作らない）。
+	Diag bool
 }
 
 const (
@@ -52,8 +58,8 @@ var fileDir string
 // （画面の ⚠ に「ログの場所」として出す・異常終了の記録を置く）。
 func Dir() string { return fileDir }
 
-// separated は本体から分けて自分のファイルへ出す名前付きの Logger の名前（log.go の Follow）。
-var separated = []string{FollowName}
+// separated は本体から分けて自分のファイルへ出す名前付きの Logger の名前（log.go の Follow / Diag）。
+var separated = []string{FollowName, DiagName}
 
 // NamedFile は名前付きの Logger のログファイルの名前の頭（"ikkyoku-follow"）。
 func NamedFile(name string) string { return FilePrefix + "-" + name }
@@ -61,7 +67,9 @@ func NamedFile(name string) string { return FilePrefix + "-" + name }
 // Init はログの出口を組み、slog.Default() をそこへ向ける。main の最初に 1 回だけ呼ぶ。
 //
 //   - ファイル: Dir/ikkyoku_<日付>.log（日ごと。keepDays より古いものは消す）
-//   - 名前付き（log.Follow）: Dir/ikkyoku-<名前>_<日付>.log だけ（コンソールに出さない。Warn 以上は本体にも）
+//   - 名前付き（log.Follow / log.Diag）: Dir/ikkyoku-<名前>_<日付>.log だけ（コンソールに出さない。Warn 以上は本体にも）。
+//     Diag は Options.Diag のときだけ残し、Debug まで出す（LevelsFile の "loggers" に diag があればそちら）
+//   - 標準の log の出力（Wails の [WebView2] の行など）: log.Diag へ
 //   - コンソール: Options.Console のときだけ標準エラーにも
 //   - レベル: 呼び出し元のパッケージごと（Dir/LevelsFile。無ければ defaultLevels）
 //
@@ -97,6 +105,9 @@ func Init(opts Options) (io.Closer, error) {
 			fileDir = dir
 			// 名前付きのファイルは書いたときに開く（追わなかった日は作られない）。
 			for _, name := range separated {
+				if name == DiagName && !opts.Diag {
+					continue // 下で捨てる口にする
+				}
 				tw, err := wlog.NewRollingFileWriter(dir, wlog.Day)
 				if err != nil {
 					continue // 出口が無い名前は本体へ出る（namedRouter）
@@ -107,6 +118,10 @@ func Init(opts Options) (io.Closer, error) {
 			}
 		}
 	}
+	if !opts.Diag {
+		// 配るビルドでは診断を残さない（Warn 以上は namedRouter が本体にも出す）。
+		namedSinks[DiagName] = slog.DiscardHandler
+	}
 	if opts.Console {
 		sinks = append(sinks, wlog.NewSimpleHandler(os.Stderr, LevelTrace))
 	}
@@ -114,15 +129,21 @@ func Init(opts Options) (io.Closer, error) {
 	// 出口は一番低いレベルで作り、絞るのはパッケージごとのレベルに任せる
 	// （出口が出さないレベルは、パッケージのレベルを下げても出ない）。
 	root, pkgs := defaultLevels()
+	loggers := defaultLoggers(opts)
 	sink := slog.NewMultiHandler(sinks...)
 	h := wlog.NewPackageLevelHandler(&namedRouter{main: sink, named: namedSinks}, root)
 	h.SetLevels(root, pkgs)
+	h.SetLoggerLevels(loggers)
 	levels := "既定"
 	if dir != "" {
 		path := filepath.Join(dir, LevelsFile)
 		switch err := h.LoadJSON(path); {
 		case err == nil:
 			levels = path
+			// LoadJSON は "loggers" も丸ごと差し替えるので、書いていない名前は既定を足し直す。
+			if len(loggers) > 0 {
+				h.SetLoggerLevels(withDefaults(path, loggers))
+			}
 		case errors.Is(err, fs.ErrNotExist):
 		default:
 			// 読めない設定は使わず、既定のまま続ける（LoadJSON は失敗したら変えない）。
@@ -130,16 +151,62 @@ func Init(opts Options) (io.Closer, error) {
 		}
 	}
 	slog.SetDefault(slog.New(h))
+	// 標準の log の出力は log.Diag へ（Wails の WebView2 は log.Printf で書く。黒くなったときの
+	// 決め手だった [WebView2] Eval failed / Focus failed もここ）。SetDefault が本体へ向けたのを上書きする。
+	// 閉じるときに戻す（戻さないと、slog の既定へ戻したあとに log → slog → log と回り続ける）。
+	prevOut, prevFlags := stdlog.Writer(), stdlog.Flags()
+	stdlog.SetOutput(slog.NewLogLogger(Diag.Handler(), LevelInfo).Writer())
+	stdlog.SetFlags(0)
+	closers = append(closers, closerFunc(func() error {
+		stdlog.SetOutput(prevOut)
+		stdlog.SetFlags(prevFlags)
+		return nil
+	}))
 
 	if dir != "" {
 		removeOld(dir, time.Now())
 	}
 	// 始まりの 1 行は、レベルの設定に関係なく必ず残す（どの設定で動いているかを後から読むため）。
 	r := slog.NewRecord(time.Now(), LevelNotice, "ログを開始しました", 0)
-	r.Add("file", file, "console", opts.Console, "levels", levels)
+	r.Add("file", file, "console", opts.Console, "diag", opts.Diag, "levels", levels)
 	_ = sink.Handle(context.Background(), r)
 	return closers, errors.Join(errs...)
 }
+
+// defaultLoggers は名前付きの Logger の既定のレベル。dev では診断を Debug まで残す
+// （ウィンドウの表示状態は Debug。黒くなったその場で要るので、上げてから待つのでは間に合わない）。
+func defaultLoggers(opts Options) map[string]slog.Level {
+	if !opts.Diag {
+		return nil
+	}
+	return map[string]slog.Level{DiagName: LevelDebug}
+}
+
+// withDefaults は LevelsFile の "loggers" に、書いていない名前の既定を足したものを返す
+// （LoadJSON が読めたあとに呼ぶので、読めないことは無い）。
+func withDefaults(path string, defs map[string]slog.Level) map[string]slog.Level {
+	out := map[string]slog.Level{}
+	if b, err := os.ReadFile(path); err == nil {
+		var f wlog.LevelsFile
+		if json.Unmarshal(b, &f) == nil {
+			for _, p := range f.Loggers {
+				if l, err := wlog.ParseLevel(p.Level); err == nil {
+					out[p.Name] = l
+				}
+			}
+		}
+	}
+	for name, l := range defs {
+		if _, ok := out[name]; !ok {
+			out[name] = l
+		}
+	}
+	return out
+}
+
+type closerFunc func() error
+
+func (f closerFunc) Close() error { return f() }
 
 type multiCloser []io.Closer
 

@@ -24,7 +24,6 @@ package main
 import (
 	"embed"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -96,7 +95,9 @@ func main() {
 	// ログは実行ファイルの隣（ikkyoku_<日付>.log。中継の追従は ikkyoku-follow_<日付>.log）。
 	// wails3 dev のときはコンソールにも出す（追従のログは出さない）
 	// （consoleLog。devbuild.go / prodbuild.go）。⚠️ **書けなくても起動は止めない。**
-	logCloser, logErr := log.Init(log.Options{Console: consoleLog})
+	// 画面まわりの診断（心拍・表示状態・Wails と WebView2 のログ）は dev のときだけ
+	// ikkyoku-diag_<日付>.log に残す（devBuild。黒い画面の再現待ち。_docs/blackscreen.md）。
+	logCloser, logErr := log.Init(log.Options{Console: consoleLog, Diag: devBuild})
 	if logErr != nil {
 		log.Warn("ログの準備で問題がありました", "error", logErr)
 	}
@@ -176,7 +177,7 @@ func main() {
 	app := application.New(application.Options{
 		Name:        "ikkyoku",
 		Description: "Ikkyoku - Shogi broadcast analyzer",
-		Logger:      slog.Default(),
+		Logger:      log.Diag, // Wails のログは診断へ（dev だけ残す。Warn 以上は本体にも。log/setup.go）
 		// ⚠️ **致命的なエラーを箱にする口**（fatal.go）。無いと Wails はログに出して
 		// os.Exit(1) するだけで、配る exe では**何も言わずに消える**（WebView2 が無いときなど）。
 		ErrorHandler: handleWailsError,
@@ -832,11 +833,11 @@ func registerPaneRaise(wins *appWindows) {
 
 // registerVisibilityLog は表示状態の変化(表示・非表示・最小化・復帰)をログに出す。
 //
-// ⚠️ **debug で出す**(2026-08-11)。枠を動かしたりリサイズしたりするだけで大量に出て
-// (「戻す」が連続する)、**他のログがこれに埋もれる**ため。アプリのログレベルは info の
-// ままなので、既定では出ない。**消さないこと** —— 下記のとおり現象の再現待ちで要る
-// 記録なので、出すのをやめるのではなく普段は黙らせているだけ。追うときは
-// この 1 行を Info に戻すか、ハンドラの Level を debug にする。
+// ⚠️ **診断のログ（log.Diag）に debug で出す**(2026-08-11 に debug、2026-10-10 に診断へ)。
+// 枠を動かしたりリサイズしたりするだけで大量に出て(「戻す」が連続する)、他のログが埋もれるため
+// 本体には出さない。**dev のときは ikkyoku-diag_<日付>.log に既定で残る**(診断だけ Debug まで残す)。
+// debug のままだと黒くなったその場の記録が無かったので、診断へ分けて常に残す形にした。
+// 配るビルドでは残さない(log.Options.Diag)。**消さないこと** —— 下記のとおり現象の再現待ちで要る記録。
 //
 // **これだけは推測ではなく記録が要る。** メイン画面が真っ黒になって触れなくなる現象は、
 // Wails が最小化のときに WebView2 を不可視にし、復帰の分岐でしか戻さない作りに
@@ -856,7 +857,7 @@ func registerVisibilityLog(wins *appWindows) {
 			"戻す":  events.Common.WindowRestore,
 		} {
 			w.OnWindowEvent(id, func(*application.WindowEvent) {
-				log.Debug("ウィンドウの表示状態", "window", name, "event", label)
+				log.Diag.Debug("ウィンドウの表示状態", "window", name, "event", label)
 			})
 		}
 	}

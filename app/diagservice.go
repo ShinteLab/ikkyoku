@@ -99,12 +99,12 @@ func (s *DiagService) Heartbeat(window string, heapMB float64, hidden bool) {
 	if !ok {
 		st = &heartbeatState{}
 		s.beats[window] = st
-		log.Info("フロントエンドの心拍を検知しました", "window", window)
+		log.Diag.Info("フロントエンドの心拍を検知しました", "window", window)
 	}
 	if st.stale {
 		// 止まっていたものが戻った。**これが出るかどうかで手当てが変わる**
 		// (戻るなら描き直しで復帰しうる。戻らないなら読み込み直すしかない)。
-		log.Info("フロントエンドの心拍が戻りました",
+		log.Diag.Info("フロントエンドの心拍が戻りました",
 			"window", window, "断絶", time.Since(st.last).Round(time.Second))
 		st.stale = false
 	}
@@ -119,7 +119,7 @@ func (s *DiagService) Heartbeat(window string, heapMB float64, hidden bool) {
 // 開いていない限り消える)。黒くなった件では何も出ていないが、
 // 「出ていない」ことを根拠にするには、まず出る経路が要る。
 func (s *DiagService) ReportError(window, kind, message, stack string) {
-	log.Warn("フロントエンドで例外が発生しました",
+	log.Diag.Warn("フロントエンドで例外が発生しました",
 		"window", window, "kind", kind, "message", message, "stack", stack)
 }
 
@@ -138,7 +138,7 @@ func (s *DiagService) Watch() {
 					continue
 				}
 				st.stale = true
-				log.Warn("フロントエンドの心拍が途切れました",
+				log.Diag.Warn("フロントエンドの心拍が途切れました",
 					"window", name,
 					"最後の心拍", st.last.Format(time.TimeOnly),
 					"heapMB", st.heapMB,
