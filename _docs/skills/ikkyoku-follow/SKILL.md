@@ -27,9 +27,9 @@ description: ikkyoku（一局）の「中継を追う」（Phase 6 の追従）�
                   │    ├─ どのマスも変わっていない ─> Skipped="same"（読まない）
                   │    └─ 8 マス以下が変わった ──> Cells（読まない）→ StudyService.FollowCells
                   │         └─ 手が 1 通りに決まらない ─> RecognizeQuiet（同じ 1 枚を下へ）
-                  └─ detectGate: 盤を探す(約 0.47 秒)
+                  └─ detectGate: 盤を探す(約 0.04 秒)
                        ├─ マスタと合わない ─> OffBoard（読まない）
-                       └─ 追っている盤 ───> 認識(約 0.5 秒。盤をもう一度探す)
+                       └─ 追っている盤 ───> 認識(約 0.09 秒。盤をもう一度探す)
   └─> StudyService.FollowAuto（app/followstudy.go）
         Rank（29µs）→ Connect（修復は深さ 4。ぴったり合う手順は 8 まで）の 1 回で答えを 1 つ据える
         （2026-10-10 から同じ 1 枚に繰り返さない。2 回目の下見は先端と合っているかを見るだけ）

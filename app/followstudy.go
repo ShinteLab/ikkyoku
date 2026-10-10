@@ -896,7 +896,7 @@ func (s *StudyService) cellsMask(cells []int) *position.CellMask {
 // FollowCells は**変わったマスだけで手を割り出して**追従する（速い経路。2026-10-07）。
 //
 // changed は**撮った画像の向き**での 81 マスの番号（行優先。`CaptureResult.Cells`）で、比べた相手は
-// 本譜の先端と合っていた 1 枚（`AtFrame` / `FrameFits`）。認識（約 0.5 秒）を回さないので、
+// 本譜の先端と合っていた 1 枚（`AtFrame` / `FrameFits`）。認識（約 0.1 秒）を回さないので、
 // **指されてから手が入るまでが「止まったのを確かめる 0.25〜0.5 秒」＋数ミリ秒**になる。
 //
 // ⚠️ **比べる相手の局面から突き合わせること**（`followFromBase`）。81 マスの読みで手を足したあとは
