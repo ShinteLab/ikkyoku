@@ -415,7 +415,7 @@ followProbe ─> Rank（候補から選ぶ。29µs）─┬─ 読めていな�
 
 ### 中継セッション（`followsession.go`）— **2026-10-11**
 
-**中継を追う 1 回（押してから止めるまで）を Go の 1 か所が持つ**（`TODO.md` 4「作り直す順」3 の第 1 段）。1 周の段取り
+**中継を追う 1 回（押してから止めるまで）を Go の 1 か所が持つ**（2026-10-11。追従の作り直し。理由は `_docs/design-follow.md`）。1 周の段取り
 （速い経路 → 違いの出るマスを読む → 81 マス → 見た目を比べる → もう一度）・回し続けるループ・見失いの数・控えの有無・
 帯の候補を、画面（`mainscreen.ts`）から `StudyService` へ移した。画面は `StartFollow` / `StopFollow` / `ChooseFollow` を呼び、
 `follow:update`（`FollowUpdate`）を描くだけ。理由は `_docs/design-follow.md`。

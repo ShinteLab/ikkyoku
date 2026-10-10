@@ -1,6 +1,6 @@
 package app
 
-// **読んだマスと、候補の盤のマスが合うか**の判定（2026-10-11。`TODO.md` 4「作り直す順」2・観点 2）。
+// **読んだマスと、候補の盤のマスが合うか**の判定（2026-10-11。追従の作り直し。理由は `_docs/design-follow.md`）。
 //
 // 追従は「読んだ駒を、ある盤のマスと比べる」をあちこちでやっている —— 速い経路の行き先の確かめ（`followBackedByRead`）・
 // 候補選び（`followPickByRead`）・差し替えで消える手と種類の確かめ（`followGoneSeen` / `followKindKeepsOld`）、81 マスの読みの
