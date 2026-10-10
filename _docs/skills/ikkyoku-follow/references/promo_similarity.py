@@ -36,7 +36,7 @@ from PIL import Image
 TRIM = 0.12   # `ikkyoku.PieceTrim`
 SHIFT = 0.06  # `ikkyoku.PieceShift`
 
-BOARD_RE = re.compile(r"追う盤を決めました board=\((\d+),(\d+)\)-\((\d+),(\d+)\).*follow.(\S+)")
+BOARD_RE = re.compile(r"追う盤を決めました (?:logger=\S+ )?board=\((\d+),(\d+)\)-\((\d+),(\d+)\).*follow.(\S+)")
 ROT_RE = re.compile(r"rotated=(true|false)")
 
 

@@ -1,11 +1,11 @@
 # log の AGENTS.md
 
 **ikkyoku のログ。** ikkyoku のコードは `log.Info(msg, "key", v)`（slog と同じ形）・
-`log.Infof(format, ...)`（printf）などで出す。土台は `github.com/wenteasy/log`（v0.3.0〜）。
+`log.Infof(format, ...)`（printf）などで出す。土台は `github.com/wenteasy/log`（v0.3.1〜）。
 
 | ファイル | 役割 |
 |---|---|
-| `log.go` | 出す関数（Trace / Debug / Info / Notice / Warn / Error と `…f`）と、**話題**（`Topic`。今は `log.Follow` だけ）の同じ関数。出口は `slog.Default()` |
+| `log.go` | 出す関数（Trace / Debug / Info / Notice / Warn / Error と `…f`）と、**中継の追従のログ `log.Follow`**（wenteasy/log の名前付きの Logger `Named("follow")`。`*slog.Logger`）。出口は `slog.Default()` |
 | `setup.go` | `Init`。出口を組んで `slog.Default()` を向ける（main の最初に 1 回）。`Dir` はログを書いている場所（**書けていなければ空**。画面の ⚠ に出す） |
 | `crash.go` | `CatchCrash`（2026-10-04）。**異常終了（panic・ランタイムの致命的なエラー）の内容をログの隣の `ikkyoku_crash.log` にも書かせる**（`debug.SetCrashOutput`）。前回の記録が残っていれば `ikkyoku_crash_<日時>.log` に改名して返す（＝次の起動の ⚠「前回は異常終了しました」）。⚠️ **改名すること**（作り直すと前回の記録が消える）。⚠️ **書けなくても起動は止めない** |
 
@@ -13,13 +13,15 @@
 
 - **ファイル**: 実行ファイルの隣の `ikkyoku_<日付>.log`（日ごと。**14 日より古いものは起動時に消す**）。
   `wails3 dev` なら `_cmd/ikkyoku/bin/`（gitignore 済み・dev の監視対象外）
-- **話題のファイル**（2026-10-10）: `log.Follow.Info(...)` のように話題を付けて出したものは
+- **追従のファイル**（2026-10-10）: `log.Follow.Info(...)` で出したものは
   `ikkyoku-follow_<日付>.log` **だけ**に出す（**コンソールにも本体のファイルにも出さない**。
   中継を追っているあいだ 1 周ごとに何行も出て、ターミナルが埋まったため）。
-  ⚠️ **Warn 以上は本体（ファイルとコンソール）にも出す**（話題のファイルはふだん見ないので、警告を見落とさないため）。
-  ファイルは書いたときに作る（追わなかった日は無い）。古いものを消すのは本体と同じ。
+  ⚠️ **Warn 以上は本体（ファイルとコンソール）にも出す**（追従のファイルはふだん見ないので、警告を見落とさないため）。
+  ファイルは書いたときに作る（追わなかった日は無い）。古いものを消すのは本体と同じ。行には `logger=follow` が付く。
   **中継の追従（Phase 6）のログは `log.Follow` で出すこと**（`app/follow*.go`・`_cmd/ikkyoku` の追従の周）。
-  話題は context で出口へ渡す（属性にしない＝行に `topic=` を載せない）
+  `log.Follow` は `*slog.Logger` なので `Infof` や `Trace` は無い（`Info` / `Debug` / `Warn` / `Error`、それ以外の段階は `Log`）。
+  振り分けは `setup.go` の `namedRouter`（Named が `WithAttrs` で付ける印で名前のファイルへ）。
+  分ける名前を増やすなら `setup.go` の `separated` に足す
 - **コンソール**: `Options.Console` のときだけ標準エラーにも。`_cmd/ikkyoku` が
   **ビルドタグ `production` が無いとき**（＝ `wails3 dev` / `go run`）に立てる（`devbuild.go` / `prodbuild.go`）
 - **レベル**: 呼び出し元の**パッケージごと**。実行ファイルの隣に `ikkyoku-log.json` があれば読む。
@@ -33,11 +35,16 @@
     {"name": "github.com/ShinteLab/ikkyoku/app", "level": "DEBUG"},
     {"name": "main.(*CaptureService).noteQuiet", "level": "DEBUG"},
     {"name": "github.com/ShinteLab/engine", "level": "DEBUG"}
+  ],
+  "loggers": [
+    {"name": "follow", "level": "DEBUG"}
   ]
 }
 ```
 
 `name` はパッケージのパスか関数まで含めた名前（`_cmd/ikkyoku` は `main`）。一番深く当たったものが効く。
+**`loggers` は名前付きの Logger**（`log.Follow` は `follow`）。あれば呼び出し元のパッケージに関係なくそのレベルで、
+無ければ追従のログもパッケージで決まる（追従だけ細かく見たいときは `loggers` の `follow` を DEBUG にする）。
 レベルは TRACE / DEBUG / INFO / NOTICE / WARN / ERROR（`INFO+2` のような slog の書き方も可）。
 ⚠️ 読めない設定は**使わずに既定で続ける**（起動の 1 行の `levels` にどれを使ったかが出る）。
 起動の 1 行（「ログを開始しました」）はレベルに関係なく必ず残る。
@@ -60,7 +67,7 @@
 
 `crash_test.go` —— 前回の記録を改名して残すこと・空のファイルは異常終了と見なさないこと・
 古いログの片付けが記録を消さないこと・`Dir` が書けているときだけ場所を返すこと。
-`log_test.go` —— ファイルに出ること・**話題のログが話題のファイルにだけ出ること（Warn 以上は本体にも）・
-話題でもレベルは呼び出し元のパッケージで決まること・話題のファイルは書くまで作らないこと**・**呼び出し元のパッケージでレベルが決まること**
+`log_test.go` —— ファイルに出ること・**`log.Follow` が追従のファイルにだけ出ること（`With` で派生しても。Warn 以上は本体にも）・
+`loggers` が無ければパッケージで、あれば `follow` の設定で決まること・追従のファイルは書くまで作らないこと**・**呼び出し元のパッケージでレベルが決まること**
 （ここの関数を通しても位置がずれない歯止め）・読めない設定でも既定で続くこと・
 ファイルを作れなくても止まらないこと・古いファイルだけ消すこと（日付はファイル名から読む）。

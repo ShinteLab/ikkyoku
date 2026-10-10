@@ -7,7 +7,7 @@ require (
 	github.com/ShinteLab/engine v0.2.1
 	github.com/ShinteLab/suteme v0.2.6
 	github.com/kbinani/screenshot v0.0.0-20250624051815-089614a94018
-	github.com/wenteasy/log v0.3.0
+	github.com/wenteasy/log v0.3.1
 	golang.design/x/hotkey v0.6.1
 )
 

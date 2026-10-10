@@ -113,7 +113,7 @@ func TestRemoveOld(t *testing.T) {
 	old := filepath.Join(dir, log.FilePrefix+"_"+time.Now().AddDate(0, 0, -30).Format("20060102")+".log")
 	recent := filepath.Join(dir, log.FilePrefix+"_"+time.Now().AddDate(0, 0, -3).Format("20060102")+".log")
 	other := filepath.Join(dir, log.FilePrefix+"_memo.log")
-	oldFollow := filepath.Join(dir, log.TopicFile(log.Follow)+"_"+time.Now().AddDate(0, 0, -30).Format("20060102")+".log")
+	oldFollow := filepath.Join(dir, log.NamedFile(log.FollowName)+"_"+time.Now().AddDate(0, 0, -30).Format("20060102")+".log")
 	for _, p := range []string{old, recent, other, oldFollow} {
 		os.WriteFile(p, []byte("x\n"), 0o644)
 	}
@@ -140,21 +140,20 @@ func todayFile(t *testing.T, dir, prefix string) string {
 	return string(b)
 }
 
-// 話題（log.Follow）のログは話題のファイルにだけ出る。Warn 以上は本体にも出す。
-// レベルは話題でも呼び出し元のパッケージで決まる。
-func TestTopicFile(t *testing.T) {
+// 名前付き（log.Follow）のログは名前のファイルにだけ出る。Warn 以上は本体にも出す。
+func TestNamedFile(t *testing.T) {
 	dir := t.TempDir()
 	initIn(t, dir, false)
 
 	log.Info("本体の行")
 	log.Follow.Info("追従の行", "k", 1)
-	log.Follow.Infof("追従の行 %d", 2)
+	log.Follow.With("n", 2).Info("派生しても追従の行")
 	log.Follow.Debug("追従の debug は既定では出ない")
 	log.Follow.Warn("追従の警告")
 
 	main := todayLog(t, dir)
-	follow := todayFile(t, dir, log.TopicFile(log.Follow))
-	for _, e := range []string{"追従の行 k=1", "追従の行 2", "追従の警告"} {
+	follow := todayFile(t, dir, log.NamedFile(log.FollowName))
+	for _, e := range []string{"追従の行 logger=follow k=1", "派生しても追従の行", "追従の警告"} {
 		if !strings.Contains(follow, e) {
 			t.Errorf("follow file missing %q:\n%s", e, follow)
 		}
@@ -173,25 +172,42 @@ func TestTopicFile(t *testing.T) {
 	}
 }
 
-// 話題のメソッドを通しても、記録の位置は呼んだ側のパッケージになる。
-func TestTopicLevelsFile(t *testing.T) {
+// "loggers" に設定が無ければ、名前付きでもレベルは呼び出し元のパッケージで決まる。
+func TestNamedFollowsPackageLevel(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, log.LevelsFile), []byte(
 		`{"root":"WARN","packages":[{"name":"github.com/ShinteLab/ikkyoku/log_test","level":"TRACE"}]}`), 0o644)
 	initIn(t, dir, false)
 
-	log.Follow.Trace("trace from test")
-	if out := todayFile(t, dir, log.TopicFile(log.Follow)); !strings.Contains(out, "trace from test") {
+	log.Follow.Debug("debug from test") // root の WARN なら出ない
+	if out := todayFile(t, dir, log.NamedFile(log.FollowName)); !strings.Contains(out, "debug from test") {
 		t.Errorf("package level should apply to the caller's package:\n%s", out)
 	}
 }
 
-// 追わなかった日は話題のファイルを作らない。
-func TestTopicFileLazy(t *testing.T) {
+// "loggers" の follow で、追従だけレベルを変えられる。
+func TestNamedLevel(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, log.LevelsFile), []byte(
+		`{"root":"INFO","loggers":[{"name":"follow","level":"DEBUG"}]}`), 0o644)
+	initIn(t, dir, false)
+
+	log.Debug("本体の debug は出ない")
+	log.Follow.Debug("追従の debug")
+	if out := todayFile(t, dir, log.NamedFile(log.FollowName)); !strings.Contains(out, "追従の debug") {
+		t.Errorf("loggers setting should apply to log.Follow:\n%s", out)
+	}
+	if out := todayLog(t, dir); strings.Contains(out, "本体の debug") {
+		t.Errorf("loggers setting should not affect the main log:\n%s", out)
+	}
+}
+
+// 追わなかった日は名前のファイルを作らない。
+func TestNamedFileLazy(t *testing.T) {
 	dir := t.TempDir()
 	initIn(t, dir, false)
 	log.Info("本体だけ")
-	if names, _ := filepath.Glob(filepath.Join(dir, log.TopicFile(log.Follow)+"_*.log")); len(names) != 0 {
-		t.Errorf("topic file should not be created until written: %v", names)
+	if names, _ := filepath.Glob(filepath.Join(dir, log.NamedFile(log.FollowName)+"_*.log")); len(names) != 0 {
+		t.Errorf("named file should not be created until written: %v", names)
 	}
 }

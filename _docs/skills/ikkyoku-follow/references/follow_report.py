@@ -28,7 +28,7 @@ rows = []
 for l in lines:
     if '動いているので止まるのを待っています' in l and appear is None:
         appear = t(l)
-    m = re.search(r'変わったマスで手を割り出しました moves=\[([^\]]*)\]', l)
+    m = re.search(r'変わったマスで手を割り出しました (?:logger=\S+ )?moves=\[([^\]]*)\]', l)
     if m:
         fast_moves = m.group(1)
     if '変わったマスでは手が決まりません' in l or '変わったマスが多いので' in l:
@@ -36,7 +36,7 @@ for l in lines:
     m = re.search(r'候補を並べました .* moves=\[([^\]]*)\]', l)
     if m and m.group(1):
         full_moves = m.group(1)
-    m = re.search(r'撮った盤面を本譜の先に繋ぎました moves=(\d+)', l)
+    m = re.search(r'撮った盤面を本譜の先に繋ぎました (?:logger=\S+ )?moves=(\d+)', l)
     if m:
         at = t(l)
         path = '速い' if fast_moves else '81マス'

@@ -84,7 +84,8 @@ description: ikkyoku（一局）の「中継を追う」（Phase 6 の追従）�
 **追従のログは実行ファイルの隣の `ikkyoku-follow_<日付>.log`**（`wails3 dev` なら `_cmd/ikkyoku/bin/`）。
 2026-10-10 から本体の `ikkyoku_<日付>.log` と分けた（`log.Follow`）。**ターミナルには出ない**
 （Warn 以上だけは本体のファイルとターミナルにも出る）。それより前の日は本体のファイルに混ざっている。追従だけ細かく見たいときは、同じ場所に
-`ikkyoku-log.json` を置いてパッケージごとにレベルを上げる（書き方は `log/AGENTS.md`）。
+`ikkyoku-log.json` を置いて `"loggers": [{"name": "follow", "level": "DEBUG"}]` にする
+（パッケージごとにも上げられる。書き方は `log/AGENTS.md`）。
 
 **Go 側は「変わり目だけ」出す**（`noteQuiet`）。同じ行が続かないのは正常。
 

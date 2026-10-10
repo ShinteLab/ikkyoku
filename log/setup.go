@@ -26,12 +26,13 @@ type Options struct {
 
 const (
 	// FilePrefix はログファイルの名前の頭。ファイルは日ごとに分かれる（ikkyoku_20261003.log）。
-	// 話題（Topic）のファイルは FilePrefix-<話題>（ikkyoku-follow_20261003.log）。
+	// 名前付きの Logger（log.Follow）のファイルは FilePrefix-<名前>（ikkyoku-follow_20261003.log）。
 	FilePrefix = "ikkyoku"
 	// LevelsFile はパッケージごとのレベルの設定。Dir に置けば Init が読む（無ければ defaultLevels）。
-	// 形は wenteasy/log の LevelsFile:
+	// 形は wenteasy/log の LevelsFile（"loggers" は名前付きの Logger。log.Follow なら "follow"）:
 	//
-	//	{"root": "INFO", "packages": [{"name": "github.com/ShinteLab/ikkyoku/app", "level": "DEBUG"}]}
+	//	{"root": "INFO", "packages": [{"name": "github.com/ShinteLab/ikkyoku/app", "level": "DEBUG"}],
+	//	 "loggers": [{"name": "follow", "level": "DEBUG"}]}
 	LevelsFile = "ikkyoku-log.json"
 	// keepDays より古いログファイルは Init のときに消す。
 	keepDays = 14
@@ -51,16 +52,16 @@ var fileDir string
 // （画面の ⚠ に「ログの場所」として出す・異常終了の記録を置く）。
 func Dir() string { return fileDir }
 
-// topics は本体から分けてファイルへ出す話題（log.go の Topic）。
-var topics = []Topic{Follow}
+// separated は本体から分けて自分のファイルへ出す名前付きの Logger の名前（log.go の Follow）。
+var separated = []string{FollowName}
 
-// TopicFile は話題のログファイルの名前の頭（"ikkyoku-follow"）。
-func TopicFile(t Topic) string { return FilePrefix + "-" + t.name }
+// NamedFile は名前付きの Logger のログファイルの名前の頭（"ikkyoku-follow"）。
+func NamedFile(name string) string { return FilePrefix + "-" + name }
 
 // Init はログの出口を組み、slog.Default() をそこへ向ける。main の最初に 1 回だけ呼ぶ。
 //
 //   - ファイル: Dir/ikkyoku_<日付>.log（日ごと。keepDays より古いものは消す）
-//   - 話題（log.Follow など）: Dir/ikkyoku-<話題>_<日付>.log だけ（コンソールに出さない。Warn 以上は本体にも）
+//   - 名前付き（log.Follow）: Dir/ikkyoku-<名前>_<日付>.log だけ（コンソールに出さない。Warn 以上は本体にも）
 //   - コンソール: Options.Console のときだけ標準エラーにも
 //   - レベル: 呼び出し元のパッケージごと（Dir/LevelsFile。無ければ defaultLevels）
 //
@@ -83,7 +84,7 @@ func Init(opts Options) (io.Closer, error) {
 	var sinks []slog.Handler
 	var closers multiCloser
 	var file string
-	topicSinks := map[string]slog.Handler{}
+	namedSinks := map[string]slog.Handler{}
 	if dir != "" {
 		w, err := wlog.NewRollingFileWriter(dir, wlog.Day)
 		if err != nil {
@@ -94,14 +95,14 @@ func Init(opts Options) (io.Closer, error) {
 			closers = append(closers, w)
 			file = filepath.Join(dir, FilePrefix+"_"+time.Now().Format("20060102")+".log")
 			fileDir = dir
-			// 話題のファイルは書いたときに開く（追わなかった日は作られない）。
-			for _, t := range topics {
+			// 名前付きのファイルは書いたときに開く（追わなかった日は作られない）。
+			for _, name := range separated {
 				tw, err := wlog.NewRollingFileWriter(dir, wlog.Day)
 				if err != nil {
-					continue // 出口が無い話題は本体へ出る（topicHandler）
+					continue // 出口が無い名前は本体へ出る（namedRouter）
 				}
-				tw.SetPrefix(TopicFile(t))
-				topicSinks[t.name] = wlog.NewSimpleHandler(tw, LevelTrace)
+				tw.SetPrefix(NamedFile(name))
+				namedSinks[name] = wlog.NewSimpleHandler(tw, LevelTrace)
 				closers = append(closers, tw)
 			}
 		}
@@ -114,7 +115,7 @@ func Init(opts Options) (io.Closer, error) {
 	// （出口が出さないレベルは、パッケージのレベルを下げても出ない）。
 	root, pkgs := defaultLevels()
 	sink := slog.NewMultiHandler(sinks...)
-	h := wlog.NewPackageLevelHandler(&topicHandler{main: sink, topics: topicSinks}, root)
+	h := wlog.NewPackageLevelHandler(&namedRouter{main: sink, named: namedSinks}, root)
 	h.SetLevels(root, pkgs)
 	levels := "既定"
 	if dir != "" {
@@ -150,55 +151,68 @@ func (m multiCloser) Close() error {
 	return errors.Join(errs...)
 }
 
-// topicHandler は話題（log.go の Topic）の付いた記録を話題のファイルへ振り分ける。
-// 話題の出口が無い（ファイルを作れなかった）ときは本体へ出す（ログを失わない）。
-// ⚠️ **Warn 以上は本体にも出す** —— 話題のファイルはふだん見ないので、警告を見落とさないため。
-type topicHandler struct {
-	main   slog.Handler
-	topics map[string]slog.Handler
+// namedRouter は名前付きの Logger（wenteasy/log の Named）の記録を、その名前のファイルへ振り分ける。
+// 名前は Named が WithAttrs で付ける印（wlog.LoggerAttr）で分かるので、印を受け取った派生だけが
+// 名前のファイルへ書く。出口が無い名前（ファイルを作れなかった・分けない名前）は本体へ出す（ログを失わない）。
+// ⚠️ **Warn 以上は本体にも出す** —— 名前のファイルはふだん見ないので、警告を見落とさないため。
+type namedRouter struct {
+	main  slog.Handler
+	named map[string]slog.Handler
+	to    slog.Handler // 印を受け取った派生の行き先（無ければ nil = 本体）
 }
 
-func (h *topicHandler) Enabled(ctx context.Context, l slog.Level) bool {
-	if t, ok := h.topics[topicOf(ctx)]; ok && t.Enabled(ctx, l) {
+func (h *namedRouter) Enabled(ctx context.Context, l slog.Level) bool {
+	if h.to != nil && h.to.Enabled(ctx, l) {
 		return true
 	}
 	return h.main.Enabled(ctx, l)
 }
 
-func (h *topicHandler) Handle(ctx context.Context, r slog.Record) error {
-	t, ok := h.topics[topicOf(ctx)]
-	if !ok {
+func (h *namedRouter) Handle(ctx context.Context, r slog.Record) error {
+	if h.to == nil {
 		return h.main.Handle(ctx, r)
 	}
-	err := t.Handle(ctx, r.Clone())
+	err := h.to.Handle(ctx, r.Clone())
 	if r.Level < LevelWarn {
 		return err
 	}
 	return errors.Join(err, h.main.Handle(ctx, r))
 }
 
-func (h *topicHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	return h.with(func(x slog.Handler) slog.Handler { return x.WithAttrs(attrs) })
+func (h *namedRouter) WithAttrs(attrs []slog.Attr) slog.Handler {
+	nh := h.with(func(x slog.Handler) slog.Handler { return x.WithAttrs(attrs) })
+	for _, a := range attrs {
+		for name, sink := range nh.named {
+			if a.Equal(wlog.LoggerAttr(name)) {
+				nh.to = sink
+			}
+		}
+	}
+	return nh
 }
 
-func (h *topicHandler) WithGroup(name string) slog.Handler {
+func (h *namedRouter) WithGroup(name string) slog.Handler {
 	return h.with(func(x slog.Handler) slog.Handler { return x.WithGroup(name) })
 }
 
-func (h *topicHandler) with(f func(slog.Handler) slog.Handler) slog.Handler {
-	ts := make(map[string]slog.Handler, len(h.topics))
-	for k, t := range h.topics {
-		ts[k] = f(t)
+func (h *namedRouter) with(f func(slog.Handler) slog.Handler) *namedRouter {
+	nh := &namedRouter{main: f(h.main), named: make(map[string]slog.Handler, len(h.named))}
+	for k, x := range h.named {
+		y := f(x)
+		nh.named[k] = y
+		if x == h.to {
+			nh.to = y
+		}
 	}
-	return &topicHandler{main: f(h.main), topics: ts}
+	return nh
 }
 
 // removeOld は keepDays より古いログファイルを消す。日付はファイル名から読む
 // （更新時刻は見ない。コピーや展開で変わるため）。消せなくても何もしない。
 func removeOld(dir string, now time.Time) {
 	prefixes := []string{FilePrefix}
-	for _, t := range topics {
-		prefixes = append(prefixes, TopicFile(t))
+	for _, name := range separated {
+		prefixes = append(prefixes, NamedFile(name))
 	}
 	limit := now.AddDate(0, 0, -keepDays)
 	for _, prefix := range prefixes {
