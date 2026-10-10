@@ -439,8 +439,10 @@ func TestFollowRewindFromBaseAcrossFrames(t *testing.T) {
 	if got := tipSFEN(t, s); !strings.HasPrefix(got, hakureiWant) {
 		t.Errorf("局面 = %s, want %s…", got, hakureiWant)
 	}
-	if !hasBranch(s, "4f4e") {
-		t.Errorf("元の手が枝に残っていません")
+	// 1 枚からは順番が決まらない（▲4五歩 △2五桂 …… も同じ局面に行き着く）。比べる相手の局面からの答えは、足し済みの手と
+	// いちばん長く揃う順番を採る（いちばん浅く戻す。2026-10-11）ので、▲4五歩 は残り、△2五歩 から先を差し替える。
+	if !hasBranch(s, "2d2e") {
+		t.Errorf("差し替えた元の手が枝に残っていません")
 	}
 }
 

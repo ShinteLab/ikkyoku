@@ -163,6 +163,17 @@ followProbe ─> Rank（候補から選ぶ。29µs）─┬─ 読めていな�
   残りますが、同じ 1 枚からは継ぎ足しません」が出たら、その 1 枚は先端と合っていない）。
   ⚠️ **`atTip` は据える前に 1 回だけ見ること** —— 自分で足した手で先端が動くので、
   あとで見ると必ず「先端ではない」になる。
+  ⚠️ **足し済みの手があれば、深く探す段（`Connect`）は比べる相手の局面から 1 回だけ回す**（2026-10-11。`followbase.go` の
+  `followExplainFromBase`。理由は `_docs/design-follow.md`）。比べる相手の局面（`followFromBase`）から先端までに追従が足した手が
+  あるとき、**足し済みの手で始まる答えなら残りを先端から足す手として返し**（`tipResult`。下見の答えは今までどおり先端から）、
+  **途中で分かれる答えは差し替えの候補として `FollowProbe.base` に載せる**（ここでは据えない）。
+  ⚠️ **足し済みの手で始まる答えが 1 つでもあれば、分かれる答えは候補にしない**（速い経路と同じ）・
+  ⚠️ **分かれる答えは一意か行き着く局面が揃うときだけ**、揃うときは足し済みの手といちばん長く揃う順番（いちばん浅く戻す）・
+  ⚠️ **使うのは足し済みの手が全部推測の手のときだけ**（`followBaseFrom`）・⚠️ **手や頭が被った 1 枚・費用表の無い 1 枚では使わない**
+  （差し替えを試さない 1 枚。今までどおり先端から）。分かれる答えのときは、差し替えの比べに使うので先端からも探す
+  （ログ「比べる相手の局面から説明しました」のあとの「下見しました」が `fromBase=false`）。
+  ⚠️ **`Rank` の 1 手の段は今までどおり先端から**（中継の大半は 0 手か 1 手で、ここで片が付く）。そこで決まった 1 枚でも、
+  先端がぴったり合わなければ差し替えの側（`followRewindProbe`）が比べる相手の局面から探す
   ⚠️ **フロント側も「手が増えたら間を置かずにもう 1 周」**（`followSchedule(soon)`）——
   待ち時間はそのぶん遅れが開く。
 - ⚠️ **訂正タブを通さないこと**（2026-09-15 に実機で踏んだ）。
@@ -336,11 +347,16 @@ followProbe ─> Rank（候補から選ぶ。29µs）─┬─ 読めていな�
 
 - ⚠️ **推測で足した末尾の手は、後の 1 枚で差し替える**（`followRewindCheck` / `followRewindApply`。`followrewind.go`。
   2026-10-08。理由は `_docs/design-follow.md`）。`FollowAuto` の下見のあと、先端から足すより先に見る。
-  - ⚠️ **差し替えるのは本譜の末尾から続く推測の手（`position.Study.MainGuessTail`）だけ・最大 3 手**（`followRewindMax`）。
+  - ⚠️ **差し替えるのは本譜の末尾から続く推測の手（`position.Study.MainGuessTail`）だけ**。
     印の無い手（ぴったり一致・棋譜・人が指した手）の手前で止まる（`TestFollowRewindKeepsUnguessedMoves`）。
-    ⚠️ **例外は比べる相手の 1 枚の局面まで戻る候補**（2026-10-10。`followFromBase`。推測の手の中に収まるときだけ）。
-    大盤のあいだに 6 手進み、推測を 6 手積んだ中継で、正しい手順は 6 手戻らないと届かなかった
-    （`TestFollowRewindFromBaseAcrossFrames`）。⚠️ **深く探す（`DeepDepth`）のはこの候補だけ**（浅い候補は今までどおり）
+  - **候補は 2 つの道から来る**（2026-10-11）: ①**比べる相手の局面からの答え**（`followExplainFromBase`。足し済みの手の途中で
+    分かれる答え。何手戻るかは答えが決める —— 大盤のあいだに 6 手進み、推測を 6 手積んだ中継で、正しい手順は 6 手戻らないと
+    届かなかった。`TestFollowRewindFromBaseAcrossFrames`）、②**末尾から 1〜3 手**（`followRewindMax`。深く探さない）。
+    ⚠️ **関門は 1 つ**（`accept`。下の比べ。道ごとに判断を変えない）。
+    ⚠️ **②は比べる相手の局面より前へ戻るときと、比べる相手の局面を使わない 1 枚（足し済みの手が無い・覚えていない）のときだけ**。
+    ⚠️ **比べる相手の局面から足し済みの手で始まる答えがぴったり合うなら、比べる相手より前へは戻らない**（`followBaseAnswer.fits`）。
+    ⚠️ **修復の答え（認識を覆して合わせた答え）は「合う」に数えないこと** —— 比べる相手は種類の読み違いを問わずに決めている
+    （`KindOnly`）ので、その前の推測の手の種類が違っていることがある（`TestFollowRewindPastBaseWhenBaseOnlyRepairs`）
   - ⚠️ **比べるのは先後と駒の有無の食い違いだけ**（`followSideCost`。駒の種類は見ない —— 種類の読み違いに合わせて正しい手を
     差し替えない）。⚠️ **読みの弱い駒（`followArrivedMinCost` 未満）は数えない**（光の差し込んだ空きを「先手の香」0.40 と読んだ
     1 枚で、▲2五歩 を ▲1五角打 △2五角打 ▲同歩 に差し替えた。`TestFollowRewindIgnoresWeakPhantomPiece`）。⚠️ **先端の盤で成駒が載っているマスは比べない**（2026-10-09。`promotedCells`。どの盤にも同じマスを使う。1一 の馬を「後手の歩」0.78 と
@@ -445,6 +461,12 @@ followProbe ─> Rank（候補から選ぶ。29µs）─┬─ 読めていな�
   ⚠️ **何も言えない 1 枚では控えを捨てず、変わっていない 1 枚では据えないこと**（`TestFollowRewindSurvivesSilentFrame`。2026-10-09）・
   ⚠️ **速い経路でも、角打ちの推測を金の移動に差し替えること**（`TestFollowCellsRewindsGuessedDrop`。2026-10-09 の中継の形）・
   ⚠️ **成駒の載ったマスの読み違いで取り消さないこと**（`TestFollowRewindIgnoresPromotedPieceMisread`。2026-10-09 の ▲1一角成）
+- `followbase_test.go` — **81 マスの読みを比べる相手の局面から説明する**（2026-10-11。`followbase.go`）。⚠️ 歯止めは ——
+  **足し済みの手で始まる答えの残りを、先端から足す手として返すこと**（`TestFollowProbeExplainsFromBase`）・
+  **途中で分かれる答えを差し替えの関門にかけ、2 枚目で差し替えること**（`TestFollowRewindFromBaseReplacesShortTail`）・
+  **比べる相手から採れる答えが無い・修復でしか合わないなら、比べる相手より前の推測の手も戻すこと**
+  （`TestFollowRewindPastBaseWhenBaseUnsettled` / `TestFollowRewindPastBaseWhenBaseOnlyRepairs`）・
+  **ぴったり合うなら差し替えないこと**（`TestFollowRewindKeepsTailWhenBaseFits`）
 - `followunseen_test.go` — **手や頭が被って見えないマス**（2026-10-06）。⚠️ **行き先が見えない 1 枚が
   何枚続いても足さず（控えもせず）、印が消えた次の 2 枚で足すこと**（`TestFollowAutoWaitsForUnseenArrival`。
   **頭が動かないと同じ 1 枚が続く**ので、2 枚の確かめだけでは止まらない形）・**頭が上辺に被っていても

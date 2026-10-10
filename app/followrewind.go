@@ -261,6 +261,10 @@ func (s *StudyService) followCellsRewind(base *position.Position, since []string
 //
 // ⚠️ **戻した局面からの答えが一意のときだけ**（一意でないのに 1 本選ばない）。
 // ⚠️ **戻した手と同じ手で始まる答えは採らない**（それは戻さなくても先端から繋がる。もっと浅く戻せば済む）。
+//
+// 戻る候補は**比べる相手の局面からの答え**（`followExplainFromBase`。2026-10-11）と、**末尾から 1〜3 手**の 2 つの道から
+// 来るが、⚠️ **関門（上の 2 つの条件）は 1 つ**（`accept`）。末尾から戻すのは、比べる相手の局面より前へ戻るときと、
+// 比べる相手の局面を使わない 1 枚のときだけ。
 func (s *StudyService) followRewindProbe(board *position.Board, cost *position.CellCost, p FollowProbe) *followRewind {
 	s.mu.Lock()
 	if s.study == nil {
@@ -279,19 +283,36 @@ func (s *StudyService) followRewindProbe(board *position.Board, cost *position.C
 		return nil
 	}
 
-	// **戻る候補**: 末尾から 1〜`followRewindMax` 手と、**比べる相手の 1 枚の局面**（先端とぴったり合った最後の局面。
-	// 2026-10-10）。後者は大盤などのあいだに何手も進み、推測の手が `followRewindMax` より長く積まれたときのため ——
-	// 中継で 6 手を取り違えたとき、正しい手順は 6 手戻らないと届かなかった。⚠️ **推測の手の外へは戻らない**。
+	// **戻る候補は 2 つの道から来る**（2026-10-11）:
+	//   - **比べる相手の局面からの答え**（`followExplainFromBase`）。足し済みの手（比べる相手から先端まで。全部推測の手）の
+	//     途中で分かれる答えがそのまま差し替えの候補になる。何手戻るかは答えが決める（中継で 6 手を取り違えたとき、
+	//     正しい手順は 6 手戻らないと届かなかった。2026-10-10）
+	//   - **末尾から 1〜`followRewindMax` 手**。比べる相手の局面より前へ戻るのはこちらだけで、⚠️ **比べる相手の局面から
+	//     足し済みの手で始まる答えがぴったり合わないときの控え**（速い経路の `followCellsRewind` と同じ形。`fits`）。
+	//     比べる相手の局面を使わない 1 枚（足し済みの手が無い・覚えていない）では、今までどおりこちらだけ
+	// ⚠️ **推測の手の外へは戻らない**。
+	bpos, since, bline, useBase := s.followBaseFrom()
+	if useBase && !slices.Equal(bline, line) {
+		useBase = false
+	}
+	nb := 0
+	if useBase {
+		nb = len(since)
+	}
 	ks := []int{}
-	for k := 1; k <= len(tail) && k <= followRewindMax; k++ {
+	for k := nb + 1; k <= len(tail) && k <= followRewindMax; k++ {
 		ks = append(ks, k)
 	}
-	if _, since, _, bok := s.followFromBase(); bok && len(since) > followRewindMax && len(since) <= len(tail) {
-		ks = append(ks, len(since))
+	deepest := nb
+	if len(ks) > 0 {
+		deepest = max(deepest, ks[len(ks)-1])
+	}
+	if deepest == 0 {
+		return nil
 	}
 	// ⚠️ **種類の読みを信じてよい 1 枚か**は、いちばん深く戻る局面と比べて決める（2026-10-10。`position.KindsTrusted`）。
 	// 先端と比べると、疑っている推測の手が置いた駒の種類違い（2五 の桂）まで「読み違い」に数えてしまう。
-	deep, ok := followReplay(root, line[:len(line)-ks[len(ks)-1]])
+	deep, ok := followReplay(root, line[:len(line)-deepest])
 	if !ok {
 		return nil
 	}
@@ -318,20 +339,74 @@ func (s *StudyService) followRewindProbe(board *position.Board, cost *position.C
 		return nil
 	}
 
+	// accept は**末尾の k 手を戻して moves を指す差し替え**が関門を通るかを見る（通れば根拠を返す）。
+	// ⚠️ **どちらの道から来た候補も、この 1 つの関門にかけること**（道ごとに判断を変えない）。
+	accept := func(k int, moves []string) (string, bool) {
+		keep := len(line) - k
+		old := line[keep:]
+		if len(moves) > 0 && moves[0] == old[0] {
+			// 戻した手と同じ手で始まるなら、もっと浅く戻せば済む。
+			return "", false
+		}
+		anc, ok := followReplay(root, line[:keep])
+		if !ok {
+			return "", false
+		}
+		after, ok := followReplay(anc, moves)
+		if !ok {
+			return "", false
+		}
+		alt := followSideCost(after.Board, board, cost, skip)
+		better := alt < tipCost-followSideEps
+		fewer := tipPlies > 0 && alt <= tipCost+followSideEps && len(moves) < k+tipPlies && (k+tipPlies-len(moves))%2 == 0
+		// ⚠️ **先後と駒の有無で同点なら、種類の読みを信じてよい 1 枚に限って種類で選ぶ**（2026-10-10。`position.KindsTrusted`）。
+		// 中継で取り違えた ▲2五桂 △同桂 と正しい ▲2五桂 △4五桂 ▲同歩 …… は先後と駒の有無では同じ盤で、2五 が歩（1.00）か
+		// 桂かでしか分かれない。⚠️ **手数の偶奇は揃えること**（違えば手番が食い違う）。
+		altKind := followKindCost(after.Board, board, cost, skip)
+		kinder := trusted && !better && alt <= tipCost+followSideEps && altKind < tipKind-followSideEps &&
+			(k+tipPlies-len(moves))%2 == 0
+		switch {
+		case better:
+			return fmt.Sprintf("先後と駒の有無の食い違い %.2f → %.2f", tipCost, alt), true
+		case kinder:
+			return fmt.Sprintf("先後と駒の有無は同じ %.2f・種類の食い違い %.2f → %.2f", alt, tipKind, altKind), true
+		case fewer:
+			return fmt.Sprintf("同じ食い違い %.2f を %d 手 → %d 手で説明", alt, k+tipPlies, len(moves)), true
+		}
+		return "", false
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), followTimeout)
 	defer cancel()
+	if useBase {
+		// **比べる相手の局面からの答え**。下見が深く探す段まで来ていればその答えを使い、来ていなければここで探す
+		// （先端が 1 手で決まった・「変わっていない」が 1 位だった 1 枚）。
+		ans := p.base
+		if ans == nil {
+			got, err := followExplainFromBase(ctx, bpos, since, line, board,
+				position.ConnectOptions{Cost: cost, Tolerance: position.DefaultTolerance})
+			if err != nil {
+				return nil
+			}
+			ans = &got
+		}
+		if rw := ans.rewind; rw != nil && slices.Equal(rw.line, line) {
+			if why, ok := accept(len(line)-rw.keep, rw.moves); ok {
+				return &followRewind{line: line, keep: rw.keep, moves: slices.Clone(rw.moves), why: rw.why + "・" + why}
+			}
+		}
+		if ans.fits(tip) {
+			// 足し済みの手で始まる答えがぴったり合う（足し済みの手は撮った盤と矛盾しない）。比べる相手の局面より前へは戻らない。
+			return nil
+		}
+	}
 	for _, k := range ks {
 		keep := len(line) - k
 		anc, ok := followReplay(root, line[:keep])
 		if !ok {
 			return nil
 		}
-		opt := position.ConnectOptions{Cost: cost, Tolerance: position.DefaultTolerance}
-		if k > followRewindMax {
-			// 比べる相手の局面まで戻るときだけ深く探す（何手も進んだあいだに積んだ推測を、まとめて説明し直すため）。
-			opt.DeepDepth = followDeepDepth
-		}
-		r, err := position.Connect(ctx, anc, board, opt)
+		r, err := position.Connect(ctx, anc, board, position.ConnectOptions{Cost: cost, Tolerance: position.DefaultTolerance})
 		if err != nil {
 			return nil
 		}
@@ -357,34 +432,9 @@ func (s *StudyService) followRewindProbe(board *position.Board, cost *position.C
 		default:
 			continue
 		}
-		if len(moves) > 0 && moves[0] == old[0] {
-			continue
+		if why, ok := accept(k, moves); ok {
+			return &followRewind{line: line, keep: keep, moves: slices.Clone(moves), why: why}
 		}
-		after, ok := followReplay(anc, moves)
-		if !ok {
-			continue
-		}
-		alt := followSideCost(after.Board, board, cost, skip)
-		better := alt < tipCost-followSideEps
-		fewer := tipPlies > 0 && alt <= tipCost+followSideEps && len(moves) < k+tipPlies && (k+tipPlies-len(moves))%2 == 0
-		// ⚠️ **先後と駒の有無で同点なら、種類の読みを信じてよい 1 枚に限って種類で選ぶ**（2026-10-10。`position.KindsTrusted`）。
-		// 中継で取り違えた ▲2五桂 △同桂 と正しい ▲2五桂 △4五桂 ▲同歩 …… は先後と駒の有無では同じ盤で、2五 が歩（1.00）か
-		// 桂かでしか分かれない。⚠️ **手数の偶奇は揃えること**（違えば手番が食い違う）。
-		altKind := followKindCost(after.Board, board, cost, skip)
-		kinder := trusted && !better && alt <= tipCost+followSideEps && altKind < tipKind-followSideEps &&
-			(k+tipPlies-len(moves))%2 == 0
-		if !better && !fewer && !kinder {
-			continue
-		}
-		why := fmt.Sprintf("先後と駒の有無の食い違い %.2f → %.2f", tipCost, alt)
-		switch {
-		case better:
-		case kinder:
-			why = fmt.Sprintf("先後と駒の有無は同じ %.2f・種類の食い違い %.2f → %.2f", alt, tipKind, altKind)
-		default:
-			why = fmt.Sprintf("同じ食い違い %.2f を %d 手 → %d 手で説明", alt, k+tipPlies, len(moves))
-		}
-		return &followRewind{line: line, keep: keep, moves: slices.Clone(moves), why: why}
 	}
 	return nil
 }

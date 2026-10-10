@@ -141,6 +141,10 @@ type FollowProbe struct {
 	// KindOnly は「変わっていない」のとき、**食い違いが駒の種類だけ**か（駒の有無と先後は全部合っている。2026-10-07）。
 	// ⚠️ **速い経路の比べる相手にしてよいかの判断にだけ使う**（`FollowAuto.AtFrame`）。画面には出さない。
 	KindOnly bool `json:"-"`
+	// base は**比べる相手の局面から説明した答え**（深く探す段まで来て、足し済みの手があったときだけ。2026-10-11。
+	// `followExplainFromBase`）。差し替えの候補（`rewind`）を `followRewindProbe` が関門にかける。nil なら、
+	// `followRewindProbe` が要るときに自分で探す。
+	base *followBaseAnswer
 }
 
 // FollowApplied は据えた結果。
@@ -289,16 +293,39 @@ func (s *StudyService) followProbe(board *position.Board, cost *position.CellCos
 	if unseen.Count() > 0 {
 		copt.Tolerance = 0
 	}
-	r, err := position.Connect(ctx, from, board, copt)
-	if err != nil {
-		return FollowProbe{}, err
+	// ⚠️ **足し済みの手があれば、比べる相手の局面から説明する**（2026-10-11。`followbase.go`）。足し済みの手で始まる
+	// 答えなら、その残りが先端から足す手。途中で分かれる答えは差し替えの候補として `followRewindProbe` に回し、
+	// ここでは今までどおり先端から探した答えを返す（差し替えを関門にかけるときの比べる相手になる）。
+	// ⚠️ **手や頭が被った 1 枚・費用表の無い 1 枚では使わない**（差し替えを試さない 1 枚。今までどおり先端から）。
+	var r position.ConnectResult
+	fromBase := false
+	if bpos, since, line, bok := s.followBaseFrom(); bok && fromImage && unseen.Count() == 0 {
+		ans, err := followExplainFromBase(ctx, bpos, since, line, board, copt)
+		if err != nil {
+			return FollowProbe{}, err
+		}
+		out.base = &ans
+		if decided != nil {
+			decided.base = &ans
+		}
+		r, fromBase = ans.tipResult()
+		log.Follow.Info("比べる相手の局面から説明しました",
+			"tip", tipID, "足し済み", len(since), "stop", ans.r.Stop.String(), "depth", ans.r.Depth,
+			"candidates", len(ans.r.Solutions), "続き", len(ans.rests), "差し替え", ans.rewind != nil,
+			"nodes", ans.r.Nodes, "cost", ans.r.Cost)
+	}
+	if !fromBase {
+		var err error
+		if r, err = position.Connect(ctx, from, board, copt); err != nil {
+			return FollowProbe{}, err
+		}
 	}
 	// scattered は**答えが複数あり、行き着く局面が揃わない**か（`followSameEnd`）。
 	scattered := r.Stop == position.StopFound && !r.Unique && !r.More && !followSameEnd(from, r.Solutions)
 	log.Follow.Info("本譜の先に繋げるか下見しました",
 		"tip", tipID, "stop", r.Stop.String(), "depth", r.Depth,
 		"candidates", len(r.Solutions), "nodes", r.Nodes,
-		"cost", r.Cost, "fixed", len(r.Fixed), "rotated", rotated)
+		"cost", r.Cost, "fixed", len(r.Fixed), "rotated", rotated, "fromBase", fromBase)
 
 	// ⚠️ **1 手で決まっていたなら、それより深く繋がったときだけ乗り換える**（`decided`。並べきれないときは乗り換えない）。
 	if decided != nil && (r.Stop != position.StopFound || r.More || scattered || r.Depth <= decided.Depth) {
