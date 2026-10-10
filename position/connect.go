@@ -73,7 +73,20 @@ const (
 	// 見ないので、それと揃える。⚠️ **費用表があるときだけ**（厳密一致の `cost` は「何マス食い違って
 	// いるか」のままにする）。⚠️ **0 にしないこと** —— 種類の違いで成・不成や打った駒を選んでいる。
 	// ⚠️ **当て推量**（`TODO.md` 4 の案の「半分」）。
+	// ⚠️ **種類の読みを信じてよい 1 枚では掛けない**（`kindTrustMax`。2026-10-10）。
 	kindOnlyWeight = 0.5
+	// kindTrustMax は**撮った 1 枚の駒の種類の読みを信じてよい**とする、根から見て先後は合って種類だけ違うマス
+	// （`staleKinds`。たいてい動いていない駒の読み違い）の数の上限（2026-10-10）。
+	//
+	// 中継で 6 手が写った 1 枚から、2五 の歩（確信度 1.00）を桂に覆した手順を継ぎ足して取り違えた。種類の違いを半分に
+	// しか数えず、修復の答えの採り方（`sideBetter`）も先後と駒の有無しか見ないので、2五 の歩と桂を区別できなかった。
+	// ⚠️ **確信度では分けられない**（録画 211 手の行き先を読み直すと、種類を外した読みにも 1.00 が普通に出た。どれも
+	// 書体に慣れていない中継）。**その 1 枚で動いていない駒の種類をどれだけ当てているか**なら分かれた —— 認識器が
+	// 正しかった 1 枚は読み違い 0〜1、外した 1 枚は 6〜10（例外が 1 枚。読み違い 1 で角を歩と読んだ）。信じる 1 枚では
+	// 種類の違いを満額で数える（修復の候補の中の選び方と、追従の差し替えの比べ）。外れても正しい手が予算を超えて
+	// 「繋がらない」で待つ側に倒れる。⚠️ **種類で手を足すこと自体は止めない**（`sideBetter` は先後と駒の有無だけ）。
+	// ⚠️ **当て推量**（測ったのは今の認識器で読み直した値。`TODO.md` 4）。
+	kindTrustMax = 1
 )
 
 // CellCost は**マスごとの「認識結果を覆すのにかかる費用」**（rank, file の順）。
@@ -392,6 +405,9 @@ func Connect(ctx context.Context, from *Position, target *Board, opt ConnectOpti
 // 説明した（`TestConnectRepairNotWorseThanNothing`）—— 2一 で読めた後手の駒を消すので、何も指していないより食い違う。
 // ⚠️ **種類は比べない**（費用の合計で比べると、来た飛車を歩と読んだ ▲同飛 が「何も指していない」に負ける。
 // 種類は認識が一番外すところ）。⚠️ **見えないマスは数えない**。
+// ⚠️ **種類の読みを信じてよい 1 枚（`kindTrustMax`）でも種類は比べない**（2026-10-10 に入れて、同じ日に戻した）。
+// 打った香を「歩」1.00 と読んだ 1 枚（ほかの駒は全部読めている）で、香を打つ手と「何も指していない」が同点になり、
+// 正しい打つ手を捨てた。駒の有無は種類の読みより確かなので、種類で手を足すこと自体を止めない（2026-10-09 の打つ手と同じ）。
 func sideBetter(root *Position, target *Board, sols [][]string, cost *CellCost, unseen *CellMask) bool {
 	base := sideCost(root.Board, target, cost, unseen)
 	for _, sol := range sols {
@@ -482,7 +498,11 @@ func search(ctx context.Context, root *Position, target *Board, opt ConnectOptio
 			if tolerance > 0 && s.forgaveOccupancy(r.Cost) {
 				// ⚠️ **修復では、深い手順がもっと安く合うなら、そちらを採る**（2026-10-08。`cheaperDeeper`）。
 				// 探すのは、答えが駒の有無か先後を覆したときだけ（深く探すと 1 枚が約 10 倍重い）。
-				if deeper, ok := s.cheaperDeeper(root, limit+1, opt.deepDepth(), r.Cost); ok {
+				// ⚠️ **`MaxDepth` の外（`DeepDepth`）へ出るのは、種類を見ない下界 + `MaxWaste` までに抑えること**（2026-10-10）。
+				// 抑えないと、行って戻る手で 1 マス余分に説明する偽の手順が「より安い」として通る（1 手戻した局面から、飛車が
+				// 2八 → 3七 → 2八 と往復する 5 手。`TestFollowRewindRecoversMissedMove`）。`MaxDepth` までは今までどおり。
+				deep := min(opt.deepDepth(), max(opt.maxDepth(), d0.blindBound(root.Turn)+opt.maxWaste()))
+				if deeper, ok := s.cheaperDeeper(root, limit+1, deep, r.Cost); ok {
 					return deeper, nil
 				}
 			}
@@ -890,7 +910,8 @@ func newDiff(cur, tgt *Board, cost *CellCost, budget float64, unseen *CellMask, 
 				}
 				v := cost.at(r, f)
 				// ⚠️ **先後が合って種類だけ違うマスは軽く数える**（費用表があるときだけ。`kindOnlyWeight`）。
-				if cost != nil && !c.IsEmpty() && !t.IsEmpty() && c.Black() == t.Black() {
+				// ⚠️ **種類の読みを信じてよい 1 枚では満額**（`kindTrustMax`）。
+				if cost != nil && !stale.trusted && !c.IsEmpty() && !t.IsEmpty() && c.Black() == t.Black() {
 					v *= kindOnlyWeight
 				}
 				d.cost += v
@@ -959,11 +980,15 @@ func newDiff(cur, tgt *Board, cost *CellCost, budget float64, unseen *CellMask, 
 type staleKinds struct {
 	root *Board
 	mask *CellMask
+	// trusted は**この 1 枚の種類の読みを信じるか**（stale のマスが `kindTrustMax` 以下。2026-10-10）。
+	// ⚠️ **ゼロ値は偽**（今までどおり種類の違いは半分）—— 厳密一致や `Rank` が渡すゼロ値の振る舞いを変えない。
+	trusted bool
 }
 
 // newStaleKinds は根 root と撮った盤 tgt から stale のマスを拾う（無ければゼロ値）。
 func newStaleKinds(root, tgt *Board, unseen *CellMask) staleKinds {
 	var m *CellMask
+	n := 0
 	for r := 0; r < 9; r++ {
 		for f := 0; f < 9; f++ {
 			c, t := root.cells[r][f], tgt.cells[r][f]
@@ -974,12 +999,20 @@ func newStaleKinds(root, tgt *Board, unseen *CellMask) staleKinds {
 				m = &CellMask{}
 			}
 			m[r][f] = true
+			n++
 		}
 	}
 	if m == nil {
-		return staleKinds{}
+		return staleKinds{trusted: true}
 	}
-	return staleKinds{root: root, mask: m}
+	return staleKinds{root: root, mask: m, trusted: n <= kindTrustMax}
+}
+
+// KindsTrusted は撮った盤 target の**駒の種類の読みを信じてよいか**（2026-10-10。`kindTrustMax`）。
+// 根 root と比べて、先後は合って種類だけ違うマスが `kindTrustMax` 以下なら真。見えないマスは数えない。
+// 追従の差し替えの比べ（app）が `Connect` と同じ線で決めるための口。
+func KindsTrusted(root, target *Board, unseen *CellMask) bool {
+	return newStaleKinds(root, target, unseen).trusted
 }
 
 // skip は、盤の (rank, file) の駒 c が stale のマスで、根から動いていないか。

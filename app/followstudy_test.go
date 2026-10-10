@@ -2015,6 +2015,47 @@ func TestFollowProbeLooksPastRankWhenMovesRemain(t *testing.T) {
 	}
 }
 
+// hakureiStudy / hakureiShot / hakureiConf は録画 `follow/20261010-122957/009-…-guess.png`（中継）の根・本譜（△2一飛 まで）と、
+// その 1 枚を読み直した盤と確信度。1一 の香を後手の飛と読んだ 1 枚（実際に出た）にしてある。
+func hakureiStudy(t *testing.T) *StudyService {
+	t.Helper()
+	return studyAt(t, "l6rl/1kg2b3/1png1snpp/p1psppp2/7P1/P1PSSPP2/1P1P2N1P/1BK1G4/LN1G3RL b 2P 1",
+		"6i6h", "4c5b", "2i4i", "2a4a", "2e2d", "2c2d", "P*2c", "4a2a")
+}
+
+const hakureiShot = "l7r/1kg1sb3/1png3rp/p1pspPp2/7p1/P1PSS1P2/1P1P4P/1BKGG4/LN3R2L"
+
+// hakureiWant は正しい 6 手のあとの局面（2五 は後手の歩・先手の持ち駒は桂 1 歩 2）。
+const hakureiWant = "l7l/1kg1sb3/1png3rp/p1pspPp2/7p1/P1PSS1P2/1P1P4P/1BKGG4/LN3R2L b N2Pn2p "
+
+var hakureiConf = []float64{
+	1.00, 0, 0, 0, 0, 0, 0, 0, 1.00,
+	0, 1.00, 1.00, 0, 1.00, 1.00, 0, 0, 0,
+	0, 1.00, 1.00, 1.00, 0, 0, 0, 1.00, 1.00,
+	1.00, 0, 1.00, 1.00, 1.00, 1.00, 1.00, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 1.00, 0,
+	1.00, 0, 1.00, 1.00, 1.00, 0, 1.00, 0, 0,
+	0, 1.00, 0, 1.00, 0, 0, 0, 0, 1.00,
+	0, 1.00, 1.00, 1.00, 1.00, 0, 0, 0, 0,
+	1.00, 1.00, 0, 0, 0, 1.00, 0, 0, 1.00,
+}
+
+// tipSFEN は本譜の先端の局面。
+func tipSFEN(t *testing.T, s *StudyService) string {
+	t.Helper()
+	s.mu.Lock()
+	_, tip, err := s.study.MainTip()
+	s.mu.Unlock()
+	if err != nil {
+		t.Fatalf("MainTip: %v", err)
+	}
+	got, err := tip.SFEN()
+	if err != nil {
+		t.Fatalf("SFEN: %v", err)
+	}
+	return got
+}
+
 // ⚠️ **何手も写った 1 枚は 1 回の答えで取り、修復の答えを継ぎ足さないこと**（2026-10-10 に中継で踏んだ）。
 //
 // **実機の症状**（録画 `follow/20261010-122957/009-…-guess.png`）: 大盤と解説の画面のあいだに ▲2五桂 △4五桂 ▲同歩
@@ -2023,32 +2064,8 @@ func TestFollowProbeLooksPastRankWhenMovesRemain(t *testing.T) {
 // そのまま追い続けた。盤と確信度は録画を読み直した値で、1一 の香を後手の飛と読んだ 1 枚（実際に出た）にしてある
 // （ぴったりの手順が無い側。修復の答えより安い深い手順で届く）。
 func TestFollowAutoTakesManyMovesInOneAnswer(t *testing.T) {
-	root, err := position.FromFullSFEN("l6rl/1kg2b3/1png1snpp/p1psppp2/7P1/P1PSSPP2/1P1P2N1P/1BK1G4/LN1G3RL b 2P 1")
-	if err != nil {
-		t.Fatalf("FromFullSFEN: %v", err)
-	}
-	for _, m := range []string{"6i6h", "4c5b", "2i4i", "2a4a", "2e2d", "2c2d", "P*2c", "4a2a"} {
-		if err := root.ApplyMove(m); err != nil {
-			t.Fatalf("ApplyMove(%q): %v", m, err)
-		}
-	}
-	s := NewStudyService(NewPositionService())
-	s.mu.Lock()
-	s.study = position.NewStudy(root)
-	s.mu.Unlock()
-
-	const shot = "l7r/1kg1sb3/1png3rp/p1pspPp2/7p1/P1PSS1P2/1P1P4P/1BKGG4/LN3R2L"
-	conf := []float64{
-		1.00, 0, 0, 0, 0, 0, 0, 0, 1.00,
-		0, 1.00, 1.00, 0, 1.00, 1.00, 0, 0, 0,
-		0, 1.00, 1.00, 1.00, 0, 0, 0, 1.00, 1.00,
-		1.00, 0, 1.00, 1.00, 1.00, 1.00, 1.00, 0, 0,
-		0, 0, 0, 0, 0, 0, 0, 1.00, 0,
-		1.00, 0, 1.00, 1.00, 1.00, 0, 1.00, 0, 0,
-		0, 1.00, 0, 1.00, 0, 0, 0, 0, 1.00,
-		0, 1.00, 1.00, 1.00, 1.00, 0, 0, 0, 0,
-		1.00, 1.00, 0, 0, 0, 1.00, 0, 0, 1.00,
-	}
+	s := hakureiStudy(t)
+	shot, conf := hakureiShot, hakureiConf
 	a, err := followAuto(t, s, shot, conf)
 	if err != nil {
 		t.Fatalf("FollowAuto: %v", err)
@@ -2060,19 +2077,9 @@ func TestFollowAutoTakesManyMovesInOneAnswer(t *testing.T) {
 	if !a.Guess {
 		t.Errorf("順番を選んだのに推測になっていません")
 	}
-	s.mu.Lock()
-	_, tip, err := s.study.MainTip()
-	s.mu.Unlock()
-	if err != nil {
-		t.Fatalf("MainTip: %v", err)
-	}
-	got, err := tip.SFEN()
-	if err != nil {
-		t.Fatalf("SFEN: %v", err)
-	}
 	// 2五 は後手の歩・先手の持ち駒は桂 1 歩 2（取り違えたときは 2五 が後手の桂・先手は歩 3 だった）。
-	if want := "l7l/1kg1sb3/1png3rp/p1pspPp2/7p1/P1PSS1P2/1P1P4P/1BKGG4/LN3R2L b N2Pn2p "; !strings.HasPrefix(got, want) {
-		t.Errorf("局面 = %s, want %s…", got, want)
+	if got := tipSFEN(t, s); !strings.HasPrefix(got, hakureiWant) {
+		t.Errorf("局面 = %s, want %s…", got, hakureiWant)
 	}
 
 	// **同じ 1 枚をもう一度渡しても、1 手も増えないこと**（継ぎ足さない）。

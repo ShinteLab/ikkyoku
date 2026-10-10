@@ -338,13 +338,22 @@ followProbe ─> Rank（候補から選ぶ。29µs）─┬─ 読めていな�
 - ⚠️ **推測で足した末尾の手は、後の 1 枚で差し替える**（`followRewindCheck` / `followRewindApply`。`followrewind.go`。
   2026-10-08。理由は `_docs/design-follow.md`）。`FollowAuto` の下見のあと、先端から足すより先に見る。
   - ⚠️ **差し替えるのは本譜の末尾から続く推測の手（`position.Study.MainGuessTail`）だけ・最大 3 手**（`followRewindMax`）。
-    印の無い手（ぴったり一致・棋譜・人が指した手）の手前で止まる（`TestFollowRewindKeepsUnguessedMoves`）
+    印の無い手（ぴったり一致・棋譜・人が指した手）の手前で止まる（`TestFollowRewindKeepsUnguessedMoves`）。
+    ⚠️ **例外は比べる相手の 1 枚の局面まで戻る候補**（2026-10-10。`followFromBase`。推測の手の中に収まるときだけ）。
+    大盤のあいだに 6 手進み、推測を 6 手積んだ中継で、正しい手順は 6 手戻らないと届かなかった
+    （`TestFollowRewindFromBaseAcrossFrames`）。⚠️ **深く探す（`DeepDepth`）のはこの候補だけ**（浅い候補は今までどおり）
   - ⚠️ **比べるのは先後と駒の有無の食い違いだけ**（`followSideCost`。駒の種類は見ない —— 種類の読み違いに合わせて正しい手を
     差し替えない）。⚠️ **読みの弱い駒（`followArrivedMinCost` 未満）は数えない**（光の差し込んだ空きを「先手の香」0.40 と読んだ
     1 枚で、▲2五歩 を ▲1五角打 △2五角打 ▲同歩 に差し替えた。`TestFollowRewindIgnoresWeakPhantomPiece`）。⚠️ **先端の盤で成駒が載っているマスは比べない**（2026-10-09。`promotedCells`。どの盤にも同じマスを使う。1一 の馬を「後手の歩」0.78 と
     読んだ 2 枚で ▲1一角成 を取り消した。`TestFollowRewindIgnoresPromotedPieceMisread`）。戻した側が**厳密に**少ないか、同じで**少ない手数・同じ偶奇**（先端からは往復して戻る手でしか辻褄が合わない）
     のときだけ。⚠️ **先端がぴったり合うなら探さない**（長考中は毎周それ。`Connect` を回さない）
-  - ⚠️ **戻した局面からの答えが一意のときだけ**・⚠️ **戻した手と同じ手で始まる答えは採らない**（もっと浅く戻せば済む）
+  - ⚠️ **先後と駒の有無で同点なら、種類の読みを信じてよい 1 枚に限って種類で選ぶ**（2026-10-10。`followKindCost` /
+    `position.KindsTrusted`。同じ偶奇のときだけ）。取り違えた ▲2五桂 △同桂 と正しい ▲2五桂 △4五桂 ▲同歩 …… は先後と駒の有無では
+    同じ盤で、2五 が歩（1.00）か桂かでしか分かれなかった。⚠️ **信じてよいかは、いちばん深く戻る局面と比べて決めること**（先端と比べると
+    疑っている推測の手が置いた駒まで読み違いに数える）・⚠️ **信じられない 1 枚では種類を見ない**（今までどおり。
+    `TestFollowRewindIgnoresKindsWhenUntrusted`）。先端がぴったり合っても、信じてよい 1 枚で種類が食い違えば探す
+  - ⚠️ **戻した局面からの答えが一意か、順番だけが決まらない（行き着く局面が同じ。`followSameEnd`）ときだけ**（後者は 2026-10-10。
+    戻した手と同じ手で始まらない順番を採る）・⚠️ **戻した手と同じ手で始まる答えは採らない**（もっと浅く戻せば済む）
   - ⚠️ **2 枚続けて同じ差し替えで据える**（ユーザーの判断。`TestFollowRewindNeedsTwoFrames`）。変わっていない 1 枚
     （`FollowConfirm`）でも確かめてよい（`TestFollowRewindConfirmsOnUnchangedFrame`）。控えたら**先端から足す手の控えは捨てる**
   - ⚠️ **手や頭が被った 1 枚・費用表の無い 1 枚では試さない**（控えた差し替えも捨てずに待つ。`TestFollowRewindIgnoresCoveredFrame`）
