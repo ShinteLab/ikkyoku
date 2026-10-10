@@ -936,3 +936,24 @@ func BenchmarkConnectDeep(b *testing.B) {
 		}
 	}
 }
+
+// ⚠️ **根から動いていない成駒のマスは、厳密一致でも見ないこと**（`staleKinds.promo`。2026-10-10 に中継で踏んだ）。
+//
+// **実機の症状**（録画 `follow/20261010-153156/011-…-guess.png`）: 実際は △5八歩成（5八 の金を取る）▲同金 の 2 手。
+// 認識器が、動いていない 1一 の先手の馬を「後手の金」と読み、深く探すと △5八歩成 ▲5七金 △1二金打 ▲5八金 △1一金
+// （後手が馬を取る）の 5 手がぴったり合って通った。成駒は学習データにほぼ入らず、先後まで外す。
+// ⚠️ **見えないマスがある 1 枚では今までどおり見る**（`TestConnectUnseenDropsCountBound`）。
+func TestConnectIgnoresUnmovedPromotedPiece(t *testing.T) {
+	from := after(t, "l6+R+B/1kg2b3/1pngss2p/pnp2pp2/4p2p1/P1P3P2/1P1PSS2P/2KGG4/LN6L w NL2Pr2p 1",
+		"5c5d", "N*6f", "5e5f", "4g5f", "5d6e", "5f6e", "7c6e", "5g5f", "P*5g", "5f6e")
+	const shot = "l6+Rg/1kg2b3/1p1g1s2p/pnp2pp2/3S3p1/P1PN2P2/1P1P4P/2K1G4/LN6L" // 1一 の馬を後手の金と読んだ
+	r := connect(t, from, shot, position.ConnectOptions{Tolerance: position.DefaultTolerance, Cost: uniformCost(1), DeepDepth: 8})
+	if r.Stop != position.StopFound || r.Depth != 2 {
+		t.Fatalf("△5八歩成 ▲同金 の 2 手になっていません: stop=%v depth=%d sols=%v", r.Stop, r.Depth, r.Solutions)
+	}
+	for _, sol := range r.Solutions {
+		if sol[1] != "6h5h" {
+			t.Fatalf("▲同金 ではない手順が並んでいます: %v", r.Solutions)
+		}
+	}
+}
