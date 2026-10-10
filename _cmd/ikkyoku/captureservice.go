@@ -147,6 +147,9 @@ type CaptureService struct {
 	// studySession は解析タブの今の検討の id を返す（`main` が `StudyService.Session` を入れる）。
 	// ⚠️ **nil なら訂正した 1 枚は使わない**（押した瞬間の 1 枚で決める。今までどおり）。
 	studySession func() string
+	// onHideRefused は**追っているあいだに枠を隠そうとして断った**ことを中継セッションへ渡す（2026-10-11。
+	// `StudyService.FollowHideRefused`。帯に出す）。nil なら知らせない（設計原則3）。
+	onHideRefused func(message string)
 	// quietOutcome は直近の `CaptureQuiet` の結果の種類（`board` / `none` / `off`）。
 	//
 	// ⚠️ **変わり目だけログに出すため**（2026-09-15）。追従は 1 秒ごとに回るので
@@ -628,8 +631,8 @@ func (s *CaptureService) placeMainBesideFrame() {
 // (起動時に出しているので普通は既に出ているが、**保険は外さないこと**)。
 //
 // ⚠️ **中継を追っているあいだは隠さない**（2026-10-10）。隠すと次の 1 周で撮れずに追跡がエラーで止まり、
-// しかも理由が見えない場所（手順の下）に出ていた。断ったことは `frame:hide-refused` で知らせ、
-// メイン画面が枠の下の帯に出す（入口が 3 つあり、Alt+F4 は Go からしか返せないので、知らせは 1 本にする）。
+// しかも理由が見えない場所（手順の下）に出ていた。断ったことは中継セッションへ渡し（`onHideRefused` →
+// `StudyService.FollowHideRefused`）、枠の下の帯に出す（入口が 3 つあり、Alt+F4 は Go からしか返せないので、知らせは 1 本にする）。
 func (s *CaptureService) HideFrame() {
 	if s.wins == nil || s.wins.frame == nil {
 		return
@@ -639,8 +642,8 @@ func (s *CaptureService) HideFrame() {
 	s.mu.Unlock()
 	if following {
 		log.Follow.Info("中継を追っているので枠を隠しません")
-		if s.app != nil {
-			s.app.Event.Emit("frame:hide-refused", hideRefusedMessage)
+		if s.onHideRefused != nil {
+			s.onHideRefused(hideRefusedMessage)
 		}
 		return
 	}
@@ -652,8 +655,10 @@ func (s *CaptureService) HideFrame() {
 // hideRefusedMessage は追跡中に枠を隠そうとしたときの文（`HideFrame`）。
 const hideRefusedMessage = "中継の追跡中は枠を隠せません。追跡をキャンセルしてください"
 
-// SetFollowing はメイン画面が**中継を追っているか**を写す（2026-10-10。入り切りが変わったときだけ呼ばれる）。
-// ⚠️ **状態の持ち主はメイン画面**（ループもあちら）。ここは枠を隠させないための写し。
+// SetFollowing は**中継を追っているか**を写す（2026-10-10。入り切りが変わったときだけ呼ばれる）。
+// ⚠️ **状態の持ち主は中継セッション**（`app` の `StudyService`。2026-10-11 にメイン画面から移した）。ここは枠を隠させないための写し。
+//
+//wails:ignore
 func (s *CaptureService) SetFollowing(on bool) {
 	s.mu.Lock()
 	s.following = on
@@ -1004,7 +1009,7 @@ type CaptureResult struct {
 	// 渡してフロントで重ねれば軽く、マスごとの確信度をホバーで出すこともできる。
 	Debug *recognize.Debug `json:"debug,omitempty"`
 	// CellConfidence は**マスごとの読みの確かさ**（81 個・行優先。`recognize.CellConfidence`。2026-10-11）。
-	// 中継を追うときの費用表の元で、フロントはそのまま `StudyService.FollowAuto` に渡す。
+	// 中継を追うときの費用表の元で、中継セッションがそのまま `StudyService.FollowAuto` に渡す。
 	// ⚠️ **空きのマスも被覆率から確かさを持つ**（以前は 0 で、下限の 0.15 で数えていた）。読めなければ nil。
 	CellConfidence []float64 `json:"cellConfidence,omitempty"`
 }
@@ -1111,6 +1116,8 @@ func (s *CaptureService) SetFollowShot(path string) {
 //
 // ⚠️ **枠の門番は掛けたまま**（`Capture` と同じ）。「どこを撮るのかが画面に
 // 見えていること」は追従でも変わらない。
+//
+//wails:ignore
 func (s *CaptureService) CaptureQuiet() (CaptureResult, error) {
 	if err := s.requireFrame(); err != nil {
 		return CaptureResult{}, err
@@ -1162,8 +1169,10 @@ func (s *CaptureService) CaptureQuiet() (CaptureResult, error) {
 
 // RecognizeQuiet は**直前に `CaptureQuiet` で撮った 1 枚を、81 マスで読む**（2026-10-07）。
 //
-// 速い経路（`CaptureResult.Cells`）で手が決まらなかったときに、フロントが呼ぶ。撮り直さないのは、
+// 速い経路（`CaptureResult.Cells`）で手が決まらなかったときに、中継セッションが呼ぶ。撮り直さないのは、
 // **変わったマスを測った 1 枚と、読む 1 枚を同じにするため**（間に次の手が指されると話が食い違う）。
+//
+//wails:ignore
 func (s *CaptureService) RecognizeQuiet() (CaptureResult, error) {
 	s.mu.Lock()
 	img := s.lastQuiet
@@ -1574,6 +1583,8 @@ func (s *CaptureService) noteQuiet(r CaptureResult) {
 // 初手から「別の盤」になった（実機で踏んだ）。押した瞬間に盤が映っていなくても始められる。
 // 押した瞬間の 1 枚を使うのは、訂正した 1 枚が無いとき（棋譜・新規対局で根を入れ替えた）と、
 // 撮ったあとに枠を動かしたときだけ。返すのは今撮った 1 枚（最初の 1 周として流す）。
+//
+//wails:ignore
 func (s *CaptureService) AnchorBoard() (CaptureResult, error) {
 	s.mu.Lock()
 	s.boardAnchor, s.anchorRegion, s.quietOutcome = recognize.Signature{}, ikkyoku.Region{}, ""
@@ -1695,6 +1706,8 @@ func (s *CaptureService) startFollowDir(master image.Image) string {
 // ⚠️ **戻り値でエラーを返さないこと。** 呼ぶのは追跡のループの中なので、
 // **残せなかっただけで追跡が止まるのは割に合わない**（設計原則3）。
 // 理由はログに出す。
+//
+//wails:ignore
 func (s *CaptureService) SaveFollowFrame(number int, moves []string, guess bool) string {
 	s.mu.Lock()
 	dir, img := s.followDir, s.lastQuiet
@@ -1732,6 +1745,8 @@ const followMissMax = 12
 //
 // ⚠️ **上限を超えたら黙って捨てること**（設計原則3）。追いつけない状態は
 // 何十分も続くので、全部残すとディスクが埋まる。
+//
+//wails:ignore
 func (s *CaptureService) SaveFollowMiss(number int, kind string) string {
 	s.mu.Lock()
 	dir, img, n := s.followDir, s.lastQuiet, s.followMisses
@@ -1815,6 +1830,8 @@ func safeNameRune(r rune) rune {
 }
 
 // ClearBoardAnchor は追う盤を忘れる（追跡を止めたとき）。
+//
+//wails:ignore
 func (s *CaptureService) ClearBoardAnchor() {
 	s.mu.Lock()
 	// following は追っていたか（止め方によっては何度も呼ばれる。本体のログに出すのは追っていたときの 1 回だけ）。

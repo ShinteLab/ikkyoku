@@ -2431,7 +2431,7 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
         // 理由は `_docs/app-kifu-load.md` の「自動更新」。
         const stopped = !followOn && isFollowingNow();
         if (stopped) {
-          stopFollow();
+          await stopFollow();
         }
         // ⚠️ **ここでは刻み始めない** —— 戻ってきた状態を `render` が受けて
         // `syncFollow` が決める（切り離した窓から押しても持ち主が刻む）。

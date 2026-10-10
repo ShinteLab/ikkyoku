@@ -682,8 +682,10 @@ func (s *StudyService) fallbackFollow(ranked position.RankResult, r position.Con
 // ⚠️ **無くても動くこと**（nil・数が合わない → 全部見えていることにする。今までどおり）。
 //
 // promo は**成・不成の見た目の証拠**（2026-10-07。`PromoEvidence`）。nil で呼ばれ、足そうとしている手に
-// 成りも不成も指せる手があれば、何も動かさずに `Compare` を返す（フロントが `CaptureService.ComparePieces` で
+// 成りも不成も指せる手があれば、何も動かさずに `Compare` を返す（中継セッションが `CaptureService.ComparePieces` で
 // 測って、同じ盤と証拠でもう一度呼ぶ）。⚠️ **nil でない（空でも）ときは、もう頼まない**（今までどおり決める）。
+//
+//wails:ignore
 func (s *StudyService) FollowAuto(boardSFEN string, cellConfidence []float64, cellHidden []bool, promo []PromoEvidence) (FollowAuto, error) {
 	// ⚠️ **訂正タブを通さないこと**（2026-09-15 に実機で踏んだ）。
 	// 以前は呼び出し側が毎周 `PositionService.Load` を呼んでいたので、
@@ -815,13 +817,15 @@ func (s *StudyService) followConfirmed(p FollowProbe, k int, board *position.Boa
 
 // FollowConfirm は**控えた答えを、撮り直した 1 枚が変わっていなかったことで確かめて**足す（2026-10-05）。
 //
-// 呼ぶのはフロントで、`CaptureQuiet` が「変わっていない」（`unchanged`）を返したとき。
+// 呼ぶのは中継セッション（`app` の `followsession.go`）で、`CaptureQuiet` が「変わっていない」（`unchanged`）を返したとき。
 // ⚠️ **ふるいの「変わっていない」は、控えた 1 枚から何も変わっていないこと**（間に
 // 変化があれば、静止したところで読み直しになる）なので、**同じ画像を読み直したのと同じ**
 // （認識は同じ画像に同じ答えを返す）。読み直さないぶん、確かめは 1 周（約 0.25 秒）で済む。
 //
 // 控えが無ければ何もしない（`FollowSame`）。⚠️ **本譜の先端が控えたときから動いていたら捨てる**
 // （手で指した・戻したなど。違う局面の先に繋がないため）。
+//
+//wails:ignore
 func (s *StudyService) FollowConfirm() (FollowAuto, error) {
 	// **控えた差し替え**（`followRewindCheck`）なら、そちらを据える（2 枚目で確かめた）。
 	if rw := s.takeRewind(); rw != nil {
@@ -929,18 +933,20 @@ func (s *StudyService) cellsMask(cells []int) *position.CellMask {
 // 踏んだ。先端から突き合わせて「合う手順 0」が続いた）。足し済みの手順で始まる答えだけを採り、残りを足す。
 // ⚠️ **合う手順が 1 つに決まるときだけ進む**（`position.ChangedMoves`）。成・不成、打った駒の種類、
 // 手や頭が被った 1 枚など、決まらなければ何もせずに返す（`Applied` も `Pending` も `AtFrame` も偽）。
-// **フロントはそれを見て、同じ 1 枚を 81 マスで読む**（`CaptureService.RecognizeQuiet` → `FollowAuto`）。
-// ⚠️ **合う手順が 1 つも無いときだけは `NoMoves` を立てる**（2026-10-08）—— フロントはすぐには読まず、組が変わるのを待つ。
+// **中継セッションはそれを見て、同じ 1 枚を 81 マスで読む**（`CaptureService.RecognizeQuiet` → `FollowAuto`）。
+// ⚠️ **合う手順が 1 つも無いときだけは `NoMoves` を立てる**（2026-10-08）—— 中継セッションはすぐには読まず、組が変わるのを待つ。
 // 残りが無ければ（今の 1 枚が先端そのもの）`AtFrame` だけを立てて返す。
 // ⚠️ **1 通りに決まっても、行き先に指した側の駒が読めるまで控えも足しもしない**（2026-10-07。
 // `followBackedByRead`）。read が行き先を読んでいなければ `ReadCells` に行き先を入れて返し
-// （フロントが `CaptureService.ReadCells` で読んでもう一度呼ぶ）、読めて先後が違えば何もせずに返す（81 マスを読む）。
-// 手が分かれたときに頼むマスは、**違いの出るマスとどの候補の行き先も合わせたもの**（フロントが読むのは 1 回だけ）。
+// （中継セッションが `CaptureService.ReadCells` で読んでもう一度呼ぶ）、読めて先後が違えば何もせずに返す（81 マスを読む）。
+// 手が分かれたときに頼むマスは、**違いの出るマスとどの候補の行き先も合わせたもの**（中継セッションが読むのは 1 回だけ）。
 // ⚠️ **成・不成で分かれたら、同じ 1 回で見た目の比べも頼む**（`Compare`。2026-10-07）。promo はその答えで、
 // **読んだマスより先に使う**（`followPickByPromo`。成駒は成っていない姿に読み違えるが、見た目が変わったかは分かる）。
 // 間の値や測れなかったときは、今までどおり読んだマスで選ぶ。
 // ⚠️ **1 枚だけでは足さない**のは同じ（`followPending`）。次の 1 枚が変わっていなければ
 // `FollowConfirm` で足す。⚠️ **比べる相手の 1 枚に至った手のマスは、見た目だけ変わってよい**（色付け）。
+//
+//wails:ignore
 func (s *StudyService) FollowCells(changed []int, read []CellPiece, promo []PromoEvidence) (FollowAuto, error) {
 	// 控えた差し替えは、この 1 枚が同じ差し替えを言うまで「残しているだけ」にする（`followCellsRewind`）。
 	s.holdRewind()
@@ -1012,7 +1018,7 @@ func (s *StudyService) FollowCells(changed []int, read []CellPiece, promo []Prom
 		if a, done, err := s.followCellsRewind(base, since, mask, extra, read, rotated); done {
 			return a, err
 		}
-		// ⚠️ **合う手順が 1 つも無いことを添えること**（`NoMoves`。2026-10-08）。フロントはすぐ 81 マスを読まず、
+		// ⚠️ **合う手順が 1 つも無いことを添えること**（`NoMoves`。2026-10-08）。中継セッションはすぐ 81 マスを読まず、
 		// 組が変わるのを待つ（駒を掴んで行き先が光っているだけの 1 枚が多い）。
 		// ⚠️ **ただし駒のあったマスが 2 つ以上変わった組は待たない**（`followOccupied`）—— 駒をつまんだときに駒のあったマスで
 		// 変わるのは浮いた駒の 1 マスだけ。それより多いのは、速い経路の手数（`followCellsDepth`）を超えて指された 1 枚で、
@@ -1054,7 +1060,7 @@ func (s *StudyService) FollowCells(changed []int, read []CellPiece, promo []Prom
 			if !diffOK && len(pairs) == 0 {
 				return unclear(len(rests), nil)
 			}
-			// ⚠️ **どの候補の行き先も一緒に頼むこと**（フロントが読むのは 1 回だけ。下の行き先の確かめに使う）。
+			// ⚠️ **どの候補の行き先も一緒に頼むこと**（中継セッションが読むのは 1 回だけ。下の行き先の確かめに使う）。
 			// 上限（`followReadMax`）は違いの出るマスだけに掛ける —— 行き先は手数ぶんしか増えない。
 			var want []int
 			if diffOK {
@@ -1115,7 +1121,7 @@ func (s *StudyService) FollowCells(changed []int, read []CellPiece, promo []Prom
 		idx := followImageCells(arrivals, rotated)
 		log.Follow.Info("変わったマスで手を割り出しました（行き先を読んで確かめます）", "moves", moves, "読むマス", len(idx),
 			"見た目を比べる組", len(looks))
-		// ⚠️ **見た目の比べも同じ 1 回で頼むこと**（フロントが読むのは 1 回だけ）。
+		// ⚠️ **見た目の比べも同じ 1 回で頼むこと**（中継セッションが読むのは 1 回だけ）。
 		return FollowAuto{Kind: FollowChoices, Reason: "行き先のマスを読みます", ReadCells: idx, Compare: looks,
 			State: s.State()}, nil
 	}
@@ -1204,11 +1210,13 @@ func followGlowOnly(base *position.Position, since []string, mask, extra *positi
 // CellsLookUnmoved は、**直前に 81 マスで読んだ 1 枚（`FollowAuto`）で、変わったマス cells に「本譜の先端では駒が
 // あるのに空きと読めたマス」が無いか**を返す（2026-10-08）。cells は撮った画像の向きの番号（`CaptureResult.Cells`）。
 //
-// フロントは 81 マスの読みが「何も指していない」だったとき、これが真なら `CaptureService.CellsUnmoved` でその組を
+// 中継セッションは 81 マスの読みが「何も指していない」だったとき、これが真なら `CaptureService.CellsUnmoved` でその組を
 // 覚えさせる（続くあいだ読み直さない）。⚠️ **駒が空いて見えるマスがあれば偽** —— 駒が動いた跡かもしれない。
 // ゲーム画面で ▲7八金 の金が直前の手の赤い色付けで空きと読まれ、6九 が空いたのも安く数えられて「何も指していない」に
 // なった。その組を覚えたせいで 10 秒ごとの保険でしか見なくなり、▲7八金 が入るまで 1 分かかった。
 // 駒をつまんで行き先が光っている 1 枚では、浮いた駒はそのマスに読め、光ったマスは空きのマスなので真になる。
+//
+//wails:ignore
 func (s *StudyService) CellsLookUnmoved(cells []int) bool {
 	mask := s.cellsMask(cells)
 	s.mu.Lock()
@@ -1500,13 +1508,15 @@ func followCellFits(c position.Cell, piece string) bool {
 
 // FrameFits は**比べる相手の 1 枚から今の 1 枚までに変わったマスが、その間に本譜へ足した手で
 // ぴったり説明できるか**を返す（2026-10-07）。説明できれば今の 1 枚は先端と合っているので、
-// 比べる相手の局面を覚え直して真を返す（フロントは `CaptureService.SetCellBase` を呼ぶ）。
+// 比べる相手の局面を覚え直して真を返す（中継セッションは `CaptureService.SetCellBase` を呼ぶ）。
 //
 // ⚠️ **81 マスの読みの一致度には頼らない。** ゲーム画面は色付けのマスの読み違いなどで一致度 1 に
 // なりにくく、それだけを条件にしていたら比べる相手が古いまま残り、速い経路がほとんど効かなかった
 // （2026-10-07 に実機で踏んだ。変わったマスが 10 → 34 と増え続けた）。**画素の変化と、足した手の
 // 動かすマスが合うか**で確かめる（`position.ChangedFits`）。
 // cells は撮った画像の向きのマスの番号（`CaptureResult.Cells`）。
+//
+//wails:ignore
 func (s *StudyService) FrameFits(cells []int) bool {
 	base, since, extra, ok := s.followFromBase()
 	if !ok {
@@ -1923,7 +1933,7 @@ type FollowAuto struct {
 	// Note は本譜を押しのけたときの断り。
 	Note string `json:"note"`
 	// Rewound は**推測で足した末尾の手を差し替えた**か（2026-10-08。`followRewindApply`）。真なら Note に
-	// 何を何に差し替えたかが入る（フロントは帯に出す）。Moves / Text は新しく本譜に入った手（取り消しだけなら空）。
+	// 何を何に差し替えたかが入る（中継セッションは帯に出す）。Moves / Text は新しく本譜に入った手（取り消しだけなら空）。
 	Rewound bool `json:"rewound"`
 	// State は結果の解析タブの状態。**そのまま描ける。**
 	State StudyState `json:"state"`
@@ -1947,30 +1957,30 @@ type FollowAuto struct {
 	// 判断には使わないこと**（それは `position` がマスごとにやっている）。
 	Unseen int `json:"unseen"`
 	// AtFrame は**本譜の先端が、この 1 枚とぴったり合っているか**（2026-10-07）。
-	// 真なら、この 1 枚を**速い経路の比べる相手**にしてよい（フロントが `CaptureService.SetCellBase` を呼ぶ）。
+	// 真なら、この 1 枚を**速い経路の比べる相手**にしてよい（中継セッションが `CaptureService.SetCellBase` を呼ぶ）。
 	// ⚠️ **ぴったり（一致度 1）のときだけ立てること。** 行き先の駒が読めていないだけの 1 枚
 	// （一致度 0.9965）を比べる相手にすると、その手のマスの変化が二度と見えなくなる。
 	AtFrame bool `json:"atFrame"`
 	// ReadCells は**速い経路で、読めば決まる・確かめられるマス**（撮った画像の向きの番号。2026-10-07）。
 	// 手が分かれたときの違いの出るマスと、決まった手順の行き先（指した側の駒が来たかを確かめる）。
-	// 空でなければフロントは `CaptureService.ReadCells` で読み、結果を添えて `FollowCells` をもう一度呼ぶ。
+	// 空でなければ中継セッションは `CaptureService.ReadCells` で読み、結果を添えて `FollowCells` をもう一度呼ぶ。
 	ReadCells []int `json:"readCells"`
 	// Compare は**成・不成を見た目で確かめたい手の、動く前と動いた先のマス**（撮った画像の向き。2026-10-07。
-	// `followPromoPairs`）。空でなければフロントは `CaptureService.ComparePieces` で測り、結果を
+	// `followPromoPairs`）。空でなければ中継セッションは `CaptureService.ComparePieces` で測り、結果を
 	// `PromoEvidence` にして同じ 1 枚でもう一度呼ぶ（`FollowAuto` / `FollowCells`）。⚠️ **これを返した周は
 	// 局面も控えも 1 つも動かしていない**（もう一度呼ばれて初めて決める）。
 	Compare []CellPair `json:"compare"`
 	// NoMoves は**速い経路で、変わったマスを説明できる手順が 1 つも無かった**か（2026-10-08）。
 	// ゲーム画面で駒を掴むと、その駒が浮いて行き先が光り、考えているあいだ同じ組が続く。そこで 81 マスを
 	// 読むと 1 周が 1〜5 秒塞がり、そのあいだに指した手と相手の応手がまとめて遅れた（1 組 10 秒前後）。
-	// 真ならフロントはすぐ 81 マスを読まず、`CaptureService.CellsUnclear` で組が変わるのを待たせる
+	// 真なら中継セッションはすぐ 81 マスを読まず、`CaptureService.CellsUnclear` で組が変わるのを待たせる
 	// （ふるいが待つ上限で読む）。⚠️ **成・不成や打った駒で決まらなかった周には立てない**（手はある。すぐ読む）。
 	NoMoves bool `json:"noMoves"`
 	// LooksOnly は**速い経路で、変わったのは空きのマスだけで、駒は動いていない**か（2026-10-08。`followGlowOnly`）。
-	// 駒台の駒をつまんで、打てるマスが光っている 1 枚。真ならフロントは 81 マスを読まず、`CaptureService.CellsUnmoved` で
+	// 駒台の駒をつまんで、打てるマスが光っている 1 枚。真なら中継セッションは 81 マスを読まず、`CaptureService.CellsUnmoved` で
 	// その組を覚えさせる（ふるいは同じ組を「変わっていない」に数え、保険の 1 枚は残る）。
 	LooksOnly bool `json:"looksOnly"`
-	// DropChoices は**打った駒の種類が決まらず、人に聞く候補**（2026-10-09。`offerDrop`）。空でなければフロントは枠の下の帯に
+	// DropChoices は**打った駒の種類が決まらず、人に聞く候補**（2026-10-09。`offerDrop`）。空でなければ中継セッションは枠の下の帯に
 	// 並べ、選ばれたら `StudyService.FollowChoose` に `Moves` を渡す。
 	DropChoices []FollowChoice `json:"dropChoices,omitempty"`
 }
@@ -1985,7 +1995,7 @@ type CellPair struct {
 }
 
 // PromoEvidence は CellPair を測った**見た目の近さ**（`ikkyoku.PieceSimilarity`。-1〜1。2026-10-07）。
-// フロントは測れなかった組（ちょうど -1）を渡さない（2026-10-08 から、負の近さは渡す —— 似ていない駒どうしは負になりうる）。
+// 中継セッションは測れなかった組（ちょうど -1）を渡さない（2026-10-08 から、負の近さは渡す —— 似ていない駒どうしは負になりうる）。
 type PromoEvidence struct {
 	From int     `json:"from"`
 	To   int     `json:"to"`

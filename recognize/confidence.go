@@ -42,3 +42,23 @@ func emptyConfidence(cover, line float64) float64 {
 	}
 	return min(max(1-cover/line, 0), 1)
 }
+
+// CellHidden は認識結果 d の**手や頭が被って見えないマス**（suteme の `CellDebug.Hidden`）を 81 個・行優先で返す。
+// ⚠️ **1 つも立っていなければ nil**（全部見えている。今までどおり）。判断（見えないマスを根拠にも減点にもしない）は使う側。
+func CellHidden(d *Debug) []bool {
+	if d == nil {
+		return nil
+	}
+	out := make([]bool, 81)
+	seen := false
+	for _, c := range d.Cells {
+		if c.Hidden && c.Row >= 0 && c.Row < 9 && c.Col >= 0 && c.Col < 9 {
+			out[c.Row*9+c.Col] = true
+			seen = true
+		}
+	}
+	if !seen {
+		return nil
+	}
+	return out
+}

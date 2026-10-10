@@ -52,6 +52,13 @@ type StudyService struct {
 	// 戻り値で描ける**ので今までどおり動く。効かなくなるのは**別の窓との連動**だけ。
 	Emit EventEmitter
 
+	// Camera は**中継を追うときの撮る側**（`followsession.go`。2026-10-11）。`main.go` が `CaptureService` を包んで
+	// 起動時に 1 度だけ入れる。⚠️ **nil なら中継は追えない**（`StartFollow` が断る。ほかは今までどおり動く）。
+	// ⚠️ **公開フィールドで差し込む**（メソッドにすると bindings に出る。`app/AGENTS.md`）。
+	Camera FollowCamera
+	// follow は中継を追う 1 回の持ち物（`followSession`。自分の mu で守る）。
+	follow followSession
+
 	mu sync.Mutex
 	// pending は追従が 1 枚目で見つけた、まだ足していない答え（`followPending`。2026-10-05）。
 	pending *followPending

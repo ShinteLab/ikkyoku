@@ -238,6 +238,8 @@ func (s *StudyService) offerDrop(ds *followDropSplit, p FollowProbe, unseen *pos
 // moves は `FollowAuto.DropChoices` のどれか 1 つの `Moves`。⚠️ **聞いたときから本譜の先端が動いていたら断る**
 // （違う局面の先に足さない）。⚠️ **1 手なら推測の印を付けない**（人が決めた手。差し替えで戻さない）。
 // 2 手以上なら、打つ手のほかは追従が割り出した手なので全部に印を付ける。
+//
+//wails:ignore
 func (s *StudyService) FollowChoose(moves []string) (FollowAuto, error) {
 	s.mu.Lock()
 	off := s.dropOffer

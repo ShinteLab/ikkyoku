@@ -291,6 +291,9 @@ func main() {
 	settingsSvc.OnClickThrough = captureSvc.applyClickThrough
 	// 中継を追う盤（マスタ）を訂正した 1 枚にするとき、それが今の根を採った 1 枚かを確かめる（2026-10-09）。
 	captureSvc.studySession = studySvc.Session
+	// 中継を追う 1 周の段取りは解析タブ側（`app` の中継セッション。2026-10-11）。撮る側はこちらを包んで渡す。
+	studySvc.Camera = followCamera{captureSvc}
+	captureSvc.onHideRefused = studySvc.FollowHideRefused
 	// 「中継を追うあいだは盤の読みを優先する」（2026-10-07。`enginepriority.go`）。
 	captureSvc.followFirst = cfg.FollowFirst
 	captureSvc.engineNames = func() []string {
