@@ -19,6 +19,7 @@ package analyze
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -28,6 +29,7 @@ import (
 	"github.com/ShinteLab/core/sfen"
 	coreusi "github.com/ShinteLab/core/usi"
 	"github.com/ShinteLab/core/usi/client"
+	"github.com/ShinteLab/ikkyoku/log"
 	localusi "github.com/ShinteLab/ikkyoku/usi"
 )
 
@@ -197,7 +199,14 @@ type Result struct {
 // 表す、というのは変わらない。
 type Session struct {
 	// open はエンジンを開く関数。**繋ぎ先が変わるのはここだけ。**
-	open func(context.Context) (*client.Session, error)
+	//
+	// tap は USI のやり取りを写す口（`usitap.go`）。読み書きの口に挟むのは開く側
+	// （Transport を組み立てるのがそこなので）。nil でもよい。
+	open func(context.Context, *usiTap) (*client.Session, error)
+	// name はログに出すエンジンの名前（実行ファイル名。繋ぐ前から分かるもの）。
+	name string
+	// grace は `stop` のあと bestmove を待つ上限（0 なら `client` の既定）。**テストが縮めるためのもの。**
+	grace time.Duration
 
 	// runMu は探索の直列化。
 	//
@@ -215,6 +224,8 @@ type Session struct {
 	// 1 手ごとに払う**ことになる。閉じるのは `Close`（解析タブを離れたとき・
 	// アプリの終了時）。
 	live *liveEngine
+	// dials は開いた回数（ログの `conn`。繋ぎ直したのかが読めるように）。
+	dials int
 	// lastEngine は最後に繋がったエンジンの名前。**表示用**
 	// （閉じたあとも名前だけは出せるようにしておく）。
 	lastEngine string
@@ -232,14 +243,19 @@ type Session struct {
 	kingless bool
 }
 
-func newSession(open func(context.Context) (*client.Session, error)) *Session {
+func newSession(open func(context.Context, *usiTap) (*client.Session, error)) *Session {
 	return &Session{open: open}
 }
 
 // NewLocalSession は同梱の `engine` を USI で話す相手として使うセッションを作る
 // （Step 1 の足場）。
 func NewLocalSession() *Session {
-	s := newSession(localusi.Local)
+	// ⚠️ **同梱エンジンのやり取りは写さない**（Transport を組むのが `usi` パッケージの中で、
+	// 外部のプロセスと違って「止まらない」ときに落とす手段も同じではない）。
+	s := newSession(func(ctx context.Context, _ *usiTap) (*client.Session, error) {
+		return localusi.Local(ctx)
+	})
+	s.name = "同梱エンジン"
 	// ⚠️ **詰将棋（攻方の玉が無い局面）を読ませるのは同梱エンジンだけ**
 	// （2026-09-12。上の `kingless` の注記）。
 	s.kingless = true
@@ -255,11 +271,13 @@ func NewLocalSession() *Session {
 // （置換表の確保や評価関数の読み込みに間に合わせるため）。エンジンが `usi` で
 // 宣言した option には、ここに書かれていなくても既定値が送られる。
 func NewExecSession(path string, options map[string]string) *Session {
-	return newSession(func(ctx context.Context) (*client.Session, error) {
+	s := newSession(func(ctx context.Context, tap *usiTap) (*client.Session, error) {
 		t, err := client.Exec(ctx, path)
 		if err != nil {
 			return nil, err
 		}
+		// **ハンドシェイクから写す**（`id name` や option の宣言も、困ったときの手掛かりになる）。
+		t.In, t.Out = tap.wrap(t.In, t.Out)
 		s, err := client.Open(ctx, t, options)
 		if err != nil {
 			// ハンドシェイクに失敗した時点でプロセスを片付ける
@@ -271,6 +289,8 @@ func NewExecSession(path string, options map[string]string) *Session {
 		}
 		return s, nil
 	})
+	s.name = filepath.Base(path)
+	return s
 }
 
 // EngineName は最後に繋がったエンジンの名前を返す（まだ繋いでいなければ空）。
@@ -406,6 +426,8 @@ func (s *Session) Analyze(ctx context.Context, positionSFEN string, opt Options,
 		black: black, started: started, sfen: root, played: opt.Moves,
 		ponanza: opt.PonanzaConstant,
 	}
+	// ⚠️ **見張りを付ける**（2026-10-10）。打ち切っても畳まれないエンジンは落とす（`stopKillAfter`）。
+	finish := eng.watch(ctx, opt.Movetime)
 	res, err := eng.Analyze(ctx, cmd,
 		client.GoOptions{Movetime: opt.Movetime, MultiPV: opt.MultiPV},
 		func(in coreusi.Info) {
@@ -413,7 +435,10 @@ func (s *Session) Analyze(ctx context.Context, positionSFEN string, opt Options,
 				info(p)
 			}
 		})
+	finish()
 	if err != nil {
+		// 何を送って何が返っていたかを残す（`stop` に応えないときに読む）。
+		eng.tap.dump(err.Error())
 		// ⚠️ **エラーが出たら接続は捨てること。** 通信が切れたときはもちろん、
 		// 「`stop` を送ったのに `bestmove` が返らない」ときも**そのまま使い回すと
 		// 次の探索ごと噛み合わなくなる**。捨てても次で開き直すだけ（数秒の損）で、
@@ -539,12 +564,16 @@ func (s *Session) Mate(ctx context.Context, positionSFEN string, opt MateOptions
 	started := time.Now()
 	// 途中経過は `Analyze` と同じ形で流す（画面の出し先が同じなので）。
 	acc := &accumulator{black: fields[1] == "b", started: started, sfen: root}
+	// 見張りは `client` が `stop` を送る段（上限 + `MateGrace`）から数える（`Analyze` と同じ保険）。
+	finish := eng.watch(ctx, limit+client.MateGrace)
 	res, err := eng.Mate(ctx, root, client.MateOptions{Limit: limit, MultiPV: opt.MultiPV}, func(in coreusi.Info) {
 		if p, ok := acc.add(in); ok && info != nil {
 			info(p)
 		}
 	})
+	finish()
 	if err != nil {
+		eng.tap.dump(err.Error())
 		// ⚠️ **エラーが出たら接続は捨てる**（`Analyze` と同じ）。
 		s.drop()
 		return MateResult{}, err
@@ -615,12 +644,99 @@ type liveEngine struct {
 	*client.Session
 	// kill はプロセスを強制的に終わらせる（行儀の悪いエンジンへの保険）。
 	kill context.CancelFunc
+	// tap は USI のやり取りの写し（困ったときに直前の行を出す。同梱エンジンは nil）。
+	tap *usiTap
+	// name はログに出す名前（`Session.name`）。
+	name string
 }
 
+// quitWait は `quit` を送ってからプロセスが自分で終わるのを待つ上限（`liveEngine.close`）。
+//
+// ⚠️ **無制限に待たないこと**（2026-10-10 に踏んだ）。`client.Session.Close` は
+// プロセスが終わるまで `cmd.Wait` で待つので、**`quit` を読まないエンジン**
+// （探索が止まらず CPU 100% のまま）だとそこで止まり、**後ろの kill に届かない**。
+// しかも呼ぶのは `runMu` を握った `drop` なので、**そのエンジンの解析が全部その後ろに
+// 積まれ、「停止」も効かない**アプリになる。見切ったら落とす。
+// 変数なのはテストが縮めるため。
+var quitWait = 3 * time.Second
+
 // close は `quit` を送って閉じ、そのあとプロセスを落とす。
+//
+// ⚠️ **`quit` で終わるのを待つのは `quitWait` まで**（上の注記）。過ぎたら kill して、
+// それでも後始末が返らなければ**諦めて戻る**（ゴルーチン 1 つを捨てるほうが、
+// 解析ごと固まるよりはるかにまし）。
 func (e *liveEngine) close() {
-	_ = e.Session.Close()
+	done := make(chan struct{})
+	go func() {
+		_ = e.Session.Close()
+		close(done)
+	}()
+	select {
+	case <-done:
+		e.kill()
+		return
+	case <-time.After(quitWait):
+	}
+	e.forceKill("quit を送っても終わりません")
+	select {
+	case <-done:
+	case <-time.After(quitWait):
+		log.USI.Warn("エンジンを落としても後始末が返りません（諦めて先へ進みます）", "engine", e.name)
+	}
+}
+
+// forceKill は止まらないエンジンを落とす（直前のやり取りをログに出してから）。
+func (e *liveEngine) forceKill(reason string) {
+	e.tap.dump(reason)
+	log.USI.Warn("エンジンを落とします", "engine", e.name, "reason", reason)
 	e.kill()
+}
+
+// stopKillAfter は**打ち切ってから（または考える時間が過ぎてから）これだけ経っても
+// 探索が畳まれなければ、エンジンを落とす**猶予（`watchStop`）。
+//
+// `client` は `stop` のあと `BestmoveGrace`（10 秒）で見切って返るので、ふつうは
+// そちらが先に効く（返ったら `drop` → `close`）。これはその**手前で詰まったとき**の保険 ——
+// `stop` などの書き込みが返らない（エンジンが標準入力を読まず、パイプが埋まった）と、
+// `client` の見切りまで辿り着かない。⚠️ **`BestmoveGrace` より長くしておくこと**
+// （短いと、行儀のよい見切りより先に落とすことになる）。
+var stopKillAfter = 15 * time.Second
+
+// watchStop は探索の見張り。stopped が閉じてから after 経っても finished が閉じなければ kill を呼ぶ。
+//
+// stopped は「もう畳まれているべき」になった合図（打ち切られた・考える時間が過ぎた）。
+func watchStop(stopped <-chan struct{}, finished <-chan struct{}, after time.Duration, kill func()) {
+	select {
+	case <-finished:
+		return
+	case <-stopped:
+	}
+	t := time.NewTimer(after)
+	defer t.Stop()
+	select {
+	case <-finished:
+	case <-t.C:
+		kill()
+	}
+}
+
+// watch は探索を見張るゴルーチンを起こし、探索が終わったら呼ぶ関数を返す。
+//
+// limit は「頼んだ時間」（0 なら打ち切られるまで）。**過ぎても自分から畳まれない**のは
+// `client` が `stop` を送る段なので、そこから `stopKillAfter` を数える。
+func (e *liveEngine) watch(ctx context.Context, limit time.Duration) (finish func()) {
+	stopCtx, cancel := ctx, context.CancelFunc(func() {})
+	if limit > 0 {
+		stopCtx, cancel = context.WithTimeout(ctx, limit)
+	}
+	finished := make(chan struct{})
+	go watchStop(stopCtx.Done(), finished, stopKillAfter, func() {
+		e.forceKill(fmt.Sprintf("打ち切ってから %s 経っても探索が畳まれません", stopKillAfter))
+	})
+	return func() {
+		close(finished)
+		cancel()
+	}
 }
 
 // dial はエンジンを起こしてハンドシェイクまで済ませる。
@@ -633,14 +749,22 @@ func (e *liveEngine) close() {
 func (s *Session) dial(ctx context.Context) (*liveEngine, time.Duration, error) {
 	procCtx, kill := context.WithCancel(context.WithoutCancel(ctx))
 
+	s.mu.Lock()
+	s.dials++
+	tap := newUSITap(s.name, s.dials)
+	s.mu.Unlock()
+
 	started := time.Now()
-	eng, err := s.open(procCtx)
+	eng, err := s.open(procCtx, tap)
 	if err != nil {
 		kill()
 		return nil, 0, fmt.Errorf("エンジンに繋げませんでした: %w", err)
 	}
+	if s.grace > 0 {
+		eng.BestmoveGrace = s.grace
+	}
 	s.rememberEngine(eng.ID)
-	return &liveEngine{Session: eng, kill: kill}, time.Since(started), nil
+	return &liveEngine{Session: eng, kill: kill, tap: tap, name: s.name}, time.Since(started), nil
 }
 
 // acquire は使える接続を返す（無ければ起こす）。reused は使い回したかどうか。

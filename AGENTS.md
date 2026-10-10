@@ -266,7 +266,7 @@ Claude Code でスキルとして使いたい人は、各自の `.claude/skills/
 | `piecesim.go` | **2 つのマスに写った駒の見た目の近さ**（`PieceSimilarity`。明るさの正規化相互相関。成・不成の証拠。2026-10-07）。**測るだけ**で、しきい値と将棋の知識は `app`。⚠️ **測れないとき（一様なマス・はみ出し）は false**（「似ていない」にしない） |
 | `config.go` | **設定はすべてここ**（標準ライブラリのみ）。⚠️ **各項目の約束はフィールドのコメント**。共通の型は 3 つ —— **bool はゼロ値が既定になる向きで持つ**（`Hide...`）・**既定の解決は関数 1 か所**（`ThinkSeconds` / `KifuDB` / `PonanzaConstantOr` など）・**知らない値は読める値に丸めて安全側に倒す**（`NormalizeEvalAxis` / `NormalizeGyoku` / `PieceInk`）。⚠️ **棚の既定は `ikkyoku/kicho.db`**（kicho アプリと同じ SQLite を 2 プロセスから開かない） |
 | `dialog.go` | ファイル選択ダイアログ（`app` へ `FilePicker` として差し込む。Wails の口なのでここ） |
-| `log/` | **ログ**（`log.Info` など。ikkyoku のコードはここで出す）。出口は実行ファイルの隣の `ikkyoku_<日付>.log`（dev のときはターミナルにも）。中継の追従は `log.Follow` で `ikkyoku-follow_<日付>.log` へ分ける・レベルはパッケージごと。⚠️ **Logger を引数で配らない**（`log/AGENTS.md`） |
+| `log/` | **ログ**（`log.Info` など。ikkyoku のコードはここで出す）。出口は実行ファイルの隣の `ikkyoku_<日付>.log`（dev のときはターミナルにも）。中継の追従は `log.Follow` で `ikkyoku-follow_<日付>.log` へ、エンジンとの USI は `log.USI` で `ikkyoku-usi_<日付>.log` へ分ける・レベルはパッケージごと。⚠️ **Logger を引数で配らない**（`log/AGENTS.md`） |
 | `recognize/` | 画像 → 盤面（`suteme` を呼ぶだけ）・盤の矩形を探す `DetectRegion` |
 | `position/` | **「とある局面」**（訂正の操作・手番・駒台・SFEN・`Rotate180`・手の木 `Study`・棋譜の取り込み・新規対局・`Connect`）。画像を知らない |
 | `legal/` | 合法手生成のラッパ（`engine` を呼ぶのはここだけ） |

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -36,6 +37,21 @@ const quitMarkEnv = "IKKYOKU_TEST_USI_QUITMARK"
 // 値までは見えない。**MultiPV は値が届かないと意味が無い**（候補が 1 本のままになる）
 // のに、画面では「このエンジンは MultiPV 非対応」と見分けが付かない。
 const multiPVMarkEnv = "IKKYOKU_TEST_USI_MULTIPVMARK"
+
+// hangEnv は**止まらないエンジン**を演じさせる（2026-10-10。中継中に実機で踏んだ）。
+//
+//   - "stop": `go` のあと `stop` にも `quit` にも標準入力の EOF にも応えない（探索が止まらない）
+//   - "deaf": `readyok` のあと標準入力を読まなくなる（こちらの書き込みがパイプで詰まる）
+//
+// どちらも**自分では終わらない**ので、片付くのは ikkyoku が kill したときだけ。
+const hangEnv = "IKKYOKU_TEST_USI_HANG"
+
+// hangForever は自分では終わらない（`select {}` だとランタイムがデッドロックと見なして落ちる）。
+func hangForever() {
+	for {
+		time.Sleep(time.Hour)
+	}
+}
 
 // runFakeEngine は最低限の USI エンジンとして振る舞う。
 func runFakeEngine() {
@@ -82,6 +98,12 @@ func runFakeEngine() {
 		case line == "isready":
 			ready = true
 			say("readyok")
+			if os.Getenv(hangEnv) == "deaf" {
+				hangForever()
+			}
+		case strings.HasPrefix(line, "go") && os.Getenv(hangEnv) == "stop":
+			say("info depth 1 score cp 42 nodes 10 pv 7g7f")
+			hangForever()
 		case strings.HasPrefix(line, "go"):
 			say("info depth 1 score cp 42 nodes 10 pv 7g7f",
 				"info depth 2 score cp 55 nodes 99 pv 2g2f",
@@ -235,4 +257,114 @@ func TestAnalyzeOmitsMultiPVWhenNotAsked(t *testing.T) {
 	if _, err := os.Stat(mark); err == nil {
 		t.Error("本数を指定していないのに MultiPV を送っています")
 	}
+}
+
+// shortenStopWaits は止まらないエンジンを待つ時間をテスト用に縮める。
+func shortenStopWaits(t *testing.T, s *Session) {
+	t.Helper()
+	oldQuit, oldKill := quitWait, stopKillAfter
+	quitWait, stopKillAfter = 300*time.Millisecond, 2*time.Second
+	t.Cleanup(func() { quitWait, stopKillAfter = oldQuit, oldKill })
+	s.grace = 300 * time.Millisecond
+}
+
+// analyzeWithin は Analyze が limit 以内に返ることを確かめる（返らなければ固まったとして落とす）。
+func analyzeWithin(t *testing.T, limit time.Duration, s *Session, ctx context.Context, opt Options) error {
+	t.Helper()
+	done := make(chan error, 1)
+	go func() {
+		_, err := s.Analyze(ctx, startpos, opt, nil)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(limit):
+		t.Fatalf("Analyze が %s 経っても返りません（止まらないエンジンに固まっています）", limit)
+		return nil
+	}
+}
+
+// ⚠️ **`stop` にも `quit` にも応えないエンジンで固まらないこと**（2026-10-10。中継中に実機で踏んだ）。
+//
+// 以前は `client` が bestmove を見切ったあとの後始末（`liveEngine.close`）が `cmd.Wait` で
+// **プロセスが自分で終わるのを無制限に待ち**、後ろの kill に届かなかった。しかも `runMu` を
+// 握ったままなので、**そのエンジンの解析が全部後ろに積まれ、「停止」も効かなくなった**。
+func TestAnalyzeKillsEngineIgnoringStop(t *testing.T) {
+	t.Setenv(fakeEngineEnv, "1")
+	t.Setenv(hangEnv, "stop")
+	s := NewExecSession(os.Args[0], nil)
+	shortenStopWaits(t, s)
+
+	err := analyzeWithin(t, 10*time.Second, s, context.Background(), Options{Movetime: 300 * time.Millisecond})
+	if err == nil {
+		t.Fatal("bestmove を返さないエンジンなのに成功しています")
+	}
+	// **落としたので、次に使うときは開き直す**（runMu も空いている）。
+	closed := make(chan struct{})
+	go func() { s.Close(); close(closed) }()
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close が返りません（runMu を握ったままです）")
+	}
+}
+
+// ⚠️ **標準入力を読まなくなったエンジンでも固まらないこと**（2026-10-10）。
+//
+// 書き込みがパイプで詰まると、送っていたゴルーチンが送信の鍵を握ったまま残り、
+// **後始末の `quit` もそこで待つ**。kill して書き込みを失敗させない限り抜けない。
+func TestAnalyzeKillsDeafEngine(t *testing.T) {
+	t.Setenv(fakeEngineEnv, "1")
+	t.Setenv(hangEnv, "deaf")
+	s := NewExecSession(os.Args[0], nil)
+	shortenStopWaits(t, s)
+
+	// パイプのバッファ（Windows は数 KB・Linux は 64KB）より長い position を送らせる。
+	moves := make([]string, 40000)
+	for i := range moves {
+		moves[i] = "7g7f"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := analyzeWithin(t, 10*time.Second, s, ctx, Options{Moves: moves}); err == nil {
+		t.Fatal("標準入力を読まないエンジンなのに成功しています")
+	}
+}
+
+// ⚠️ **見張りは「畳まれるべき」になってから数えること**（打ち切る前の長考で落とさない）、
+// **畳まれたら何もしないこと**。
+func TestWatchStop(t *testing.T) {
+	t.Run("畳まれなければ落とす", func(t *testing.T) {
+		stopped, finished := make(chan struct{}), make(chan struct{})
+		killed := make(chan struct{})
+		go watchStop(stopped, finished, 50*time.Millisecond, func() { close(killed) })
+		select {
+		case <-killed:
+			t.Fatal("打ち切る前に落としています")
+		case <-time.After(150 * time.Millisecond):
+		}
+		close(stopped)
+		select {
+		case <-killed:
+		case <-time.After(2 * time.Second):
+			t.Fatal("打ち切っても畳まれないのに落としません")
+		}
+	})
+	t.Run("畳まれたら落とさない", func(t *testing.T) {
+		stopped, finished := make(chan struct{}), make(chan struct{})
+		var killed atomic.Bool
+		done := make(chan struct{})
+		go func() {
+			watchStop(stopped, finished, 50*time.Millisecond, func() { killed.Store(true) })
+			close(done)
+		}()
+		close(stopped)
+		close(finished)
+		<-done
+		time.Sleep(100 * time.Millisecond)
+		if killed.Load() {
+			t.Error("畳まれたのに落としています")
+		}
+	})
 }

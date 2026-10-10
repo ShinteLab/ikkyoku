@@ -173,6 +173,28 @@ func TestNamedFile(t *testing.T) {
 	}
 }
 
+// USI のやり取り（log.USI）は配るビルドでも自分のファイルに残る（2026-10-10。
+// エンジンが stop に応えなくなったとき、何を送って何が返っていたかを後から読むため）。
+func TestUSIFile(t *testing.T) {
+	dir := t.TempDir()
+	initIn(t, dir, false)
+
+	log.USI.Info("送ります", "line", "stop")
+	log.USI.Warn("エンジンを落としました")
+
+	main := todayLog(t, dir)
+	usi := todayFile(t, dir, log.NamedFile(log.USIName))
+	if !strings.Contains(usi, "送ります logger=usi line=stop") {
+		t.Errorf("usi file missing the sent line:\n%s", usi)
+	}
+	if strings.Contains(main, "送ります") {
+		t.Errorf("usi lines should not go to the main file:\n%s", main)
+	}
+	if !strings.Contains(main, "エンジンを落としました") {
+		t.Errorf("usi warnings should also go to the main file:\n%s", main)
+	}
+}
+
 // "loggers" に設定が無ければ、名前付きでもレベルは呼び出し元のパッケージで決まる。
 func TestNamedFollowsPackageLevel(t *testing.T) {
 	dir := t.TempDir()

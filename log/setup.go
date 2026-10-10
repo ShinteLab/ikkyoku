@@ -58,8 +58,8 @@ var fileDir string
 // （画面の ⚠ に「ログの場所」として出す・異常終了の記録を置く）。
 func Dir() string { return fileDir }
 
-// separated は本体から分けて自分のファイルへ出す名前付きの Logger の名前（log.go の Follow / Diag）。
-var separated = []string{FollowName, DiagName}
+// separated は本体から分けて自分のファイルへ出す名前付きの Logger の名前（log.go の Follow / Diag / USI）。
+var separated = []string{FollowName, DiagName, USIName}
 
 // NamedFile は名前付きの Logger のログファイルの名前の頭（"ikkyoku-follow"）。
 func NamedFile(name string) string { return FilePrefix + "-" + name }
@@ -67,7 +67,7 @@ func NamedFile(name string) string { return FilePrefix + "-" + name }
 // Init はログの出口を組み、slog.Default() をそこへ向ける。main の最初に 1 回だけ呼ぶ。
 //
 //   - ファイル: Dir/ikkyoku_<日付>.log（日ごと。keepDays より古いものは消す）
-//   - 名前付き（log.Follow / log.Diag）: Dir/ikkyoku-<名前>_<日付>.log だけ（コンソールに出さない。Warn 以上は本体にも）。
+//   - 名前付き（log.Follow / log.Diag / log.USI）: Dir/ikkyoku-<名前>_<日付>.log だけ（コンソールに出さない。Warn 以上は本体にも）。
 //     Diag は Options.Diag のときだけ残し、Debug まで出す（LevelsFile の "loggers" に diag があればそちら）
 //   - 標準の log の出力（Wails の [WebView2] の行など）: log.Diag へ
 //   - コンソール: Options.Console のときだけ標準エラーにも

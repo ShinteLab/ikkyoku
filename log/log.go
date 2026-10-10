@@ -76,6 +76,17 @@ const DiagName = "diag"
 // コンソールには出さない（2026-10-10）。
 var Diag = wlog.Named(DiagName)
 
+// USIName はエンジンとの USI のやり取りのログの名前。
+const USIName = "usi"
+
+// USI はエンジンとの USI のやり取りのログ（`analyze` が送った行・受けた行を出す）。
+// Init が本体から分けて ikkyoku-usi_<日付>.log へ出し、**コンソールには出さない**。
+// ⚠️ **Warn 以上は本体にも出す**（エンジンを落としたなど）。
+// 配るビルドでも残す（2026-10-10。中継中にエンジンが `stop` に応えなくなり、何を送って
+// 何が返っていたかが分からなかった）。`info` は Debug なので既定では出ない
+// （探索中は毎秒何十行も出る。困ったときの直前の行は analyze が覚えていて、まとめて出す）。
+var USI = wlog.Named(USIName)
+
 // callerSkip は runtime.Callers → output → 公開関数 → 呼び出し元 の段数。
 // ⚠️ **output は公開関数から直接呼ぶこと。** 間に関数を挟むと、記録される位置（と、
 // パッケージごとのレベルの判定）がこのパッケージになる。wenteasy/log の Info などを
