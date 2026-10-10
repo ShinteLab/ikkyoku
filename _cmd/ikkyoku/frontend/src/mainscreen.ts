@@ -2888,8 +2888,8 @@ ${st.turnLabel}${n}`;
   // （札を枠に置いたのと同じ理由）。帯は文があるあいだだけ枠を下へ伸ばす（撮る範囲は動かない。
   // `CaptureService.SetFrameFooter`）。
   // ⚠️ **毎周の状態を流さないこと** —— 出入りのたびに枠が伸び縮みする。毎周の状態は状態の行（`publishFollow`）。
-  // ⚠️ **枠が出ていないときは手順の下に出す**（見えないところに出しても届かない。枠が隠れていて
-  // 撮れずに止まったときがこれ）。
+  // ⚠️ **枠が出ていないときは手順の下に出す**（見えないところに出しても届かない。枠を出さずに
+  // メイン画面から追い始めて、撮れずに止まったときがこれ。追っているあいだは枠を隠せない）。
   // fade は**しばらくして消す**か（人が自分で止めたときの「止めました」など。読めば済むもの）。
   type FollowNoticeKind = "" | "warn" | "error";
   const followNoticeFadeMs = 4000;
@@ -2926,6 +2926,10 @@ ${st.turnLabel}${n}`;
     followWaiting > 0 ? `${label}・${followWaiting}手目待ち` : label;
 
   const setFollowing = (on: boolean) => {
+    // Go 側へ写す（追っているあいだは枠を隠させない。`CaptureService.HideFrame`。2026-10-10）。
+    if (on !== followOn) {
+      void CaptureService.SetFollowing(on);
+    }
     followOn = on;
     studyFollowBtn.setAttribute("aria-pressed", on ? "true" : "false");
     // ⚠️ **「追跡中」はボタンに書かない**（2026-10-08。視点の上の札が言う）。
@@ -2959,6 +2963,12 @@ ${st.turnLabel}${n}`;
     }
     publishFollow(on ? "追う盤を決めています…" : "");
   };
+
+  // 追っているあいだに枠を隠そうとした（✕・Alt+F4・タイトルバーのトグル。2026-10-10）。
+  // 断ったのは Go 側（`HideFrame`）で、ここは理由を帯に出すだけ。
+  Events.On("frame:hide-refused", (e: { data: string }) => {
+    followNotice(e.data, "error", true);
+  });
 
   // ⚠️ **枠のボタンからも入り切りできること。** 状態を持っているのはこちらだけで、
   // 枠は映すだけ（2 か所が別々に覚えると食い違う）。

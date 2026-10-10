@@ -177,6 +177,10 @@ type CaptureService struct {
 	cellBounds image.Rectangle
 	// followFirst は設定「中継を追うあいだは盤の読みを優先する」（`enginepriority.go`。2026-10-07）。
 	followFirst bool
+	// following は**中継を追っているか**（2026-10-10。メイン画面が `SetFollowing` で写す。持ち主はあちら）。
+	// 追っているあいだは枠を隠させない（`HideFrame`）。⚠️ **追う盤（`boardAnchor`）で代わりにしないこと** ——
+	// 盤が映っていなくても追い始められる（空のまま追っている）うえ、エラーで止まったときは忘れない。
+	following bool
 	// enginesLowered は外部エンジンの優先度を下げているか（戻し忘れないため）。
 	enginesLowered bool
 	// engineNames は登録してある外部エンジンの実行ファイルのパス（`main` が差し込む。設定から読む）。
@@ -623,13 +627,38 @@ func (s *CaptureService) placeMainBesideFrame() {
 // 枠を隠した結果として可視ウィンドウが 1 枚も無くなると、アプリが動いているのに
 // 操作できない状態になる。それを避けるため、メイン画面がまだ出ていなければ出す
 // (起動時に出しているので普通は既に出ているが、**保険は外さないこと**)。
+//
+// ⚠️ **中継を追っているあいだは隠さない**（2026-10-10）。隠すと次の 1 周で撮れずに追跡がエラーで止まり、
+// しかも理由が見えない場所（手順の下）に出ていた。断ったことは `frame:hide-refused` で知らせ、
+// メイン画面が枠の下の帯に出す（入口が 3 つあり、Alt+F4 は Go からしか返せないので、知らせは 1 本にする）。
 func (s *CaptureService) HideFrame() {
 	if s.wins == nil || s.wins.frame == nil {
+		return
+	}
+	s.mu.Lock()
+	following := s.following
+	s.mu.Unlock()
+	if following {
+		log.Info("中継を追っているので枠を隠しません")
+		if s.app != nil {
+			s.app.Event.Emit("frame:hide-refused", hideRefusedMessage)
+		}
 		return
 	}
 	s.revealMain()
 	s.wins.frame.Hide()
 	s.emitFrameVisible()
+}
+
+// hideRefusedMessage は追跡中に枠を隠そうとしたときの文（`HideFrame`）。
+const hideRefusedMessage = "中継の追跡中は枠を隠せません。追跡をキャンセルしてください"
+
+// SetFollowing はメイン画面が**中継を追っているか**を写す（2026-10-10。入り切りが変わったときだけ呼ばれる）。
+// ⚠️ **状態の持ち主はメイン画面**（ループもあちら）。ここは枠を隠させないための写し。
+func (s *CaptureService) SetFollowing(on bool) {
+	s.mu.Lock()
+	s.following = on
+	s.mu.Unlock()
 }
 
 // ShowMain はメイン画面を出して前面に持ってくる。枠のメニューから呼ばれる。
