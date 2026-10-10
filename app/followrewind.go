@@ -236,6 +236,11 @@ func (s *StudyService) followCellsRewind(base *position.Position, since []string
 				"元の手", old, "新しい手", moves, "マス", sq, "読んだ駒", got)
 			return FollowAuto{}, false, nil
 		}
+		if sq, got, kept := followKindKeepsOld(anc, old, moves, need, read, rotated); kept {
+			log.Follow.Info("差し替えると種類の変わるマスが、元の手の駒に読めています（差し替えません）",
+				"元の手", old, "新しい手", moves, "マス", sq, "読んだ駒", got)
+			return FollowAuto{}, false, nil
+		}
 		rw := &followRewind{line: line, keep: keep, moves: slices.Clone(moves),
 			why: "変わったマス（先後と駒の有無）を説明できる・行き先を読んだ"}
 		a, err := s.followRewindHold(rw, 0)
@@ -582,6 +587,35 @@ func followGoneSeen(anc *position.Position, old []string, gone []int, read []Cel
 		up, readable := cellPieceUp(cp)
 		if found && readable && (up != rotated) == c.Black() {
 			return squareText(i/9, i%9), cp.Piece + "/" + cp.Side, true
+		}
+	}
+	return "", "", false
+}
+
+// followKindKeepsOld は、読んだマス cells のうち**元の手順 old と差し替える手順 moves で駒の種類だけが変わるマス**（どちらも
+// 同じ側の駒）で、読んだ駒が**元の盤と合い、新しい盤と合わない**ものがあるか（2026-10-10）。あれば差し替えない。
+//
+// **実機の症状**（実盤の中継）: ▲5九歩打 のあと、変わったマスが 5八 だけの 1 枚（△5八桂成 の手が掛かった）で、速い経路の
+// 差し替えが ▲5九歩打 を ▲5九金（5八 の金が動いた）に替えた。5九 は「歩」と読めていたが、速い経路の差し替えは先後と駒の
+// 有無しか比べない（`TestFollowCellsRewindKeepsDropWhoseKindIsSeen`）。⚠️ **新しい盤と合う読みなら今までどおり替える**
+// （デジタル盤の △7二角打 → △7二金。7二 は金と読める。`TestFollowCellsRewindsGuessedDrop`）。合い方は `followCellFits`。
+func followKindKeepsOld(anc *position.Position, old, moves []string, cells []int, read []CellPiece, rotated bool) (sq, got string, kept bool) {
+	before, after := followBoard(anc, nil, old), followBoard(anc, nil, moves)
+	if before == nil || after == nil {
+		return "", "", false
+	}
+	for _, i := range cells {
+		b, err1 := before.At(i/9, i%9)
+		a, err2 := after.At(i/9, i%9)
+		if err1 != nil || err2 != nil || b == a || b.IsEmpty() || a.IsEmpty() || b.Black() != a.Black() {
+			continue
+		}
+		cp, found := followReadAt(read, i, rotated)
+		if !found || cp.Piece == "" || cp.Piece == "?" {
+			continue
+		}
+		if followCellFits(b, cp.Piece) && !followCellFits(a, cp.Piece) {
+			return squareText(i/9, i%9), cp.Piece, true
 		}
 	}
 	return "", "", false
