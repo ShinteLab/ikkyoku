@@ -56,16 +56,20 @@ FollowAuto ─> followFrame ─> followProbe ─> Rank / position.Connect ─┬
 **認識が数マス外しても追える**。
 
 ```
-撮る ─> recognize.Debug.Cells[].Confidence ─> FollowAuto(cellConfidence) ─> followFrame ─> 費用表
+撮る ─> recognize.CellConfidence ─> CaptureResult.cellConfidence ─> FollowAuto(cellConfidence) ─> followFrame ─> 費用表
                                                                                          ▼
                                                               followProbe ─> position.Connect（Tolerance）
 ```
 
 - ⚠️ **確信度が無い盤では修復しない**（厳密一致に倒す）。**どのマスを覆してよいかの根拠が無い。**
   判断は `followProbe` の `fromImage`（＝費用表があるか）1 か所
-- ⚠️ **確信度 0 のマスを作らないこと**（`minCellCost`）。認識器が推論しなかったマス
-  （空マスなど）は 0 で返るので、そのまま使うと**いくらでもただで覆せる**
+- ⚠️ **確信度 0 のマスを作らないこと**（`minCellCost`）。読みの確かさが 0 のマス
+  （被覆率を測れない空き・空きの線を越えて空きにした空き）をそのまま使うと**いくらでもただで覆せる**
   ＝ 予算という歯止めが効かなくなる
+- ⚠️ **空きのマスも確かさを持つ**（2026-10-11。`recognize.CellConfidence`。`1 − 被覆率 ÷ 空きの線`）。
+  以前は suteme が空きを確信度 0 で返すのをそのまま下限 0.15 で数えていたので、**はっきり空いて写ったマスも安く覆せた**
+  （中継で空きの 3七・3三 を覆した偽の手順が通った）。理由と実測は `_docs/design-follow.md`。
+  ⚠️ **空きを一律の下限に戻さないこと**・⚠️ **作るのは撮る側（Go）**（`CaptureResult.cellConfidence`。フロントは渡すだけ）
 - ⚠️ **盤と同じ向きに回して返すこと**（`followFrame`）。盤だけ回して費用を回さないと
   **別のマスの確信度で判断する**（画面からは気づけない）
 - ⚠️ **覆したマスは返す**（`Fixed`）。黙って直すと、盤に出ている局面が
@@ -75,6 +79,23 @@ FollowAuto ─> followFrame ─> followProbe ─> Rank / position.Connect ─┬
 - ⚠️ **確信度は撮った 1 枚から直に受け取る**（`FollowAuto` の `cellConfidence`）。訂正タブ（`PositionService.Load`）は持たない
 - ⚠️ **既定値（`position.DefaultTolerance` / `minCellCost`）は
   実測で決めた数ではない。** **実際の中継で当たり具合を見て調整すること**
+
+### 読んだマスと候補の盤のマスの判定（`followJudge`。2026-10-11）
+
+**読んだ駒を、ある盤のマスと比べるのは `followjudge.go` の `followJudge` だけ。** 速い経路の行き先の確かめ
+（`followBackedByRead`）・候補選び（`followPickByRead` → `followCellFits`）・差し替えで消える手と種類の確かめ
+（`followGoneSeen` / `followKindKeepsOld`）、81 マスの読みの差し替えの比べ（`followSideCost` / `followKindCost`）と
+指された跡（`followArrived`）が、駒の有無・先後・種類の 3 つの答え（合う / 食い違う / 分からない）から決める。
+
+- ⚠️ **決まりは `followJudge` に書くこと**（呼ぶ側で例外を足さない。以前は場所ごとに弱い読み・成駒・"?" の扱いが違った）。
+  呼ぶ側が決めるのは、どの答えを要るとするかだけ（行き先の確かめは「先後が合う」、差し替えの比べは「食い違う」を数える）
+- 決まりは 3 つ: ⚠️ **弱い駒の読み（`followArrivedMinCost` 未満）は何も言わない**（空きの読みは弱くても「駒が無い」とは言う）・
+  ⚠️ **成駒の候補は、成っていない姿と読めたときだけ種類が食い違う**（成駒は読めないのが普通）・
+  **種類の読めない "?" は種類について何も言わない**
+- ⚠️ **読みは `followObs` で渡す**（81 マスの盤は `followObsBoard`・速い経路で読んだマスは `followObsRead`（後手目線なら先後を
+  入れ替える）・駒の字だけは `followObsPiece`）
+- ⚠️ **`position` の探索の中の比べ（`Connect` の修復の費用・`backed`・`sideBetter`）は対象外**（探索の作りの一部。
+  強い読みの線だけ `position.sureCellCost` と揃えてある）
 
 ### 認識が完璧でなくても繋ぐ（候補から選ぶ。2026-09-15）
 
@@ -461,6 +482,9 @@ followProbe ─> Rank（候補から選ぶ。29µs）─┬─ 読めていな�
   ⚠️ **何も言えない 1 枚では控えを捨てず、変わっていない 1 枚では据えないこと**（`TestFollowRewindSurvivesSilentFrame`。2026-10-09）・
   ⚠️ **速い経路でも、角打ちの推測を金の移動に差し替えること**（`TestFollowCellsRewindsGuessedDrop`。2026-10-09 の中継の形）・
   ⚠️ **成駒の載ったマスの読み違いで取り消さないこと**（`TestFollowRewindIgnoresPromotedPieceMisread`。2026-10-09 の ▲1一角成）
+- `followjudge_test.go` — **読んだマスと候補の盤のマスの判定**（2026-10-11。`followJudge`）。⚠️ 歯止めは ——
+  **弱い駒の読みは何も言わず、弱い空きの読みは「駒が無い」と言うこと**・**成駒の候補は成っていない姿と読めたときだけ
+  種類が食い違うこと**・**"?" は種類を言わないこと**・**速い経路の読みを後手目線で先後を入れ替えて比べること**
 - `followbase_test.go` — **81 マスの読みを比べる相手の局面から説明する**（2026-10-11。`followbase.go`）。⚠️ 歯止めは ——
   **足し済みの手で始まる答えの残りを、先端から足す手として返すこと**（`TestFollowProbeExplainsFromBase`）・
   **途中で分かれる答えを差し替えの関門にかけ、2 枚目で差し替えること**（`TestFollowRewindFromBaseReplacesShortTail`）・

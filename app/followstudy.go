@@ -424,7 +424,8 @@ func followKindOnly(fixed []position.Fix) bool {
 
 // followArrivedMinCost は「駒が来た」と言い切る、そのマスの読みの確かさ（費用表の値）の下限。
 //
-// suteme は空きを確信度 0（費用は下限の 0.15）で返し、駒のマスは駒の確信度で返す。
+// 駒のマスは推論の確信度、空きのマスは被覆率から作った確かさ（`recognize.CellConfidence`。2026-10-11 から。それまでは
+// 空きは一律で下限の 0.15）。
 // ⚠️ **当て推量**（2026-10-06）。下げすぎると、中継の読みの揺れのたびに深い探索
 // （`Connect`。打ち切りは `followTimeout`）を回すことになる。
 const followArrivedMinCost = 0.5
@@ -446,22 +447,19 @@ func followArrived(fixed []position.Fix, cost *position.CellCost) bool {
 	if cost == nil {
 		return false
 	}
-	sure := func(f position.Fix) bool { return cost[f.Rank][f.File] >= followArrivedMinCost }
 	vacated, swapped := false, false
 	for _, f := range fixed {
+		// 判定は `followJudge`（読んだ駒 f.Was と、今の局面のマス f.Now。弱い駒の読みは何も言わない）。
+		v := followJudge(f.Now, followObsCell(f.Was, cost[f.Rank][f.File]))
 		switch {
 		case f.Was.IsEmpty():
-			if !f.Now.IsEmpty() {
+			if v.presence == followDisagree {
 				vacated = true
 			}
-		case f.Now.IsEmpty() || f.Now.Black() != f.Was.Black():
-			if sure(f) {
-				return true
-			}
-		case f.Now != f.Was:
-			if sure(f) {
-				swapped = true
-			}
+		case v.presence == followDisagree || v.side == followDisagree:
+			return true
+		case v.kind == followDisagree:
+			swapped = true
 		}
 	}
 	return swapped && vacated
@@ -1380,10 +1378,9 @@ func followBackedByRead(base *position.Position, since, moves []string, read []C
 		if err != nil {
 			return false, squareText(i/9, i%9), ""
 		}
-		cp, found := followReadAt(read, i, rotated)
-		up, readable := cellPieceUp(cp)
-		// 撮った画像の手前側は、後手目線なら後手。
-		if !found || !readable || (up != rotated) != c.Black() {
+		// 判定は `followJudge`（先後が読めて合うこと。撮った画像の手前側は、後手目線なら後手）。
+		if followJudge(c, followObsRead(read, i, rotated)).side != followAgree {
+			cp, _ := followReadAt(read, i, rotated)
 			return false, squareText(i/9, i%9), cp.Piece + "/" + cp.Side
 		}
 	}
@@ -1485,15 +1482,20 @@ func followPickByRead(base *position.Position, since []string, rests [][]string,
 }
 
 // followCellFits は候補の盤のマス c が、読んだ駒 piece（撮った画像の向きの SFEN。空は ""、読めない "?"）と合うか。
+//
+// 判定は `followJudge`。合うとは、駒の有無が合い、**成っていない駒の候補なら種類が合う**こと・**成駒の候補なら種類が
+// 食い違わない**こと（成っていない姿と読めなければ合う。成駒と読めた・別の駒・読めない "?" は合う）。
 func followCellFits(c position.Cell, piece string) bool {
-	if piece == "" || c.IsEmpty() {
-		return piece == "" && c.IsEmpty()
+	v := followJudge(c, followObsPiece(piece))
+	switch {
+	case v.presence != followAgree:
+		return false
+	case c.IsEmpty():
+		return true
+	case c.Promoted():
+		return v.kind != followDisagree
 	}
-	if !c.Promoted() {
-		return strings.EqualFold(c.Mark(), piece)
-	}
-	// **成駒の候補**: 成っていない姿と読めたら合わない。それ以外（成駒と読めた・別の駒・読めない）は合う。
-	return !strings.EqualFold(strings.TrimPrefix(c.Mark(), "+"), piece)
+	return v.kind == followAgree
 }
 
 // FrameFits は**比べる相手の 1 枚から今の 1 枚までに変わったマスが、その間に本譜へ足した手で

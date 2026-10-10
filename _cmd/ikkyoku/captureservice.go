@@ -1003,6 +1003,10 @@ type CaptureResult struct {
 	// 描き込んだ 2 枚目を積むとイベントのペイロードが倍になるため。矩形の座標だけを
 	// 渡してフロントで重ねれば軽く、マスごとの確信度をホバーで出すこともできる。
 	Debug *recognize.Debug `json:"debug,omitempty"`
+	// CellConfidence は**マスごとの読みの確かさ**（81 個・行優先。`recognize.CellConfidence`。2026-10-11）。
+	// 中継を追うときの費用表の元で、フロントはそのまま `StudyService.FollowAuto` に渡す。
+	// ⚠️ **空きのマスも被覆率から確かさを持つ**（以前は 0 で、下限の 0.15 で数えていた）。読めなければ nil。
+	CellConfidence []float64 `json:"cellConfidence,omitempty"`
 }
 
 // Capture はガイド枠の内側を撮って PNG 保存し、保存先パスとサムネイルを返す。
@@ -1226,6 +1230,7 @@ func (s *CaptureService) readQuiet(img image.Image, region ikkyoku.Region, resul
 		result.HandTotal = h
 	}
 	result.Debug = board.Debug
+	result.CellConfidence = recognize.CellConfidence(board.Debug)
 	// 速い経路のマス割りを控える（`celldiff.go`）。
 	s.noteCellRects(img, board.Debug)
 

@@ -531,7 +531,7 @@ func followReplay(from *position.Position, moves []string) (*position.Position, 
 // ⚠️ **成駒は読めないものとして扱う**（成駒は学習データにほぼ入らない。`followPickByRead` と同じ前提）。読めないだけで
 // なく**先後まで外す**: 中継で 1一 の馬を、1 枚ごとに「先手の桂 0.40」「後手の歩 0.78」「先手の龍 0.40」と読み、
 // 後手の歩と読んだ 2 枚続けて ▲1一角成 を取り消した（取り消すと 1一 に後手の香が戻って「合う」。2二 の角が無いことは
-// 空きの読みなので 0.15 しか数えない）。⚠️ **比べるどの盤にも同じマスを使う**（先端の盤で決める。片方だけ外すと比べにならない）。
+// 空きの読みなので 0.15 しか数えなかった）。⚠️ **比べるどの盤にも同じマスを使う**（先端の盤で決める。片方だけ外すと比べにならない）。
 func promotedCells(b *position.Board) *position.CellMask {
 	m := &position.CellMask{}
 	for r := 0; r < 9; r++ {
@@ -546,7 +546,7 @@ func promotedCells(b *position.Board) *position.CellMask {
 
 // followSideCost は盤 cand を正しいとしたとき、撮った盤 read と**駒の有無か先後が食い違うマス**の費用の合計。
 //
-// ⚠️ **駒の種類は見ない**（`followRewindProbe`）。費用はマスごとの確信度（空きは下限の 0.15）。
+// ⚠️ **駒の種類は見ない**（`followRewindProbe`）。費用はマスごとの確信度（空きは被覆率から。`recognize.CellConfidence`）。
 // skip のマスは数えない（`promotedCells`。nil なら全部数える）。
 // ⚠️ **読みの弱い駒（`followArrivedMinCost` 未満）は数えない**（2026-10-08 に実機で踏んだ）。光の差し込んだ空きの 1五 を
 // 「先手の香」（0.40）と読んだ 1 枚で、▲2五歩 を ▲1五角打 △2五角打 ▲同歩 に差し替えた（幻の駒を手で説明した。
@@ -558,16 +558,13 @@ func followSideCost(cand, read *position.Board, cost *position.CellCost, skip *p
 			if skip != nil && skip[r][f] {
 				continue
 			}
-			a, err1 := cand.At(r, f)
-			b, err2 := read.At(r, f)
-			if err1 != nil || err2 != nil {
+			a, err := cand.At(r, f)
+			if err != nil {
 				continue
 			}
-			if !b.IsEmpty() && cost[r][f] < followArrivedMinCost {
-				continue
-			}
-			if a.IsEmpty() != b.IsEmpty() || (!a.IsEmpty() && a.Black() != b.Black()) {
-				sum += cost[r][f]
+			// 判定は `followJudge`（弱い駒の読みは数えない）。
+			if v := followJudge(a, followObsBoard(read, cost, r, f)); v.presence == followDisagree || v.side == followDisagree {
+				sum += v.weight
 			}
 		}
 	}
@@ -585,16 +582,13 @@ func followKindCost(cand, read *position.Board, cost *position.CellCost, skip *p
 			if skip != nil && skip[r][f] {
 				continue
 			}
-			a, err1 := cand.At(r, f)
-			b, err2 := read.At(r, f)
-			if err1 != nil || err2 != nil || a.IsEmpty() || b.IsEmpty() || a.Black() != b.Black() {
+			a, err := cand.At(r, f)
+			if err != nil {
 				continue
 			}
-			if cost[r][f] < followArrivedMinCost {
-				continue
-			}
-			if a != b {
-				sum += cost[r][f]
+			// 判定は `followJudge`（弱い駒の読みは数えない・成駒の候補は成っていない姿と読めたときだけ食い違う）。
+			if v := followJudge(a, followObsBoard(read, cost, r, f)); v.side == followAgree && v.kind == followDisagree {
+				sum += v.weight
 			}
 		}
 	}
@@ -633,9 +627,8 @@ func followGoneSeen(anc *position.Position, old []string, gone []int, read []Cel
 		if err != nil || c.IsEmpty() {
 			continue
 		}
-		cp, found := followReadAt(read, i, rotated)
-		up, readable := cellPieceUp(cp)
-		if found && readable && (up != rotated) == c.Black() {
+		if followJudge(c, followObsRead(read, i, rotated)).side == followAgree {
+			cp, _ := followReadAt(read, i, rotated)
 			return squareText(i/9, i%9), cp.Piece + "/" + cp.Side, true
 		}
 	}

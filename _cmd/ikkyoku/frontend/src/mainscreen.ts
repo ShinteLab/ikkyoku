@@ -2717,26 +2717,6 @@ ${st.turnLabel}${n}`;
     // **盤の下に行を積むぶんだけ盤が小さくなっていた。**
   };
 
-  // cellConfidence は認識器のマスごとの確信度を 81 個の並びにする（行優先）。
-  //
-  // ⚠️ **中継を追うときの「どのマスなら覆してよいか」の根拠**になるので、
-  // **撮ったときに必ず渡すこと**（渡さないと修復が働かず、認識が 1 マス外すたびに
-  // 人が直すことになる）。⚠️ **判断は Go 側** —— ここは形を整えるだけ。
-  // ⚠️ **並び順を信用せず row/col で置くこと**（欠けた行があっても崩れない）。
-  const cellConfidence = (dbg: Debug | null | undefined): number[] | undefined => {
-    const cells = dbg?.cells;
-    if (!cells || cells.length === 0) {
-      return undefined;
-    }
-    const out = new Array<number>(81).fill(0);
-    for (const c of cells) {
-      if (c.row >= 0 && c.row < 9 && c.col >= 0 && c.col < 9) {
-        out[c.row * 9 + c.col] = c.confidence ?? 0;
-      }
-    }
-    return out;
-  };
-
   // cellHidden は**手や頭が被って見えないマス**を 81 個の並びにする（行優先。2026-10-06）。
   //
   // suteme が `CellDebug.Hidden` で返す印。⚠️ **判断は Go 側**（見えないマスを根拠にも
@@ -3175,7 +3155,9 @@ ${st.turnLabel}${n}`;
     //
     // ⚠️ **禁止事項で塞がないこと** —— 中継を観ながら学習データを作るのは
     // **正当な使い方**（訂正結果を学習に回すのは 2026-08-07 の決定）。
-    const conf = cellConfidence(shot.debug) ?? null;
+    // ⚠️ **マスごとの読みの確かさは撮る側（Go）が作る**（`CaptureResult.cellConfidence`。2026-10-11）。中継を追うときの
+    // 「どのマスなら覆してよいか」の根拠で、空きのマスの確かさも入っている。⚠️ **ここで組み立て直さないこと**（判断は Go 側）。
+    const conf = shot.cellConfidence ?? null;
     const hidden = cellHidden(shot.debug) ?? null;
     const got = await StudyService.FollowAuto(shot.sfen, conf, hidden, null);
     // ⚠️ **成りも不成も指せる手なら、動く前と後の見た目を比べて同じ 1 枚でもう一度**（2026-10-07）。
