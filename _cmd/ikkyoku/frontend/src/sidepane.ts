@@ -26,6 +26,7 @@ import type {
 import type { EngineColorOption } from "../bindings/github.com/ShinteLab/ikkyoku/models";
 import { iconMarkup } from "./icon";
 import { mountMoveList } from "./movelist";
+import { isFollowing as isFollowingNow, stopFollow } from "./followguard";
 import { openPopup, openPopupBelow } from "./popup";
 import type {
   AnalyzeDone,
@@ -2425,11 +2426,20 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
   kifuFollowBtn.addEventListener("click", () => {
     void (async () => {
       try {
+        // ⚠️ **入れるときは中継を追うを止める**（2026-10-10。同じ対局を両方で追う意味はほぼ無いので、
+        // 後から押したほうが勝つ。聞かない）。逆向き（中継を追うを押したら自動更新を止める）は `mainscreen.ts`。
+        // 理由は `_docs/app-kifu-load.md` の「自動更新」。
+        const stopped = !followOn && isFollowingNow();
+        if (stopped) {
+          stopFollow();
+        }
         // ⚠️ **ここでは刻み始めない** —— 戻ってきた状態を `render` が受けて
         // `syncFollow` が決める（切り離した窓から押しても持ち主が刻む）。
         onState(await StudyService.SetKifuFollow(!followOn));
         if (!followOn) {
           setStatus("自動更新を止めました");
+        } else if (stopped) {
+          setStatus("中継の追跡を止めて、棋譜の自動更新を始めました");
         }
       } catch (err) {
         setStatus(String(err instanceof Error ? err.message : err), true);
