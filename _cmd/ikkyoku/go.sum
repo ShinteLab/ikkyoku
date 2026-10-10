@@ -6,8 +6,8 @@ github.com/ShinteLab/engine v0.2.1 h1:+A2ngSF3GJjDlGhV205bp/2lT6XJEY7mqa9baDARWt
 github.com/ShinteLab/engine v0.2.1/go.mod h1:d7wpetvwK9RAbvamQr1sIuYq+LXvEd4DXCLYtAFYyUc=
 github.com/ShinteLab/kicho v0.2.1 h1:gz/FL3whYscgxWEaIqYk/rP5g84Reu2oEBSx3L48U1Q=
 github.com/ShinteLab/kicho v0.2.1/go.mod h1:z2lQL0Jm/jtceZxUoV95iNzcksHX6XsuSCiQ1BOOUMo=
-github.com/ShinteLab/suteme v0.2.6 h1:CDbuccdBZjbTb/FQdmOhe2NaEwoJpdJMLRRzexJNixk=
-github.com/ShinteLab/suteme v0.2.6/go.mod h1:zUIp+2tYGOhEOrVmtpuAfDZBUSKhmRkeRl8AHAEzqes=
+github.com/ShinteLab/suteme v0.2.7 h1:BJ8bvFvMeMIc+F6dAZCjeA/su2Q6u+Lk2qa8Le2PEgo=
+github.com/ShinteLab/suteme v0.2.7/go.mod h1:zUIp+2tYGOhEOrVmtpuAfDZBUSKhmRkeRl8AHAEzqes=
 github.com/adrg/xdg v0.5.3 h1:xRnxJXne7+oWDatRhR1JLnvuccuIeCoBu2rtuLqQB78=
 github.com/adrg/xdg v0.5.3/go.mod h1:nlTsY+NNiCBGCK2tpm09vRqfVzrc2fLmXGpBLF0zlTQ=
 github.com/coder/websocket v1.8.14 h1:9L0p0iKiNOibykf283eHkKUHHrpG7f65OE3BhhO7v9g=
