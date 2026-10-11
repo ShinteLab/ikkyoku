@@ -390,6 +390,12 @@ followProbe ─> Rank（候補から選ぶ。29µs）─┬─ 読めていな�
     `TestFollowRewindIgnoresKindsWhenUntrusted`）。先端がぴったり合っても、信じてよい 1 枚で種類が食い違えば探す
   - ⚠️ **戻した局面からの答えが一意か、順番だけが決まらない（行き着く局面が同じ。`followSameEnd`）ときだけ**（後者は 2026-10-10。
     戻した手と同じ手で始まらない順番を採る）・⚠️ **戻した手と同じ手で始まる答えは採らない**（もっと浅く戻せば済む）
+  - ⚠️ **先端側の説明には、先端から 1 手の候補（`FollowProbe.ranked`。`Rank` の並び）も数えること**（2026-10-11）。
+    深い探索の答え（`Candidates`）は「変わっていません」で終わった 1 枚では空で、先端そのものと比べると、先端に 1 手足せば
+    合う 1 枚でも差し替えが勝つ。⚠️ **戻した答えが先端側の説明と同じ局面に行き着くなら差し替えないこと**（`followEndKey`。
+    違うのは順番か取られた駒の成・不成だけ。足し済みの手は撮った順と見た目の証拠を持っている）。中継で △5八銀打 ▲5七角 を
+    △9六角打 ▲5七角 △5八銀打 に、△9七桂成 ▲同香 を △9七桂不成 ▲同香 △8四桂打 に替えた
+    （`TestFollowRewindKeepsOrderWhenTipExtends` / `TestFollowRewindKeepsPromotionWhenTipExtends`）
   - ⚠️ **2 枚続けて同じ差し替えで据える**（ユーザーの判断。`TestFollowRewindNeedsTwoFrames`）。変わっていない 1 枚
     （`FollowConfirm`）でも確かめてよい（`TestFollowRewindConfirmsOnUnchangedFrame`）。控えたら**先端から足す手の控えは捨てる**
   - ⚠️ **手や頭が被った 1 枚・費用表の無い 1 枚では試さない**（控えた差し替えも捨てずに待つ。`TestFollowRewindIgnoresCoveredFrame`）
@@ -511,7 +517,10 @@ followProbe ─> Rank（候補から選ぶ。29µs）─┬─ 読めていな�
   手が被った 1 枚では差し替えないこと・1 枚だけでは差し替えないこと・変わっていない 1 枚で確かめられること・
   ⚠️ **何も言えない 1 枚では控えを捨てず、変わっていない 1 枚では据えないこと**（`TestFollowRewindSurvivesSilentFrame`。2026-10-09）・
   ⚠️ **速い経路でも、角打ちの推測を金の移動に差し替えること**（`TestFollowCellsRewindsGuessedDrop`。2026-10-09 の中継の形）・
-  ⚠️ **成駒の載ったマスの読み違いで取り消さないこと**（`TestFollowRewindIgnoresPromotedPieceMisread`。2026-10-09 の ▲1一角成）
+  ⚠️ **成駒の載ったマスの読み違いで取り消さないこと**（`TestFollowRewindIgnoresPromotedPieceMisread`。2026-10-09 の ▲1一角成）・
+  ⚠️ **先端に 1 手足せば合う 1 枚で、順番の入れ替えや取られた駒の成・不成だけが違う差し替えをしないこと**
+  （`TestFollowRewindKeepsOrderWhenTipExtends` / `TestFollowRewindKeepsPromotionWhenTipExtends`。2026-10-11 の中継。
+  どちらも先端から 1 手の候補が無ければ差し替える形であることを先に確かめている）
 - `followsession_test.go` — **中継セッション**（2026-10-11。偽の撮る側でループを実際に回す）。⚠️ 歯止めは ——
   **押したときの 1 枚を最初の 1 周に流し、次の 1 枚が変わっていなければ確かめて足すこと**・**止めたら追う盤を忘れ、
   撮る側の入り切りを戻し、「止めました」を消える知らせで出すこと**・**繋がらない周が続いたら「見失っています」**・

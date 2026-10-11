@@ -145,6 +145,10 @@ type FollowProbe struct {
 	// `followExplainFromBase`）。差し替えの候補（`rewind`）を `followRewindProbe` が関門にかける。nil なら、
 	// `followRewindProbe` が要るときに自分で探す。
 	base *followBaseAnswer
+	// ranked は**先端から 1 手の候補**（`Rank` が並べた良い順。「何も指していない」は除く。2026-10-11）。
+	// ⚠️ **差し替えの比べで先端側に数えるためのもの**（`followRewindProbe`）。`Candidates` は深い探索の答えで、
+	// 「変わっていません」で終わった 1 枚では空になる —— そのとき先端に 1 手足せば合う 1 枚でも、差し替えが勝っていた。
+	ranked [][]string
 }
 
 // FollowApplied は据えた結果。
@@ -223,6 +227,11 @@ func (s *StudyService) followProbe(board *position.Board, cost *position.CellCos
 			ranked = got
 			top := got.Candidates[0]
 			out.Fit = top.Fit
+			for _, c := range got.Candidates {
+				if len(c.Moves) > 0 {
+					out.ranked = append(out.ranked, c.Moves)
+				}
+			}
 			log.Follow.Info("候補を並べました", "tip", tipID, "moves", top.Moves,
 				"fit", top.Fit, "margin", got.Margin, "cost", top.Cost, "rotated", rotated,
 				"unseen", unseen.Count())
@@ -275,7 +284,7 @@ func (s *StudyService) followProbe(board *position.Board, cost *position.CellCos
 				}
 				d := out
 				decided = &d
-				out = FollowProbe{Rev: rev, Candidates: []FollowChoice{}, Fit: top.Fit}
+				out = FollowProbe{Rev: rev, Candidates: []FollowChoice{}, Fit: top.Fit, ranked: d.ranked}
 				log.Follow.Info("1 位の手のあとにも指された跡があるので先を探します",
 					"tip", tipID, "moves", top.Moves, "rotated", rotated)
 			}
@@ -393,12 +402,11 @@ func followSameEnd(from *position.Position, sols [][]string) bool {
 				return false
 			}
 		}
-		got, err := p.SFEN()
-		if err != nil {
+		// 手数は手順の長さで揃うので、比べるのは盤・手番・駒台。
+		got := followEndKey(p)
+		if got == "" {
 			return false
 		}
-		// 手数は手順の長さで揃うので、比べるのは盤・手番・駒台。
-		got = got[:strings.LastIndex(got, " ")]
 		if i == 0 {
 			end = got
 		} else if got != end {

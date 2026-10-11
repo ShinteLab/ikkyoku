@@ -414,6 +414,80 @@ func TestFollowRewindIgnoresPromotedPieceMisread(t *testing.T) {
 	}
 }
 
+// rewindOnSame は撮った 1 枚 frame で、**下見が「変わっていません」で終わったとき**の差し替えの関門を回す
+// （深い探索の答え `Candidates` は空。先端から 1 手の候補 `ranked` だけ下見から引き継ぐ）。
+func rewindOnSame(t *testing.T, s *StudyService, frame string, ranked [][]string) *followRewind {
+	t.Helper()
+	b, cost, _, _, err := s.src.followFrame(frame, evenConf(0.9), nil)
+	if err != nil {
+		t.Fatalf("followFrame: %v", err)
+	}
+	return s.followRewindProbe(b, cost, FollowProbe{Kind: FollowSame, ranked: ranked})
+}
+
+// rankedOf は撮った 1 枚 frame の下見が並べた、先端から 1 手の候補（`FollowProbe.ranked`）。
+func rankedOf(t *testing.T, s *StudyService, frame, want string) [][]string {
+	t.Helper()
+	p, err := probe(t, s, frame, evenConf(0.9))
+	if err != nil {
+		t.Fatalf("probe: %v", err)
+	}
+	if !slices.ContainsFunc(p.ranked, func(m []string) bool { return slices.Equal(m, []string{want}) }) {
+		t.Fatalf("下見が先端から 1 手の候補に %s を並べていません: %v", want, p.ranked)
+	}
+	return p.ranked
+}
+
+// ⚠️ **先端に 1 手足せば合う 1 枚で、足し済みの手の順番を入れ替える差し替えをしないこと**（2026-10-11 に中継で踏んだ）。
+//
+// **実機の症状**: △5八銀打 ▲5七角 を足したあと、△9六角打 が指された 1 枚で、下見は「変わっていません」で終わった
+// （打った駒は人に聞いている途中）。差し替えの関門は先端そのもの（9六 が空き）と比べて「食い違い 1.00 → 0.00」と見なし、
+// △9六角打 ▲5七角 △5八銀打 に差し替えた —— 行き着く局面は同じで、順番だけが撮った順と逆になった。
+// ここでは ▲7六歩 △3四歩 を足したあと ▲2六歩 が指された 1 枚（戻せば ▲2六歩 △3四歩 ▲7六歩 でも同じ局面）。
+func TestFollowRewindKeepsOrderWhenTipExtends(t *testing.T) {
+	s, _ := following(t)
+	guessMoves(t, s, "7g7f")
+	guessMoves(t, s, "3c3d")
+	frame := boardAfter(t, "7g7f", "3c3d", "2g2f")
+
+	// 先端から 1 手の候補を数えない関門なら差し替える形であること（この形が実機の症状を再現している確かめ）。
+	if rw := rewindOnSame(t, s, frame, nil); rw == nil {
+		t.Fatalf("先端から 1 手の候補が無いのに差し替えを見つけません（形が症状を再現していません）")
+	}
+	if rw := rewindOnSame(t, s, frame, rankedOf(t, s, frame, "2g2f")); rw != nil {
+		t.Fatalf("先端に ▲2六歩 を足せば合うのに、%v を %v に差し替えようとしました", rw.line[rw.keep:], rw.moves)
+	}
+}
+
+// ⚠️ **取られた駒の成・不成だけが違う差し替えをしないこと**（2026-10-11 に中継で踏んだ）。
+//
+// **実機の症状**: 見た目で成りと決めた △9七桂成 ▲同香 のあと、△8四桂打 が指された 1 枚で、△9七桂不成 ▲同香 △8四桂打 に
+// 差し替えた（9七 の駒は取られて盤に無いので、撮った盤からは成・不成が分からない。先端に △8四桂打 を足せば同じ局面だった）。
+// ここでは先手の向きで ▲9三桂成 △同香 のあと ▲5八玉。
+func TestFollowRewindKeepsPromotionWhenTipExtends(t *testing.T) {
+	const root = "l3k4/9/9/9/1N7/9/9/9/4K4 b - 1"
+	s := studyAt(t, root)
+	guessMoves(t, s, "8e9c+")
+	guessMoves(t, s, "9a9c")
+	p, err := position.FromFullSFEN(root)
+	if err != nil {
+		t.Fatalf("FromFullSFEN: %v", err)
+	}
+	for _, m := range []string{"8e9c+", "9a9c", "5i5h"} {
+		if err := p.ApplyMove(m); err != nil {
+			t.Fatalf("ApplyMove(%q): %v", m, err)
+		}
+	}
+	frame := p.BoardSFEN()
+
+	if rw := rewindOnSame(t, s, frame, nil); rw == nil {
+		t.Fatalf("先端から 1 手の候補が無いのに差し替えを見つけません（形が症状を再現していません）")
+	}
+	if rw := rewindOnSame(t, s, frame, rankedOf(t, s, frame, "5i5h")); rw != nil {
+		t.Fatalf("先端に ▲5八玉 を足せば合うのに、%v を %v に差し替えようとしました", rw.line[rw.keep:], rw.moves)
+	}
+}
+
 // ⚠️ **推測で積んだ手を、比べる相手の 1 枚の局面から説明し直して差し替えること**（2026-10-10 に中継で踏んだ）。
 //
 // 中継で大盤のあいだに 6 手進み、追従は 4 手の修復 ▲4五歩 △2五歩 ▲4四歩 △2三飛 に ▲2五桂 △同桂 を継ぎ足した。

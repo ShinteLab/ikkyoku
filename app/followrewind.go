@@ -318,21 +318,49 @@ func (s *StudyService) followRewindProbe(board *position.Board, cost *position.C
 	}
 	trusted := position.KindsTrusted(deep.Board, board, nil)
 
-	// **先端側の一番よい説明**（何も指していない／下見が並べた候補）。同じだけ説明できるなら手数の少ないほう。
+	// **先端側の一番よい説明**（何も指していない／下見が並べた候補／先端から 1 手の候補）。同じだけ説明できるなら
+	// 手数の少ないほう、それも同じなら種類の食い違いの少ないほう。
 	// ⚠️ **先端の盤で成駒が載っているマスは比べない**（2026-10-09。`promotedCells`）。
+	// ⚠️ **先端から 1 手の候補（`FollowProbe.ranked`）も数えること**（2026-10-11 に実機で踏んだ）。深い探索の答え
+	// （`Candidates`）は「変わっていません」で終わった 1 枚では空になる。先端に △9六角打 を足せば合う 1 枚で、
+	// 先端そのもの（9六 が空き）と比べて「食い違い 1.00 → 0.00」になり、△5八銀打 ▲5七角 を
+	// △9六角打 ▲5七角 △5八銀打 に差し替えた（順番が逆。打った駒も人に聞いている途中だった）。
 	skip := promotedCells(tip.Board)
 	tipCost, tipPlies := followSideCost(tip.Board, board, cost, skip), 0
 	tipKind := followKindCost(tip.Board, board, cost, skip)
+	tipSide := [][]string{nil}
 	for _, c := range p.Candidates {
-		after, ok := followReplay(tip, c.Moves)
+		tipSide = append(tipSide, c.Moves)
+	}
+	tipSide = append(tipSide, p.ranked...)
+	for _, mv := range tipSide[1:] {
+		after, ok := followReplay(tip, mv)
 		if !ok {
 			continue
 		}
 		v := followSideCost(after.Board, board, cost, skip)
-		if v < tipCost-followSideEps || (v <= tipCost+followSideEps && len(c.Moves) < tipPlies) {
-			tipCost, tipPlies = v, len(c.Moves)
+		if v < tipCost-followSideEps || (v <= tipCost+followSideEps && len(mv) < tipPlies) {
+			tipCost, tipPlies = v, len(mv)
 			tipKind = followKindCost(after.Board, board, cost, skip)
+		} else if v <= tipCost+followSideEps && len(mv) == tipPlies {
+			tipKind = min(tipKind, followKindCost(after.Board, board, cost, skip))
 		}
+	}
+	// tipEnds は先端側の説明が行き着く局面（`followEndKey`）。要るときに 1 回だけ作る。
+	var tipEnds map[string]bool
+	reachedFromTip := func(after *position.Position) bool {
+		if tipEnds == nil {
+			tipEnds = map[string]bool{}
+			for _, mv := range tipSide {
+				if pos, ok := followReplay(tip, mv); ok {
+					if key := followEndKey(pos); key != "" {
+						tipEnds[key] = true
+					}
+				}
+			}
+		}
+		key := followEndKey(after)
+		return key != "" && tipEnds[key]
 	}
 	if tipCost <= followSideEps && tipPlies == 0 && (!trusted || tipKind <= followSideEps) {
 		// 先端そのものがぴったり合っている（長考中はほとんどこれ）。戻す理由が無い。
@@ -365,15 +393,27 @@ func (s *StudyService) followRewindProbe(board *position.Board, cost *position.C
 		altKind := followKindCost(after.Board, board, cost, skip)
 		kinder := trusted && !better && alt <= tipCost+followSideEps && altKind < tipKind-followSideEps &&
 			(k+tipPlies-len(moves))%2 == 0
+		var why string
 		switch {
 		case better:
-			return fmt.Sprintf("先後と駒の有無の食い違い %.2f → %.2f", tipCost, alt), true
+			why = fmt.Sprintf("先後と駒の有無の食い違い %.2f → %.2f", tipCost, alt)
 		case kinder:
-			return fmt.Sprintf("先後と駒の有無は同じ %.2f・種類の食い違い %.2f → %.2f", alt, tipKind, altKind), true
+			why = fmt.Sprintf("先後と駒の有無は同じ %.2f・種類の食い違い %.2f → %.2f", alt, tipKind, altKind)
 		case fewer:
-			return fmt.Sprintf("同じ食い違い %.2f を %d 手 → %d 手で説明", alt, k+tipPlies, len(moves)), true
+			why = fmt.Sprintf("同じ食い違い %.2f を %d 手 → %d 手で説明", alt, k+tipPlies, len(moves))
+		default:
+			return "", false
 		}
-		return "", false
+		// ⚠️ **先端に手を足しても同じ局面に行き着くなら差し替えない**（2026-10-11 に実機で踏んだ）。違うのは手の順番か、
+		// 取られて盤から消えた駒の成・不成だけで、撮った盤にはどちらとも書いていない。足し済みの手は撮った順に並んでいて、
+		// 成・不成も見た目で決めている —— そちらを捨てる根拠が無い。△9七桂成 ▲同香 を △9七桂不成 ▲同香 △8四桂打 に
+		// 差し替えた（先端に △8四桂打 を足せば同じ局面だった）。
+		if reachedFromTip(after) {
+			log.Follow.Info("差し替えても、先端に手を足した局面と同じになります（差し替えません）",
+				"元の手", old, "新しい手", moves, "根拠", why)
+			return "", false
+		}
+		return why, true
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), followTimeout)
@@ -513,6 +553,15 @@ func (s *StudyService) takeRewind() *followRewind {
 		return nil
 	}
 	return rw
+}
+
+// followEndKey は局面 p を**行き着く局面として比べる鍵**（盤・手番・駒台。手数は除く）。組めなければ空。
+func followEndKey(p *position.Position) string {
+	got, err := p.SFEN()
+	if err != nil {
+		return ""
+	}
+	return got[:strings.LastIndex(got, " ")]
 }
 
 // followReplay は from に手順を指した局面を返す（指せなければ ok は偽）。
