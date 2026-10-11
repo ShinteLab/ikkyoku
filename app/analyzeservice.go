@@ -346,7 +346,8 @@ func (s *AnalyzeService) CheckEngine(id string) EngineCheck {
 	// 結び付いているのが素直（保存の操作では繋がない、という線引きは変えていない）。
 	s.settings.setEngineOptionSpecs(entry.ID, engineOptions(info.Declared))
 	s.rememberEngine(entry.ID, info.Name)
-	log.Info("エンジンに繋がりました",
+	// NOTICE（常に残す。2026-10-11）: どのエンジン（名前・版）で解析したか。
+	log.Notice("エンジンに繋がりました",
 		"id", entry.ID, "name", info.Name, "path", entry.Path,
 		"options", info.Options, "applied", info.Applied, "startupMs", info.StartupMS)
 	return out

@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -37,6 +38,10 @@ type Options struct {
 	// ikkyoku-diag_<日付>.log に Debug まで残すか。**dev のときだけ立てる**（2026-10-10）。
 	// 偽なら Warn 以上だけ本体に出し、残りは捨てる（ファイルも作らない）。
 	Diag bool
+	// Root は全体の既定のレベル（ゼロ値は Info）。**アプリは dev で Info、配る exe で Notice を渡す**（2026-10-11）。
+	// Info は開発中に参考になるもの、Notice は常に残しておきたいもの（起動した版など）という線引き。
+	// LevelsFile の "root" と、画面の設定（SetRootLevel）がこれより勝つ。
+	Root slog.Level
 }
 
 const (
@@ -64,17 +69,125 @@ func DefaultDir() string { return filepath.Join(os.TempDir(), dirName) }
 var followOn atomic.Bool
 
 // SetFollow は中継を追うログ（log.Follow）をファイルに残すかを切り替える（設定を変えたその場で効く）。
-// 偽でも Warn 以上は本体に出る。
-func SetFollow(on bool) { followOn.Store(on) }
+// 偽でも Warn 以上は本体に出る。⚠️ **真のあいだは追従のログを Info まで出す**（追従の行は Info なので、
+// 配る exe の既定の Notice のままでは何も残らない）。LevelsFile の "loggers" に follow があればそちらが勝つ。
+func SetFollow(on bool) {
+	followOn.Store(on)
+	levels.apply()
+}
 
 // FollowOn は中継を追うログをファイルに残しているか。
 func FollowOn() bool { return followOn.Load() }
 
-// defaultLevels は LevelsFile が無いときの設定。全体を Info にするだけ。
-// ⚠️ **ライブラリを個別に絞って黙らせないこと。** うるさいなら、そのライブラリで
+// SetRootLevel は**画面の設定の全体のレベル**を当てる（2026-10-11。設定を変えたその場で効く）。nil なら
+// 画面では決めない（LevelsFile の "root"、無ければ Options.Root）。⚠️ **パッケージごと・名前付きの Logger ごとの
+// レベル（LevelsFile）はそのまま** —— 画面で変えるのは全体だけ。
+func SetRootLevel(l *slog.Level) {
+	levels.mu.Lock()
+	if l == nil {
+		levels.ui = nil
+	} else {
+		v := *l
+		levels.ui = &v
+	}
+	levels.mu.Unlock()
+	levels.apply()
+}
+
+// RootLevel は今効いている全体のレベル。
+func RootLevel() slog.Level {
+	levels.mu.Lock()
+	defer levels.mu.Unlock()
+	return levels.rootLocked()
+}
+
+// ParseLevel はレベルの名前（TRACE / DEBUG / INFO / NOTICE / WARN / ERROR）を読む（wenteasy/log の書き方）。
+func ParseLevel(s string) (slog.Level, error) { return wlog.ParseLevel(s) }
+
+// levelState は**レベルの決め方の材料**（2026-10-11）。全体のレベルは
+// 画面の設定（ui）> LevelsFile の "root"（fileRoot）> Options.Root（build）の順で決まる。
+// パッケージごと（pkgs）と名前付きの Logger ごと（fileLoggers）は LevelsFile だけが決める。
+// ⚠️ **ライブラリを個別に絞って黙らせないこと**（既定の pkgs は空）。うるさいなら、そのライブラリで
 // レベルを下げる（engine の USI の送受信は engine 側で Debug にした。2026-10-03）。
-func defaultLevels() (slog.Level, map[string]slog.Level) {
-	return LevelInfo, nil
+type levelState struct {
+	mu          sync.Mutex
+	h           *wlog.PackageLevelHandler
+	build       slog.Level
+	fileRoot    *slog.Level
+	pkgs        map[string]slog.Level
+	fileLoggers map[string]slog.Level
+	defLoggers  map[string]slog.Level
+	ui          *slog.Level
+}
+
+var levels levelState
+
+func (s *levelState) rootLocked() slog.Level {
+	switch {
+	case s.ui != nil:
+		return *s.ui
+	case s.fileRoot != nil:
+		return *s.fileRoot
+	}
+	return s.build
+}
+
+// apply は今の材料でレベルを組み直す（Init の前なら何もしない）。
+func (s *levelState) apply() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.h == nil {
+		return
+	}
+	root := s.rootLocked()
+	s.h.SetLevels(root, s.pkgs)
+	loggers := map[string]slog.Level{}
+	for k, v := range s.defLoggers {
+		loggers[k] = v
+	}
+	if followOn.Load() {
+		loggers[FollowName] = min(LevelInfo, root)
+	}
+	for k, v := range s.fileLoggers {
+		loggers[k] = v
+	}
+	s.h.SetLoggerLevels(loggers)
+}
+
+// readLevelsFile は LevelsFile を読む。読めないレベルが 1 つでもあればエラー（何も使わない）。
+func readLevelsFile(path string) (root *slog.Level, pkgs, loggers map[string]slog.Level, err error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	var f wlog.LevelsFile
+	if err := json.Unmarshal(b, &f); err != nil {
+		return nil, nil, nil, err
+	}
+	if f.Root != "" {
+		l, err := wlog.ParseLevel(f.Root)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("root: %w", err)
+		}
+		root = &l
+	}
+	pkgs = map[string]slog.Level{}
+	for _, p := range f.Packages {
+		l, err := wlog.ParseLevel(p.Level)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("packages %q: %w", p.Name, err)
+		}
+		pkgs[p.Name] = l
+	}
+	loggers = map[string]slog.Level{}
+	for _, p := range f.Loggers {
+		l, err := wlog.ParseLevel(p.Level)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("loggers %q: %w", p.Name, err)
+		}
+		loggers[p.Name] = l
+	}
+	return root, pkgs, loggers, nil
 }
 
 // fileDir はログファイルを書いているディレクトリ（Init が決める。書けていなければ空）。
@@ -159,28 +272,28 @@ func Init(opts Options) (io.Closer, error) {
 
 	// 出口は一番低いレベルで作り、絞るのはパッケージごとのレベルに任せる
 	// （出口が出さないレベルは、パッケージのレベルを下げても出ない）。
-	root, pkgs := defaultLevels()
-	loggers := defaultLoggers(opts)
 	sink := slog.NewMultiHandler(sinks...)
-	h := wlog.NewPackageLevelHandler(&namedRouter{main: sink, named: namedSinks}, root)
-	h.SetLevels(root, pkgs)
-	h.SetLoggerLevels(loggers)
-	levels := "既定"
+	h := wlog.NewPackageLevelHandler(&namedRouter{main: sink, named: namedSinks}, opts.Root)
+	levels.mu.Lock()
+	levels.h, levels.build, levels.defLoggers = h, opts.Root, defaultLoggers(opts)
+	levels.fileRoot, levels.pkgs, levels.fileLoggers, levels.ui = nil, nil, nil, nil
+	levels.mu.Unlock()
+	levelsFrom := "既定"
 	if levelsDir != "" {
 		path := filepath.Join(levelsDir, LevelsFile)
-		switch err := h.LoadJSON(path); {
+		switch root, pkgs, loggers, err := readLevelsFile(path); {
 		case err == nil:
-			levels = path
-			// LoadJSON は "loggers" も丸ごと差し替えるので、書いていない名前は既定を足し直す。
-			if len(loggers) > 0 {
-				h.SetLoggerLevels(withDefaults(path, loggers))
-			}
+			levelsFrom = path
+			levels.mu.Lock()
+			levels.fileRoot, levels.pkgs, levels.fileLoggers = root, pkgs, loggers
+			levels.mu.Unlock()
 		case errors.Is(err, fs.ErrNotExist):
 		default:
-			// 読めない設定は使わず、既定のまま続ける（LoadJSON は失敗したら変えない）。
+			// 読めない設定は使わず、既定のまま続ける。
 			errs = append(errs, fmt.Errorf("%s を読めません（既定のレベルで続けます）: %w", LevelsFile, err))
 		}
 	}
+	levels.apply()
 	slog.SetDefault(slog.New(h))
 	// 標準の log の出力は log.Diag へ（Wails の WebView2 は log.Printf で書く。黒くなったときの
 	// 決め手だった [WebView2] Eval failed / Focus failed もここ）。SetDefault が本体へ向けたのを上書きする。
@@ -199,7 +312,7 @@ func Init(opts Options) (io.Closer, error) {
 	}
 	// 始まりの 1 行は、レベルの設定に関係なく必ず残す（どの設定で動いているかを後から読むため）。
 	r := slog.NewRecord(time.Now(), LevelNotice, "ログを開始しました", 0)
-	r.Add("file", file, "console", opts.Console, "diag", opts.Diag, "levels", levels)
+	r.Add("file", file, "console", opts.Console, "diag", opts.Diag, "root", RootLevel().String(), "levels", levelsFrom)
 	_ = sink.Handle(context.Background(), r)
 	return closers, errors.Join(errs...)
 }
@@ -211,28 +324,6 @@ func defaultLoggers(opts Options) map[string]slog.Level {
 		return nil
 	}
 	return map[string]slog.Level{DiagName: LevelDebug}
-}
-
-// withDefaults は LevelsFile の "loggers" に、書いていない名前の既定を足したものを返す
-// （LoadJSON が読めたあとに呼ぶので、読めないことは無い）。
-func withDefaults(path string, defs map[string]slog.Level) map[string]slog.Level {
-	out := map[string]slog.Level{}
-	if b, err := os.ReadFile(path); err == nil {
-		var f wlog.LevelsFile
-		if json.Unmarshal(b, &f) == nil {
-			for _, p := range f.Loggers {
-				if l, err := wlog.ParseLevel(p.Level); err == nil {
-					out[p.Name] = l
-				}
-			}
-		}
-	}
-	for name, l := range defs {
-		if _, ok := out[name]; !ok {
-			out[name] = l
-		}
-	}
-	return out
 }
 
 type closerFunc func() error

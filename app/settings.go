@@ -33,6 +33,10 @@ type AppSettings struct {
 	FollowFirst bool `json:"followFirst"`
 	// FollowDebug は中継を追うときに、デバッグ用の録画とログを残すか（2026-10-11。`Config.FollowDebug`）。
 	FollowDebug bool `json:"followDebug"`
+	// LogLevel はログの全体のレベル（2026-10-11。空は既定。`ikkyoku.NormalizeLogLevel` 済み）。
+	LogLevel string `json:"logLevel"`
+	// LogLevels は選べるログの細かさ（**フロントに表を書かせない**）。
+	LogLevels []ikkyoku.LogLevelOption `json:"logLevels"`
 	// EvalGraphDetached は評価値グラフを**別ウィンドウに切り離しているか**
 	// （2026-09-08）。
 	//
@@ -365,6 +369,9 @@ type SettingsService struct {
 	// OnFollowDebug は「中継の録画とログを残す（デバッグ）」を切り替えたときに呼ぶ（2026-10-11）。
 	// ⚠️ **設定のロックを持ったまま呼ぶ**ので、先で `Config()` を呼び返さないこと（値は引数で渡す）。
 	OnFollowDebug func(bool)
+	// OnLogLevel は「ログの細かさ」を切り替えたときに呼ぶ（2026-10-11。値は `ikkyoku.NormalizeLogLevel` 済み）。
+	// ⚠️ **設定のロックを持ったまま呼ぶ**ので、先で `Config()` を呼び返さないこと（値は引数で渡す）。
+	OnLogLevel func(string)
 
 	// OnSutemeSource は「認識器の読み込み元」を切り替えたときに呼ぶ
 	// （`CaptureService.applyRecognizerSource`。その場で読み直す）。
@@ -481,6 +488,8 @@ func (s *SettingsService) settings() AppSettings {
 		ClickThrough:      s.cfg.ClickThrough,
 		FollowFirst:       s.cfg.FollowFirst,
 		FollowDebug:       s.cfg.FollowDebug,
+		LogLevel:          ikkyoku.NormalizeLogLevel(s.cfg.LogLevel),
+		LogLevels:         ikkyoku.LogLevelOptions,
 		EvalGraphDetached: s.cfg.EvalGraphDetached,
 		StudyPaneDetached: s.cfg.StudyPaneDetached,
 		MovePaneDetached:  s.cfg.MovePaneDetached,
@@ -1234,6 +1243,19 @@ func (s *SettingsService) SetFollowDebug(v bool) (AppSettings, error) {
 	st, err := s.save(func(cfg *ikkyoku.Config) { cfg.FollowDebug = v })
 	if err == nil && s.OnFollowDebug != nil {
 		s.OnFollowDebug(v)
+	}
+	return st, err
+}
+
+// SetLogLevel は「ログの細かさ」を切り替えて保存し、**その場で効かせる**（`OnLogLevel`。2026-10-11）。
+// ⚠️ **知らない値は既定に倒す**（`ikkyoku.NormalizeLogLevel`）・⚠️ **保存できたときだけ効かせること**。
+func (s *SettingsService) SetLogLevel(v string) (AppSettings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	lv := ikkyoku.NormalizeLogLevel(v)
+	st, err := s.save(func(cfg *ikkyoku.Config) { cfg.LogLevel = lv })
+	if err == nil && s.OnLogLevel != nil {
+		s.OnLogLevel(lv)
 	}
 	return st, err
 }

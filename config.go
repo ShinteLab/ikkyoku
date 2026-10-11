@@ -108,6 +108,14 @@ type Config struct {
 	// 1 週間（`log.KeepDays`）より古いものは消す。⚠️ **切ってあっても追従の警告は本体のログに出る**。
 	FollowDebug bool `json:"followDebug,omitempty"`
 
+	// LogLevel は**ログの全体のレベル**（2026-10-11）。空は既定（dev は INFO・配る exe は NOTICE）。
+	//
+	// INFO は開発中に参考になるもの、NOTICE は常に残しておきたいもの（起動した版など）という線引きで、
+	// 配る exe でも何かあったときに画面から細かくできるようにする。値は `LogLevelOptions` の Value。
+	// ⚠️ **知らない値は既定に倒す**（`NormalizeLogLevel`）。実行ファイルの隣の ikkyoku-log.json の
+	// パッケージごとの指定はそのまま効き、全体のレベルだけこちらが勝つ。
+	LogLevel string `json:"logLevel,omitempty"`
+
 	// EvalGraphDetached は評価値グラフを**別ウィンドウに切り離しているか**
 	// （2026-09-08）。
 	//
@@ -588,6 +596,36 @@ func NormalizeEvalAxis(v string) string {
 	default:
 		return EvalAxisEval
 	}
+}
+
+// LogLevelOption はログの細かさの選択肢 1 つ（`Config.LogLevel`）。
+type LogLevelOption struct {
+	Value string `json:"value"`
+	Label string `json:"label"`
+}
+
+// LogLevelOptions は選べるログの細かさ（2026-10-11）。Value は log のレベルの名前で、空は既定。
+//
+// ⚠️ **フロントにこの表を書かないこと**（`ThemeOptions` と同じ）。
+var LogLevelOptions = []LogLevelOption{
+	{Value: "", Label: "既定"},
+	{Value: "TRACE", Label: "TRACE"},
+	{Value: "DEBUG", Label: "DEBUG"},
+	{Value: "INFO", Label: "INFO"},
+	{Value: "NOTICE", Label: "NOTICE"},
+	{Value: "WARN", Label: "WARN"},
+	{Value: "ERROR", Label: "ERROR"},
+}
+
+// NormalizeLogLevel はログの細かさの指定を**知っている値に倒す**（大文字にそろえ、知らない値は既定 = 空）。
+func NormalizeLogLevel(v string) string {
+	v = strings.ToUpper(strings.TrimSpace(v))
+	for _, o := range LogLevelOptions {
+		if o.Value == v {
+			return v
+		}
+	}
+	return ""
 }
 
 // 画面の配色（`Config.Theme`）。

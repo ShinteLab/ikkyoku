@@ -1246,6 +1246,21 @@ export function mountMainScreen(root: HTMLElement): void {
             </span>
           </span>
         </label>
+        <div class="setting is-block">
+          <span class="setting-body">
+            <span class="setting-title" data-hint="hint-loglevel">ログの細かさ</span>
+            <span id="hint-loglevel" class="setting-note is-hint">
+              一時フォルダの ikkyoku に残すログの細かさです。既定は、開発版が INFO、配布版が NOTICE です。
+              何か起きたときに細かくして調べ、済んだら既定に戻してください。
+            </span>
+          </span>
+          <div class="setting-fields">
+            <label class="field">
+              <span class="field-label">レベル</span>
+              <select id="log-level"></select>
+            </label>
+          </div>
+        </div>
 
         <details id="fold-analyze" class="setting-group setting-fold">
           <summary class="setting-fold-head">
@@ -4797,6 +4812,8 @@ ${st.turnLabel}${n}`;
   const followFirst = root.querySelector<HTMLInputElement>("#follow-first")!;
   // 中継の録画とログを残す（デバッグ。2026-10-11）。追従のログは切り替えたその場から、録画は次に追い始めたときから。
   const followDebug = root.querySelector<HTMLInputElement>("#follow-debug")!;
+  // ログの細かさ（2026-10-11）。選択肢は Go 側が返したものをそのまま並べる（**フロントに表を書かない**）。
+  const logLevel = root.querySelector<HTMLSelectElement>("#log-level")!;
   // 認識器の読み込み元。**「焼き込みがあるビルドか」は Go が返す**
   // （`sutemeEmbedAvailable`）。⚠️ **フロントで判定できない**（バイナリの中身の話）。
   const sutemeSource = root.querySelector<HTMLSelectElement>("#suteme-source")!;
@@ -5396,6 +5413,8 @@ ${st.turnLabel}${n}`;
     clickThrough: boolean;
     followFirst: boolean;
     followDebug: boolean;
+    logLevel: string;
+    logLevels: { value: string; label: string }[] | null;
     // 評価値グラフを別ウィンドウに切り離しているか（2026-09-08）。
     evalGraphDetached: boolean;
     // **候補手の面**を別ウィンドウに切り離しているか（2026-09-08）。
@@ -5442,6 +5461,16 @@ ${st.turnLabel}${n}`;
     clickThrough.checked = s.clickThrough;
     followFirst.checked = s.followFirst;
     followDebug.checked = s.followDebug;
+    if (logLevel.options.length !== (s.logLevels ?? []).length) {
+      logLevel.replaceChildren();
+      for (const o of s.logLevels ?? []) {
+        const opt = document.createElement("option");
+        opt.value = o.value;
+        opt.textContent = o.label;
+        logLevel.appendChild(opt);
+      }
+    }
+    logLevel.value = s.logLevel;
     // 配色。選択肢は Go 側が返したものをそのまま並べる（**フロントに表を書かない**）。
     if (themeSelect.options.length !== (s.themes ?? []).length) {
       themeSelect.replaceChildren();
@@ -6149,6 +6178,28 @@ ${st.turnLabel}${n}`;
         settingsStatus.classList.add("is-error");
       } finally {
         followFirst.disabled = false;
+      }
+    })();
+  });
+
+  logLevel.addEventListener("change", () => {
+    void (async () => {
+      const want = logLevel.value;
+      logLevel.disabled = true;
+      settingsStatus.textContent = "";
+      settingsStatus.classList.remove("is-error");
+      try {
+        showSettings(await SettingsService.SetLogLevel(want));
+      } catch (err) {
+        settingsStatus.textContent = `設定を保存できませんでした: ${String(err)}`;
+        settingsStatus.classList.add("is-error");
+        try {
+          showSettings(await SettingsService.Settings());
+        } catch {
+          /* 読み直せないなら画面はそのまま。理由は上に出ている。 */
+        }
+      } finally {
+        logLevel.disabled = false;
       }
     })();
   });

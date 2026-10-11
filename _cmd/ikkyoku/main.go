@@ -100,7 +100,12 @@ func main() {
 	// ikkyoku-diag_<日付>.log に残す（devBuild。黒い画面の再現待ち。_docs/blackscreen.md）。
 	// 中継の追従（ikkyoku-follow_<日付>.log）は設定「中継の録画とログを残す（デバッグ）」のときだけ（下で設定を読んでから入れる）。
 	// レベルの設定（ikkyoku-log.json）は今までどおり実行ファイルの隣に置く。
-	logOpts := log.Options{Console: consoleLog, Diag: devBuild}
+	// 全体の既定のレベルは dev で INFO、配る exe で NOTICE（2026-10-11。INFO は開発中に参考になるもの、
+	// NOTICE は常に残しておきたいもの）。画面の設定「ログの細かさ」は設定を読んでから当てる（applyLogLevel）。
+	logOpts := log.Options{Console: consoleLog, Diag: devBuild, Root: log.LevelNotice}
+	if devBuild {
+		logOpts.Root = log.LevelInfo
+	}
 	if exe, err := os.Executable(); err == nil {
 		logOpts.LevelsDir = filepath.Dir(exe)
 	}
@@ -111,7 +116,8 @@ func main() {
 	// ⚠️ **ここから下で panic したら、箱を出してから終わる**（fatal.go）。配る exe は
 	// 標準エラーの行き先が無いので、無いと**何も言わずに消える**。
 	defer recoverMain()
-	log.Info("ikkyoku を起動します", "version", appVersion())
+	// ⚠️ **起動した版は NOTICE**（常に残す。どれで動いたかが分からなくなる）。
+	log.Notice("ikkyoku を起動します", "version", appVersion())
 
 	// 起動はできたが足りないもの・できないこと（2026-10-04）。メイン画面のツールバーの ⚠ が
 	// 一覧にする。**どれも起動は止めない**（設計原則3）。載せ方は issues.go。
@@ -317,6 +323,9 @@ func main() {
 	}
 	settingsSvc.OnFollowFirst = captureSvc.applyFollowFirst
 	settingsSvc.OnFollowDebug = captureSvc.applyFollowDebug
+	// 「ログの細かさ」（2026-10-11）。
+	applyLogLevel(cfg.LogLevel)
+	settingsSvc.OnLogLevel = applyLogLevel
 	// 評価値グラフの切り離し（解析タブのスプリットバーのトグル / グラフ窓を閉じる）。
 	// **窓を出し入れするのは CaptureService**（SettingsService はウィンドウを持たない）。
 	settingsSvc.OnEvalGraphDetached = captureSvc.applyEvalGraphDetached
@@ -1047,4 +1056,19 @@ func pickFile(a *application.App) ikkyokuapp.FilePicker {
 		}
 		return dlg.PromptForSingleSelection()
 	}
+}
+
+// applyLogLevel は設定「ログの細かさ」を当てる（起動時と切り替えたとき。`SettingsService.OnLogLevel`）。
+// 空・読めない値は画面では決めない（ikkyoku-log.json の root、無ければビルドの既定）。
+func applyLogLevel(v string) {
+	if l, err := log.ParseLevel(v); v != "" && err == nil {
+		log.SetRootLevel(&l)
+	} else {
+		log.SetRootLevel(nil)
+	}
+	shown := v
+	if shown == "" {
+		shown = "既定"
+	}
+	log.Notice("ログの細かさを設定しました", "設定", shown, "全体", log.RootLevel().String())
 }

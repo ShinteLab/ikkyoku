@@ -338,7 +338,8 @@ func (s *CaptureService) loadRecognizer() RecognizerStatus {
 			log.Warn("盤の縁の帯の判定器を読み込めませんでした(盤の位置が 1マス滑ることがあります)",
 				"mode", mode, "error", set.StripErr)
 		}
-		log.Info("認識器を読み込みました", "mode", mode, "source", set.Source, "strip", set.StripSamples)
+		// NOTICE（常に残す。2026-10-11）: どの認識器で読んだかが分からないと、読み違いを追えない。
+		log.Notice("認識器を読み込みました", "mode", mode, "source", set.Source, "strip", set.StripSamples)
 		return st
 	}
 
@@ -577,7 +578,8 @@ func (s *CaptureService) Quit() {
 	if s.beforeQuit != nil {
 		s.beforeQuit()
 	}
-	log.Info("終了します")
+	// NOTICE（常に残す。2026-10-11）: 起動の 1 行と対にする（どこまで動いていたかの区切り）。
+	log.Notice("終了します")
 	s.app.Quit()
 }
 
@@ -1656,7 +1658,7 @@ func (s *CaptureService) applyFollowDebug(v bool) {
 	s.mu.Unlock()
 	log.SetFollow(v)
 	// 起動時（設定を読んだあと）と切り替えたときに 1 行（ログの最初の行は設定を読む前に書くので、そちらには出せない）。
-	log.Info("中継の録画とログ（デバッグ）を設定しました", "残す", v)
+	log.Notice("中継の録画とログ（デバッグ）を設定しました", "残す", v)
 }
 
 // followMissMax は**繋げなかった周を残す枚数の上限**。

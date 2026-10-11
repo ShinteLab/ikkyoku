@@ -196,16 +196,18 @@ func TestUSIFile(t *testing.T) {
 	}
 }
 
-// "loggers" に設定が無ければ、名前付きでもレベルは呼び出し元のパッケージで決まる。
-func TestNamedFollowsPackageLevel(t *testing.T) {
+// 追従のログを残すあいだ（SetFollow）、"loggers" に follow が無ければ追従の行は Info まで出る（全体が Warn でも）。
+// 追従の行は Info なので、配る exe の既定（Notice）のままでは何も残らないため（2026-10-11）。Debug は出ない。
+func TestFollowLevelWhenOn(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, log.LevelsFile), []byte(
-		`{"root":"WARN","packages":[{"name":"github.com/ShinteLab/ikkyoku/log_test","level":"TRACE"}]}`), 0o644)
+	os.WriteFile(filepath.Join(dir, log.LevelsFile), []byte(`{"root":"WARN"}`), 0o644)
 	initIn(t, dir, false)
 
-	log.Follow.Debug("debug from test") // root の WARN なら出ない
-	if out := todayFile(t, dir, log.NamedFile(log.FollowName)); !strings.Contains(out, "debug from test") {
-		t.Errorf("package level should apply to the caller's package:\n%s", out)
+	log.Follow.Info("追従の info")
+	log.Follow.Debug("追従の debug")
+	out := todayFile(t, dir, log.NamedFile(log.FollowName))
+	if !strings.Contains(out, "追従の info") || strings.Contains(out, "追従の debug") {
+		t.Errorf("追従のログは Info まで出るはず:\n%s", out)
 	}
 }
 
@@ -379,4 +381,57 @@ func TestLevelsDir(t *testing.T) {
 	if out := todayLog(t, dir); !strings.Contains(out, "設定で出す debug") {
 		t.Errorf("LevelsDir の設定が効いていません:\n%s", out)
 	}
+}
+
+// 全体のレベルは 画面の設定（SetRootLevel）> LevelsFile の root > Options.Root の順で決まり、画面の設定は
+// その場で効く（2026-10-11）。配る exe は Options.Root に Notice を渡す（Info は開発中の参考、Notice は常に残すもの）。
+func TestRootLevelOrder(t *testing.T) {
+	dir := t.TempDir()
+	old := slog.Default()
+	c, err := log.Init(log.Options{Dir: dir, Root: log.LevelNotice})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		slog.SetDefault(old)
+		c.Close()
+	})
+
+	log.Info("配る exe の info")
+	log.Notice("配る exe の notice")
+	debug := log.LevelDebug
+	log.SetRootLevel(&debug)
+	log.Debug("画面で下げた debug")
+	log.SetRootLevel(nil)
+	log.Info("画面の設定を戻したあとの info")
+
+	out := todayLog(t, dir)
+	for _, e := range []string{"配る exe の notice", "画面で下げた debug"} {
+		if !strings.Contains(out, e) {
+			t.Errorf("missing %q:\n%s", e, out)
+		}
+	}
+	for _, e := range []string{"配る exe の info", "画面の設定を戻したあとの info"} {
+		if strings.Contains(out, e) {
+			t.Errorf("Notice の既定なのに %q が出ました:\n%s", e, out)
+		}
+	}
+
+	// LevelsFile の root は Options.Root より勝ち、画面の設定はそれより勝つ。
+	dir2 := t.TempDir()
+	os.WriteFile(filepath.Join(dir2, log.LevelsFile), []byte(`{"root":"DEBUG"}`), 0o644)
+	c2, err := log.Init(log.Options{Dir: dir2, Root: log.LevelNotice})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c2.Close() })
+	if got := log.RootLevel(); got != log.LevelDebug {
+		t.Errorf("LevelsFile の root が効いていません: %v", got)
+	}
+	warn := log.LevelWarn
+	log.SetRootLevel(&warn)
+	if got := log.RootLevel(); got != log.LevelWarn {
+		t.Errorf("画面の設定が LevelsFile より勝っていません: %v", got)
+	}
+	log.SetRootLevel(nil)
 }

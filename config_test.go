@@ -929,3 +929,28 @@ func TestConfigFollowDebug(t *testing.T) {
 		t.Fatalf("保存した設定が残っていません: %+v（%v）", c.FollowDebug, err)
 	}
 }
+
+// ⚠️ **「ログの細かさ」は、キーが無ければ既定（空）・知らない値も既定に倒し・小文字でも読み・保存したら残ること**（2026-10-11）。
+// 既定に倒すのは、読めない値で全体のレベルが勝手に変わって、残るはずのログが消えたり埋もれたりしないため。
+func TestConfigLogLevel(t *testing.T) {
+	for in, want := range map[string]string{"": "", "debug": "DEBUG", " NOTICE ": "NOTICE", "LOUD": "", "INFO+2": ""} {
+		if got := NormalizeLogLevel(in); got != want {
+			t.Errorf("NormalizeLogLevel(%q) = %q, want %q", in, got, want)
+		}
+	}
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, err := LoadConfig(path)
+	if err != nil || c.LogLevel != "" {
+		t.Fatalf("キーが無いのに既定ではありません: %q（%v）", c.LogLevel, err)
+	}
+	c.LogLevel = "DEBUG"
+	if err := SaveConfig(path, c); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+	if c, err = LoadConfig(path); err != nil || c.LogLevel != "DEBUG" {
+		t.Fatalf("保存した設定が残っていません: %q（%v）", c.LogLevel, err)
+	}
+}

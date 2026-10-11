@@ -131,7 +131,8 @@ func (s *KifuService) openLocked(path string) {
 		return
 	}
 	s.lib = lib
-	log.Info("棋譜データベースを開きました", "path", path)
+	// NOTICE（常に残す。2026-10-11）: どの棚で動いていたか。
+	log.Notice("棋譜データベースを開きました", "path", path)
 }
 
 // describeOpenError は棚を開けなかった理由に、ikkyoku 側の直し方を足す。
