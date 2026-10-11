@@ -10,19 +10,44 @@ import (
 	"time"
 )
 
+// timestampLayout は撮った画像のファイル名の時刻の形（古いものを消すときもこれで読む）。
+const timestampLayout = "20060102-150405"
+
 // timestampName はキャプチャ時刻からファイル名を生成する（例 20260804-193045.png）。
 // 時刻を引数で受け取ることでテスト可能にしてある。
 func timestampName(t time.Time) string {
-	return t.Format("20060102-150405") + ".png"
+	return t.Format(timestampLayout) + ".png"
 }
 
-// DefaultOutDir は既定の保存先ディレクトリを返す（os.UserConfigDir()/ikkyoku/captures）。
+// DefaultOutDir は撮った画像の既定の保存先を返す（一時ディレクトリの ikkyoku/capture。2026-10-11）。
+//
+// 撮った画像は suteme へ学習データとして送れば役目を終えるので、残し続けない（`RemoveOldCaptures`）。
+// それまでは os.UserConfigDir()/ikkyoku/captures で、消す仕組みが無く 2 か月で 400 枚ほど溜まっていた。
+// ⚠️ **中継の録画（ログのディレクトリの follow）とは別のディレクトリにすること**（撮った画像は人が撮る瞬間を
+// 決めたもの、録画は追従のデバッグの記録）。ログ・録画と同じ一時ディレクトリの ikkyoku の下。
 func DefaultOutDir() (string, error) {
-	dir, err := os.UserConfigDir()
+	return filepath.Join(os.TempDir(), "ikkyoku", "capture"), nil
+}
+
+// RemoveOldCaptures は dir の撮った画像のうち、名前の時刻が keepDays 日より前のものを消す（2026-10-11）。
+// ⚠️ **名前が撮った時刻として読める PNG だけ消す**（ほかのものは置いた人のもの）。消せなくても何もしない。
+func RemoveOldCaptures(dir string, now time.Time, keepDays int) {
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return "", fmt.Errorf("ikkyoku: 設定ディレクトリの取得に失敗しました: %w", err)
+		return
 	}
-	return filepath.Join(dir, "ikkyoku", "captures"), nil
+	limit := now.AddDate(0, 0, -keepDays)
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".png") {
+			continue
+		}
+		t, err := time.ParseInLocation(timestampLayout, strings.TrimSuffix(name, ".png"), now.Location())
+		if err != nil || !t.Before(limit) {
+			continue
+		}
+		os.Remove(filepath.Join(dir, name))
+	}
 }
 
 // SavePNG は img を outDir にタイムスタンプ名で PNG 保存し、保存先パスを返す。

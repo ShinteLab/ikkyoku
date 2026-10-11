@@ -314,6 +314,10 @@ func main() {
 	if root := followRecordRoot(); root != "" {
 		go removeOldRecordings(root, time.Now())
 	}
+	// 撮った画像も 1 週間で消す（2026-10-11。suteme へ送れば役目を終える。置き場所は ikkyoku.DefaultOutDir）。
+	if dir, err := ikkyoku.DefaultOutDir(); err == nil {
+		go ikkyoku.RemoveOldCaptures(dir, time.Now(), log.KeepDays)
+	}
 	captureSvc.engineNames = func() []string {
 		var out []string
 		for _, e := range settingsSvc.Config().Engines {

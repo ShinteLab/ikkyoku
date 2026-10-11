@@ -42,8 +42,29 @@ func TestDefaultOutDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DefaultOutDir() error = %v", err)
 	}
-	if filepath.Base(dir) != "captures" {
-		t.Errorf("DefaultOutDir() = %q, want basename %q", dir, "captures")
+	// 一時ディレクトリの ikkyoku/capture（2026-10-11。中継の録画の follow とは別）。
+	if want := filepath.Join(os.TempDir(), "ikkyoku", "capture"); dir != want {
+		t.Errorf("DefaultOutDir() = %q, want %q", dir, want)
+	}
+}
+
+// ⚠️ **撮った画像は keepDays 日より前のものだけ消し、名前が撮った時刻でないものは消さないこと**（2026-10-11）。
+func TestRemoveOldCaptures(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now()
+	old := timestampName(now.AddDate(0, 0, -8))
+	recent := timestampName(now.AddDate(0, 0, -6))
+	for _, name := range []string{old, recent, "memo.png", "20200101-000000.txt"} {
+		os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o644)
+	}
+	RemoveOldCaptures(dir, now, 7)
+	if _, err := os.Stat(filepath.Join(dir, old)); !os.IsNotExist(err) {
+		t.Errorf("7 日より前の %s が残っています", old)
+	}
+	for _, name := range []string{recent, "memo.png", "20200101-000000.txt"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			t.Errorf("%s は消さないはず: %v", name, err)
+		}
 	}
 }
 
