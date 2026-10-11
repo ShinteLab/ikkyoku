@@ -1655,6 +1655,8 @@ func (s *CaptureService) applyFollowDebug(v bool) {
 	s.followDebug = v
 	s.mu.Unlock()
 	log.SetFollow(v)
+	// 起動時（設定を読んだあと）と切り替えたときに 1 行（ログの最初の行は設定を読む前に書くので、そちらには出せない）。
+	log.Info("中継の録画とログ（デバッグ）を設定しました", "残す", v)
 }
 
 // followMissMax は**繋げなかった周を残す枚数の上限**。

@@ -199,7 +199,7 @@ func Init(opts Options) (io.Closer, error) {
 	}
 	// 始まりの 1 行は、レベルの設定に関係なく必ず残す（どの設定で動いているかを後から読むため）。
 	r := slog.NewRecord(time.Now(), LevelNotice, "ログを開始しました", 0)
-	r.Add("file", file, "console", opts.Console, "diag", opts.Diag, "follow", opts.Follow, "levels", levels)
+	r.Add("file", file, "console", opts.Console, "diag", opts.Diag, "levels", levels)
 	_ = sink.Handle(context.Background(), r)
 	return closers, errors.Join(errs...)
 }
