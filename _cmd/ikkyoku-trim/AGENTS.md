@@ -18,6 +18,7 @@ GOWORK=off go test ./_cmd/ikkyoku-trim
 | `scan.go` | **1 段目**: ffmpeg でデコードしたコマを 1 つ前のコマと比べ、変化を集める（`ikkyoku.FrameDiff`・`recognize.DetectRegion`） |
 | `plan.go` | 区間の組み立て（`buildSegments`）と JSON |
 | `cut.go` | **2 段目**: 区間を ffmpeg の `select` に渡して 1 本に書き出す |
+| `progress.go` | 進み具合を 1 行で書き換えながら出す（1 段目はコマ数、2 段目は書き出した長さの割合） |
 
 ## ⚠️ 崩さないこと
 
@@ -48,6 +49,9 @@ GOWORK=off go test ./_cmd/ikkyoku-trim
 - ⚠️ **ディレクトリを読むとき、書き出した動画（名前の終わりが `-trim`）を拾わない**（同じディレクトリに書き出すので、
   やり直すたびに前の出力が入力に混ざる）
 - ⚠️ **既にある書き出し先は `-force` が無ければ上書きしない**
+- ⚠️ **処理中は黙らない**（2026-10-11。長い録画では何分もかかる）。進み具合は標準エラーの 1 行を書き換えて出す（`progress`）。
+  ⚠️ **ほかの表示を出す前に改行させる**（`logf` / `breakLine`。標準出力の `対局の盤:` の行も）。⚠️ **割合は 100% で止める**
+  （1 段目の全体のコマ数は長さからの見積もり）
 - ⚠️ **フィルタはファイルで渡す**（`-/filter_complex`）。区間が何百もあると Windows のコマンドラインの長さの上限を超える
 
 ## テスト（`trim_test.go`）
@@ -62,6 +66,8 @@ GOWORK=off go test ./_cmd/ikkyoku-trim
   **決めたコマ全体を赤い枠付きの画像にして、場所を標準出力に出す**ことも見る。
   ffmpeg が無ければ飛ばす
 - `TestGameBoardShowsWithoutDetection` —— 盤が見つからないコマでは、最後に映っていた盤の部分と見比べる
+- `TestProgress` —— 進み具合は同じ行を書き換え、ほかの表示の前と最後に改行する・100% を超えない
+- `TestProgressSeconds` —— ffmpeg の `-progress` の行から書き出した時刻を読む（`N/A` や別の行は読まない）
 - `TestParseProbe` —— ffprobe の答え（`30000/1001`・最初の時刻）を読む
 - `TestCutArgs` —— 区間の時刻に最初の時刻を足す・大きさの違う動画は最初の動画に合わせる・区間の無い動画は読まない
 - `TestTrimEndToEnd` —— **ffmpeg で作った 2 本を 1 本の続いた録画として詰める**（境目では変化と見なさず、3 秒と 8 秒の

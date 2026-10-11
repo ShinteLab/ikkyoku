@@ -312,3 +312,40 @@ func TestGameBoardShowsWithoutDetection(t *testing.T) {
 		t.Errorf("盤の部分が丸ごと変わったのに、映っていると言いました")
 	}
 }
+
+// ⚠️ **進み具合は同じ行を書き換え、ほかの表示の前と最後に改行すること**（2026-10-11。長い録画で黙っていると、止まっているのか
+// 分からない）。割合は 100% を超えない（全体のコマ数は長さからの見積もりなので、実際のコマ数が少し多いことがある）。
+func TestProgress(t *testing.T) {
+	var buf bytes.Buffer
+	done := 0.0
+	p := newProgress(&buf, "1 段目", 200, func() string { return fmt.Sprintf("（%d コマ）", int(done)) })
+	done = 50
+	p.set(done)
+	p.logf("盤を決めました\n")
+	done = 250
+	p.set(done)
+	p.finish()
+	out := buf.String()
+	for _, e := range []string{"\r1 段目  25.0%（50 コマ）\n盤を決めました\n", "\r1 段目 100.0%"} {
+		if !strings.Contains(out, e) {
+			t.Errorf("進み具合に %q がありません: %q", e, out)
+		}
+	}
+	if !strings.HasSuffix(out, "\n") || strings.Contains(out, "125.0%") {
+		t.Errorf("最後に改行していないか、100%% を超えました: %q", out)
+	}
+}
+
+// ffmpeg の -progress の行から、書き出した時刻を読むこと（N/A や別の行は読まない）。
+func TestProgressSeconds(t *testing.T) {
+	for line, want := range map[string]float64{"out_time_us=1500000": 1.5, "out_time_ms=2000000": 2} {
+		if got, ok := progressSeconds(line); !ok || got != want {
+			t.Errorf("progressSeconds(%q) = %v, %v", line, got, ok)
+		}
+	}
+	for _, line := range []string{"out_time_us=N/A", "frame=10", "progress=end"} {
+		if _, ok := progressSeconds(line); ok {
+			t.Errorf("progressSeconds(%q) を読みました", line)
+		}
+	}
+}

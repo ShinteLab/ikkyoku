@@ -7,6 +7,7 @@ import (
 	"image"
 	"image/color"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -49,6 +50,9 @@ const (
 // ⚠️ **持つのは 1 つ前のコマと今のコマだけ**（動画を丸ごと展開しない）。
 // ⚠️ **1 つ前のコマとの比べは動画の境目をまたいで続ける**（分けて録ったあいだに盤が変わっていれば、それも変化）。
 func scan(o options, inputs []Input) (Plan, error) {
+	if o.stderr == nil {
+		o.stderr = io.Discard
+	}
 	p := Plan{Inputs: inputs, Before: o.before.Seconds(), After: o.after.Seconds(), FPS: o.fps,
 		Threshold: o.threshold, Scene: o.scene, Switch: o.switchKeep.Seconds(), Quiet: newHistogram()}
 	step := 1 / o.fps
@@ -65,6 +69,16 @@ func scan(o options, inputs []Input) (Plan, error) {
 	}
 	// pendingRegion は -region の対局の盤を、最初のコマで画像にして知らせるか。
 	pendingRegion := !o.fixed.Empty()
+	// 進み具合（全体のコマ数は、各動画の長さ × 1 秒あたりに見るコマ数の合計）。
+	totalFrames := 0.0
+	for _, in := range inputs {
+		totalFrames += math.Ceil(in.Duration * o.fps)
+	}
+	done := 0.0
+	prog := newProgress(o.stderr, "1 段目（変化を探す）", totalFrames, func() string {
+		return fmt.Sprintf("（%d / %d コマ・変化 %d 回）", int(done), int(totalFrames), len(p.Changes))
+	})
+	o.progress = prog
 	for _, in := range inputs {
 		frame := image.Rect(0, 0, in.Width, in.Height)
 		// ⚠️ **画面の大きさが違う動画に変わったら、対局の盤を大きさの比で引き伸ばす**（探し直すと大盤を拾いうる）。
@@ -74,14 +88,15 @@ func scan(o options, inputs []Input) (Plan, error) {
 			p.Boards = append(p.Boards, BoardNote{File: in.File, Rect: game.Board, How: "scaled"})
 		}
 		lastTry := -redetectEvery
-		fmt.Fprintf(os.Stderr, "%s を読みます（%dx%d・%s）\n", in.File, in.Width, in.Height, seconds(in.Duration))
-		nextReport := 600.0
+		prog.logf("%s を読みます（%dx%d・%s）\n", in.File, in.Width, in.Height, seconds(in.Duration))
 		err := decodeFrames(o.ffmpeg, in, o.fps, func(cur *image.RGBA, t float64) error {
 			defer func() {
 				prev = cur // ⚠️ バッファは decodeFrames が入れ替えて使い回す
 				if visible {
 					g.remember(cur)
 				}
+				done++
+				prog.set(done)
 			}()
 			if pendingRegion {
 				pendingRegion = false
@@ -90,10 +105,6 @@ func scan(o options, inputs []Input) (Plan, error) {
 			add := func(c Change, before, after float64) {
 				c.File, c.Time, c.At, c.Before, c.After = in.File, t, in.Offset+t, before, after
 				p.Changes = append(p.Changes, c)
-			}
-			if t >= nextReport {
-				fmt.Fprintf(os.Stderr, "  %s / %s（変化 %d 回）\n", seconds(t), seconds(in.Duration), len(p.Changes))
-				nextReport += 600
 			}
 			// まだ対局の盤を決めていない: 見つけたらそれにする（それまでは何も残さない）。
 			if game.Board.Empty() {
@@ -104,7 +115,7 @@ func scan(o options, inputs []Input) (Plan, error) {
 				if r, err := o.detect(cur); err == nil {
 					*game, visible = recognize.Signature{Frame: frame, Board: r.Rect}, true
 					p.Boards = append(p.Boards, BoardNote{File: in.File, Time: t, Rect: r.Rect, Confidence: r.Confidence, How: "detect"})
-					fmt.Fprintf(os.Stderr, "  %s: 対局の盤を決めました %v（信頼度 %.2f）\n", seconds(t), r.Rect, r.Confidence)
+					prog.logf("  %s: 対局の盤を決めました %v（信頼度 %.2f）\n", seconds(t), r.Rect, r.Confidence)
 					reportBoard(o, cur, r.Rect)
 				}
 				return nil
@@ -151,11 +162,13 @@ func scan(o options, inputs []Input) (Plan, error) {
 			return nil
 		})
 		if err != nil {
+			prog.breakLine()
 			return Plan{}, err
 		}
 	}
+	prog.finish()
 	if game.Board.Empty() {
-		fmt.Fprintln(os.Stderr, "⚠ 盤が一度も見つかりませんでした（-region で盤の位置を渡してください）")
+		fmt.Fprintln(o.stderr, "⚠ 盤が一度も見つかりませんでした（-region で盤の位置を渡してください）")
 	}
 	p.Segments, p.Kept = buildSegments(inputs, p.Changes, step)
 	last := inputs[len(inputs)-1]
@@ -176,13 +189,15 @@ func reportBoard(o options, img *image.RGBA, rect image.Rectangle) {
 	copy(out.Pix, img.Pix)
 	outline(out, rect, 4, color.RGBA{255, 0, 0, 255})
 	if err := savePNG(o.boardImage, out); err != nil {
-		fmt.Fprintf(os.Stderr, "  ⚠ 対局の盤の画像を残せません: %v\n", err)
+		o.progress.logf("  ⚠ 対局の盤の画像を残せません: %v\n", err)
 		return
 	}
 	path := o.boardImage
 	if abs, err := filepath.Abs(path); err == nil {
 		path = abs
 	}
+	// 進み具合の行（標準エラー）の途中に出ると読めないので、先に改行させる。
+	o.progress.breakLine()
 	fmt.Fprintf(o.stdout, "対局の盤: %s\n", path)
 }
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"os/exec"
@@ -29,14 +30,59 @@ func cut(o options, p Plan) error {
 	if err := f.Close(); err != nil {
 		return err
 	}
-	full := append([]string{"-v", "error", "-stats", "-nostdin", "-y"}, args...)
+	// 進み具合は ffmpeg の -progress（書き出した時刻を key=value で 1 行ずつ）を受けて、残す長さに対する割合で出す。
+	full := append([]string{"-v", "error", "-nostats", "-progress", "pipe:1", "-nostdin", "-y"}, args...)
 	full = append(full[:len(full)-1], "-/filter_complex", f.Name(), full[len(full)-1])
 	cmd := exec.Command(o.ffmpeg, full...)
-	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("ffmpeg で書き出せません（ffmpeg はありますか）: %w", err)
+	cmd.Stderr = o.stderr
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
 	}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("ffmpeg を起動できません（ffmpeg はありますか）: %w", err)
+	}
+	kept := keptSeconds(p.Segments)
+	written := 0.0
+	prog := newProgress(o.stderr, "2 段目（切ってつなぐ）", kept, func() string {
+		return fmt.Sprintf("（%s / %s）", seconds(written), seconds(kept))
+	})
+	sc := bufio.NewScanner(out)
+	for sc.Scan() {
+		if v, ok := progressSeconds(sc.Text()); ok {
+			written = v
+			prog.set(v)
+		}
+	}
+	if err := cmd.Wait(); err != nil {
+		prog.breakLine()
+		return fmt.Errorf("ffmpeg で書き出せません: %w", err)
+	}
+	prog.finish()
 	return nil
+}
+
+// keptSeconds は残す区間の長さの合計（秒）。手で直した JSON でも合うように、区間から数える。
+func keptSeconds(segs []Segment) float64 {
+	sum := 0.0
+	for _, s := range segs {
+		sum += max(0, s.End-s.Start)
+	}
+	return sum
+}
+
+// progressSeconds は ffmpeg の -progress の 1 行から、書き出した時刻（秒）を読む（`out_time_us=…`。
+// `out_time_ms` も中身はマイクロ秒）。読めない行・まだ時刻の無い行（`N/A`）は ok が偽。
+func progressSeconds(line string) (float64, bool) {
+	k, v, ok := strings.Cut(strings.TrimSpace(line), "=")
+	if !ok || (k != "out_time_us" && k != "out_time_ms") {
+		return 0, false
+	}
+	us, err := strconv.ParseFloat(v, 64)
+	if err != nil || us < 0 {
+		return 0, false
+	}
+	return us / 1e6, true
 }
 
 // cutArgs は 2 段目の ffmpeg のフィルタと引数（フィルタのファイルを除く。最後が書き出す先）を組む。

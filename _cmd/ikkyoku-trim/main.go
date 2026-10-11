@@ -67,7 +67,7 @@ func run(args []string) error {
 		return err
 	}
 	o.detect = recognize.DetectRegion
-	o.stdout = os.Stdout
+	o.stdout, o.stderr = os.Stdout, os.Stderr
 	if o.fps <= 0 {
 		return fmt.Errorf("-fps は 0 より大きくしてください")
 	}
@@ -115,7 +115,7 @@ func run(args []string) error {
 		if err := writePlan(jsonPath, plan); err != nil {
 			return err
 		}
-		fmt.Fprintf(os.Stderr, "区間を書きました: %s（変化 %d 回・区間 %d・残す長さ %s / 元 %s）\n",
+		fmt.Fprintf(o.stderr, "区間を書きました: %s（変化 %d 回・区間 %d・残す長さ %s / 元 %s）\n",
 			jsonPath, len(plan.Changes), len(plan.Segments), seconds(plan.Kept), seconds(plan.Total))
 	}
 	if o.dryRun {
@@ -129,7 +129,7 @@ func run(args []string) error {
 	if err := cut(o, plan); err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stderr, "書き出しました: %s\n", o.out)
+	fmt.Fprintf(o.stderr, "書き出しました: %s\n", o.out)
 	return nil
 }
 
@@ -152,8 +152,10 @@ type options struct {
 	fixed image.Rectangle
 	// boardImage は対局の盤を決めたコマを画像にして残す先（空なら残さない。場所は標準出力に出す）。
 	boardImage string
-	// stdout は対局の盤の画像の場所を出す先（既定は標準出力。テストで差し替える）。
-	stdout io.Writer
+	// stdout は対局の盤の画像の場所を出す先、stderr は進み具合などを出す先（既定は標準出力・標準エラー。テストで差し替える）。
+	stdout, stderr io.Writer
+	// progress は今の進み具合（1 段目が作る。ほかの表示を出す前に改行させる）。
+	progress *progress
 	// detect は盤を探す関数（既定は recognize.DetectRegion。テストで差し替える）。
 	detect detector
 }
