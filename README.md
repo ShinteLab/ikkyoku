@@ -191,6 +191,7 @@ wails3 dev                       # 開発モード
 - `_cmd/ikkyoku/`: Wails3 GUI アプリ(独立したネストモジュール、モジュール名は
   `ikkyoku`)。⚠️ **ここに置くのは「Wails の口が要るもの」だけ** ——
   Service は `app/`、枠の幾何は `guide/` にある
+- `_cmd/ikkyoku-trim/`: 開発用のコマンド。中継の録画を、盤が変わった前後だけに詰める（追従を確かめるため。ffmpeg が要る）
 
 ## 開発上の約束
 
