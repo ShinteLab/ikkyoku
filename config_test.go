@@ -906,3 +906,26 @@ func TestConfigFollowFirst(t *testing.T) {
 		t.Fatalf("保存した設定が残っていません: %+v（%v）", c.FollowFirst, err)
 	}
 }
+
+// ⚠️ **「中継の録画とログを残す（デバッグ）」は、キーが無ければ偽（残さない）・保存したら残ること**（2026-10-11）。
+// 偽が既定なのは、録画と追従のログは調べるための記録で、ふだん使うときに溜める理由が無いから（1 局で 200MB を超えた）。
+func TestConfigFollowDebug(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if c.FollowDebug {
+		t.Fatal("キーが無いのに録画とログを残す設定になっています（既定は残さない）")
+	}
+	c.FollowDebug = true
+	if err := SaveConfig(path, c); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+	if c, err = LoadConfig(path); err != nil || !c.FollowDebug {
+		t.Fatalf("保存した設定が残っていません: %+v（%v）", c.FollowDebug, err)
+	}
+}

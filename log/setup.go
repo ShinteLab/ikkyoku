@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	wlog "github.com/wenteasy/log"
@@ -19,8 +20,16 @@ import (
 
 // Options は Init の設定。
 type Options struct {
-	// Dir はログファイルと設定（LevelsFile）を置くディレクトリ。空なら実行ファイルのあるディレクトリ。
+	// Dir はログファイルを書くディレクトリ。空なら DefaultDir（一時ディレクトリの ikkyoku。2026-10-11）。
 	Dir string
+	// LevelsDir はレベルの設定（LevelsFile）を読むディレクトリ。空なら Dir。
+	// ⚠️ **アプリは実行ファイルのディレクトリを渡す**（設定は書き出すものではなく置くもの。一時ディレクトリは
+	// OS の掃除で消えることがある）。
+	LevelsDir string
+	// Follow は中継を追うログ（log.Follow）を ikkyoku-follow_<日付>.log に残すか（2026-10-11。設定「中継の録画と
+	// ログを残す（デバッグ）」）。あとから SetFollow で切り替えられる。偽なら Warn 以上だけ本体に出し、残りは捨てる
+	// （ファイルも作らない）。
+	Follow bool
 	// Console は標準エラーにも出すか。wails3 dev で動かすとき（ターミナルで見るとき）に立てる。
 	// ⚠️ 配る exe（-H windowsgui）には標準エラーの行き先が無いので、立てても見えない。
 	Console bool
@@ -40,9 +49,26 @@ const (
 	//	{"root": "INFO", "packages": [{"name": "github.com/ShinteLab/ikkyoku/app", "level": "DEBUG"}],
 	//	 "loggers": [{"name": "follow", "level": "DEBUG"}]}
 	LevelsFile = "ikkyoku-log.json"
-	// keepDays より古いログファイルは Init のときに消す。
-	keepDays = 14
+	// KeepDays より古いログファイルは Init のときに消す（2026-10-11 に 14 日から 7 日へ。何日も前の記録を
+	// 掘ってデバッグすることは無い）。中継の録画も同じ日数で消す（`_cmd/ikkyoku`）。
+	KeepDays = 7
+	// dirName は DefaultDir のディレクトリの名前。
+	dirName = "ikkyoku"
 )
+
+// DefaultDir はログ（と中継の録画）を書く既定のディレクトリ（一時ディレクトリの ikkyoku。2026-10-11）。
+// それまでは実行ファイルの隣で、配る exe の置き場所にデバッグの記録が溜まっていた。
+func DefaultDir() string { return filepath.Join(os.TempDir(), dirName) }
+
+// followOn は中継を追うログをファイルに残すか（`SetFollow`）。
+var followOn atomic.Bool
+
+// SetFollow は中継を追うログ（log.Follow）をファイルに残すかを切り替える（設定を変えたその場で効く）。
+// 偽でも Warn 以上は本体に出る。
+func SetFollow(on bool) { followOn.Store(on) }
+
+// FollowOn は中継を追うログをファイルに残しているか。
+func FollowOn() bool { return followOn.Load() }
 
 // defaultLevels は LevelsFile が無いときの設定。全体を Info にするだけ。
 // ⚠️ **ライブラリを個別に絞って黙らせないこと。** うるさいなら、そのライブラリで
@@ -66,12 +92,13 @@ func NamedFile(name string) string { return FilePrefix + "-" + name }
 
 // Init はログの出口を組み、slog.Default() をそこへ向ける。main の最初に 1 回だけ呼ぶ。
 //
-//   - ファイル: Dir/ikkyoku_<日付>.log（日ごと。keepDays より古いものは消す）
+//   - ファイル: Dir/ikkyoku_<日付>.log（日ごと。KeepDays より古いものは消す）
 //   - 名前付き（log.Follow / log.Diag / log.USI）: Dir/ikkyoku-<名前>_<日付>.log だけ（コンソールに出さない。Warn 以上は本体にも）。
-//     Diag は Options.Diag のときだけ残し、Debug まで出す（LevelsFile の "loggers" に diag があればそちら）
+//     Diag は Options.Diag のときだけ残し、Debug まで出す（LevelsFile の "loggers" に diag があればそちら）。
+//     Follow は Options.Follow / SetFollow が真のあいだだけ残す
 //   - 標準の log の出力（Wails の [WebView2] の行など）: log.Diag へ
 //   - コンソール: Options.Console のときだけ標準エラーにも
-//   - レベル: 呼び出し元のパッケージごと（Dir/LevelsFile。無ければ defaultLevels）
+//   - レベル: 呼び出し元のパッケージごと（LevelsDir/LevelsFile。無ければ defaultLevels）
 //
 // ⚠️ **ログが書けなくてもアプリは動かす**（設計原則3）。ファイルを作れないときも、出せる
 // 出口（コンソール）だけで組んで slog.Default() を差し替え、理由をエラーで返す。
@@ -79,14 +106,14 @@ func NamedFile(name string) string { return FilePrefix + "-" + name }
 func Init(opts Options) (io.Closer, error) {
 	var errs []error
 	fileDir = ""
+	followOn.Store(opts.Follow)
 	dir := opts.Dir
 	if dir == "" {
-		exe, err := os.Executable()
-		if err != nil {
-			errs = append(errs, fmt.Errorf("実行ファイルの場所が分かりません: %w", err))
-		} else {
-			dir = filepath.Dir(exe)
-		}
+		dir = DefaultDir()
+	}
+	levelsDir := opts.LevelsDir
+	if levelsDir == "" {
+		levelsDir = dir
 	}
 
 	var sinks []slog.Handler
@@ -114,6 +141,10 @@ func Init(opts Options) (io.Closer, error) {
 				}
 				tw.SetPrefix(NamedFile(name))
 				namedSinks[name] = wlog.NewSimpleHandler(tw, LevelTrace)
+				if name == FollowName {
+					// 設定で切り替える（切ってあるあいだは書かないので、ファイルも作られない）。
+					namedSinks[name] = &switchHandler{on: &followOn, h: namedSinks[name]}
+				}
 				closers = append(closers, tw)
 			}
 		}
@@ -135,8 +166,8 @@ func Init(opts Options) (io.Closer, error) {
 	h.SetLevels(root, pkgs)
 	h.SetLoggerLevels(loggers)
 	levels := "既定"
-	if dir != "" {
-		path := filepath.Join(dir, LevelsFile)
+	if levelsDir != "" {
+		path := filepath.Join(levelsDir, LevelsFile)
 		switch err := h.LoadJSON(path); {
 		case err == nil:
 			levels = path
@@ -168,7 +199,7 @@ func Init(opts Options) (io.Closer, error) {
 	}
 	// 始まりの 1 行は、レベルの設定に関係なく必ず残す（どの設定で動いているかを後から読むため）。
 	r := slog.NewRecord(time.Now(), LevelNotice, "ログを開始しました", 0)
-	r.Add("file", file, "console", opts.Console, "diag", opts.Diag, "levels", levels)
+	r.Add("file", file, "console", opts.Console, "diag", opts.Diag, "follow", opts.Follow, "levels", levels)
 	_ = sink.Handle(context.Background(), r)
 	return closers, errors.Join(errs...)
 }
@@ -274,14 +305,40 @@ func (h *namedRouter) with(f func(slog.Handler) slog.Handler) *namedRouter {
 	return nh
 }
 
-// removeOld は keepDays より古いログファイルを消す。日付はファイル名から読む
+// switchHandler は on が偽のあいだ何も書かない（名前付きの Logger の出口を設定で切り替える。`SetFollow`）。
+// ⚠️ **派生（WithAttrs / WithGroup）でも同じ on を見ること**（log.Follow は Init より前に作られ、書くたびに派生する）。
+type switchHandler struct {
+	on *atomic.Bool
+	h  slog.Handler
+}
+
+func (s *switchHandler) Enabled(ctx context.Context, l slog.Level) bool {
+	return s.on.Load() && s.h.Enabled(ctx, l)
+}
+
+func (s *switchHandler) Handle(ctx context.Context, r slog.Record) error {
+	if !s.on.Load() {
+		return nil
+	}
+	return s.h.Handle(ctx, r)
+}
+
+func (s *switchHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return &switchHandler{on: s.on, h: s.h.WithAttrs(attrs)}
+}
+
+func (s *switchHandler) WithGroup(name string) slog.Handler {
+	return &switchHandler{on: s.on, h: s.h.WithGroup(name)}
+}
+
+// removeOld は KeepDays より古いログファイルを消す。日付はファイル名から読む
 // （更新時刻は見ない。コピーや展開で変わるため）。消せなくても何もしない。
 func removeOld(dir string, now time.Time) {
 	prefixes := []string{FilePrefix}
 	for _, name := range separated {
 		prefixes = append(prefixes, NamedFile(name))
 	}
-	limit := now.AddDate(0, 0, -keepDays)
+	limit := now.AddDate(0, 0, -KeepDays)
 	for _, prefix := range prefixes {
 		names, err := filepath.Glob(filepath.Join(dir, prefix+"_*.log"))
 		if err != nil {

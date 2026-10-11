@@ -1,6 +1,6 @@
 """成・不成を見た目で決めるしきい値を、録画から計り直す（2026-10-07）。
 
-追従の録画（<captures>/follow/<日時>/）の、手を足した 1 枚どうしを並べ、指した駒の
+追従の録画（%TEMP%/ikkyoku/follow/<日時>/。2026-10-10 までは <captures>/follow）の、手を足した 1 枚どうしを並べ、指した駒の
 「動く前のマス」（前の 1 枚）と「動いた先のマス」（その手の 1 枚）の見た目の近さを測る。
 アプリと同じ量（明るさの正規化相互相関。マスの内側＝各辺 12% を削る・マスの幅の 6% までずらして
 いちばん高い値。`ikkyoku.PieceSimilarity`）を出すので、成った手と成っていない手の分かれ目から
@@ -14,10 +14,10 @@
 使い方（numpy と Pillow が要る）:
 
     python promo_similarity.py --logs "<ログのある場所>/ikkyoku-follow_20261010.log" [--logs ...]
-                               [--follow "<captures>/follow"] [--csv out.csv]
+                               [--follow "%TEMP%/ikkyoku/follow"] [--csv out.csv]
 
     --logs    ikkyoku-follow_<日付>.log（2026-10-09 までは ikkyoku_<日付>.log。何個でも。glob も可）。録画のディレクトリ名と盤の矩形・目線をここから引く
-    --follow  録画の親ディレクトリ。既定は環境変数 IKKYOKU_FOLLOW_DIR、無ければ %APPDATA%/ikkyoku/captures/follow
+    --follow  録画の親ディレクトリ。既定は環境変数 IKKYOKU_FOLLOW_DIR、無ければ %TEMP%/ikkyoku/follow
     --csv     1 手 1 行で書き出す（近さ・成ったか・録画・ファイル・手）
 
 出力は近さの低い順。成った手（PROMO）が上に固まり、成っていない手が 0.9 前後より上に来るのが期待どおり。
@@ -29,6 +29,7 @@ import glob
 import os
 import re
 import sys
+import tempfile
 
 import numpy as np
 from PIL import Image
@@ -111,7 +112,7 @@ def main():
             pass
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--logs", action="append", required=True, help="ikkyoku-follow_<日付>.log（glob 可。何個でも）")
-    ap.add_argument("--follow", default=None, help="録画の親ディレクトリ（<captures>/follow）")
+    ap.add_argument("--follow", default=None, help="録画の親ディレクトリ（%TEMP%/ikkyoku/follow）")
     ap.add_argument("--csv", default=None, help="1 手 1 行で書き出す先")
     args = ap.parse_args()
 
@@ -119,7 +120,7 @@ def main():
     if not logs:
         sys.exit("ログが見つかりません: " + ", ".join(args.logs))
     follow = args.follow or os.environ.get("IKKYOKU_FOLLOW_DIR") or os.path.join(
-        os.environ.get("APPDATA", ""), "ikkyoku", "captures", "follow")
+        tempfile.gettempdir(), "ikkyoku", "follow")
     if not os.path.isdir(follow):
         sys.exit("録画のディレクトリがありません: " + follow)
 

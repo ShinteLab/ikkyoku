@@ -16,7 +16,7 @@ import (
 func initIn(t *testing.T, dir string, console bool) {
 	t.Helper()
 	old := slog.Default()
-	c, err := log.Init(log.Options{Dir: dir, Console: console})
+	c, err := log.Init(log.Options{Dir: dir, Console: console, Follow: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,8 +111,9 @@ func TestInitWithoutFile(t *testing.T) {
 
 func TestRemoveOld(t *testing.T) {
 	dir := t.TempDir()
-	old := filepath.Join(dir, log.FilePrefix+"_"+time.Now().AddDate(0, 0, -30).Format("20060102")+".log")
-	recent := filepath.Join(dir, log.FilePrefix+"_"+time.Now().AddDate(0, 0, -3).Format("20060102")+".log")
+	// 1 週間（KeepDays）を過ぎたものだけ消す（2026-10-11 に 14 日から縮めた）。
+	old := filepath.Join(dir, log.FilePrefix+"_"+time.Now().AddDate(0, 0, -(log.KeepDays+1)).Format("20060102")+".log")
+	recent := filepath.Join(dir, log.FilePrefix+"_"+time.Now().AddDate(0, 0, -(log.KeepDays-1)).Format("20060102")+".log")
 	other := filepath.Join(dir, log.FilePrefix+"_memo.log")
 	oldFollow := filepath.Join(dir, log.NamedFile(log.FollowName)+"_"+time.Now().AddDate(0, 0, -30).Format("20060102")+".log")
 	for _, p := range []string{old, recent, other, oldFollow} {
@@ -239,7 +240,7 @@ func TestNamedFileLazy(t *testing.T) {
 func initDiag(t *testing.T, dir string, diag bool) {
 	t.Helper()
 	old := slog.Default()
-	c, err := log.Init(log.Options{Dir: dir, Diag: diag})
+	c, err := log.Init(log.Options{Dir: dir, Diag: diag, Follow: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -323,5 +324,59 @@ func TestDiagLevelsFile(t *testing.T) {
 	log.Diag.Info("心拍を検知")
 	if names, _ := filepath.Glob(filepath.Join(dir2, log.NamedFile(log.DiagName)+"_*.log")); len(names) != 0 {
 		t.Errorf("diag level from the levels file should win: %v", names)
+	}
+}
+
+// 設定「中継の録画とログを残す（デバッグ）」が切ってあれば、追従のログはファイルに残さない（ファイルも作らない）。
+// Warn 以上は本体に出す。切り替えたその場で効く（log.Follow は Init より前に作られた Logger のまま）。
+func TestFollowSwitch(t *testing.T) {
+	dir := t.TempDir()
+	old := slog.Default()
+	c, err := log.Init(log.Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		slog.SetDefault(old)
+		c.Close()
+	})
+
+	log.Follow.Info("切ってあるあいだの行")
+	log.Follow.Warn("切ってあるあいだの警告")
+	if names, _ := filepath.Glob(filepath.Join(dir, log.NamedFile(log.FollowName)+"_*.log")); len(names) != 0 {
+		t.Errorf("切ってあるのに追従のファイルを作りました: %v", names)
+	}
+	if out := todayLog(t, dir); !strings.Contains(out, "切ってあるあいだの警告") || strings.Contains(out, "切ってあるあいだの行") {
+		t.Errorf("切ってあっても警告だけは本体に出るはず:\n%s", out)
+	}
+
+	log.SetFollow(true)
+	log.Follow.Info("入れたあとの行")
+	if out := todayFile(t, dir, log.NamedFile(log.FollowName)); !strings.Contains(out, "入れたあとの行") {
+		t.Errorf("入れたのに追従のファイルに出ません:\n%s", out)
+	}
+	log.SetFollow(false)
+	log.Follow.Info("また切ったあとの行")
+	if out := todayFile(t, dir, log.NamedFile(log.FollowName)); strings.Contains(out, "また切ったあとの行") {
+		t.Errorf("切ったのに追従のファイルに出ました:\n%s", out)
+	}
+}
+
+// レベルの設定は LevelsDir から読む（アプリは実行ファイルのディレクトリを渡し、ログは一時ディレクトリへ書く）。
+func TestLevelsDir(t *testing.T) {
+	dir, conf := t.TempDir(), t.TempDir()
+	os.WriteFile(filepath.Join(conf, log.LevelsFile), []byte(`{"root":"DEBUG"}`), 0o644)
+	old := slog.Default()
+	c, err := log.Init(log.Options{Dir: dir, LevelsDir: conf})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		slog.SetDefault(old)
+		c.Close()
+	})
+	log.Debug("設定で出す debug")
+	if out := todayLog(t, dir); !strings.Contains(out, "設定で出す debug") {
+		t.Errorf("LevelsDir の設定が効いていません:\n%s", out)
 	}
 }

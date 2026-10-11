@@ -63,7 +63,11 @@ description: ikkyoku（一局）の「中継を追う」（Phase 6 の追従）�
 **誤認識が起きたとき、「手が被ったのか、認識器が弱いのか」を切り分けるためのもの。**
 **見送ったフレームは残らない**（1 秒に 4 枚撮るので、残すと埋まるうえ大半は空振り）。
 
-`<captures>/follow/<開始時刻>/`（「追う」を押すたびに別のディレクトリ）:
+⚠️ **録画もログも、設定「中継の録画とログを残す（デバッグ）」を入れたときだけ残る**（2026-10-11。dev でも配る exe でも）。
+**調べたい中継を追う前に入れること**（追従のログは入れたその場から、録画は次に「追う」を押したときから）。
+どちらも 1 週間で消える。
+
+`%TEMP%\ikkyoku\follow\<開始時刻>\`（「追う」を押すたびに別のディレクトリ。2026-10-10 までは `%APPDATA%\ikkyoku\captures\follow`）:
 
 | ファイル | いつ残るか | 何が分かるか |
 |---|---|---|
@@ -84,7 +88,9 @@ description: ikkyoku（一局）の「中継を追う」（Phase 6 の追従）�
 
 ## ログの読み方
 
-**追従のログは実行ファイルの隣の `ikkyoku-follow_<日付>.log`**（`wails3 dev` なら `_cmd/ikkyoku/bin/`）。
+**追従のログは一時ディレクトリの `ikkyoku`（`%TEMP%\ikkyoku`）の `ikkyoku-follow_<日付>.log`**（dev でも配る exe でも。
+2026-10-10 までは実行ファイルの隣・`wails3 dev` なら `_cmd/ikkyoku/bin/`）。⚠️ **設定「中継の録画とログを残す（デバッグ）」を
+入れていないと作られない**。
 2026-10-10 から本体の `ikkyoku_<日付>.log` と分けた（`log.Follow`）。**ターミナルには出ない**
 （Warn 以上と、追跡を始めた・止めたの 1 行ずつ（「中継の追跡を始めました／止めました」）は本体のファイルとターミナルにも出る）。それより前の日は本体のファイルに混ざっている。追従だけ細かく見たいときは、同じ場所に
 `ikkyoku-log.json` を置いて `"loggers": [{"name": "follow", "level": "DEBUG"}]` にする
@@ -150,7 +156,7 @@ description: ikkyoku（一局）の「中継を追う」（Phase 6 の追従）�
 3. 流し終わったら、ログを手ごとに集計する:
 
    ```bash
-   PYTHONIOENCODING=utf-8 python _docs/skills/ikkyoku-follow/references/follow_report.py _cmd/ikkyoku/bin/ikkyoku-follow_<日付>.log
+   PYTHONIOENCODING=utf-8 python _docs/skills/ikkyoku-follow/references/follow_report.py "$TEMP/ikkyoku/ikkyoku-follow_<日付>.log"
    ```
 
    最後の「追う盤を決めました」から後を見て、足した手ごとに **時刻・経路（速い / 81 マス）・手・遅れ（秒）・
@@ -191,7 +197,7 @@ description: ikkyoku（一局）の「中継を追う」（Phase 6 の追従）�
 から決めた仮の値。成る手の録画が溜まったら `references/promo_similarity.py` で計り直す（numpy と Pillow が要る）:
 
 ```bash
-python _docs/skills/ikkyoku-follow/references/promo_similarity.py --logs "_cmd/ikkyoku/bin/ikkyoku-follow_202610*.log" --follow "$APPDATA/ikkyoku/captures/follow" --csv promo.csv
+python _docs/skills/ikkyoku-follow/references/promo_similarity.py --logs "$TEMP/ikkyoku/ikkyoku-follow_202610*.log" --follow "$TEMP/ikkyoku/follow" --csv promo.csv
 ```
 
 - ログから録画ごとの盤の矩形と目線を引き、手を足した 1 枚どうしで指した駒の元と行き先を比べる。近さの低い順に並び、

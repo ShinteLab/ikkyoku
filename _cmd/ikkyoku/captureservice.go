@@ -136,6 +136,8 @@ type CaptureService struct {
 
 	// followFirst は設定「中継を追うあいだは盤の読みを優先する」（`enginepriority.go`。2026-10-07）。
 	followFirst bool
+	// followDebug は設定「中継の録画とログを残す（デバッグ）」（2026-10-11。`applyFollowDebug`）。偽なら録画を残さない。
+	followDebug bool
 	// enginesLowered は外部エンジンの優先度を下げているか（戻し忘れないため）。
 	enginesLowered bool
 	// engineNames は登録してある外部エンジンの実行ファイルのパス（`main` が差し込む。設定から読む）。
@@ -1532,6 +1534,9 @@ func pickAnchor(shot shotAnchor, session string, live recognize.Signature, liveO
 
 // startFollowDir は録画の保存先を作り、**マスタ画像**を残す（2026-09-15）。
 //
+// ⚠️ **設定「中継の録画とログを残す（デバッグ）」が切ってあれば何も作らない**（2026-10-11。dev でも配る exe でも
+// この設定だけで決まる）。置き場所はログと同じ一時ディレクトリの ikkyoku の下（`followRecordRoot`）で、
+// 作るたびに 1 週間より古い録画を消す（`removeOldRecordings`）。
 // ⚠️ **マスタを残すのが要点。** 追いかける基準そのものなので、
 // **これが無いと「なぜ別の盤だと判断したか」を後から確かめられない**
 // （`recognize.Signature` は矩形と色しか持っていない）。
@@ -1542,11 +1547,18 @@ func pickAnchor(shot shotAnchor, session string, live recognize.Signature, liveO
 // ⚠️ **失敗しても追跡を止めないこと**（設計原則3）。録画はおまけで、
 // **残らなくても中継は追える。**
 func (s *CaptureService) startFollowDir(master image.Image) string {
-	base, err := ikkyoku.DefaultOutDir()
-	if err != nil {
-		log.Follow.Warn("録画の保存先が決められません", "error", err)
+	s.mu.Lock()
+	on := s.followDebug
+	s.mu.Unlock()
+	if !on {
 		return ""
 	}
+	base := followRecordRoot()
+	if base == "" {
+		log.Follow.Warn("ログを書けていないので、録画も残しません")
+		return ""
+	}
+	removeOldRecordings(base, time.Now())
 	// ⚠️ **今撮った 1 枚をそのまま使うこと**（`CaptureQuiet` が控えている）。
 	// 撮り直すと**マスタと記述子が別のフレームになる** —— 数えるのは同じ盤でも、
 	// 手が被った瞬間などに**画像と判断がずれる**。
@@ -1556,7 +1568,7 @@ func (s *CaptureService) startFollowDir(master image.Image) string {
 		img = s.fol.lastQuiet
 		s.mu.Unlock()
 	}
-	dir := filepath.Join(base, "follow", time.Now().Format("20060102-150405"))
+	dir := filepath.Join(base, time.Now().Format(followRecordLayout))
 	if img != nil {
 		if _, err := ikkyoku.SavePNGAs(img, dir, "master.png"); err != nil {
 			log.Follow.Warn("マスタ画像を残せません", "error", err)
@@ -1582,9 +1594,9 @@ func (s *CaptureService) startFollowDir(master image.Image) string {
 //wails:ignore
 func (s *CaptureService) SaveFollowFrame(number int, moves []string, guess bool) string {
 	s.mu.Lock()
-	dir, img := s.fol.followDir, s.fol.lastQuiet
+	dir, img, on := s.fol.followDir, s.fol.lastQuiet, s.followDebug
 	s.mu.Unlock()
-	if dir == "" || img == nil {
+	if dir == "" || img == nil || !on {
 		return ""
 	}
 	// ⚠️ **足せたら数え直すこと。** 残したいのは**崩れ始め**なので、
@@ -1602,6 +1614,47 @@ func (s *CaptureService) SaveFollowFrame(number int, moves []string, guess bool)
 	// 直前の「手を足しました（追跡）」と並べて、その手を決めた 1 枚に辿れるようにする（2026-10-08）。
 	log.Follow.Info("録画を残しました（追跡）", "name", name)
 	return path
+}
+
+// followRecordLayout は録画のディレクトリの名前（「追う」を押した時刻）。古いものを消すときもこれで読む。
+const followRecordLayout = "20060102-150405"
+
+// followRecordRoot は中継の録画を置くディレクトリ（ログのディレクトリの follow。2026-10-11）。ログを書けていなければ空。
+// それまでは撮った画像と同じ `%APPDATA%\ikkyoku\captures\follow` で、消す仕組みが無く 2GB 溜まっていた。
+func followRecordRoot() string {
+	if d := log.Dir(); d != "" {
+		return filepath.Join(d, "follow")
+	}
+	return ""
+}
+
+// removeOldRecordings は root の下の録画のうち、`log.KeepDays` より前に始めたものを消す（ログと同じ 1 週間）。
+// ⚠️ **名前が録画の時刻として読めるディレクトリだけ消す**（ほかのものは置いた人のもの）。消せなくても何もしない。
+func removeOldRecordings(root string, now time.Time) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return
+	}
+	limit := now.AddDate(0, 0, -log.KeepDays)
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		t, err := time.ParseInLocation(followRecordLayout, e.Name(), now.Location())
+		if err != nil || !t.Before(limit) {
+			continue
+		}
+		os.RemoveAll(filepath.Join(root, e.Name()))
+	}
+}
+
+// applyFollowDebug は設定「中継の録画とログを残す（デバッグ）」が切り替わったときに呼ばれる（`SettingsService.OnFollowDebug`）。
+// 追従のログは次の行から、録画は次に「追う」を押したときから（切ったときは次の 1 枚から残さない）。
+func (s *CaptureService) applyFollowDebug(v bool) {
+	s.mu.Lock()
+	s.followDebug = v
+	s.mu.Unlock()
+	log.SetFollow(v)
 }
 
 // followMissMax は**繋げなかった周を残す枚数の上限**。
@@ -1622,6 +1675,9 @@ const followMissMax = 12
 func (s *CaptureService) SaveFollowMiss(number int, kind string) string {
 	s.mu.Lock()
 	dir, img, n := s.fol.followDir, s.fol.lastQuiet, s.fol.followMisses
+	if !s.followDebug {
+		dir = "" // 追っている途中で設定を切った
+	}
 	// ⚠️ **同じ理由が続いているあいだは残さない**（変わり目だけ）。
 	// 「別の盤」も「変わっていない」も何十周も続くので、毎周残すと
 	// **同じ絵で上限を使い切り、そのあとの本当の変わり目が残らない。**

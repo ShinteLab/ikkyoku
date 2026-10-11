@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -92,12 +93,18 @@ type appWindows struct {
 }
 
 func main() {
-	// ログは実行ファイルの隣（ikkyoku_<日付>.log。中継の追従は ikkyoku-follow_<日付>.log）。
+	// ログは一時ディレクトリの ikkyoku（ikkyoku_<日付>.log。2026-10-11 に実行ファイルの隣から移した。1 週間で消す）。
 	// wails3 dev のときはコンソールにも出す（追従のログは出さない）
 	// （consoleLog。devbuild.go / prodbuild.go）。⚠️ **書けなくても起動は止めない。**
 	// 画面まわりの診断（心拍・表示状態・Wails と WebView2 のログ）は dev のときだけ
 	// ikkyoku-diag_<日付>.log に残す（devBuild。黒い画面の再現待ち。_docs/blackscreen.md）。
-	logCloser, logErr := log.Init(log.Options{Console: consoleLog, Diag: devBuild})
+	// 中継の追従（ikkyoku-follow_<日付>.log）は設定「中継の録画とログを残す（デバッグ）」のときだけ（下で設定を読んでから入れる）。
+	// レベルの設定（ikkyoku-log.json）は今までどおり実行ファイルの隣に置く。
+	logOpts := log.Options{Console: consoleLog, Diag: devBuild}
+	if exe, err := os.Executable(); err == nil {
+		logOpts.LevelsDir = filepath.Dir(exe)
+	}
+	logCloser, logErr := log.Init(logOpts)
 	if logErr != nil {
 		log.Warn("ログの準備で問題がありました", "error", logErr)
 	}
@@ -296,6 +303,11 @@ func main() {
 	captureSvc.onHideRefused = studySvc.FollowHideRefused
 	// 「中継を追うあいだは盤の読みを優先する」（2026-10-07。`enginepriority.go`）。
 	captureSvc.followFirst = cfg.FollowFirst
+	// 「中継の録画とログを残す（デバッグ）」（2026-10-11）。切ってあっても古い録画は消す（ログと同じ 1 週間）。
+	captureSvc.applyFollowDebug(cfg.FollowDebug)
+	if root := followRecordRoot(); root != "" {
+		go removeOldRecordings(root, time.Now())
+	}
 	captureSvc.engineNames = func() []string {
 		var out []string
 		for _, e := range settingsSvc.Config().Engines {
@@ -304,6 +316,7 @@ func main() {
 		return out
 	}
 	settingsSvc.OnFollowFirst = captureSvc.applyFollowFirst
+	settingsSvc.OnFollowDebug = captureSvc.applyFollowDebug
 	// 評価値グラフの切り離し（解析タブのスプリットバーのトグル / グラフ窓を閉じる）。
 	// **窓を出し入れするのは CaptureService**（SettingsService はウィンドウを持たない）。
 	settingsSvc.OnEvalGraphDetached = captureSvc.applyEvalGraphDetached

@@ -1236,6 +1236,16 @@ export function mountMainScreen(root: HTMLElement): void {
             </span>
           </span>
         </label>
+        <label class="setting">
+          <input id="follow-debug" type="checkbox" />
+          <span class="setting-body">
+            <span class="setting-title" data-hint="hint-followdebug">中継の録画とログを残す（デバッグ）</span>
+            <span id="hint-followdebug" class="setting-note is-hint">
+              中継を追うとき、手を決めた画像と追従の細かいログを一時フォルダの ikkyoku に残します。
+              追従がおかしいときに調べるためのものです。1 週間より古いものは消えます。
+            </span>
+          </span>
+        </label>
 
         <details id="fold-analyze" class="setting-group setting-fold">
           <summary class="setting-fold-head">
@@ -4785,6 +4795,8 @@ ${st.turnLabel}${n}`;
   const clickThrough = root.querySelector<HTMLInputElement>("#click-through")!;
   // 中継を追うあいだは盤の読みを優先する（2026-10-07）。**切り替えたその場で効く**（追っている最中なら）。
   const followFirst = root.querySelector<HTMLInputElement>("#follow-first")!;
+  // 中継の録画とログを残す（デバッグ。2026-10-11）。追従のログは切り替えたその場から、録画は次に追い始めたときから。
+  const followDebug = root.querySelector<HTMLInputElement>("#follow-debug")!;
   // 認識器の読み込み元。**「焼き込みがあるビルドか」は Go が返す**
   // （`sutemeEmbedAvailable`）。⚠️ **フロントで判定できない**（バイナリの中身の話）。
   const sutemeSource = root.querySelector<HTMLSelectElement>("#suteme-source")!;
@@ -5383,6 +5395,7 @@ ${st.turnLabel}${n}`;
     fitOnStartup: boolean;
     clickThrough: boolean;
     followFirst: boolean;
+    followDebug: boolean;
     // 評価値グラフを別ウィンドウに切り離しているか（2026-09-08）。
     evalGraphDetached: boolean;
     // **候補手の面**を別ウィンドウに切り離しているか（2026-09-08）。
@@ -5428,6 +5441,7 @@ ${st.turnLabel}${n}`;
     fitOnStartup.checked = s.fitOnStartup;
     clickThrough.checked = s.clickThrough;
     followFirst.checked = s.followFirst;
+    followDebug.checked = s.followDebug;
     // 配色。選択肢は Go 側が返したものをそのまま並べる（**フロントに表を書かない**）。
     if (themeSelect.options.length !== (s.themes ?? []).length) {
       themeSelect.replaceChildren();
@@ -6135,6 +6149,24 @@ ${st.turnLabel}${n}`;
         settingsStatus.classList.add("is-error");
       } finally {
         followFirst.disabled = false;
+      }
+    })();
+  });
+
+  followDebug.addEventListener("change", () => {
+    void (async () => {
+      const want = followDebug.checked;
+      followDebug.disabled = true;
+      settingsStatus.textContent = "";
+      settingsStatus.classList.remove("is-error");
+      try {
+        showSettings(await SettingsService.SetFollowDebug(want));
+      } catch (err) {
+        followDebug.checked = !want;
+        settingsStatus.textContent = `設定を保存できませんでした: ${String(err)}`;
+        settingsStatus.classList.add("is-error");
+      } finally {
+        followDebug.disabled = false;
       }
     })();
   });

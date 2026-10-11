@@ -31,6 +31,8 @@ type AppSettings struct {
 	ClickThrough bool `json:"clickThrough"`
 	// FollowFirst は中継を追っているあいだ、盤の読みを外部エンジンより優先するか（2026-10-07。Windows のみ）。
 	FollowFirst bool `json:"followFirst"`
+	// FollowDebug は中継を追うときに、デバッグ用の録画とログを残すか（2026-10-11。`Config.FollowDebug`）。
+	FollowDebug bool `json:"followDebug"`
 	// EvalGraphDetached は評価値グラフを**別ウィンドウに切り離しているか**
 	// （2026-09-08）。
 	//
@@ -360,6 +362,9 @@ type SettingsService struct {
 	// OnFollowFirst は「中継を追うあいだは盤の読みを優先する」を切り替えたときに呼ぶ（2026-10-07）。
 	// ⚠️ **設定のロックを持ったまま呼ぶ**ので、先で `Config()` を呼び返さないこと（値は引数で渡す）。
 	OnFollowFirst func(bool)
+	// OnFollowDebug は「中継の録画とログを残す（デバッグ）」を切り替えたときに呼ぶ（2026-10-11）。
+	// ⚠️ **設定のロックを持ったまま呼ぶ**ので、先で `Config()` を呼び返さないこと（値は引数で渡す）。
+	OnFollowDebug func(bool)
 
 	// OnSutemeSource は「認識器の読み込み元」を切り替えたときに呼ぶ
 	// （`CaptureService.applyRecognizerSource`。その場で読み直す）。
@@ -475,6 +480,7 @@ func (s *SettingsService) settings() AppSettings {
 		FitOnStartup:      s.cfg.FitOnStartup,
 		ClickThrough:      s.cfg.ClickThrough,
 		FollowFirst:       s.cfg.FollowFirst,
+		FollowDebug:       s.cfg.FollowDebug,
 		EvalGraphDetached: s.cfg.EvalGraphDetached,
 		StudyPaneDetached: s.cfg.StudyPaneDetached,
 		MovePaneDetached:  s.cfg.MovePaneDetached,
@@ -1215,6 +1221,19 @@ func (s *SettingsService) SetFollowFirst(v bool) (AppSettings, error) {
 	st, err := s.save(func(cfg *ikkyoku.Config) { cfg.FollowFirst = v })
 	if err == nil && s.OnFollowFirst != nil {
 		s.OnFollowFirst(v)
+	}
+	return st, err
+}
+
+// SetFollowDebug は「中継の録画とログを残す（デバッグ）」を切り替えて保存し、**その場で効かせる**
+// （`OnFollowDebug`。追従のログは次の行から、録画は次に「追う」を押したときから）。
+// ⚠️ **保存できたときだけ効かせること**（`SetFollowFirst` と同じ）。
+func (s *SettingsService) SetFollowDebug(v bool) (AppSettings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st, err := s.save(func(cfg *ikkyoku.Config) { cfg.FollowDebug = v })
+	if err == nil && s.OnFollowDebug != nil {
+		s.OnFollowDebug(v)
 	}
 	return st, err
 }
