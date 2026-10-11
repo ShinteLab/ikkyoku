@@ -414,7 +414,7 @@ func relayConf(v [81]float64) *position.CellCost {
 	return c
 }
 
-// relayShot / relayCost は録画 `follow/20261007-152341/002-2e2d-guess.png` を読み直した盤と確信度。
+// relayShot / relayCost は 2026-10-07 の中継の録画で、△6五桂 ▲同桂 △同歩 ▲2四歩 と進んだ 1 枚を読み直した盤と確信度。
 const relayShot = "ln1g3nl/1gs3p2/1pp1s2p1/p4b1Pp/3p1p3/P1P1p4/1P1P1PSLP/2KGGG3/L7+b"
 
 var relayCost = [81]float64{
@@ -431,7 +431,7 @@ var relayCost = [81]float64{
 
 // ⚠️ **種類だけの読み違いが何マスかあっても、修復で繋がること**（`kindOnlyWeight`。2026-10-07 に実機で踏んだ）。
 //
-// **実機の症状**（録画 `follow/20261007-152341/002-2e2d-guess.png`）: △6五桂 のあと ▲同桂 △同歩 ▲2四歩 と
+// **実機の症状**（2026-10-07 の中継の録画）: △6五桂 のあと ▲同桂 △同歩 ▲2四歩 と
 // 進んだ 1 枚で、8二 の後手玉を「金」（確信度 0.80。この中継では毎回）、2七 の飛を「香」（0.56）、
 // 4八 の銀を「金」（0.39）と読んだ。種類の違いを満額で数えると、厳密一致は駒が消えて湧いたことになって
 // 「隔たりが大きすぎます」、修復も 3 マスで予算 1.0 を超えて落ちた。そこへ `Rank` が ▲2四歩 だけを
@@ -447,7 +447,7 @@ func TestConnectRepairForgivesKindMisreads(t *testing.T) {
 	}
 }
 
-// gameShot / gameCost は録画 `follow/20261008-040431/021-8g8f_8e8f_4h3g.png` を読み直した盤と確信度
+// gameShot / gameCost は 2026-10-08 のゲーム画面の録画で、▲8六歩 △同歩 ▲3七銀 と進んだ 1 枚を読み直した盤と確信度
 // （空きは 0.15）。1四 の後手の歩を香と読んでいる（0.65）ほかは正しい。
 const gameShot = "ln1g2snl/3s1kg2/p1pppp1p1/6p1l/4b4/Pr4PRP/2PPPPS2/1BG6/LNS1KG1NL"
 
@@ -482,10 +482,10 @@ func TestConnectRepairPrefersCheaperDeeper(t *testing.T) {
 	}
 }
 
-// anagumaAfter8d は中継（2026-10-08。録画 `follow/20261008-101441/`）の ▲8四歩 まで進めた局面（後手は居飛車穴熊）。
+// anagumaAfter8d は中継（2026-10-08 の録画）の ▲8四歩 まで進めた局面（後手は居飛車穴熊）。
 const anagumaAfter8d = "kn2g2nl/lsg2srb1/pppppp1pp/1P4p2/3P5/2P6/P1BSPPPPP/1R4K2/LN1G1GSNL w - 1"
 
-// anagumaShot3 / anagumaCost3 は録画 `x005-same-3.png` を読み直した盤と確信度（△同歩 ▲同飛 △8三歩 のあと）。
+// anagumaShot3 / anagumaCost3 は同じ録画の、繋がらなかった周の 1 枚を読み直した盤と確信度（△同歩 ▲同飛 △8三歩 のあと）。
 // 動いていない 6 マスで種類を読み違えている: 5一 の金と 2一 の桂を「歩」、3八 の玉を「金」、4九 の金・3九 の銀・
 // 1九 の香を「歩」。
 const anagumaShot3 = "kn2p2pl/lsg2srb1/pppppp1pp/1R4p2/3P5/2P6/P1BSPPPPP/6G2/LN1G1PPNP"
@@ -502,7 +502,7 @@ var anagumaCost3 = [81]float64{
 	1.00, 1.00, 0.15, 0.82, 0.15, 0.34, 0.77, 1.00, 0.51,
 }
 
-// anagumaShot2 / anagumaCost2 は録画 `x005-same-1.png`（△同歩 ▲同飛 のあと）。2一 の桂・3二 の飛・2九 の桂を「歩」、
+// anagumaShot2 / anagumaCost2 は同じ録画の、それより前に繋がらなかった周の 1 枚（△同歩 ▲同飛 のあと）。2一 の桂・3二 の飛・2九 の桂を「歩」、
 // 2二 の角と 3八 の玉を「銀」と読み、8四 に来た飛も「歩」と読んでいる。
 const anagumaShot2 = "kn2g2pl/lsg2sps1/p1pppp1pp/1P4p2/3P5/2P6/P1BSPPPPP/6S2/LN1G1GSPL"
 
@@ -518,7 +518,7 @@ var anagumaCost2 = [81]float64{
 	1.00, 1.00, 0.15, 0.82, 0.15, 0.66, 0.43, 0.81, 1.00,
 }
 
-// furibishaShot / furibishaCost は同じ日の別の中継（録画 `follow/20261008-103837/013-4d3e_2g2f-guess.png`）を読み直した盤と確信度。
+// furibishaShot / furibishaCost は同じ日の別の中継（振り飛車の対局）の録画の 1 枚を読み直した盤と確信度。
 // ▲3五同歩 のあと △2六歩 ▲同歩 △同銀 と進んだ 1 枚で、8六 の角・7六 の飛・7七 の桂を「歩」、4八 の金を「角」、
 // 3八 の玉を「金」、2二 の飛を「香」、1九 の香を「歩」と読んでいる。
 const furibishaShot = "kn5nl/lsgg3l1/ppppbp2p/4p4/P1PP2s2/1PP4P1/2PSPP2P/4BGGS1/L6NP"
@@ -787,7 +787,7 @@ func BenchmarkConnectRelay(b *testing.B) {
 
 // ⚠️ **読みの弱い駒を、手を足して説明しないこと**（`cheaperDeeper` は確かな読みのマスを覆したときだけ。2026-10-08）。
 //
-// 光の差し込んだ 1五 を「先手の香」（0.40）と読んだ 1 枚（録画 `follow/20261008-140929/`）。▲2五歩 で 1五 を覆す（0.40）
+// 光の差し込んだ 1五 を「先手の香」（0.40）と読んだ 1 枚（2026-10-08 の中継の録画。盤の右側に光が差し込んでいた）。▲2五歩 で 1五 を覆す（0.40）
 // のが正しいのに、1 手深く探して ▲1五角打 △2五角打 ▲同歩（覆さずに済む）を採った。
 func TestConnectRepairDoesNotExplainWeakPiece(t *testing.T) {
 	from := mustPos(t, "ln1g3nl/1ks3g2/1ppppp1pp/p4sr2/6p2/PPP2P1P1/1SNPPSP1P/1KG1G2R1/L6NL b Bb 1")
@@ -811,7 +811,7 @@ func TestConnectRepairDoesNotExplainWeakPiece(t *testing.T) {
 
 // ⚠️ **何も指していないほうが安く説明できるなら、修復で手を足さないこと**（2026-10-08 に実機で踏んだ）。
 //
-// 録画 `follow/20261008-142803/020-2c1c_1a1c.png` を読み直した盤と確信度。盤の右側に光が当たり、2三 のと金を「空き」（0.15）、
+// 同じ中継の少しあとの録画で、追従が ▲1三と △同桂 を足した 1 枚を読み直した盤と確信度。盤の右側に光が当たり、2三 のと金を「空き」（0.15）、
 // 1三 の歩を「香」と読んでいる（1〜2 筋は実際には動いていない）。`staleKinds` で予算が空いたぶん、▲1三と △同桂（費用 0.90）が
 // 予算に収まって入った。何も指していなければ 0.15 で済む。
 func TestConnectRepairNotWorseThanNothing(t *testing.T) {
@@ -834,7 +834,7 @@ func TestConnectRepairNotWorseThanNothing(t *testing.T) {
 	}
 }
 
-// hakureiRoot / hakureiLine / hakureiShot / hakureiCost は録画 `follow/20261010-122957/009-…-guess.png`（中継）の根・本譜と、
+// hakureiRoot / hakureiLine / hakureiShot / hakureiCost は 2026-10-10 の中継（白玲戦）の録画で、大盤と解説の画面のあとに写った 1 枚の根・本譜と、
 // その 1 枚を読み直した盤と確信度。大盤と解説の画面のあいだに ▲2五桂 △4五桂 ▲同歩 △2五歩 ▲4四歩 △2三飛 の 6 手
 // （△2五歩 と △2三飛 は入れ替わりうる）が進んだ。
 const hakureiRoot = "l6rl/1kg2b3/1png1snpp/p1psppp2/7P1/P1PSSPP2/1P1P2N1P/1BK1G4/LN1G3RL b 2P 1"
@@ -939,7 +939,7 @@ func BenchmarkConnectDeep(b *testing.B) {
 
 // ⚠️ **根から動いていない成駒のマスは、厳密一致でも見ないこと**（`staleKinds.promo`。2026-10-10 に中継で踏んだ）。
 //
-// **実機の症状**（録画 `follow/20261010-153156/011-…-guess.png`）: 実際は △5八歩成（5八 の金を取る）▲同金 の 2 手。
+// **実機の症状**（2026-10-10 の中継の録画）: 実際は △5八歩成（5八 の金を取る）▲同金 の 2 手。
 // 認識器が、動いていない 1一 の先手の馬を「後手の金」と読み、深く探すと △5八歩成 ▲5七金 △1二金打 ▲5八金 △1一金
 // （後手が馬を取る）の 5 手がぴったり合って通った。成駒は学習データにほぼ入らず、先後まで外す。
 // ⚠️ **見えないマスがある 1 枚では今までどおり見る**（`TestConnectUnseenDropsCountBound`）。

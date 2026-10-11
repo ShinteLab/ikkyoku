@@ -199,7 +199,7 @@ func TestFollowRewindNeedsTwoFrames(t *testing.T) {
 	}
 }
 
-// furibishaFrame / furibishaFrameConf は 2026-10-08 の中継の録画 `follow/20261008-103837/013-4d3e_2g2f-guess.png` を
+// furibishaFrame / furibishaFrameConf は 2026-10-08 の中継（振り飛車の対局）の録画で、▲3五同歩 のあと △2六歩 ▲同歩 △同銀 と進んだ 1 枚を
 // 読み直した盤と確信度（`position` の `TestConnectRepairIgnoresStaleKindMisreads` と同じ 1 枚）。
 const furibishaFrame = "kn5nl/lsgg3l1/ppppbp2p/4p4/P1PP2s2/1PP4P1/2PSPP2P/4BGGS1/L6NP"
 
@@ -239,7 +239,7 @@ func TestFollowRewindRecoversMissedMove(t *testing.T) {
 	}
 }
 
-// glareFrame / glareFrameConf は 2026-10-08 の中継の録画 `follow/20261008-140929/018-B@1e_B@2e_2f2e-guess.png` を
+// glareFrame / glareFrameConf は 2026-10-08 の中継の録画で、追従が ▲1五角打 △2五角打 ▲同歩 を推測で足した 1 枚を
 // 読み直した盤と確信度。**盤の右側（1〜2 筋）に光が差し込み**、空きの 1五 を「先手の香」（0.40）と読んでいる。
 // 実際は ▲2五歩 だけで、先手・後手とも角を 1 枚ずつ持っている。
 const glareFrame = "ln1g3pp/1ks3g2/1ppppp1pl/p4sr2/6pPL/PPP2P3/1SPPPSP1P/1KG1P2R1/L6PL"
