@@ -228,8 +228,6 @@ Claude Code でスキルとして使いたい人は、各自の `.claude/skills/
   `followFirst`（外部エンジンの優先度を下げる。止めたら戻す）
 - **録画と追従のログはデバッグの記録**（2026-10-11）。⚠️ **設定 `followDebug` を入れたときだけ残す**（dev でも配る exe でも）・
   置き場所は一時ディレクトリの `ikkyoku`・1 週間で消す
-- **追従は、録った中継を `ikkyoku-trim` で詰めて再生して確かめる**（2026-10-11）。⚠️ **画像を ikkyoku の中へ直接流し込まない**
-  （撮る・枠を合わせる・撮るタイミングが本番と違う）
 - ⚠️ **足す前に `TODO.md` 4 を読む**（今の作りは継ぎ接ぎ）。調整とデバッグはスキル `ikkyoku-follow`
 
 ## モジュール / 位置づけ
@@ -294,7 +292,7 @@ Claude Code でスキルとして使いたい人は、各自の `.claude/skills/
 | `guide/` | ガイド枠の寸法と幾何（自動フィット。ウィンドウにも Wails にも依存しない） |
 | `piecefont/` / `training/` | 端末のフォントから駒の字を焼く / 訂正した局面を `suteme` へ登録するクライアント |
 | `_cmd/ikkyoku/` | **Wails3 アプリ**（独立したネストモジュール。**Wails の口が要るものだけ**。CLI は無い）。ウィンドウ 5 枚（枠 / メイン画面 / 評価値グラフ / 候補手 / 手順）・キャプチャ領域は枠のクライアント矩形そのもの。`_cmd/ikkyoku/AGENTS.md`、画面は `_cmd/ikkyoku/frontend/src/AGENTS.md` |
-| `_cmd/ikkyoku-trim/` | **中継の録画を盤が変わった前後だけに詰める開発用のコマンド**（2026-10-11。ルートモジュールの中・Wails を使わない・ffmpeg を外から呼ぶ）。詰めた動画を再生して ikkyoku に追わせ、追従を確かめる。`_cmd/ikkyoku-trim/AGENTS.md` |
+| `_cmd/ikkyoku-trim/` | **録画した動画を、盤が変わった前後だけに詰める開発用のコマンド**（2026-10-11。ルートモジュールの中・Wails を使わない・ffmpeg を外から呼ぶ）。ikkyoku アプリとは関わらない。`_cmd/ikkyoku-trim/README.md` |
 
 ## ビルドと実機確認 — スキル `ikkyoku-build`
 

@@ -45,7 +45,7 @@ func cut(o options, p Plan) error {
 //   - ⚠️ **区間の時刻に動画の最初の時刻（`StartTime`）を足す**（mpeg-ts などは 0 から始まらない）
 //   - ⚠️ **画面の大きさが違う動画が混ざったら、最初の動画の大きさに合わせる**（つなぐには揃っている必要がある）。
 //     画素が変わるので、黙らずに知らせる
-//   - 音は入れない（追従には要らない）
+//   - 音は入れない（盤の変化を見るための動画なので要らない）
 func cutArgs(p Plan, out string, crf int) (script string, args []string, err error) {
 	byFile := map[string][]Segment{}
 	for _, s := range p.Segments {

@@ -1,7 +1,7 @@
-// ikkyoku-trim は中継の録画を「盤が変わった前後だけ」に詰める（2026-10-11。TODO 6・`_docs/design-follow.md`）。
+// ikkyoku-trim は録画した動画を「盤が変わった前後だけ」に詰める（2026-10-11）。使い方と仕組みは README.md。
 //
-// 人が録画ソフトで録った中継を、画面で再生して ikkyoku に本物の中継として追わせるための下ごしらえ。
-// 何時間もの録画から、盤が変わった前後（既定は 10 秒ずつ）だけを残してつなぎ、1 本の動画にする。
+// 将棋の対局を録画ソフトで録った動画（何時間にもなる）から、盤が変わった前後（既定は 10 秒ずつ）だけを残してつなぎ、
+// 1 本の短い動画にする。動画を詰めるだけの道具で、ikkyoku アプリとは関わらない。
 //
 //	go run ./_cmd/ikkyoku-trim [フラグ] <動画ファイルかディレクトリ>...
 //
@@ -11,8 +11,7 @@
 //     残す区間を JSON に書く（`-segments` で、手で直した JSON から 2 段目だけをやり直せる）
 //  2. 切ってつなぐ（`cut.go`）: 区間を ffmpeg の select に渡し、1 本の動画に書き出す
 //
-// ⚠️ **ikkyoku アプリ（`_cmd/ikkyoku`）には何も足さない**（ユーザーの判断）。ikkyoku から借りるのは
-// `ikkyoku.FrameDiff`（変化を測る）と `recognize.DetectRegion`（盤の矩形を探す）だけ。
+// ikkyoku から借りるのは `ikkyoku.FrameDiff`（変化を測る）と `recognize.DetectRegion`（盤の矩形を探す）だけ。
 // ⚠️ **ffmpeg は外部のコマンドとして呼ぶ**（cgo で繋がない。PureGo の方針）。
 package main
 
@@ -47,8 +46,8 @@ func run(args []string) error {
 	fs.StringVar(&o.out, "o", "", "書き出す動画（既定は最初の入力の隣の <名前>-trim.mp4。区間の JSON は同じ名前の .json）")
 	fs.DurationVar(&o.before, "before", 10*time.Second, "変化の前に残す長さ")
 	fs.DurationVar(&o.after, "after", 10*time.Second, "変化の後に残す長さ")
-	fs.Float64Var(&o.fps, "fps", 4, "変化を探すときに 1 秒あたり何コマ見るか（ikkyoku の追従は 250ms ごと）")
-	fs.Float64Var(&o.threshold, "threshold", defaultThreshold, "盤の矩形の中で、明るさが変わった点の割合がこれ以上なら変化（ikkyoku のふるいは 0.0015）")
+	fs.Float64Var(&o.fps, "fps", 4, "変化を探すときに 1 秒あたり何コマ見るか")
+	fs.Float64Var(&o.threshold, "threshold", defaultThreshold, "盤の矩形の中で、明るさが変わった点の割合がこれ以上なら変化")
 	fs.Float64Var(&o.scene, "scene", defaultScene, "画面全体で、明るさが変わった点の割合がこれ以上なら画面の切り替え（盤を探し直す）")
 	fs.StringVar(&o.region, "region", "", "盤の矩形を動画の画素で x,y,w,h と指定する（既定は自動で探す）")
 	fs.StringVar(&o.segments, "segments", "", "変化を探さず、この JSON の区間で切ってつなぐ（1 段目の JSON を手で直したとき）")
