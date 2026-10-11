@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"image/color"
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 
 	"github.com/ShinteLab/ikkyoku"
@@ -61,6 +63,8 @@ func scan(o options, inputs []Input) (Plan, error) {
 		visible = true
 		p.Boards = append(p.Boards, BoardNote{File: inputs[0].File, Rect: o.fixed, How: "region"})
 	}
+	// pendingRegion は -region の対局の盤を、最初のコマで画像にして知らせるか。
+	pendingRegion := !o.fixed.Empty()
 	for _, in := range inputs {
 		frame := image.Rect(0, 0, in.Width, in.Height)
 		// ⚠️ **画面の大きさが違う動画に変わったら、対局の盤を大きさの比で引き伸ばす**（探し直すと大盤を拾いうる）。
@@ -79,6 +83,10 @@ func scan(o options, inputs []Input) (Plan, error) {
 					g.remember(cur)
 				}
 			}()
+			if pendingRegion {
+				pendingRegion = false
+				reportBoard(o, cur, game.Board)
+			}
 			add := func(c Change, before, after float64) {
 				c.File, c.Time, c.At, c.Before, c.After = in.File, t, in.Offset+t, before, after
 				p.Changes = append(p.Changes, c)
@@ -97,11 +105,7 @@ func scan(o options, inputs []Input) (Plan, error) {
 					*game, visible = recognize.Signature{Frame: frame, Board: r.Rect}, true
 					p.Boards = append(p.Boards, BoardNote{File: in.File, Time: t, Rect: r.Rect, Confidence: r.Confidence, How: "detect"})
 					fmt.Fprintf(os.Stderr, "  %s: 対局の盤を決めました %v（信頼度 %.2f）\n", seconds(t), r.Rect, r.Confidence)
-					if o.boardImage != "" {
-						if err := savePNG(o.boardImage, cur.SubImage(r.Rect.Inset(-8).Intersect(frame))); err != nil {
-							fmt.Fprintf(os.Stderr, "  ⚠ 対局の盤の画像を残せません: %v\n", err)
-						}
-					}
+					reportBoard(o, cur, r.Rect)
 				}
 				return nil
 			}
@@ -157,6 +161,41 @@ func scan(o options, inputs []Input) (Plan, error) {
 	last := inputs[len(inputs)-1]
 	p.Total = last.Offset + last.Duration
 	return p, nil
+}
+
+// reportBoard は対局の盤を決めたコマを、選んだ矩形を赤い枠で囲んだ画像にして残し、**その場所を標準出力に出す**（2026-10-11）。
+//
+// 処理を待って詰めた動画を見たら全然違う盤だった、を避けるため。人は処理が始まってすぐにこの画像を見て、対局の盤を
+// 選べているかを確かめる（問い合わせはしない。違っていたら止めて `-region` で渡し直す）。⚠️ **コマ全体を残す**
+// （盤の部分だけだと、画面のどの盤を選んだのかが分からない）。残せなくても処理は止めない。
+func reportBoard(o options, img *image.RGBA, rect image.Rectangle) {
+	if o.boardImage == "" {
+		return
+	}
+	out := image.NewRGBA(img.Bounds())
+	copy(out.Pix, img.Pix)
+	outline(out, rect, 4, color.RGBA{255, 0, 0, 255})
+	if err := savePNG(o.boardImage, out); err != nil {
+		fmt.Fprintf(os.Stderr, "  ⚠ 対局の盤の画像を残せません: %v\n", err)
+		return
+	}
+	path := o.boardImage
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
+	fmt.Fprintf(o.stdout, "対局の盤: %s\n", path)
+}
+
+// outline は img の rect のまわりに太さ w の枠を描く（はみ出した部分は描かない）。
+func outline(img *image.RGBA, rect image.Rectangle, w int, c color.RGBA) {
+	outer := rect.Inset(-w).Intersect(img.Bounds())
+	for y := outer.Min.Y; y < outer.Max.Y; y++ {
+		for x := outer.Min.X; x < outer.Max.X; x++ {
+			if !image.Pt(x, y).In(rect) {
+				img.SetRGBA(x, y, c)
+			}
+		}
+	}
 }
 
 // gameBoard は対局の盤と、それが映っているかの見分け方。

@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"image"
 	"image/color"
 	"image/draw"
+	"image/png"
 	"math"
 	"os"
 	"os/exec"
@@ -167,6 +169,10 @@ func TestTrimEndToEnd(t *testing.T) {
 	if len(p.Segments) != 2 || p.Segments[0].File == p.Segments[1].File {
 		t.Errorf("2 本それぞれから 1 区間ずつのはず: %+v", p.Segments)
 	}
+	// -region でも、最初のコマを対局の盤の画像にして残す（指定した位置が合っているかの確かめ）。
+	if _, err := os.Stat(strings.TrimSuffix(out, ".mp4") + "-board.png"); err != nil {
+		t.Errorf("-region の対局の盤の画像がありません: %v", err)
+	}
 	in, err := probe("ffprobe", out)
 	if err != nil {
 		t.Fatal(err)
@@ -239,8 +245,10 @@ func TestScanKeepsOnlyGameBoard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var stdout bytes.Buffer
+	boardImage := filepath.Join(t.TempDir(), "rec-trim-board.png")
 	o := options{fps: 4, threshold: defaultThreshold, scene: defaultScene, before: time.Second, after: time.Second,
-		switchKeep: time.Second, ffmpeg: "ffmpeg", detect: boxDetector}
+		switchKeep: time.Second, ffmpeg: "ffmpeg", detect: boxDetector, boardImage: boardImage, stdout: &stdout}
 	p, err := scan(o, inputs)
 	if err != nil {
 		t.Fatal(err)
@@ -255,6 +263,28 @@ func TestScanKeepsOnlyGameBoard(t *testing.T) {
 	}
 	if len(p.Boards) != 1 || p.Boards[0].Rect.Dx() < 110 || p.Boards[0].Rect.Dx() > 130 {
 		t.Errorf("対局の盤は最初に見つけた青い四角のはず: %+v", p.Boards)
+	}
+
+	// ⚠️ **対局の盤を決めたら、そのコマ全体を赤い枠付きの画像にして残し、場所を標準出力に出すこと**（2026-10-11。
+	// 処理を待って詰めた動画を見たら全然違う盤だった、を避けるため、人が始まってすぐに確かめる）。
+	if !strings.Contains(stdout.String(), "対局の盤: ") || !strings.Contains(stdout.String(), filepath.Base(boardImage)) {
+		t.Errorf("標準出力に対局の盤の画像の場所が出ていません: %q", stdout.String())
+	}
+	f, err := os.Open(boardImage)
+	if err != nil {
+		t.Fatalf("対局の盤の画像がありません: %v", err)
+	}
+	defer f.Close()
+	img, err := png.Decode(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if img.Bounds().Dx() != 320 || img.Bounds().Dy() != 240 {
+		t.Errorf("コマ全体ではありません: %v", img.Bounds())
+	}
+	r := p.Boards[0].Rect
+	if c := color.RGBAModel.Convert(img.At(r.Min.X-2, r.Min.Y-2)).(color.RGBA); c.R != 255 || c.G != 0 || c.B != 0 {
+		t.Errorf("選んだ盤のまわりが赤い枠ではありません: %v", c)
 	}
 }
 

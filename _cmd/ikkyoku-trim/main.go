@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"image"
 	"image/png"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -66,6 +67,7 @@ func run(args []string) error {
 		return err
 	}
 	o.detect = recognize.DetectRegion
+	o.stdout = os.Stdout
 	if o.fps <= 0 {
 		return fmt.Errorf("-fps は 0 より大きくしてください")
 	}
@@ -148,8 +150,10 @@ type options struct {
 	switchKeep    time.Duration
 	// fixed は -region で指定した対局の盤の矩形（空なら最初に見つけた盤）。
 	fixed image.Rectangle
-	// boardImage は対局の盤を決めたコマを切り出して残す先（空なら残さない）。
+	// boardImage は対局の盤を決めたコマを画像にして残す先（空なら残さない。場所は標準出力に出す）。
 	boardImage string
+	// stdout は対局の盤の画像の場所を出す先（既定は標準出力。テストで差し替える）。
+	stdout io.Writer
 	// detect は盤を探す関数（既定は recognize.DetectRegion。テストで差し替える）。
 	detect detector
 }
