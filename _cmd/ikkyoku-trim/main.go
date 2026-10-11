@@ -20,12 +20,14 @@ import (
 	"flag"
 	"fmt"
 	"image"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/ShinteLab/ikkyoku"
+	"github.com/ShinteLab/ikkyoku/recognize"
 )
 
 func main() {
@@ -48,8 +50,9 @@ func run(args []string) error {
 	fs.DurationVar(&o.after, "after", 10*time.Second, "変化の後に残す長さ")
 	fs.Float64Var(&o.fps, "fps", 4, "変化を探すときに 1 秒あたり何コマ見るか")
 	fs.Float64Var(&o.threshold, "threshold", defaultThreshold, "盤の矩形の中で、明るさが変わった点の割合がこれ以上なら変化")
-	fs.Float64Var(&o.scene, "scene", defaultScene, "画面全体で、明るさが変わった点の割合がこれ以上なら画面の切り替え（盤を探し直す）")
-	fs.StringVar(&o.region, "region", "", "盤の矩形を動画の画素で x,y,w,h と指定する（既定は自動で探す）")
+	fs.Float64Var(&o.scene, "scene", defaultScene, "画面全体か対局の盤の中で、明るさが変わった点の割合がこれ以上なら、対局の盤がまだ映っているかを確かめる")
+	fs.DurationVar(&o.switchKeep, "switch", 2*time.Second, "対局の盤が映らなくなった・戻ったときに残す長さ（戻ったあとは -after）")
+	fs.StringVar(&o.region, "region", "", "対局の盤の矩形を動画の画素で x,y,w,h と指定する（既定は最初に見つけた盤）")
 	fs.StringVar(&o.segments, "segments", "", "変化を探さず、この JSON の区間で切ってつなぐ（1 段目の JSON を手で直したとき）")
 	fs.BoolVar(&o.dryRun, "dry-run", false, "変化を探して JSON を書くだけ（動画は書き出さない）")
 	fs.BoolVar(&o.force, "force", false, "書き出す先が既にあっても上書きする")
@@ -62,6 +65,7 @@ func run(args []string) error {
 		}
 		return err
 	}
+	o.detect = recognize.DetectRegion
 	if o.fps <= 0 {
 		return fmt.Errorf("-fps は 0 より大きくしてください")
 	}
@@ -99,6 +103,7 @@ func run(args []string) error {
 		if err != nil {
 			return err
 		}
+		o.boardImage = strings.TrimSuffix(o.out, filepath.Ext(o.out)) + "-board.png"
 		p, err := scan(o, inputs)
 		if err != nil {
 			return err
@@ -140,11 +145,29 @@ type options struct {
 	crf           int
 	ffmpeg        string
 	ffprobe       string
-	// fixed は -region で指定した盤の矩形（空なら自動で探す）。
+	switchKeep    time.Duration
+	// fixed は -region で指定した対局の盤の矩形（空なら最初に見つけた盤）。
 	fixed image.Rectangle
+	// boardImage は対局の盤を決めたコマを切り出して残す先（空なら残さない）。
+	boardImage string
+	// detect は盤を探す関数（既定は recognize.DetectRegion。テストで差し替える）。
+	detect detector
 }
 
 // seconds は秒数を「1h02m03s」の形にする。
 func seconds(s float64) string {
 	return time.Duration(s * float64(time.Second)).Round(time.Second).String()
+}
+
+// savePNG は img を path に PNG で書く（対局の盤を決めたコマ。大盤を選んでいないか目で確かめるため）。
+func savePNG(path string, img image.Image) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	if err := png.Encode(f, img); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
 }

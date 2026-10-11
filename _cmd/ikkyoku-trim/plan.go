@@ -17,6 +17,8 @@ type Plan struct {
 	FPS       float64 `json:"fps"`
 	Threshold float64 `json:"threshold"`
 	Scene     float64 `json:"scene"`
+	// Switch は対局の盤が映らなくなった・戻ったときに短く残した秒。
+	Switch float64 `json:"switch"`
 	// Boards は盤の矩形を決めた・決め直した記録（どこを見て変化を測ったか）。
 	Boards []BoardNote `json:"boards"`
 	// Changes は変化と見なしたコマ。
@@ -36,7 +38,8 @@ type BoardNote struct {
 	Time       float64         `json:"time"`
 	Rect       image.Rectangle `json:"rect"`
 	Confidence float64         `json:"confidence,omitempty"`
-	// How は "region"（-region で指定）・"detect"（探した）。
+	// How は "region"（-region で指定）・"detect"（最初に見つけた盤を対局の盤にした）・
+	// "scaled"（画面の大きさが違う動画に変わったので、対局の盤を比で写した）。
 	How string `json:"how"`
 }
 
@@ -46,10 +49,14 @@ type Change struct {
 	// Time はその動画の中の秒、At はつないだ録画の中の秒。
 	Time float64 `json:"time"`
 	At   float64 `json:"at"`
-	// Board は盤の矩形の中の割合（盤を見ていなければ -1）、Scene は画面全体の割合（比べられなければ -1）。
+	// Board は対局の盤の矩形の中の割合、Scene は画面全体の割合（どちらも測っていなければ -1）。
 	Board float64 `json:"board"`
 	Scene float64 `json:"scene"`
-	Why   string  `json:"why"`
+	// Why は "盤"（対局の盤の中が変わった）・"対局の盤が映らなくなった"・"対局の盤が戻った"。
+	Why string `json:"why"`
+	// Before / After はこの変化の前後に残す秒（盤の変化は -before / -after、映らなくなった・戻ったは短い）。
+	Before float64 `json:"before"`
+	After  float64 `json:"after"`
 }
 
 // Segment は残す区間 1 つ（その動画の中の秒）。
@@ -85,34 +92,31 @@ func (h *Histogram) add(v float64) {
 
 // buildSegments は変化の時刻（つないだ録画の中の秒）から、残す区間を動画ごとに組む。
 //
-// 変化 1 つにつき [At - before - step, At + after]（step は 1 コマの間隔。変わる直前のコマも含める）を残し、
+// 変化 1 つにつき [At - Before - step, At + After]（step は 1 コマの間隔。変わる直前のコマも含める）を残し、
 // 重なる・接する区間はまとめ、つないだ録画の外は切り捨て、動画の境目で分ける。
-func buildSegments(inputs []Input, changes []Change, before, after, step float64) ([]Segment, float64) {
+func buildSegments(inputs []Input, changes []Change, step float64) ([]Segment, float64) {
 	if len(inputs) == 0 {
 		return nil, 0
 	}
 	last := inputs[len(inputs)-1]
 	total := last.Offset + last.Duration
 	type span struct{ a, b float64 }
-	var spans []span
+	var raw []span
 	for _, c := range changes {
-		a, b := c.At-before-step, c.At+after
-		if a < 0 {
-			a = 0
+		a, b := max(c.At-c.Before-step, 0), min(c.At+c.After, total)
+		if b > a {
+			raw = append(raw, span{a, b})
 		}
-		if b > total {
-			b = total
-		}
-		if b <= a {
+	}
+	// ⚠️ **始まりの順に並べてからまとめる**（変化ごとに前後の長さが違うので、後の変化の区間が前から始まりうる）。
+	sort.Slice(raw, func(i, j int) bool { return raw[i].a < raw[j].a })
+	var spans []span
+	for _, s := range raw {
+		if n := len(spans); n > 0 && s.a <= spans[n-1].b+step {
+			spans[n-1].b = max(spans[n-1].b, s.b)
 			continue
 		}
-		if n := len(spans); n > 0 && a <= spans[n-1].b+step {
-			if b > spans[n-1].b {
-				spans[n-1].b = b
-			}
-			continue
-		}
-		spans = append(spans, span{a, b})
+		spans = append(spans, s)
 	}
 	var segs []Segment
 	kept := 0.0
