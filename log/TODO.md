@@ -38,7 +38,7 @@ ikkyoku で実際に使って足したもの。ほかのプロジェクトでも
 
 - **置き場所は一時ディレクトリ**（`DefaultDir`。`%TEMP%\ikkyoku`。2026-10-11。配る exe の置き場所に記録が溜まる・
   何日も前の記録を掘ってデバッグすることは無い）。README の例は `%APPDATA%\<名前>\logs`。
-  → README に「置き場所はアプリで決める（何日分を残したいか・アプリ内で見られるか）」と書く。binder も一時フォルダ
+  → **README に書いた**（wenteasy/log `444a65e`。次のタグから）:「置き場所はアプリで決める」、設定のファイルは一時フォルダに置かない
 - **出口は一番低いレベル（Trace）で作り、全体のレベルは `Options.Root`（dev は Info、配る exe は Notice）**。
   README のひな形は出口を Info で固定している。→ README のひな形を Root を取る形にするか、「パッケージごとのレベル」の節に寄せる
 - **レベルの決め方の順**（画面の設定 > `ikkyoku-log.json` の root > `Options.Root`）と、設定のファイルはログと別の場所（`LevelsDir`。
@@ -46,6 +46,7 @@ ikkyoku で実際に使って足したもの。ほかのプロジェクトでも
 - **名前付きの Logger を別のファイルへ振り分ける**（`namedRouter`。Warn 以上は本体にも出す）と、設定で出口を切り替える（`switchHandler`）。
   → wenteasy/log に振り分けのハンドラとして入れる候補（README の「名前付きの Logger」の続き）
 - **標準の log の出力の向け先**（`stdlog.SetOutput`。Wails の [WebView2] の行は標準の log で来る）と、閉じるときに戻すこと
-  （戻さないと log → slog → log と回り続ける）。→ README の Wails の例に書く
+  （戻さないと log → slog → log と回り続ける）。→ **README に一部書いた**（`444a65e`。WebView2 の行は標準の log で来ること・
+  ikkyoku は名前付きの Logger へ向け直していること）。向け直し方と、閉じるときに戻すことは、まだ README に無い
 - **古いファイルを消す**（`KeepDays` = 7。日付はファイル名から読む）と、**始まりの 1 行はレベルに関係なく残す**
 - **異常終了を残す**（`CatchCrash`。`debug.SetCrashOutput`）。README は「ikkyoku の log にある」と名前だけ
