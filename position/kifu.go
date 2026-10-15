@@ -113,9 +113,13 @@ func FromKIF(text string) (*Study, KIFLoad, error) {
 	// ⚠️ **最後まで読めたときだけ立てること。** 途中で止まったなら、
 	// **そこは対局の終わりではない**（読めなかっただけ）。立てると
 	// 棋譜の途中に「対局の終わり」の印が出る。
-	if doc.EndMark() != "" && load.Loaded == load.Total {
-		study.SetRecordEnd(study.CurrentID())
+	// **種別（"投了" など）も覚える**（2026-10-09。手順リストの最後に「91 投了」と出す）。
+	if mark := doc.EndMark(); mark != "" && load.Loaded == load.Total {
+		study.SetRecordEnd(study.CurrentID(), mark)
 	}
+	// **終局が書いていなくても、千日手ならそこで終わっている**（2026-10-09。中継の棋譜は
+	// 千日手の行が載る前に取れることがある）。⚠️ **1 手ごとではなく最後に 1 回**（本譜を丸ごと辿る）。
+	study.settleRepetition()
 	return study, load, nil
 }
 

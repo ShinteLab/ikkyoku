@@ -10,11 +10,13 @@
 // | 本線にする | 本譜の先端に続きを据える → 聞いて止める |
 // | 本譜の手を消す | **聞くが止めない**（消したところから 4 手以内なら追従が繋ぎ直す）。`movelist.ts` |
 // | 解析タブの盤で駒を動かす | **動かせない**（2026-10-07。追跡を止めてから動かす）。`study.ts` |
+// | 棋譜の自動更新を入れる | **聞かずに止める**（2026-10-10。`stopFollow`。後から押したほうが勝つ。`sidepane.ts`） |
 //
-// ⚠️ **状態の持ち主はメイン画面**（`mainscreen.ts` の `followOn`）。ここは
-// `follow:state`（1 周ごとにアプリ全体へ流れる）を映すだけで、切り離した窓でも同じに効く。
+// ⚠️ **状態の持ち主は Go の中継セッション**（`app` の `StudyService`。2026-10-11 にメイン画面から移した）。ここは
+// `follow:update`（Go が 1 周ごとにアプリ全体へ流す）を映すだけで、切り離した窓でも同じに効く。
 
 import { Dialogs, Events } from "@wailsio/runtime";
+import { StudyService } from "../bindings/github.com/ShinteLab/ikkyoku/app";
 
 let following = false;
 const watchers: ((on: boolean) => void)[] = [];
@@ -30,12 +32,11 @@ const setFollowing = (on: boolean) => {
   }
 };
 
-Events.On("follow:state", (e: { data: { on: boolean } }) => {
+Events.On("follow:update", (e: { data: { on: boolean } }) => {
   setFollowing(!!e.data?.on);
 });
 
-// noteFollowing は**メイン画面が自分の状態をここへ写す**（自分の出したイベントが
-// 自分に届くかに頼らないため）。
+// noteFollowing は**メイン画面が受けた状態をここへ写す**（イベントの届く順に頼らないため）。
 export function noteFollowing(on: boolean): void {
   setFollowing(on);
 }
@@ -51,12 +52,6 @@ export function isFollowing(): boolean {
   return following;
 }
 
-let stopHere: (() => void) | null = null;
-
-// setFollowStopper はメイン画面が**追跡を止める関数**を渡す（同じ窓ならイベントを介さず止める）。
-export function setFollowStopper(fn: () => void): void {
-  stopHere = fn;
-}
 
 // confirmStopFollow は追跡中なら「〜すると追跡を止めます」と聞き、**はいなら止めて真**を返す。
 // 追跡していなければ聞かずに真。
@@ -88,11 +83,20 @@ export async function confirmStopFollow(what: string): Promise<boolean> {
   if (got !== "Yes") {
     return false;
   }
-  if (stopHere) {
-    stopHere();
-  } else {
-    void Events.Emit("follow:stop", null);
-  }
-  setFollowing(false);
+  await stopFollow();
   return true;
+}
+
+// stopFollow は**聞かずに**追跡を止める（追っていなければ何もしない）。どの窓からでも Go を直に呼ぶ。
+// ⚠️ **止め終わるのを待ってから操作を通すこと**（`StudyService.StopFollow` は走っている 1 周が終わるまで待って返る）。
+// 待たないと、走っている 1 周が入れ替えた局面へ手を足す。
+export async function stopFollow(): Promise<void> {
+  if (!following) {
+    return;
+  }
+  try {
+    await StudyService.StopFollow();
+  } finally {
+    setFollowing(false);
+  }
 }

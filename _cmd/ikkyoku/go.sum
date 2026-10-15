@@ -6,8 +6,8 @@ github.com/ShinteLab/engine v0.2.1 h1:+A2ngSF3GJjDlGhV205bp/2lT6XJEY7mqa9baDARWt
 github.com/ShinteLab/engine v0.2.1/go.mod h1:d7wpetvwK9RAbvamQr1sIuYq+LXvEd4DXCLYtAFYyUc=
 github.com/ShinteLab/kicho v0.2.1 h1:gz/FL3whYscgxWEaIqYk/rP5g84Reu2oEBSx3L48U1Q=
 github.com/ShinteLab/kicho v0.2.1/go.mod h1:z2lQL0Jm/jtceZxUoV95iNzcksHX6XsuSCiQ1BOOUMo=
-github.com/ShinteLab/suteme v0.2.5 h1:L1L06uDiiaenWXWR+NMFrQPXyirqvJgDoqJS4SBRw40=
-github.com/ShinteLab/suteme v0.2.5/go.mod h1:zUIp+2tYGOhEOrVmtpuAfDZBUSKhmRkeRl8AHAEzqes=
+github.com/ShinteLab/suteme v0.2.7 h1:BJ8bvFvMeMIc+F6dAZCjeA/su2Q6u+Lk2qa8Le2PEgo=
+github.com/ShinteLab/suteme v0.2.7/go.mod h1:zUIp+2tYGOhEOrVmtpuAfDZBUSKhmRkeRl8AHAEzqes=
 github.com/adrg/xdg v0.5.3 h1:xRnxJXne7+oWDatRhR1JLnvuccuIeCoBu2rtuLqQB78=
 github.com/adrg/xdg v0.5.3/go.mod h1:nlTsY+NNiCBGCK2tpm09vRqfVzrc2fLmXGpBLF0zlTQ=
 github.com/coder/websocket v1.8.14 h1:9L0p0iKiNOibykf283eHkKUHHrpG7f65OE3BhhO7v9g=
@@ -64,8 +64,8 @@ github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
 github.com/wailsapp/wails/v3 v3.0.0-beta.26 h1:Cs7E3wSD6kouJGDzbbvqeFBIbNOzuUMjf0kto3/a7Oc=
 github.com/wailsapp/wails/v3 v3.0.0-beta.26/go.mod h1:5DR/EG5FHU8+BNV7tQYQ/rJMjoFsVlYpM+0gp1+gcTI=
-github.com/wenteasy/log v0.3.0 h1:6+cahZ7y7/7FU2Rb4uyRRcf/aFDNGHEp6lwge+EN7b8=
-github.com/wenteasy/log v0.3.0/go.mod h1:RLWYNT1JF1QFeep67J1y6aJptZQLtph647dysVu9EKA=
+github.com/wenteasy/log v0.3.1 h1:BxwEjT4IbMdFGV6/yvU533D6zR0f1cNkwZiSAqtfqKE=
+github.com/wenteasy/log v0.3.1/go.mod h1:RLWYNT1JF1QFeep67J1y6aJptZQLtph647dysVu9EKA=
 golang.design/x/hotkey v0.6.1 h1:mR3kp6L7eykJnEH7jvYQ9kc00LTq8edeWRFDsXfWp6Q=
 golang.design/x/hotkey v0.6.1/go.mod h1:+CUQy3N+t1b8HbhsDScVWWuUpXiRPNRIKugECCiW0Po=
 golang.design/x/mainthread v0.3.0 h1:UwFus0lcPodNpMOGoQMe87jSFwbSsEY//CA7yVmu4j8=

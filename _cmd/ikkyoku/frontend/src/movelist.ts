@@ -11,7 +11,7 @@
 // Go 側の 1 つの手順**で、両方の窓が `study:changed` で追随する。
 //
 // ⚠️ **畳み方だけはここが持つ**（画面だけの状態。Go には持たせない）。
-import { StudyService } from "../bindings/github.com/ShinteLab/ikkyoku/app";
+import { KifuService, StudyService } from "../bindings/github.com/ShinteLab/ikkyoku/app";
 import type { StudyState } from "../bindings/github.com/ShinteLab/ikkyoku/app/models";
 import { confirmStopFollow, isFollowing } from "./followguard";
 import { openPopup, type PopupHandle, type PopupItem } from "./popup";
@@ -307,6 +307,47 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
       row.appendChild(b);
       return row;
     };
+    // 終局（"投了" など。2026-10-09）。**終わった手の直後に 1 行**（棋譜の「91 投了」）。
+    //
+    // ⚠️ **手ではないので押せない行にする**（`button` にしない・`data-id` を付けない）。
+    // 節点ではないので、戻る先も消す相手も無い。右クリックは手のメニューではなく
+    // 「棋譜に登録」「投了を取り消す」を出す（`askEndMenu`。出せるものが無ければ何も出さない）。
+    // ⚠️ **付いている手と同じ深さ・同じ列で並べる**（時間とコメントの列を揃える）。
+    // 消える範囲を光らせるときは、付いている手と一緒に光る（`data-end-of`）。
+    const endRow = (num: string, mark: string, note: string, of: number, depth: number) => {
+      const row = document.createElement("div");
+      row.className = "move-row";
+      row.style.setProperty("--move-depth", String(depth));
+      const pad = document.createElement("span");
+      pad.className = "move-toggle is-empty";
+      pad.setAttribute("aria-hidden", "true");
+      const body = document.createElement("div");
+      body.className = "move-chip is-end";
+      body.dataset.endOf = String(of);
+      // 終局の説明（千日手を自動で立てたとき。「連続王手の千日手（▲の反則負け）」）と
+      // 登録済みかは**ホバーで分かれば足りる**（行に文字を足さない）。⚠️ **文言は Go 側**（`Node.EndNote`）。
+      body.title = [note, state?.gameId ? "棋譜タブに登録済み" : ""].filter((x) => x).join("\n");
+      const i = document.createElement("span");
+      i.className = "move-num";
+      i.textContent = num;
+      const t = document.createElement("span");
+      t.className = "move-text";
+      t.textContent = mark;
+      const main = document.createElement("span");
+      main.className = "move-main";
+      main.appendChild(t);
+      body.append(i, main);
+      if (hasTime || hasComment) {
+        body.classList.add("is-noted");
+        if (hasTime) {
+          const tm = document.createElement("span");
+          tm.className = "move-time";
+          body.appendChild(tm);
+        }
+      }
+      row.append(pad, body);
+      return row;
+    };
     movesPanel.appendChild(
       chip("", "開始局面", 0, "採ったときの局面に戻ります", { comment: rootComment }));
     for (const m of rows) {
@@ -327,6 +368,13 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
             time: m.time ?? "", comment: m.comment ?? "",
           }),
       );
+      // ⚠️ **手数は終わった手の次**（90 手目で終わったら「91 投了」）。
+      // **投了図以下の手はこの行の下に 1 段下げた変化**として並ぶ（Go の並びのまま。
+      // KIF の「変化：91手」）。⚠️ **ここで並べ替えたり字下げを足したりしないこと。**
+      if (m.end) {
+        movesPanel.appendChild(
+          endRow(String((state.first ?? 0) + m.number + 1), m.end, m.endNote ?? "", m.id, m.depth));
+      }
     }
     // 今見ている手が画面の外にあると、進めても手順が動いていないように見える。
     movesPanel.querySelector<HTMLElement>(".move-chip.is-current")?.scrollIntoView({
@@ -365,7 +413,10 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
     const chips = [...movesPanel.querySelectorAll<HTMLElement>(".move-chip")];
     const parent = new Map<number, number>();
     for (const el of chips) {
-      parent.set(Number(el.dataset.id ?? "0"), Number(el.dataset.parent ?? "-1"));
+      // ⚠️ **終局の行（`data-id` が無い）は親の表に入れない** —— 入れると id 0 の親を潰す。
+      if (el.dataset.id !== undefined) {
+        parent.set(Number(el.dataset.id), Number(el.dataset.parent ?? "-1"));
+      }
     }
     const doomed = (id: number): boolean => {
       for (let n = id; n > 0; n = parent.get(n) ?? -1) {
@@ -376,8 +427,9 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
       return false;
     };
     for (const el of chips) {
-      el.classList.toggle(
-        "is-doomed", from > 0 && doomed(Number(el.dataset.id ?? "0")));
+      // 終局の行は**付いている手と一緒に**消える（その手が消えれば終局も消える）。
+      const id = Number(el.dataset.id ?? el.dataset.endOf ?? "0");
+      el.classList.toggle("is-doomed", from > 0 && doomed(id));
     }
   };
 
@@ -442,6 +494,46 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
     askDrop(x, y, id, label, count);
   };
 
+  // askEndMenu は終局の行（「91 投了」）を右クリックしたときのメニュー（2026-10-09）。
+  //
+  // **棋譜タブへ登録する口はここだけ。** 終局していなければ行そのものが無いので、
+  // 対局の途中で誤って登録することが起きない（以前は手順の見出しの「再読み込み」の
+  // 隣にあって押し間違えた）。⚠️ **手順の見出しに戻さないこと。**
+  // ⚠️ **出す条件は Go 側**（`canRegister` / `canUnresign`）。どちらも無ければ何も出さない。
+  // ⚠️ **確認は挟まない** —— 登録は何も消さないし、投了の取り消しはもう一度投了すれば戻る。
+  const askEndMenu = (x: number, y: number) => {
+    closeAsk();
+    if (!state?.loaded) {
+      return;
+    }
+    const items: PopupItem[] = [];
+    if (state.canRegister) {
+      items.push({
+        label: "棋譜に登録",
+        onPick: () =>
+          void (async () => {
+            try {
+              await KifuService.SaveStudy();
+            } catch (err) {
+              onError(String(err instanceof Error ? err.message : err));
+            }
+            // 登録すると棋譜タブと結ばれる（`study:changed` も来るが、呼んだ窓はその場で描く）。
+            onState(await StudyService.State());
+          })(),
+      });
+    }
+    if (state.canUnresign) {
+      items.push({
+        label: "投了を取り消す",
+        onPick: () => void run(() => StudyService.Unresign()),
+      });
+    }
+    if (items.length === 0) {
+      return;
+    }
+    ask = openPopup(x, y, { label: "終局", items });
+  };
+
   // askMoveMenu は手を右クリックしたときのメニュー。
   //
   // ⚠️ **ここでは何も起きない**（消すほうは、2 手以上なら押すと確認が出る）。
@@ -494,6 +586,11 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
     }
     // ⚠️ **webview の既定メニューを止める**（訂正タブの盤と同じ）。
     e.preventDefault();
+    // 終局の行（「91 投了」）は手ではないので、**手のメニューは出さない**。
+    if (chip.classList.contains("is-end")) {
+      askEndMenu(e.clientX, e.clientY);
+      return;
+    }
     const id = Number(chip.dataset.id ?? "0");
     // 「開始局面」は手ではないので消せない（消したいなら 1 手目を押す）。
     if (id < 1 || !state?.loaded) {

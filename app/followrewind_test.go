@@ -199,7 +199,7 @@ func TestFollowRewindNeedsTwoFrames(t *testing.T) {
 	}
 }
 
-// furibishaFrame / furibishaFrameConf は 2026-10-08 の中継の録画 `follow/20261008-103837/013-4d3e_2g2f-guess.png` を
+// furibishaFrame / furibishaFrameConf は 2026-10-08 の中継（振り飛車の対局）の録画で、▲3五同歩 のあと △2六歩 ▲同歩 △同銀 と進んだ 1 枚を
 // 読み直した盤と確信度（`position` の `TestConnectRepairIgnoresStaleKindMisreads` と同じ 1 枚）。
 const furibishaFrame = "kn5nl/lsgg3l1/ppppbp2p/4p4/P1PP2s2/1PP4P1/2PSPP2P/4BGGS1/L6NP"
 
@@ -239,7 +239,7 @@ func TestFollowRewindRecoversMissedMove(t *testing.T) {
 	}
 }
 
-// glareFrame / glareFrameConf は 2026-10-08 の中継の録画 `follow/20261008-140929/018-B@1e_B@2e_2f2e-guess.png` を
+// glareFrame / glareFrameConf は 2026-10-08 の中継の録画で、追従が ▲1五角打 △2五角打 ▲同歩 を推測で足した 1 枚を
 // 読み直した盤と確信度。**盤の右側（1〜2 筋）に光が差し込み**、空きの 1五 を「先手の香」（0.40）と読んでいる。
 // 実際は ▲2五歩 だけで、先手・後手とも角を 1 枚ずつ持っている。
 const glareFrame = "ln1g3pp/1ks3g2/1ppppp1pl/p4sr2/6pPL/PPP2P3/1SPPPSP1P/1KG1P2R1/L6PL"
@@ -275,5 +275,349 @@ func TestFollowRewindIgnoresWeakPhantomPiece(t *testing.T) {
 	}
 	if got := mainLine(s); !slices.Equal(got, []string{"2f2e"}) {
 		t.Fatalf("本譜 = %v, want [2f2e]", got)
+	}
+}
+
+// ⚠️ **何も言えない 1 枚では、控えた差し替えを捨てないこと**（2026-10-09。`dropRewindUnlessFits`）。
+//
+// **実機の症状**: △7二角打 を △7二金 に差し替える案が 3 回出たが、そのたびに次に読んだ 1 枚（光ったマスが多く
+// 「隔たりが大きすぎます」）で捨てられ、差し替わるまで 64 秒かかった。その 1 枚は先端を支持していない。
+// ⚠️ **残した差し替えは、変わっていない 1 枚（`FollowConfirm`）では据えないこと**（同じ差し替えを言う 1 枚で据える）。
+func TestFollowRewindSurvivesSilentFrame(t *testing.T) {
+	s, _ := following(t)
+	guessMoves(t, s, "2h4h")
+	if a, err := s.FollowAuto(boardAfter(t, "7g7f"), evenConf(0.9), nil, []PromoEvidence{}); err != nil || !a.Pending {
+		t.Fatalf("1 枚目で控えていません: %+v (%v)", a, err)
+	}
+	// 何も言えない 1 枚（5 段目に幻の駒が並んだ。どこからも繋がらないが、▲7六歩 の側のほうが合っている）。
+	noisy := strings.Replace(boardAfter(t, "7g7f"), "/9/2P6/", "/lllllllll/2P6/", 1)
+	if a, err := s.FollowAuto(noisy, evenConf(0.9), nil, []PromoEvidence{}); err != nil || a.Rewound || a.Applied {
+		t.Fatalf("何も言えない 1 枚で差し替えたか足しました: %+v (%v)", a, err)
+	}
+	if a, err := s.FollowConfirm(); err != nil || a.Rewound {
+		t.Fatalf("残しているだけの差し替えを、変わっていない 1 枚で据えました: %+v (%v)", a, err)
+	}
+	a, err := s.FollowAuto(boardAfter(t, "7g7f"), evenConf(0.9), nil, []PromoEvidence{})
+	if err != nil || !a.Rewound {
+		t.Fatalf("同じ差し替えを言う 1 枚で据えていません: %+v (%v)", a, err)
+	}
+	if got := mainLine(s); !slices.Equal(got, []string{"7g7f"}) {
+		t.Fatalf("本譜 = %v, want [7g7f]", got)
+	}
+}
+
+// cellsRewindLine は △3二角打 を推測で足す前の手順（▲7六歩 △3四歩 ▲2二角成 △同銀 ▲2六歩。後手は角を持っている）。
+var cellsRewindLine = []string{"7g7f", "3c3d", "8h2b+", "3a2b", "2g2f"}
+
+// cellsRewindStudy は cellsRewindLine を指し、△3二角打 を推測で足して、その 1 枚を速い経路の比べる相手にした解析タブ。
+func cellsRewindStudy(t *testing.T) *StudyService {
+	t.Helper()
+	s, _ := following(t)
+	for _, m := range cellsRewindLine {
+		if _, err := s.Play(m); err != nil {
+			t.Fatalf("Play(%q): %v", m, err)
+		}
+	}
+	guessMoves(t, s, "B*3b")
+	s.markBase()
+	return s
+}
+
+// ⚠️ **速い経路でも、推測で足した末尾の手を差し替えること**（2026-10-09。`followCellsRewind`）。
+//
+// **実機の形**（手で操作するデジタル盤）: 金をドラッグしているあいだ、元のマスに金が残ったまま行き先に金の絵が重なり、
+// 変わったマスが行き先だけになって角打ちを推測で足した。次の 1 枚で元のマス 4一 が空き、金の動ける 3一・4二・5二 が光った。
+// 先端から先には合う手順が無いが、角打ちを戻せば △3二金 で説明が付く（3二 の見た目は金のまま変わらない）。
+// ⚠️ 行き先（3二）を読んで後手の駒を確かめてから控え、⚠️ 2 枚目で差し替えること。
+func TestFollowCellsRewindsGuessedDrop(t *testing.T) {
+	s := cellsRewindStudy(t)
+	changed := cellIdx("4a", "3a", "4b", "5b")
+	a := followCellsRead(t, s, changed, false, append(slices.Clone(cellsRewindLine), "4a3b")...)
+	if !a.Pending || a.Rewound || a.Applied {
+		t.Fatalf("1 枚目で控えていないか、差し替えました: %+v", a)
+	}
+	if got := mainLine(s); got[len(got)-1] != "B*3b" {
+		t.Fatalf("1 枚目で本譜が動きました: %v", got)
+	}
+	a, err := s.FollowConfirm()
+	if err != nil || !a.Rewound {
+		t.Fatalf("変わっていない 1 枚で差し替えていません: %+v (%v)", a, err)
+	}
+	if got := mainLine(s); !slices.Equal(got, append(slices.Clone(cellsRewindLine), "4a3b")) {
+		t.Fatalf("本譜 = %v", got)
+	}
+	if !hasBranch(s, "B*3b") {
+		t.Error("元の手（△3二角打）が枝に残っていません")
+	}
+}
+
+// ⚠️ **速い経路で控えた差し替えも、何も言えない 1 枚では捨てず、同じ差し替えを言う 1 枚で据えること**。
+func TestFollowCellsRewindSurvivesUnclearFrame(t *testing.T) {
+	s := cellsRewindStudy(t)
+	changed := cellIdx("4a", "3a", "4b", "5b")
+	seen := append(slices.Clone(cellsRewindLine), "4a3b")
+	if a := followCellsRead(t, s, changed, false, seen...); !a.Pending {
+		t.Fatalf("1 枚目で控えていません: %+v", a)
+	}
+	// 何も説明できない 1 枚（先手の 9九 だけが変わった）。
+	if a, err := s.FollowCells(cellIdx("9i"), nil, nil); err != nil || a.Rewound || a.Applied || a.Pending {
+		t.Fatalf("説明できない 1 枚で何かしました: %+v (%v)", a, err)
+	}
+	if a, err := s.FollowConfirm(); err != nil || a.Rewound {
+		t.Fatalf("残しているだけの差し替えを、変わっていない 1 枚で据えました: %+v (%v)", a, err)
+	}
+	a := followCellsRead(t, s, changed, false, seen...)
+	if !a.Rewound {
+		t.Fatalf("同じ差し替えを言う 1 枚で据えていません: %+v", a)
+	}
+}
+
+// ⚠️ **印の無い手は速い経路でも差し替えないこと**（今までどおり「説明できる手がありません」で待つ）。
+func TestFollowCellsRewindKeepsUnguessedMoves(t *testing.T) {
+	s, _ := following(t)
+	for _, m := range append(slices.Clone(cellsRewindLine), "B*3b") {
+		if _, err := s.Play(m); err != nil {
+			t.Fatalf("Play(%q): %v", m, err)
+		}
+	}
+	s.markBase()
+	a, err := s.FollowCells(cellIdx("4a", "3a", "4b", "5b"), nil, nil)
+	if err != nil || a.Pending || a.Rewound || len(a.ReadCells) > 0 || !a.NoMoves {
+		t.Fatalf("人が指した手を差し替えようとしました: %+v (%v)", a, err)
+	}
+}
+
+// ⚠️ **成駒の載ったマスの読みで、推測の手を取り消さないこと**（2026-10-09。`promotedCells`）。
+//
+// **実機の症状**（中継）: ▲1一角成 のあと、1一 の馬を「後手の歩」（0.78）と読んだ 1 枚が 2 枚続き、取り消すと 1一 に後手の香が
+// 戻って「合う」ので取り消した。2二 に角が無いことは空きの読みなので 0.15 しか数えない。成駒は読めないものとして扱い、
+// 先端の盤で成駒が載っているマスは比べない。
+func TestFollowRewindIgnoresPromotedPieceMisread(t *testing.T) {
+	s := studyAt(t, "4k3l/7B1/9/9/9/9/9/9/4K4 b - 1")
+	guessMoves(t, s, "2b1a+")
+	// 撮った 1 枚: 1一 の馬を後手の歩と読んだ。2二 は空き（確信度 0）、5一・5九 の玉ははっきり読めている。
+	frame := "4k3p/9/9/9/9/9/9/9/4K4"
+	conf := make([]float64, 81)
+	conf[4], conf[76] = 1, 1 // 5一・5九
+	conf[8] = 0.78           // 1一
+	for i := 0; i < 3; i++ {
+		a, err := s.FollowAuto(frame, conf, nil, []PromoEvidence{})
+		if err != nil {
+			t.Fatalf("FollowAuto: %v", err)
+		}
+		if a.Rewound || a.Pending {
+			t.Fatalf("%d 枚目: 成駒の読み違いで ▲1一角成 を取り消そうとしました: %+v", i+1, a)
+		}
+	}
+	if got := mainLine(s); !slices.Equal(got, []string{"2b1a+"}) {
+		t.Fatalf("本譜 = %v, want [2b1a+]", got)
+	}
+}
+
+// rewindOnSame は撮った 1 枚 frame で、**下見が「変わっていません」で終わったとき**の差し替えの関門を回す
+// （深い探索の答え `Candidates` は空。先端から 1 手の候補 `ranked` だけ下見から引き継ぐ）。
+func rewindOnSame(t *testing.T, s *StudyService, frame string, ranked [][]string) *followRewind {
+	t.Helper()
+	b, cost, _, _, err := s.src.followFrame(frame, evenConf(0.9), nil)
+	if err != nil {
+		t.Fatalf("followFrame: %v", err)
+	}
+	return s.followRewindProbe(b, cost, FollowProbe{Kind: FollowSame, ranked: ranked})
+}
+
+// rankedOf は撮った 1 枚 frame の下見が並べた、先端から 1 手の候補（`FollowProbe.ranked`）。
+func rankedOf(t *testing.T, s *StudyService, frame, want string) [][]string {
+	t.Helper()
+	p, err := probe(t, s, frame, evenConf(0.9))
+	if err != nil {
+		t.Fatalf("probe: %v", err)
+	}
+	if !slices.ContainsFunc(p.ranked, func(m []string) bool { return slices.Equal(m, []string{want}) }) {
+		t.Fatalf("下見が先端から 1 手の候補に %s を並べていません: %v", want, p.ranked)
+	}
+	return p.ranked
+}
+
+// ⚠️ **先端に 1 手足せば合う 1 枚で、足し済みの手の順番を入れ替える差し替えをしないこと**（2026-10-11 に中継で踏んだ）。
+//
+// **実機の症状**: △5八銀打 ▲5七角 を足したあと、△9六角打 が指された 1 枚で、下見は「変わっていません」で終わった
+// （打った駒は人に聞いている途中）。差し替えの関門は先端そのもの（9六 が空き）と比べて「食い違い 1.00 → 0.00」と見なし、
+// △9六角打 ▲5七角 △5八銀打 に差し替えた —— 行き着く局面は同じで、順番だけが撮った順と逆になった。
+// ここでは ▲7六歩 △3四歩 を足したあと ▲2六歩 が指された 1 枚（戻せば ▲2六歩 △3四歩 ▲7六歩 でも同じ局面）。
+func TestFollowRewindKeepsOrderWhenTipExtends(t *testing.T) {
+	s, _ := following(t)
+	guessMoves(t, s, "7g7f")
+	guessMoves(t, s, "3c3d")
+	frame := boardAfter(t, "7g7f", "3c3d", "2g2f")
+
+	// 先端から 1 手の候補を数えない関門なら差し替える形であること（この形が実機の症状を再現している確かめ）。
+	if rw := rewindOnSame(t, s, frame, nil); rw == nil {
+		t.Fatalf("先端から 1 手の候補が無いのに差し替えを見つけません（形が症状を再現していません）")
+	}
+	if rw := rewindOnSame(t, s, frame, rankedOf(t, s, frame, "2g2f")); rw != nil {
+		t.Fatalf("先端に ▲2六歩 を足せば合うのに、%v を %v に差し替えようとしました", rw.line[rw.keep:], rw.moves)
+	}
+}
+
+// ⚠️ **取られた駒の成・不成だけが違う差し替えをしないこと**（2026-10-11 に中継で踏んだ）。
+//
+// **実機の症状**: 見た目で成りと決めた △9七桂成 ▲同香 のあと、△8四桂打 が指された 1 枚で、△9七桂不成 ▲同香 △8四桂打 に
+// 差し替えた（9七 の駒は取られて盤に無いので、撮った盤からは成・不成が分からない。先端に △8四桂打 を足せば同じ局面だった）。
+// ここでは先手の向きで ▲9三桂成 △同香 のあと ▲5八玉。
+func TestFollowRewindKeepsPromotionWhenTipExtends(t *testing.T) {
+	const root = "l3k4/9/9/9/1N7/9/9/9/4K4 b - 1"
+	s := studyAt(t, root)
+	guessMoves(t, s, "8e9c+")
+	guessMoves(t, s, "9a9c")
+	p, err := position.FromFullSFEN(root)
+	if err != nil {
+		t.Fatalf("FromFullSFEN: %v", err)
+	}
+	for _, m := range []string{"8e9c+", "9a9c", "5i5h"} {
+		if err := p.ApplyMove(m); err != nil {
+			t.Fatalf("ApplyMove(%q): %v", m, err)
+		}
+	}
+	frame := p.BoardSFEN()
+
+	if rw := rewindOnSame(t, s, frame, nil); rw == nil {
+		t.Fatalf("先端から 1 手の候補が無いのに差し替えを見つけません（形が症状を再現していません）")
+	}
+	if rw := rewindOnSame(t, s, frame, rankedOf(t, s, frame, "5i5h")); rw != nil {
+		t.Fatalf("先端に ▲5八玉 を足せば合うのに、%v を %v に差し替えようとしました", rw.line[rw.keep:], rw.moves)
+	}
+}
+
+// ⚠️ **推測で積んだ手を、比べる相手の 1 枚の局面から説明し直して差し替えること**（2026-10-10 に中継で踏んだ）。
+//
+// 中継で大盤のあいだに 6 手進み、追従は 4 手の修復 ▲4五歩 △2五歩 ▲4四歩 △2三飛 に ▲2五桂 △同桂 を継ぎ足した。
+// 正しい ▲2五桂 △4五桂 ▲同歩 …… とは先後と駒の有無では同じ盤で、2五 が歩（1.00）か桂かでしか分かれない。
+// ⚠️ **戻るのは推測の手の末尾 3 手より深い**（6 手）ので、比べる相手の局面（先端とぴったり合った △2一飛 の 1 枚）まで戻る。
+// ⚠️ **種類で選ぶのは、その 1 枚の種類の読みを信じてよいとき**（動いていない駒の読み違いは 1一 の 1 マスだけ）。
+func TestFollowRewindFromBaseAcrossFrames(t *testing.T) {
+	s := hakureiStudy(t)
+	s.markBase()
+	guessMoves(t, s, "4f4e", "2d2e", "4e4d", "2a2c")
+	guessMoves(t, s, "3g2e", "3c2e")
+
+	var a FollowAuto
+	for i := 0; i < 2; i++ {
+		var err error
+		if a, err = s.FollowAuto(hakureiShot, hakureiConf, nil, []PromoEvidence{}); err != nil {
+			t.Fatalf("FollowAuto: %v", err)
+		}
+	}
+	if !a.Rewound {
+		t.Fatalf("差し替えていません: %+v", a)
+	}
+	if got := tipSFEN(t, s); !strings.HasPrefix(got, hakureiWant) {
+		t.Errorf("局面 = %s, want %s…", got, hakureiWant)
+	}
+	// 1 枚からは順番が決まらない（▲4五歩 △2五桂 …… も同じ局面に行き着く）。比べる相手の局面からの答えは、足し済みの手と
+	// いちばん長く揃う順番を採る（いちばん浅く戻す。2026-10-11）ので、▲4五歩 は残り、△2五歩 から先を差し替える。
+	if !hasBranch(s, "2d2e") {
+		t.Errorf("差し替えた元の手が枝に残っていません")
+	}
+}
+
+// ⚠️ **種類の読みを信じられない 1 枚では、種類で差し替えないこと**（2026-10-10。`position.KindsTrusted`）。
+//
+// 上と同じ形で、動いていない駒の種類を 2 マス読み違えた 1 枚（1一 の香を飛・9一 の香を飛）。書体に慣れていない中継では、
+// 種類を外した読みにも確信度 1.00 が出る（録画 211 手の読み直し）。
+func TestFollowRewindIgnoresKindsWhenUntrusted(t *testing.T) {
+	s := hakureiStudy(t)
+	s.markBase()
+	guessMoves(t, s, "4f4e", "2d2e", "4e4d", "2a2c")
+	guessMoves(t, s, "3g2e", "3c2e")
+	shot := "r" + hakureiShot[1:]
+
+	for i := 0; i < 2; i++ {
+		a, err := s.FollowAuto(shot, hakureiConf, nil, []PromoEvidence{})
+		if err != nil {
+			t.Fatalf("FollowAuto: %v", err)
+		}
+		if a.Rewound {
+			t.Fatalf("種類を信じられない 1 枚で、種類で差し替えました: %+v", a)
+		}
+	}
+}
+
+// ⚠️ **速い経路の差し替えで、消える手の行き先に元の手の駒が読めたら差し替えないこと**（2026-10-10 に中継で踏んだ）。
+//
+// **実機の症状**（実盤の中継）: ▲7九銀打 △5九金打 ▲同玉 を正しく足し、その 1 枚を比べる相手にしたあと、変わったマスが
+// 7九 だけの 1 枚（銀に手か影が掛かった）で、速い経路の差し替えがこの 3 手を ▲5九玉 の 1 手に替えた（7九 の銀が消えたことに
+// すれば説明が付く）。読んだのは新しい手の行き先 5九 だけで、銀が写ったままの 7九 は読んでいなかった。ここでは同じ形を
+// 平手から作る（▲5五角打 △5八角打 ▲同玉 を ▲5八玉 に替えようとする。5五 には角が写ったまま）。
+func TestFollowCellsRewindKeepsMoveWhosePieceIsSeen(t *testing.T) {
+	s, _ := following(t)
+	line := []string{"7g7f", "3c3d", "8h2b+", "3a2b"}
+	for _, m := range line {
+		if _, err := s.Play(m); err != nil {
+			t.Fatalf("Play(%q): %v", m, err)
+		}
+	}
+	guessMoves(t, s, "B*5e", "B*5h", "5i5h")
+	s.markBase() // 3 手を指した 1 枚を比べる相手にした
+	seen := append(slices.Clone(line), "B*5e", "B*5h", "5i5h")
+
+	changed := cellIdx("5e") // 5五 に影が掛かっただけ
+	a, err := s.FollowCells(changed, nil, nil)
+	if err != nil {
+		t.Fatalf("FollowCells: %v", err)
+	}
+	if len(a.ReadCells) > 0 {
+		a, err = s.FollowCells(changed, readAfter(t, false, a.ReadCells, seen...), nil)
+		if err != nil {
+			t.Fatalf("FollowCells: %v", err)
+		}
+	}
+	if a.Rewound || a.Pending {
+		t.Fatalf("角が読めている 5五 の手を差し替えようとしました: %+v", a)
+	}
+	if a2, err := s.FollowConfirm(); err != nil || a2.Rewound {
+		t.Fatalf("差し替えました: %+v (%v)", a2, err)
+	}
+	if got := mainLine(s); !slices.Equal(got, seen) {
+		t.Fatalf("本譜 = %v, want %v", got, seen)
+	}
+}
+
+// ⚠️ **速い経路の差し替えで、種類の変わるマスの読みが元の盤と合い、新しい盤と合わなければ差し替えないこと**（2026-10-10 に中継で踏んだ）。
+//
+// **実機の症状**（実盤の中継）: ▲5九歩打 のあと、変わったマスが 5八 だけの 1 枚（△5八桂成 の手が掛かった）で、速い経路の差し替えが
+// ▲5九歩打 を ▲5九金（5八 の金が動いた）に替えた。5九 は「歩」と読めていたが、差し替えは先後と駒の有無しか比べない。
+// ここでは同じ形を平手から作る（▲4八角打 を、4九 の金が 4八 へ動いた手に替えようとする。4八 には角が写ったまま）。
+// デジタル盤の △7二角打 → △7二金（7二 が金と読める。`TestFollowCellsRewindsGuessedDrop`）は新しい盤と合うので今までどおり替える。
+func TestFollowCellsRewindKeepsDropWhoseKindIsSeen(t *testing.T) {
+	s, _ := following(t)
+	line := []string{"7g7f", "3c3d", "8h2b+", "3a2b"}
+	for _, m := range line {
+		if _, err := s.Play(m); err != nil {
+			t.Fatalf("Play(%q): %v", m, err)
+		}
+	}
+	guessMoves(t, s, "B*4h")
+	s.markBase() // 角を打った 1 枚を比べる相手にした
+	seen := append(slices.Clone(line), "B*4h")
+
+	changed := cellIdx("4i") // 4九 に手が掛かっただけ
+	a, err := s.FollowCells(changed, nil, nil)
+	if err != nil {
+		t.Fatalf("FollowCells: %v", err)
+	}
+	if len(a.ReadCells) > 0 {
+		a, err = s.FollowCells(changed, readAfter(t, false, a.ReadCells, seen...), nil)
+		if err != nil {
+			t.Fatalf("FollowCells: %v", err)
+		}
+	}
+	if a.Rewound || a.Pending {
+		t.Fatalf("角と読めている 4八 を金に差し替えようとしました: %+v", a.Reason)
+	}
+	if a2, err := s.FollowConfirm(); err != nil || a2.Rewound {
+		t.Fatalf("差し替えました: %+v (%v)", a2.Reason, err)
+	}
+	if got := mainLine(s); !slices.Equal(got, seen) {
+		t.Fatalf("本譜 = %v, want %v", got, seen)
 	}
 }

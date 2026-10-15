@@ -11,7 +11,7 @@
 // ⚠️ **局面も持たない。** 描くのは渡された `StudyState` そのもので、
 // 操作は Service を呼ぶだけ。どちらの窓から押しても、変わるのは Go 側の 1 つの手順。
 import { Events } from "@wailsio/runtime";
-import { FiMessageSquare, FiRefreshCw, FiRadio } from "react-icons/fi";
+import { FiMessageSquare, FiRefreshCw, FiRss } from "react-icons/fi";
 
 import {
   AnalyzeService,
@@ -26,7 +26,8 @@ import type {
 import type { EngineColorOption } from "../bindings/github.com/ShinteLab/ikkyoku/models";
 import { iconMarkup } from "./icon";
 import { mountMoveList } from "./movelist";
-import { openPopup } from "./popup";
+import { isFollowing as isFollowingNow, stopFollow } from "./followguard";
+import { openPopup, openPopupBelow } from "./popup";
 import type {
   AnalyzeDone,
   AnalyzeFailure,
@@ -270,10 +271,14 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
                    窓でも同じ入切が見えるように。刻むのは持ち主の窓だけ。
                    ⚠️ **絵は変わらないので、今どちらかは aria-pressed の色だけが伝える。**
                    ⚠️ **盤の脇の「中継を追う」（study-follow）とは別物。** あちらは
-                   **画面を撮って**盤から手を起こす（Phase 6）。こちらは **URL の棋譜**。 -->
-              <button id="study-kifu-follow" class="icon-btn" type="button" hidden
+                   **画面を撮って**盤から手を起こす（Phase 6）。こちらは **URL の棋譜**。
+                   ⚠️ **絵は枠の「中継を追う」（電波。FiRadio）と同じにしないこと**（2026-10-10）——
+                   同じ絵だと同じ機能に見える。こちらは URL から取り直すのでフィードの絵（FiRss）。
+                   ⚠️ **入のときの色は盤の札（棋譜を自動更新中）と同じ緑**（is-kifu-live）。
+                   既定の入（青）だと、札と同じものの入切だと読めなかった。 -->
+              <button id="study-kifu-follow" class="icon-btn is-kifu-live" type="button" hidden
                       aria-pressed="false"
-                      aria-label="棋譜を自動更新">${iconMarkup(FiRadio)}</button>
+                      aria-label="棋譜を自動更新">${iconMarkup(FiRss)}</button>
               <!-- ⚠️ **「棋譜に登録」のアイコンは外した**（2026-09-26）。棋譜タブに
                    入れるのは終局してからで、しかも再読み込みの隣では押し間違える。
                    **棋譜タブに入れたときに同じ出どころの検討が結ばれる**ので
@@ -1495,12 +1500,12 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
   // エンジンの起動や局面の移動のぶんは入っていない —— だから「約」）。
   // ⚠️ **選んだ秒数は保存する**（次に押したときの初期値。ボタンの「3秒毎」もこれ）。
   // ⚠️ **選ばずに閉じたら始めない**（`openPopup` の約束）。
+  // ⚠️ **出す場所はボタンの真下（収まらなければ真上）**（`openPopupBelow`。2026-10-10）。
   const askBatchSeconds = () => {
-    const r = batchRun.getBoundingClientRect();
     const n = batchCount();
     const choices = batchSecondsChoices();
     const now = choices.indexOf(batchSecondsSaved);
-    openPopup(r.left, r.bottom, {
+    openPopupBelow(batchRun, {
       label: "連続解析の秒数",
       title: n <= 1
         ? `${batchFrom()}手目を解析`
@@ -2304,7 +2309,7 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
   // ドック側も隠れたまま生きているので、両方が刻むと**同じ URL を 2 倍叩く。**
   // ⚠️ **解析タブを離れているあいだは刻まない**（`shown`）。付いていった先で
   // 連続モードの自動解析が起き、**見ていないタブのためにエンジンが起動する**
-  // （`TODO.md`「本譜のロック」の「中継が進むたびに勝手にエンジンが起きる」）。
+  // （`_docs/app-kifu-load.md` の「自動更新」）。
   // 戻ってきたらすぐ 1 回取り直すので、そのあいだの手は取りこぼさない。
 
   // 取り直す間隔（分）。⚠️ **値は設定から押し込まれる**（`setKifuFollowMinutes`。
@@ -2421,11 +2426,20 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
   kifuFollowBtn.addEventListener("click", () => {
     void (async () => {
       try {
+        // ⚠️ **入れるときは中継を追うを止める**（2026-10-10。同じ対局を両方で追う意味はほぼ無いので、
+        // 後から押したほうが勝つ。聞かない）。逆向き（中継を追うを押したら自動更新を止める）は `mainscreen.ts`。
+        // 理由は `_docs/app-kifu-load.md` の「自動更新」。
+        const stopped = !followOn && isFollowingNow();
+        if (stopped) {
+          await stopFollow();
+        }
         // ⚠️ **ここでは刻み始めない** —— 戻ってきた状態を `render` が受けて
         // `syncFollow` が決める（切り離した窓から押しても持ち主が刻む）。
         onState(await StudyService.SetKifuFollow(!followOn));
         if (!followOn) {
           setStatus("自動更新を止めました");
+        } else if (stopped) {
+          setStatus("中継の追跡を止めて、棋譜の自動更新を始めました");
         }
       } catch (err) {
         setStatus(String(err instanceof Error ? err.message : err), true);

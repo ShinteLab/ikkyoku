@@ -414,7 +414,7 @@ func relayConf(v [81]float64) *position.CellCost {
 	return c
 }
 
-// relayShot / relayCost は録画 `follow/20261007-152341/002-2e2d-guess.png` を読み直した盤と確信度。
+// relayShot / relayCost は 2026-10-07 の中継の録画で、△6五桂 ▲同桂 △同歩 ▲2四歩 と進んだ 1 枚を読み直した盤と確信度。
 const relayShot = "ln1g3nl/1gs3p2/1pp1s2p1/p4b1Pp/3p1p3/P1P1p4/1P1P1PSLP/2KGGG3/L7+b"
 
 var relayCost = [81]float64{
@@ -431,7 +431,7 @@ var relayCost = [81]float64{
 
 // ⚠️ **種類だけの読み違いが何マスかあっても、修復で繋がること**（`kindOnlyWeight`。2026-10-07 に実機で踏んだ）。
 //
-// **実機の症状**（録画 `follow/20261007-152341/002-2e2d-guess.png`）: △6五桂 のあと ▲同桂 △同歩 ▲2四歩 と
+// **実機の症状**（2026-10-07 の中継の録画）: △6五桂 のあと ▲同桂 △同歩 ▲2四歩 と
 // 進んだ 1 枚で、8二 の後手玉を「金」（確信度 0.80。この中継では毎回）、2七 の飛を「香」（0.56）、
 // 4八 の銀を「金」（0.39）と読んだ。種類の違いを満額で数えると、厳密一致は駒が消えて湧いたことになって
 // 「隔たりが大きすぎます」、修復も 3 マスで予算 1.0 を超えて落ちた。そこへ `Rank` が ▲2四歩 だけを
@@ -447,7 +447,7 @@ func TestConnectRepairForgivesKindMisreads(t *testing.T) {
 	}
 }
 
-// gameShot / gameCost は録画 `follow/20261008-040431/021-8g8f_8e8f_4h3g.png` を読み直した盤と確信度
+// gameShot / gameCost は 2026-10-08 のゲーム画面の録画で、▲8六歩 △同歩 ▲3七銀 と進んだ 1 枚を読み直した盤と確信度
 // （空きは 0.15）。1四 の後手の歩を香と読んでいる（0.65）ほかは正しい。
 const gameShot = "ln1g2snl/3s1kg2/p1pppp1p1/6p1l/4b4/Pr4PRP/2PPPPS2/1BG6/LNS1KG1NL"
 
@@ -482,10 +482,10 @@ func TestConnectRepairPrefersCheaperDeeper(t *testing.T) {
 	}
 }
 
-// anagumaAfter8d は中継（2026-10-08。録画 `follow/20261008-101441/`）の ▲8四歩 まで進めた局面（後手は居飛車穴熊）。
+// anagumaAfter8d は中継（2026-10-08 の録画）の ▲8四歩 まで進めた局面（後手は居飛車穴熊）。
 const anagumaAfter8d = "kn2g2nl/lsg2srb1/pppppp1pp/1P4p2/3P5/2P6/P1BSPPPPP/1R4K2/LN1G1GSNL w - 1"
 
-// anagumaShot3 / anagumaCost3 は録画 `x005-same-3.png` を読み直した盤と確信度（△同歩 ▲同飛 △8三歩 のあと）。
+// anagumaShot3 / anagumaCost3 は同じ録画の、繋がらなかった周の 1 枚を読み直した盤と確信度（△同歩 ▲同飛 △8三歩 のあと）。
 // 動いていない 6 マスで種類を読み違えている: 5一 の金と 2一 の桂を「歩」、3八 の玉を「金」、4九 の金・3九 の銀・
 // 1九 の香を「歩」。
 const anagumaShot3 = "kn2p2pl/lsg2srb1/pppppp1pp/1R4p2/3P5/2P6/P1BSPPPPP/6G2/LN1G1PPNP"
@@ -502,7 +502,7 @@ var anagumaCost3 = [81]float64{
 	1.00, 1.00, 0.15, 0.82, 0.15, 0.34, 0.77, 1.00, 0.51,
 }
 
-// anagumaShot2 / anagumaCost2 は録画 `x005-same-1.png`（△同歩 ▲同飛 のあと）。2一 の桂・3二 の飛・2九 の桂を「歩」、
+// anagumaShot2 / anagumaCost2 は同じ録画の、それより前に繋がらなかった周の 1 枚（△同歩 ▲同飛 のあと）。2一 の桂・3二 の飛・2九 の桂を「歩」、
 // 2二 の角と 3八 の玉を「銀」と読み、8四 に来た飛も「歩」と読んでいる。
 const anagumaShot2 = "kn2g2pl/lsg2sps1/p1pppp1pp/1P4p2/3P5/2P6/P1BSPPPPP/6S2/LN1G1GSPL"
 
@@ -518,7 +518,7 @@ var anagumaCost2 = [81]float64{
 	1.00, 1.00, 0.15, 0.82, 0.15, 0.66, 0.43, 0.81, 1.00,
 }
 
-// furibishaShot / furibishaCost は同じ日の別の中継（録画 `follow/20261008-103837/013-4d3e_2g2f-guess.png`）を読み直した盤と確信度。
+// furibishaShot / furibishaCost は同じ日の別の中継（振り飛車の対局）の録画の 1 枚を読み直した盤と確信度。
 // ▲3五同歩 のあと △2六歩 ▲同歩 △同銀 と進んだ 1 枚で、8六 の角・7六 の飛・7七 の桂を「歩」、4八 の金を「角」、
 // 3八 の玉を「金」、2二 の飛を「香」、1九 の香を「歩」と読んでいる。
 const furibishaShot = "kn5nl/lsgg3l1/ppppbp2p/4p4/P1PP2s2/1PP4P1/2PSPP2P/4BGGS1/L6NP"
@@ -787,7 +787,7 @@ func BenchmarkConnectRelay(b *testing.B) {
 
 // ⚠️ **読みの弱い駒を、手を足して説明しないこと**（`cheaperDeeper` は確かな読みのマスを覆したときだけ。2026-10-08）。
 //
-// 光の差し込んだ 1五 を「先手の香」（0.40）と読んだ 1 枚（録画 `follow/20261008-140929/`）。▲2五歩 で 1五 を覆す（0.40）
+// 光の差し込んだ 1五 を「先手の香」（0.40）と読んだ 1 枚（2026-10-08 の中継の録画。盤の右側に光が差し込んでいた）。▲2五歩 で 1五 を覆す（0.40）
 // のが正しいのに、1 手深く探して ▲1五角打 △2五角打 ▲同歩（覆さずに済む）を採った。
 func TestConnectRepairDoesNotExplainWeakPiece(t *testing.T) {
 	from := mustPos(t, "ln1g3nl/1ks3g2/1ppppp1pp/p4sr2/6p2/PPP2P1P1/1SNPPSP1P/1KG1G2R1/L6NL b Bb 1")
@@ -811,7 +811,7 @@ func TestConnectRepairDoesNotExplainWeakPiece(t *testing.T) {
 
 // ⚠️ **何も指していないほうが安く説明できるなら、修復で手を足さないこと**（2026-10-08 に実機で踏んだ）。
 //
-// 録画 `follow/20261008-142803/020-2c1c_1a1c.png` を読み直した盤と確信度。盤の右側に光が当たり、2三 のと金を「空き」（0.15）、
+// 同じ中継の少しあとの録画で、追従が ▲1三と △同桂 を足した 1 枚を読み直した盤と確信度。盤の右側に光が当たり、2三 のと金を「空き」（0.15）、
 // 1三 の歩を「香」と読んでいる（1〜2 筋は実際には動いていない）。`staleKinds` で予算が空いたぶん、▲1三と △同桂（費用 0.90）が
 // 予算に収まって入った。何も指していなければ 0.15 で済む。
 func TestConnectRepairNotWorseThanNothing(t *testing.T) {
@@ -831,5 +831,129 @@ func TestConnectRepairNotWorseThanNothing(t *testing.T) {
 	r := connect(t, from, shot, position.ConnectOptions{Tolerance: position.DefaultTolerance, Cost: relayConf(cost)})
 	if r.Stop != position.StopSame || len(r.Moves) != 0 {
 		t.Fatalf("何も指していないはず: stop=%v moves=%v solutions=%v cost=%v", r.Stop, r.Moves, r.Solutions, r.Cost)
+	}
+}
+
+// hakureiRoot / hakureiLine / hakureiShot / hakureiCost は 2026-10-10 の中継（白玲戦）の録画で、大盤と解説の画面のあとに写った 1 枚の根・本譜と、
+// その 1 枚を読み直した盤と確信度。大盤と解説の画面のあいだに ▲2五桂 △4五桂 ▲同歩 △2五歩 ▲4四歩 △2三飛 の 6 手
+// （△2五歩 と △2三飛 は入れ替わりうる）が進んだ。
+const hakureiRoot = "l6rl/1kg2b3/1png1snpp/p1psppp2/7P1/P1PSSPP2/1P1P2N1P/1BK1G4/LN1G3RL b 2P 1"
+
+var hakureiLine = []string{"6i6h", "4c5b", "2i4i", "2a4a", "2e2d", "2c2d", "P*2c", "4a2a"}
+
+const hakureiShot = "l7l/1kg1sb3/1png3rp/p1pspPp2/7p1/P1PSS1P2/1P1P4P/1BKGG4/LN3R2L"
+
+var hakureiCost = [81]float64{
+	1.00, 0.15, 0.15, 0.15, 0.15, 0.15, 0.15, 0.15, 1.00,
+	0.15, 1.00, 1.00, 0.15, 1.00, 1.00, 0.15, 0.15, 0.15,
+	0.15, 1.00, 1.00, 1.00, 0.15, 0.15, 0.15, 1.00, 1.00,
+	1.00, 0.15, 1.00, 1.00, 1.00, 1.00, 1.00, 0.15, 0.15,
+	0.15, 0.15, 0.15, 0.15, 0.15, 0.15, 0.15, 1.00, 0.15,
+	1.00, 0.15, 1.00, 1.00, 1.00, 0.15, 1.00, 0.15, 0.15,
+	0.15, 1.00, 0.15, 1.00, 0.15, 0.15, 0.15, 0.15, 1.00,
+	0.15, 1.00, 1.00, 1.00, 1.00, 0.15, 0.15, 0.15, 0.15,
+	1.00, 1.00, 0.15, 0.15, 0.15, 1.00, 0.15, 0.15, 1.00,
+}
+
+// ⚠️ **MaxDepth の外にある、もっとよく合う手順を探すこと**（`DeepDepth`。2026-10-10 に中継で踏んだ）。
+//
+// **実機の症状**: 上の 6 手が写った 1 枚で、深さ 4 の修復 ▲4五歩 △2五歩 ▲4四歩 △2三飛（空きと読めた 3七・3三 を
+// 「読めていない」として覆した。0.15 × 2）が通り、続けて ▲2五桂 △同桂（2五 の歩を桂に覆した）が継ぎ足されて、
+// 2五 の駒と先手の持ち駒が狂った。ぴったり合う 6 手は深さ 6 で 72 節点しか要らない。
+// ⚠️ **1 マスでも種類を読み違えた 1 枚（実際に 1一 の香を飛と読んだ）でも同じ答えになること**（そちらはぴったりの手順が
+// 無いので、修復の答えより安い深い手順を探す `cheaperDeeper` の側で届く）。
+// ⚠️ **順番は決まらないが、行き着く局面（持ち駒まで）は全部同じであること**（追従が推測の印を付けて進んでよい形）。
+func TestConnectDeepDepthFindsBetterFit(t *testing.T) {
+	from := after(t, hakureiRoot, hakureiLine...)
+	opt := position.ConnectOptions{Tolerance: position.DefaultTolerance, Cost: relayConf(hakureiCost)}
+
+	// 前提: 深さを渡さなければ、今までどおり 4 手の修復が通る（ここが取り違えの入口だった）。
+	if r := connect(t, from, hakureiShot, opt); r.Stop != position.StopFound || r.Depth != 4 {
+		t.Fatalf("前提が崩れています: stop=%v depth=%d sols=%v", r.Stop, r.Depth, r.Solutions)
+	}
+
+	misread := "l7r" + hakureiShot[3:] // 1一 の香を後手の飛と読んだ 1 枚
+	for _, shot := range []string{hakureiShot, misread} {
+		deep := opt
+		deep.DeepDepth = 8
+		r := connect(t, from, shot, deep)
+		if r.Stop != position.StopFound || r.Depth != 6 || r.Cost != 0 {
+			t.Fatalf("%s: 6 手に届いていません: stop=%v depth=%d cost=%v sols=%v", shot[:3], r.Stop, r.Depth, r.Cost, r.Solutions)
+		}
+		if r.More || len(r.Solutions) < 2 {
+			t.Fatalf("%s: 順番違いが並んでいません: more=%v sols=%v", shot[:3], r.More, r.Solutions)
+		}
+		end := ""
+		for i, sol := range r.Solutions {
+			p := from.Clone()
+			for _, m := range sol {
+				if err := p.ApplyMove(m); err != nil {
+					t.Fatalf("ApplyMove(%q): %v", m, err)
+				}
+			}
+			got, err := p.SFEN()
+			if err != nil {
+				t.Fatalf("SFEN: %v", err)
+			}
+			if i == 0 {
+				end = got
+			} else if got != end {
+				t.Fatalf("%s: 行き着く局面が揃っていません: %v → %s / %s", shot[:3], sol, got, end)
+			}
+		}
+		if !strings.HasPrefix(end, "l7l/1kg1sb3/1png3rp/p1pspPp2/7p1/P1PSS1P2/1P1P4P/1BKGG4/LN3R2L b N2Pn2p ") {
+			t.Errorf("%s: 行き着いた局面 = %s", shot[:3], end)
+		}
+	}
+}
+
+// BenchmarkConnectDeep は**深く探してやっと繋がる 1 枚**の時間の歯止め（`DeepDepth`。2026-10-10）。
+// 1一 を読み違えた 1 枚はぴったりの手順が無く、厳密一致を深さ 8 まで空振りしてから修復と `cheaperDeeper` に進む。
+//
+// ⚠️ **追従の打ち切り（`app.followTimeout` 1.5 秒）に届くと、繋がるはずの 6 手を落として 4 手の修復に戻る。**
+func BenchmarkConnectDeep(b *testing.B) {
+	from, err := position.FromFullSFEN(hakureiRoot)
+	if err != nil {
+		b.Fatal(err)
+	}
+	for _, m := range hakureiLine {
+		if err := from.ApplyMove(m); err != nil {
+			b.Fatal(err)
+		}
+	}
+	board, err := position.FromSFEN("l7r" + hakureiShot[3:])
+	if err != nil {
+		b.Fatal(err)
+	}
+	opt := position.ConnectOptions{Tolerance: position.DefaultTolerance, Cost: relayConf(hakureiCost), DeepDepth: 8}
+	for i := 0; i < b.N; i++ {
+		r, err := position.Connect(context.Background(), from, board, opt)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if r.Stop != position.StopFound || r.Depth != 6 {
+			b.Fatalf("6 手に届いていません: %v depth=%d", r.Stop, r.Depth)
+		}
+	}
+}
+
+// ⚠️ **根から動いていない成駒のマスは、厳密一致でも見ないこと**（`staleKinds.promo`。2026-10-10 に中継で踏んだ）。
+//
+// **実機の症状**（2026-10-10 の中継の録画）: 実際は △5八歩成（5八 の金を取る）▲同金 の 2 手。
+// 認識器が、動いていない 1一 の先手の馬を「後手の金」と読み、深く探すと △5八歩成 ▲5七金 △1二金打 ▲5八金 △1一金
+// （後手が馬を取る）の 5 手がぴったり合って通った。成駒は学習データにほぼ入らず、先後まで外す。
+// ⚠️ **見えないマスがある 1 枚では今までどおり見る**（`TestConnectUnseenDropsCountBound`）。
+func TestConnectIgnoresUnmovedPromotedPiece(t *testing.T) {
+	from := after(t, "l6+R+B/1kg2b3/1pngss2p/pnp2pp2/4p2p1/P1P3P2/1P1PSS2P/2KGG4/LN6L w NL2Pr2p 1",
+		"5c5d", "N*6f", "5e5f", "4g5f", "5d6e", "5f6e", "7c6e", "5g5f", "P*5g", "5f6e")
+	const shot = "l6+Rg/1kg2b3/1p1g1s2p/pnp2pp2/3S3p1/P1PN2P2/1P1P4P/2K1G4/LN6L" // 1一 の馬を後手の金と読んだ
+	r := connect(t, from, shot, position.ConnectOptions{Tolerance: position.DefaultTolerance, Cost: uniformCost(1), DeepDepth: 8})
+	if r.Stop != position.StopFound || r.Depth != 2 {
+		t.Fatalf("△5八歩成 ▲同金 の 2 手になっていません: stop=%v depth=%d sols=%v", r.Stop, r.Depth, r.Solutions)
+	}
+	for _, sol := range r.Solutions {
+		if sol[1] != "6h5h" {
+			t.Fatalf("▲同金 ではない手順が並んでいます: %v", r.Solutions)
+		}
 	}
 }

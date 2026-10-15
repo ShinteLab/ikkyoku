@@ -136,6 +136,17 @@ func TestStudyServiceFollowKifuStopsAtEnd(t *testing.T) {
 	if load.Note == "" {
 		t.Error("自動更新を止めたことが出ていません")
 	}
+	// **取り直した側の終局の種別も写すこと**（2026-10-09。手順リストの「3 投了」）。
+	// ⚠️ 据え直しは手しか受け取らないので、ここで写さないと行が出ない。
+	ends := map[int]string{}
+	for _, n := range load.State.Nodes {
+		if n.End != "" {
+			ends[n.Number] = n.End
+		}
+	}
+	if len(ends) != 1 || ends[2] != "投了" {
+		t.Errorf("終局の印 = %v, want 2 手目に「投了」だけ", ends)
+	}
 }
 
 // URL から読んでいない局面では入れられないこと。**根を入れ替えたら切れる**こと。

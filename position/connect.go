@@ -72,8 +72,21 @@ const (
 	// （△6五桂 のあとの ▲同桂 △同歩）が繋がらなかった。行き先の裏付け（`backed`）も先後までしか
 	// 見ないので、それと揃える。⚠️ **費用表があるときだけ**（厳密一致の `cost` は「何マス食い違って
 	// いるか」のままにする）。⚠️ **0 にしないこと** —— 種類の違いで成・不成や打った駒を選んでいる。
-	// ⚠️ **当て推量**（`TODO.md` 4 の案の「半分」）。
+	// ⚠️ **当て推量**（録画で詰めていない。`TODO.md` 4 の「実機で詰めること」）。
+	// ⚠️ **種類の読みを信じてよい 1 枚では掛けない**（`kindTrustMax`。2026-10-10）。
 	kindOnlyWeight = 0.5
+	// kindTrustMax は**撮った 1 枚の駒の種類の読みを信じてよい**とする、根から見て先後は合って種類だけ違うマス
+	// （`staleKinds`。たいてい動いていない駒の読み違い）の数の上限（2026-10-10）。
+	//
+	// 中継で 6 手が写った 1 枚から、2五 の歩（確信度 1.00）を桂に覆した手順を継ぎ足して取り違えた。種類の違いを半分に
+	// しか数えず、修復の答えの採り方（`sideBetter`）も先後と駒の有無しか見ないので、2五 の歩と桂を区別できなかった。
+	// ⚠️ **確信度では分けられない**（録画 211 手の行き先を読み直すと、種類を外した読みにも 1.00 が普通に出た。どれも
+	// 書体に慣れていない中継）。**その 1 枚で動いていない駒の種類をどれだけ当てているか**なら分かれた —— 認識器が
+	// 正しかった 1 枚は読み違い 0〜1、外した 1 枚は 6〜10（例外が 1 枚。読み違い 1 で角を歩と読んだ）。信じる 1 枚では
+	// 種類の違いを満額で数える（修復の候補の中の選び方と、追従の差し替えの比べ）。外れても正しい手が予算を超えて
+	// 「繋がらない」で待つ側に倒れる。⚠️ **種類で手を足すこと自体は止めない**（`sideBetter` は先後と駒の有無だけ）。
+	// ⚠️ **当て推量**（測ったのは今の認識器で読み直した値。`TODO.md` 4）。
+	kindTrustMax = 1
 )
 
 // CellCost は**マスごとの「認識結果を覆すのにかかる費用」**（rank, file の順）。
@@ -179,6 +192,17 @@ func (r StopReason) String() string {
 type ConnectOptions struct {
 	// MaxDepth は探す最大手数（0 なら DefaultMaxDepth）。
 	MaxDepth int
+	// DeepDepth は **MaxDepth を超えて探してよい最大手数**（MaxDepth 以下なら MaxDepth と同じ。2026-10-10）。
+	//
+	// 深く探すのは 2 つだけ: **認識とぴったり合う手順**と、**修復の答えより厳密に安く合う手順**（`cheaperDeeper`）。
+	// 修復そのもの（最初の答え）は今までどおり MaxDepth までで探す。中継の大盤のあいだに 6 手進んだ 1 枚で、
+	// 深さ 4 の修復（空きの読み 2 マスを覆した 4 手）が通り、ぴったり合う 6 手（深さ 6 で 72 節点・5ms）が
+	// 探されなかった。1 マスでも種類を読み違えた 1 枚ではぴったりの手順が無いので、修復の側でも深く探す。
+	// ⚠️ **MaxDepth を超えた層は打ち切りを許す** —— 打ち切ったら「深い答えは無かった」として、浅い側の答え
+	// （厳密一致なら修復へ進む・修復なら浅い答え）のまま。MaxDepth までの探し方と答えは今までどおり。
+	// ⚠️ **相手が往復して戻るぴったりの手順は出うる**（片側だけ 3 手進んだ盤は、手番が交互なので相手の 2 手が要る）。
+	// たいてい往復の選び方が多すぎて並べきれない（`More`）ので、それを 1 本選んで据えないこと。
+	DeepDepth int
 	// MaxNodes は展開する節点の上限（0 なら DefaultMaxNodes）。
 	MaxNodes int
 	// MaxSolutions は集める手順の本数（0 なら DefaultMaxSolutions）。
@@ -214,6 +238,14 @@ func (o ConnectOptions) maxDepth() int {
 		return DefaultMaxDepth
 	}
 	return o.MaxDepth
+}
+
+// deepDepth は MaxDepth を超えて探してよい最大手数（`DeepDepth`。MaxDepth より浅くはしない）。
+func (o ConnectOptions) deepDepth() int {
+	if d := o.maxDepth(); o.DeepDepth < d {
+		return d
+	}
+	return o.DeepDepth
 }
 
 func (o ConnectOptions) maxNodes() int {
@@ -316,7 +348,7 @@ func Connect(ctx context.Context, from *Position, target *Board, opt ConnectOpti
 
 	// 下界。**ここで落ちれば `legal.Moves` を 1 回も呼ばない。**
 	// 認識の誤りの大半（駒が何枚も湧いた・消えた）はここで即死する。
-	if newDiff(root.Board, target, nil, 0, opt.Unseen, staleKinds{}).same() {
+	if newDiff(root.Board, target, nil, 0, opt.Unseen, newPromoSkip(root.Board, opt.Unseen)).same() {
 		return ConnectResult{Depth: 0, Stop: StopSame}, nil
 	}
 
@@ -373,6 +405,9 @@ func Connect(ctx context.Context, from *Position, target *Board, opt ConnectOpti
 // 説明した（`TestConnectRepairNotWorseThanNothing`）—— 2一 で読めた後手の駒を消すので、何も指していないより食い違う。
 // ⚠️ **種類は比べない**（費用の合計で比べると、来た飛車を歩と読んだ ▲同飛 が「何も指していない」に負ける。
 // 種類は認識が一番外すところ）。⚠️ **見えないマスは数えない**。
+// ⚠️ **種類の読みを信じてよい 1 枚（`kindTrustMax`）でも種類は比べない**（2026-10-10 に入れて、同じ日に戻した）。
+// 打った香を「歩」1.00 と読んだ 1 枚（ほかの駒は全部読めている）で、香を打つ手と「何も指していない」が同点になり、
+// 正しい打つ手を捨てた。駒の有無は種類の読みより確かなので、種類で手を足すこと自体を止めない（2026-10-09 の打つ手と同じ）。
 func sideBetter(root *Position, target *Board, sols [][]string, cost *CellCost, unseen *CellMask) bool {
 	base := sideCost(root.Board, target, cost, unseen)
 	for _, sol := range sols {
@@ -414,9 +449,14 @@ func sideCost(cur, tgt *Board, cost *CellCost, unseen *CellMask) float64 {
 func search(ctx context.Context, root *Position, target *Board, opt ConnectOptions,
 	cost *CellCost, tolerance float64, collect int) (ConnectResult, error) {
 	depth := opt.maxDepth()
+	if tolerance == 0 {
+		// ⚠️ **厳密一致だけは MaxDepth より深く探してよい**（`DeepDepth`。2026-10-10）。
+		depth = opt.deepDepth()
+	}
 	// ⚠️ **動いていないマスの種類だけの読み違いを見ないのは、修復のときだけ**（`staleKinds`）。
 	// 厳密一致は「認識と合法性が完全に一致した」ことを言うので、1 マスでも違えば通さない。
-	var stale staleKinds
+	// ⚠️ **根で成駒が載っているマスは、厳密一致でも動いていないあいだは見ない**（`staleKinds.promo`）。
+	stale := newPromoSkip(root.Board, opt.Unseen)
 	if tolerance > 0 {
 		stale = newStaleKinds(root.Board, target, opt.Unseen)
 	}
@@ -459,12 +499,21 @@ func search(ctx context.Context, root *Position, target *Board, opt ConnectOptio
 			if tolerance > 0 && s.forgaveOccupancy(r.Cost) {
 				// ⚠️ **修復では、深い手順がもっと安く合うなら、そちらを採る**（2026-10-08。`cheaperDeeper`）。
 				// 探すのは、答えが駒の有無か先後を覆したときだけ（深く探すと 1 枚が約 10 倍重い）。
-				if deeper, ok := s.cheaperDeeper(root, limit+1, opt.maxDepth(), r.Cost); ok {
+				// ⚠️ **`MaxDepth` の外（`DeepDepth`）へ出るのは、種類を見ない下界 + `MaxWaste` までに抑えること**（2026-10-10）。
+				// 抑えないと、行って戻る手で 1 マス余分に説明する偽の手順が「より安い」として通る（1 手戻した局面から、飛車が
+				// 2八 → 3七 → 2八 と往復する 5 手。`TestFollowRewindRecoversMissedMove`）。`MaxDepth` までは今までどおり。
+				deep := min(opt.deepDepth(), max(opt.maxDepth(), d0.blindBound(root.Turn)+opt.maxWaste()))
+				if deeper, ok := s.cheaperDeeper(root, limit+1, deep, r.Cost); ok {
 					return deeper, nil
 				}
 			}
 			return r, nil
 		} else if over {
+			if limit > opt.maxDepth() {
+				// ⚠️ **MaxDepth を超えた厳密一致の層で打ち切ったら「無かった」に倒す**（`DeepDepth`）。
+				// 「探し切れなかった」にすると修復へ進まなくなり、深くしたせいで今まで繋がった 1 枚が繋がらなくなる。
+				return s.miss(StopUnreachable), nil
+			}
 			return s.miss(StopBudget), nil
 		}
 	}
@@ -474,16 +523,18 @@ func search(ctx context.Context, root *Position, target *Board, opt ConnectOptio
 // cheaperDeeper は**修復の答えが見つかったあと、深い手順で、もっと少なく覆して合うもの**を探す（2026-10-08）。
 //
 // 修復は浅い手数から探して最初に見つかった手数で止まり、深さの上限も下界 + `MaxWaste`（と `blindBound`）で決まる。
-// 「空き」の読みは安く覆せる（0.15）ので、**駒が本当に動いて空いたマスを「読み違い」として覆した浅い手順**が、
+// 「空き」の読みは安く覆せることがある（2026-10-10 までは一律 0.15。今は被覆率が空きの線に近い空きだけ）ので、**駒が本当に動いて空いたマスを「読み違い」として覆した浅い手順**が、
 // ぴったり合う深い手順より先に通ってしまう。ゲーム画面で ▲3七銀 △8六歩 ▲同歩 △同飛 の 4 手が 1 枚に写り
 // （1d の歩を香と読んでいたので厳密一致は無かった）、3 手の [8g8f 8e8f 4h3g] が 8b の飛車を「読めていない」
 // として通って、本譜と持ち駒が狂った。
 //
 // ⚠️ **予算を今の答えの費用より小さく絞ること**（厳密に安いものだけ採る）—— 同じだけ覆す深い手順は、同じ変化を
 // 遠回りで説明しているだけで、往復して戻る偽の手順もここに入る。絞った予算は刈り（`floor`）にも効くので軽い。
-// ⚠️ **`MaxDepth` まで 1 手ずつ深く探す**（2026-10-08。動いていない駒の種類の読み違いを見なくなった
-// （`staleKinds`）ぶん浅い答えが予算に収まりやすくなり、1 手深いだけでは ▲同桂 △同歩 ▲2四歩 の 3 手に
-// 届かなくなった）。⚠️ **打ち切ったら浅い答えのまま**（探し切れていない）。
+// ⚠️ **`DeepDepth`（無ければ `MaxDepth`）まで 1 手ずつ深く探す**（2026-10-08。動いていない駒の種類の読み違いを
+// 見なくなった（`staleKinds`）ぶん浅い答えが予算に収まりやすくなり、1 手深いだけでは ▲同桂 △同歩 ▲2四歩 の 3 手に
+// 届かなくなった）。2026-10-10 に `MaxDepth` の外まで延ばした —— 1一 の香を飛と読んだ中継の 1 枚で、ぴったりの
+// 手順が無いまま 4 手の修復が通り、種類の読み違いのほかは合う 6 手に届かなかった。
+// ⚠️ **打ち切ったら浅い答えのまま**（探し切れていない）。
 // ⚠️ **呼ぶのは浅い答えが駒の有無か先後を覆したときだけ**（`forgaveOccupancy`）。深く探すと
 // 中継の 1 枚（`BenchmarkConnectRelay`）が 7.7ms → 72ms になった。種類の読み違いだけを覆した答えは、
 // 深い手順でも同じマスを覆すことになるので、探しても安くならない。
@@ -860,7 +911,8 @@ func newDiff(cur, tgt *Board, cost *CellCost, budget float64, unseen *CellMask, 
 				}
 				v := cost.at(r, f)
 				// ⚠️ **先後が合って種類だけ違うマスは軽く数える**（費用表があるときだけ。`kindOnlyWeight`）。
-				if cost != nil && !c.IsEmpty() && !t.IsEmpty() && c.Black() == t.Black() {
+				// ⚠️ **種類の読みを信じてよい 1 枚では満額**（`kindTrustMax`）。
+				if cost != nil && !stale.trusted && !c.IsEmpty() && !t.IsEmpty() && c.Black() == t.Black() {
 					v *= kindOnlyWeight
 				}
 				d.cost += v
@@ -929,32 +981,76 @@ func newDiff(cur, tgt *Board, cost *CellCost, budget float64, unseen *CellMask, 
 type staleKinds struct {
 	root *Board
 	mask *CellMask
+	// promo は**根で成駒が載っているマス**（2026-10-10）。⚠️ **厳密一致でも修復でも、動いていないあいだは見ない**
+	// （`newPromoSkip`）。成駒は学習データにほぼ入らず読めないのが普通で、先後まで外す。中継で、動いていない 1一 の
+	// 先手の馬を「後手の金」と読んだ 1 枚から、▲同金 の 2 手で済むところを、後手が馬を取る △1二金打 △1一金 を挟んだ
+	// 5 手が「ぴったり合う」として通った（深く探すようにした `DeepDepth` で届いた）。差し替えの比べ（app の
+	// `promotedCells`）と同じ前提。取られた・動いたなら元のマスや行き先が変わるので、そちらで見つかる。
+	promo *CellMask
+	// trusted は**この 1 枚の種類の読みを信じるか**（stale のマスが `kindTrustMax` 以下。2026-10-10）。
+	// ⚠️ **ゼロ値は偽**（今までどおり種類の違いは半分）—— 厳密一致や `Rank` が渡すゼロ値の振る舞いを変えない。
+	trusted bool
 }
 
-// newStaleKinds は根 root と撮った盤 tgt から stale のマスを拾う（無ければゼロ値）。
+// newStaleKinds は根 root と撮った盤 tgt から stale のマスと成駒のマス（`promo`）を拾う。
+// ⚠️ **成駒のマスは種類の読みを信じるかの数に入れない**（読めないのが普通なので、その 1 枚の読みの出来を表さない）。
 func newStaleKinds(root, tgt *Board, unseen *CellMask) staleKinds {
-	var m *CellMask
+	k := newPromoSkip(root, unseen)
+	n := 0
 	for r := 0; r < 9; r++ {
 		for f := 0; f < 9; f++ {
 			c, t := root.cells[r][f], tgt.cells[r][f]
-			if unseen.at(r, f) || c == t || c.IsEmpty() || t.IsEmpty() || c.Black() != t.Black() {
+			if unseen.at(r, f) || c == t || c.IsEmpty() || t.IsEmpty() || c.Black() != t.Black() || c.Promoted() {
 				continue
 			}
-			if m == nil {
-				m = &CellMask{}
+			if k.mask == nil {
+				k.mask = &CellMask{}
 			}
-			m[r][f] = true
+			k.mask[r][f] = true
+			n++
 		}
 	}
-	if m == nil {
-		return staleKinds{}
-	}
-	return staleKinds{root: root, mask: m}
+	k.root = root
+	k.trusted = n <= kindTrustMax
+	return k
 }
 
-// skip は、盤の (rank, file) の駒 c が stale のマスで、根から動いていないか。
+// newPromoSkip は**根で成駒が載っているマスだけ**を見ないマスにする（厳密一致・`Rank` 用。`promo`）。種類の読みは信じない側。
+//
+// ⚠️ **見えないマス（`unseen`）がある 1 枚では見る**（今までどおり）。成駒が取られたことは、ふつうは取った駒の元のマスが
+// 空くことでも分かるが、元のマスが手や頭で見えないと、跡は成駒のマスにしか残らない（一段目に隠れた △3一銀 が 2二 の馬を
+// 取った 1 枚。`TestConnectUnseenDropsCountBound`）。
+func newPromoSkip(root *Board, unseen *CellMask) staleKinds {
+	if unseen.Count() > 0 {
+		return staleKinds{}
+	}
+	var m *CellMask
+	for r := 0; r < 9; r++ {
+		for f := 0; f < 9; f++ {
+			if c := root.cells[r][f]; !c.IsEmpty() && c.Promoted() && !unseen.at(r, f) {
+				if m == nil {
+					m = &CellMask{}
+				}
+				m[r][f] = true
+			}
+		}
+	}
+	return staleKinds{root: root, promo: m}
+}
+
+// KindsTrusted は撮った盤 target の**駒の種類の読みを信じてよいか**（2026-10-10。`kindTrustMax`）。
+// 根 root と比べて、先後は合って種類だけ違うマスが `kindTrustMax` 以下なら真。見えないマスは数えない。
+// 追従の差し替えの比べ（app）が `Connect` と同じ線で決めるための口。
+func KindsTrusted(root, target *Board, unseen *CellMask) bool {
+	return newStaleKinds(root, target, unseen).trusted
+}
+
+// skip は、盤の (rank, file) の駒 c が stale のマスか成駒のマスで、根から動いていないか。
 func (k staleKinds) skip(rank, file int, c Cell) bool {
-	return k.mask != nil && k.mask[rank][file] && c == k.root.cells[rank][file]
+	if k.root == nil || c != k.root.cells[rank][file] {
+		return false
+	}
+	return (k.mask != nil && k.mask[rank][file]) || (k.promo != nil && k.promo[rank][file])
 }
 
 // floor は**あと r 手指しても残る食い違いの費用の下限**（修復のときだけ意味がある。2026-10-07）。
@@ -962,7 +1058,7 @@ func (k staleKinds) skip(rank, file int, c Cell) bool {
 // 1 手で中身が変わるマスは高々 2 つ（元と行き先。打つ手は 1 つ）なので、r 手では高々 2r マスしか
 // 直せない。**手の触れないマスの食い違いはそのまま残る**ので、安い順に (食い違い − 2r) マスぶんは
 // 必ず払う。⚠️ **admissible**（直すマスを一番高いほうから選べた場合でもこれだけ残る）。
-// `bound` は安いマスを見逃せる数で下界を緩めるので、空き（0.15）が多い 1 枚では 0 まで落ちて
+// `bound` は安いマスを見逃せる数で下界を緩めるので、安い空きが多い 1 枚では 0 まで落ちて
 // 刈れない —— こちらは費用で刈る。
 func (d *diff) floor(r int) float64 {
 	keep := d.mismatches - 2*r
@@ -1080,7 +1176,7 @@ func (d *diff) bound(turn Turn) int {
 // blindBound は**駒の種類を見ない**下界（先後と駒の有無だけ。2026-10-07）。
 //
 // 修復で**どこまで深く探すか**にだけ使う（`search`）。`bound` は見逃せるマスを
-// **安い順に**引くので、空きの読み（0.15）で安く見えるだけの**本当に空いたマス**まで見逃し、
+// **安い順に**引くので、空きの読みが安いと、安く見えるだけの**本当に空いたマス**まで見逃し、
 // 下界が 0 まで落ちる —— そこへ `MaxWaste` を足すと深さ 2 で打ち切られ、△6五桂 のあとの
 // ▲同桂 △同歩 ▲2四歩（3 手）に届かなかった。逆に種類の読み違いは数えないので、満額の下界
 // （玉が消えて湧いた）のように膨らみもしない。⚠️ **満額の下界以下**なので、厳密一致の上限

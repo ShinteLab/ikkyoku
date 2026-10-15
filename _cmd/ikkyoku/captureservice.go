@@ -115,131 +115,33 @@ type CaptureService struct {
 	// ⚠️ **起動時だけでなく、設定タブで指し直したときも呼ぶこと** —— 直ったのに ⚠ が残る。
 	onRecognizer func(RecognizerStatus)
 
-	// boardAnchor は**追いかけている盤の見た目**（2026-09-15。中継の追従）。
+	// lastShot は**最後に画面から撮った 1 枚**の盤の見た目（2026-10-09。`noteShot`）。
+	// ⚠️ **入れるのは `Capture`（画面から撮った 1 枚）だけ** —— 画像ファイルの 1 枚は
+	// 画面と座標系が違う（記述子は画像の中の座標）。
+	lastShot shotAnchor
+	// followShot は**解析タブの根を採った（訂正した）1 枚**（2026-10-09。`SetFollowShot`）。
 	//
-	// ⚠️ **中継には大盤（解説用）が映る。** あちらは将棋の局面としては矛盾しない
-	// ので、**盤面だけを見ていては弾けない** —— 解説が本譜から 1 手の変化を
-	// 並べていたら、そのまま棋譜に足してしまう。
-	//
-	// ⚠️ **覚えるのは人が「追う」と言ったときだけ**（`AnchorBoard`）。
-	// 撮るたびに覚え直すと、**大盤に切り替わった 1 枚でマスタがそちらへ移る。**
-	// ⚠️ **ゼロ値は「決めていない」** —— そのときは何も落とさない（設計原則3）。
-	boardAnchor recognize.Signature
-	// anchorRegion は**マスタを取ったときの撮影範囲**（2026-09-15）。
-	//
-	// ⚠️ **記述子は画像の中の座標なので、枠を動かすと必ず食い違う** ——
-	// 盤は同じなのに「盤の位置が違います」になり、**そこから全部見送られる**
-	// （実機で踏んだ。「盤が映っていないのかも」と枠をずらしたら止まった）。
-	// **枠を動かすのは狙いを直す操作**であって、追う盤を変える操作ではない。
-	anchorRegion ikkyoku.Region
-	// quietOutcome は直近の `CaptureQuiet` の結果の種類（`board` / `none` / `off`）。
-	//
-	// ⚠️ **変わり目だけログに出すため**（2026-09-15）。追従は 1 秒ごとに回るので
-	// 毎回出すと読めないが、**何も出さないと「正常に見送っている」のか
-	// 「止まっている」のかがログから分からない**（実機で聞かれた）。
-	quietOutcome string
+	// **訂正してから追うときのマスタはこれ**（`AnchorBoard`）。押した瞬間の 1 枚は使わない ——
+	// 押したときに棋士の手が盤に被っていて、初手から「別の盤」になった（実機で踏んだ）。
+	// 訂正した 1 枚は人が盤を確かめた 1 枚なので、マスタとしてこれより確かなものは無い。
+	// ⚠️ **今の根を採った 1 枚のときだけ使う**（`session` を `studySession` と突き合わせる。
+	// 棋譜や新規対局で根を入れ替えたあとに、前の 1 枚の盤を追わない）。
+	followShot shotAnchor
+	// studySession は解析タブの今の検討の id を返す（`main` が `StudyService.Session` を入れる）。
+	// ⚠️ **nil なら訂正した 1 枚は使わない**（押した瞬間の 1 枚で決める。今までどおり）。
+	studySession func() string
+	// onHideRefused は**追っているあいだに枠を隠そうとして断った**ことを中継セッションへ渡す（2026-10-11。
+	// `StudyService.FollowHideRefused`。帯に出す）。nil なら知らせない（設計原則3）。
+	onHideRefused func(message string)
 
-	// followDir は**追跡中の録画**の保存先（空なら残さない）。
-	//
-	// ⚠️ **残すのは「マスタ」と「手を決めた 1 枚」だけ**（2026-09-15）。
-	// 中継には**棋士の手が映り込む**ので、誤認識したときに
-	// **「手が被ったのか、認識器が弱いのか」を切り分ける手掛かり**が要る
-	// （実機で出た話）。⚠️ **見送ったフレームは残さないこと** ——
-	// 1 秒ごとに撮るので、全部残すとディスクが埋まるうえ**大半は空振り**。
-	followDir string
-	// lastQuiet は**直近に黙って撮った 1 枚**（採用が決まってから残すため）。
-	//
-	// ⚠️ **撮った時点ではまだ「その手を決めた画像」かどうか分からない** ——
-	// 決めるのは解析タブ側（`FollowAuto`）なので、**答えが返るまで持っておく**。
-	lastQuiet image.Image
-	// cellBase は**速い経路の比べる相手**（本譜の先端とぴったり合っていた 1 枚。`celldiff.go`。2026-10-07）。
-	// ⚠️ **入れるのは `SetCellBase` だけ**（解析タブ側が `FollowAuto.AtFrame` で「合っている」と言った 1 枚）。
-	cellBase image.Image
-	// cellRects / cellRegion は**最後に 81 マスを読んだときのマス割り**（速い経路はこれでマスを切る）。
-	// cellBounds はそのときの画像の大きさ（違えばマス割りは使えない）。
-	cellRects  []image.Rectangle
-	cellRegion image.Rectangle
-	cellBounds image.Rectangle
 	// followFirst は設定「中継を追うあいだは盤の読みを優先する」（`enginepriority.go`。2026-10-07）。
 	followFirst bool
+	// followDebug は設定「中継の録画とログを残す（デバッグ）」（2026-10-11。`applyFollowDebug`）。偽なら録画を残さない。
+	followDebug bool
 	// enginesLowered は外部エンジンの優先度を下げているか（戻し忘れないため）。
 	enginesLowered bool
 	// engineNames は登録してある外部エンジンの実行ファイルのパス（`main` が差し込む。設定から読む）。
 	engineNames func() []string
-	// gateRead は**ふるいが読む側へ倒した理由**（`gateReadSettled` など。速い経路を使ってよいかの判断）。
-	gateRead string
-	// cellGen は**比べる相手（`cellBase`）の版**。替えるたびに進める（`setCellBaseLocked`）。
-	// 違う相手と比べた変わったマスの組どうしは比べられないので、組に版を添えて持つ（`frameCells`）。
-	cellGen int
-	// gateCells は**前の周に撮った 1 枚の、比べる相手から変わったマス**（2026-10-07）。
-	// ふるいが「変わったマスの組が 2 枚続けて同じ ＝ 止まった」と見なすのに使う（`gate`）。毎周入れ替える。
-	gateCells frameCells
-	// cellsFailed は**速い経路で決まらなかった、変わったマスの組**（2026-10-07。`markCellsFailed`）。
-	// ⚠️ **この組が続いても「止まった」と見なさない** —— 駒を掴んだまま行き先が光り続けると同じ組が続き、
-	// 見なすと 0.5 秒ごとに 81 マスを読み直す。比べる相手を替えたら忘れる。
-	cellsFailed frameCells
-	// cellsUnmoved は**81 マスを読んだら何も指していなかった、変わったマスの組**（2026-10-08。`CellsUnmoved`）。
-	// 駒を掴んで行き先が光っているだけの組。⚠️ **この組のあいだは「変わっていない」に数える**（`gate`）——
-	// 81 マスを読まず、組が変われば（指した）すぐ速い経路に入る。保険（`gateSkipMax`）は残る。比べる相手を替えたら忘れる。
-	cellsUnmoved frameCells
-	// followMisses は**繋げなかった周を残した枚数**（2026-09-15）。
-	//
-	// ⚠️ **見送りを全部残さない方針の例外。** 1 秒ごとの空振りは残さないが、
-	// **「繋ごうとして繋げなかった」周だけは残す** —— 実機で追従が止まったとき、
-	// **止まった瞬間の画像が無いせいで原因が分からなかった**（採用した画像しか
-	// 残していないので、**壊れた場面の証拠だけが消える**という一番まずい形）。
-	// ⚠️ **上限を置くこと**（`followMissMax`）—— 追いつけない状態は何十分も続くので、
-	// 上限が無いとディスクが埋まる。**知りたいのは崩れ始めの数枚**。
-	followMisses int
-	// lastMissKind は直近に残した「繋がらなかった理由」。
-	//
-	// ⚠️ **変わり目だけ残すため**（2026-09-15）。同じ状態は何十周も続くので、
-	// 毎周残すとディスクが埋まるうえ**同じ絵が並ぶだけで読めない**。
-	// **知りたいのは「何が起きて止まったか」**なので、種類が変わった 1 枚でよい。
-	lastMissKind string
-
-	// ---- 画素差分のふるい（2026-09-18）--------------------------------------
-	//
-	// ⚠️ **認識 1 枚 2.1 秒**が追従の速さを決めている。**ikkyoku 側で 1 枚を
-	// 速くする手は無い**（重いのは 81 マスの推論で、それは `suteme` の話）ので、
-	// できるのは**読む枚数を減らすこと**だけ。長考中も CM 中も画素は動いていない
-	// ので、**前の 1 枚と変わっていなければ認識を呼ばない。**
-	//
-	// ⚠️ **状態はここに置く**（`ikkyoku.FrameDiff` は測るだけ）。追従の状態は
-	// 既にここに集まっている（マスタ・録画）ので、**もう 1 か所に散らさない。**
-
-	// gateFrame は前の周に撮った 1 枚（比べる相手）。
-	gateFrame image.Image
-	// gateDirty は「変化を見たが、まだ認識していない」。
-	//
-	// ⚠️ **変化した周ではなく、その次の「止まった」周で認識すること**（静止判定）。
-	// 中継には**棋士の手が映り込む**ので、動いている最中の 1 枚を読むと
-	// **2.1 秒かけてゴミを取る**（駒が隠れた盤が「繋がらない」で捨てられる）。
-	gateDirty bool
-	// gateMoving は変化が続いた周の数（`gateMovingMax` の保険用）。
-	gateMoving int
-	// gateSkipped は**「変わっていない」で省き続けた周の数**（`gateSkipMax` の保険用）。
-	//
-	// ⚠️ **これが無いと、ふるいが外したときに永久に止まる**（2026-09-18 に
-	// 実機で踏んだ。**指したのに「変わっていません」と出続けた**）。
-	// **しきい値をどう詰めても、外したら動かない作りにはしないこと。**
-	gateSkipped int
-	// gateMaxSkip は省いた周で見た**いちばん大きかった差**。
-	//
-	// ⚠️ **しきい値を実測で詰めるために要る。** 「しきい値を超えられなかった
-	// 最大値」が分かれば、**どれだけ足りなかったのか**が数字で読める。
-	gateMaxSkip float64
-	// detectMisses は**盤の有無のふるい**で見送り続けた周の数（`detectMissMax`）。
-	//
-	// ⚠️ **数えているのは「弱い判断で落とした」周。** 検出だけを根拠に
-	// 落とし続けると**黙って何も起きない**ので、**続いたら 1 枚は読んで確かめる。**
-	detectMisses int
-	// gateShots / gateReads は撮った枚数と認識した枚数。
-	//
-	// ⚠️ **測るために持っている。** ふるいがどれくらい効いたかは**実機の中継で
-	// しか分からない**ので、追跡を止めたときにログへ出す（当て推量の定数を
-	// あとで実測で詰めるための材料）。
-	gateShots, gateReads int
 
 	// clickThrough は設定「枠の内側で後ろの画面を操作する」（`ikkyoku.Config.ClickThrough`）。
 	clickThrough bool
@@ -271,6 +173,9 @@ type CaptureService struct {
 	// ⚠️ **落とさないこと**（設計原則3）。出せないまま設定が「切り離し」で残ると、
 	// **中身がどこにも無いうえ戻す入口も無い**（戻す口はその窓の中にある）。
 	onPaneShowFailed func(kind string)
+	// fol は**中継を追う 1 回の撮る側の持ち物**（`captureFollow`。2026-10-11。`followstate.go`）。
+	// ⚠️ **追い始め（`BeginFollow`）で作り直し、止めたとき（`EndFollow`）に捨てる**。`mu` で守る。
+	fol captureFollow
 }
 
 func NewCaptureService(recognizerDir, recognizerModelDir, recognizerSource string) *CaptureService {
@@ -433,7 +338,8 @@ func (s *CaptureService) loadRecognizer() RecognizerStatus {
 			log.Warn("盤の縁の帯の判定器を読み込めませんでした(盤の位置が 1マス滑ることがあります)",
 				"mode", mode, "error", set.StripErr)
 		}
-		log.Info("認識器を読み込みました", "mode", mode, "source", set.Source, "strip", set.StripSamples)
+		// NOTICE（常に残す。2026-10-11）: どの認識器で読んだかが分からないと、読み違いを追えない。
+		log.Notice("認識器を読み込みました", "mode", mode, "source", set.Source, "strip", set.StripSamples)
 		return st
 	}
 
@@ -608,14 +514,31 @@ func (s *CaptureService) placeMainBesideFrame() {
 // 枠を隠した結果として可視ウィンドウが 1 枚も無くなると、アプリが動いているのに
 // 操作できない状態になる。それを避けるため、メイン画面がまだ出ていなければ出す
 // (起動時に出しているので普通は既に出ているが、**保険は外さないこと**)。
+//
+// ⚠️ **中継を追っているあいだは隠さない**（2026-10-10）。隠すと次の 1 周で撮れずに追跡がエラーで止まり、
+// しかも理由が見えない場所（手順の下）に出ていた。断ったことは中継セッションへ渡し（`onHideRefused` →
+// `StudyService.FollowHideRefused`）、枠の下の帯に出す（入口が 3 つあり、Alt+F4 は Go からしか返せないので、知らせは 1 本にする）。
 func (s *CaptureService) HideFrame() {
 	if s.wins == nil || s.wins.frame == nil {
+		return
+	}
+	s.mu.Lock()
+	following := s.fol.following
+	s.mu.Unlock()
+	if following {
+		log.Follow.Info("中継を追っているので枠を隠しません")
+		if s.onHideRefused != nil {
+			s.onHideRefused(hideRefusedMessage)
+		}
 		return
 	}
 	s.revealMain()
 	s.wins.frame.Hide()
 	s.emitFrameVisible()
 }
+
+// hideRefusedMessage は追跡中に枠を隠そうとしたときの文（`HideFrame`）。
+const hideRefusedMessage = "中継の追跡中は枠を隠せません。追跡をキャンセルしてください"
 
 // ShowMain はメイン画面を出して前面に持ってくる。枠のメニューから呼ばれる。
 //
@@ -655,7 +578,8 @@ func (s *CaptureService) Quit() {
 	if s.beforeQuit != nil {
 		s.beforeQuit()
 	}
-	log.Info("終了します")
+	// NOTICE（常に残す。2026-10-11）: 起動の 1 行と対にする（どこまで動いていたかの区切り）。
+	log.Notice("終了します")
 	s.app.Quit()
 }
 
@@ -937,7 +861,7 @@ type CaptureResult struct {
 	// `unchanged`（前の 1 枚と変わっていない）/ `moving`（まだ動いている）。
 	//
 	// ⚠️ **「盤が映っていない」（SFEN が空）と混ぜないこと。** あちらは
-	// **2.1 秒かけて読んだうえで盤が無かった**で、こちらは**読んでいない**。
+	// **読んだうえで盤が無かった**で、こちらは**読んでいない**。
 	// 呼ぶ側は**黙って次の周へ行くだけ**（見送りとして数えない・録画も残さない）。
 	Skipped string `json:"skipped"`
 	// Cells は**比べる相手の 1 枚から変わったマス**（撮った画像の向きの 81 マスの番号。2026-10-07）。
@@ -960,6 +884,10 @@ type CaptureResult struct {
 	// 描き込んだ 2 枚目を積むとイベントのペイロードが倍になるため。矩形の座標だけを
 	// 渡してフロントで重ねれば軽く、マスごとの確信度をホバーで出すこともできる。
 	Debug *recognize.Debug `json:"debug,omitempty"`
+	// CellConfidence は**マスごとの読みの確かさ**（81 個・行優先。`recognize.CellConfidence`。2026-10-11）。
+	// 中継を追うときの費用表の元で、中継セッションがそのまま `StudyService.FollowAuto` に渡す。
+	// ⚠️ **空きのマスも被覆率から確かさを持つ**（以前は 0 で、下限の 0.15 で数えていた）。読めなければ nil。
+	CellConfidence []float64 `json:"cellConfidence,omitempty"`
 }
 
 // Capture はガイド枠の内側を撮って PNG 保存し、保存先パスとサムネイルを返す。
@@ -994,7 +922,61 @@ func (s *CaptureService) Capture() (CaptureResult, error) {
 		return CaptureResult{}, err
 	}
 
-	return s.deliver(img, path, ImageSourceScreen), nil
+	result := s.deliver(img, path, ImageSourceScreen)
+	s.noteShot(img, region, path, result.Debug)
+	return result, nil
+}
+
+// shotAnchor は**撮った 1 枚の盤の見た目**と、そのときの撮影範囲・画像・パス（2026-10-09）。
+// ⚠️ **ゼロ値は「無い」**（`ok`）。
+type shotAnchor struct {
+	sig    recognize.Signature
+	region ikkyoku.Region
+	img    image.Image
+	path   string
+	// session は根を採った検討の id（`followShot` のときだけ埋まる）。
+	session string
+}
+
+func (a shotAnchor) ok() bool { return a.sig.Board.Dx() > 0 }
+
+// noteShot は**画面から撮った 1 枚の盤の見た目**を控える（2026-10-09。`lastShot`）。
+//
+// 使うのは訂正してから追うときだけ（`SetFollowShot` → `AnchorBoard`）で、
+// **撮ることそのものはこれを読まない**（1 回のキャプチャは他のキャプチャから独立したまま）。
+// ⚠️ **盤が取れなかった 1 枚でも入れ替える**（パスだけ持たせる）—— その 1 枚を訂正して採っても、
+// 前の 1 枚の盤をマスタにしない。
+func (s *CaptureService) noteShot(img image.Image, region ikkyoku.Region, path string, d *recognize.Debug) {
+	shot := shotAnchor{path: path}
+	if sig, ok := recognize.SignatureOf(d); ok {
+		shot.sig, shot.region, shot.img = sig, region, img
+	}
+	s.mu.Lock()
+	s.lastShot = shot
+	s.mu.Unlock()
+}
+
+// SetFollowShot は**解析タブの根を採った 1 枚**を、中継を追う盤（マスタ）として覚える（2026-10-09）。
+//
+// フロントが「この局面を解析する」で根を採った直後に、訂正タブの画像のパスを渡す
+// （画像の無い局面・画像ファイルの局面なら空か、撮った 1 枚と違うパスになる）。
+// ⚠️ **最後に画面から撮った 1 枚と同じパスで、盤が取れていたときだけ覚える**。それ以外は忘れる
+// （押した瞬間の 1 枚で決める。今までどおり）。
+func (s *CaptureService) SetFollowShot(path string) {
+	session := ""
+	if s.studySession != nil {
+		session = s.studySession()
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	shot := s.lastShot
+	if path == "" || shot.path != path || !shot.ok() || session == "" {
+		s.followShot = shotAnchor{}
+		return
+	}
+	shot.session = session
+	s.followShot = shot
+	log.Follow.Info("訂正した 1 枚を、中継を追う盤として覚えました", "path", path, "board", shot.sig.Board)
 }
 
 // CaptureQuiet は**知らせずに撮る**（中継の追従。2026-09-15）。
@@ -1010,6 +992,8 @@ func (s *CaptureService) Capture() (CaptureResult, error) {
 //
 // ⚠️ **枠の門番は掛けたまま**（`Capture` と同じ）。「どこを撮るのかが画面に
 // 見えていること」は追従でも変わらない。
+//
+//wails:ignore
 func (s *CaptureService) CaptureQuiet() (CaptureResult, error) {
 	if err := s.requireFrame(); err != nil {
 		return CaptureResult{}, err
@@ -1025,7 +1009,7 @@ func (s *CaptureService) CaptureQuiet() (CaptureResult, error) {
 	// ⚠️ **採用が決まるまで控えておく**（`SaveFollowFrame`）。手を決めたかどうかは
 	// **解析タブ側が返事をするまで分からない**ので、ここでは残すか決められない。
 	s.mu.Lock()
-	s.lastQuiet = img
+	s.fol.lastQuiet = img
 	s.mu.Unlock()
 
 	b := img.Bounds()
@@ -1033,7 +1017,7 @@ func (s *CaptureService) CaptureQuiet() (CaptureResult, error) {
 		Width: b.Dx(), Height: b.Dy(), Source: ImageSourceScreen,
 		Warnings: []string{}, HandTotal: map[string]int{},
 	}
-	// ⚠️ **読まずに済むなら読まない**（2026-09-18）。認識は 2.1 秒かかるので、
+	// ⚠️ **読まずに済むなら読まない**（2026-09-18）。認識は約 0.1 秒かかるので、
 	// **変わっていない 1 枚に払うと、そのぶんだけ次の手に気づくのが遅れる。**
 	// 比べる相手から変わったマスは 1 枚につき 1 回だけ測る（ふるいと速い経路の両方が使う。数ミリ秒）。
 	fc := s.cellsOf(img)
@@ -1061,11 +1045,13 @@ func (s *CaptureService) CaptureQuiet() (CaptureResult, error) {
 
 // RecognizeQuiet は**直前に `CaptureQuiet` で撮った 1 枚を、81 マスで読む**（2026-10-07）。
 //
-// 速い経路（`CaptureResult.Cells`）で手が決まらなかったときに、フロントが呼ぶ。撮り直さないのは、
+// 速い経路（`CaptureResult.Cells`）で手が決まらなかったときに、中継セッションが呼ぶ。撮り直さないのは、
 // **変わったマスを測った 1 枚と、読む 1 枚を同じにするため**（間に次の手が指されると話が食い違う）。
+//
+//wails:ignore
 func (s *CaptureService) RecognizeQuiet() (CaptureResult, error) {
 	s.mu.Lock()
-	img := s.lastQuiet
+	img := s.fol.lastQuiet
 	s.mu.Unlock()
 	if img == nil {
 		return CaptureResult{}, errors.New("読み直す 1 枚がありません")
@@ -1091,9 +1077,9 @@ func (s *CaptureService) RecognizeQuiet() (CaptureResult, error) {
 
 // readQuiet は**盤の有無を見て、81 マスを読み、追っている盤か確かめる**（`CaptureQuiet` の後段）。
 func (s *CaptureService) readQuiet(img image.Image, region ikkyoku.Region, result CaptureResult) CaptureResult {
-	// ⚠️ **盤の有無だけなら安い**（2026-09-18）。**大盤（解説用）が映っている
+	// ⚠️ **盤の有無で落とす**（2026-09-18）。**大盤（解説用）が映っている
 	// あいだは画素が動き続ける**ので、上のふるいは素通りする ——
-	// そこを 2.1 秒かけて読んでから捨てていた。
+	// そのままでは別の盤を読んでから捨てることになる。
 	//
 	// ⚠️ **ここで落としても `OffBoard` として返すこと**（`Skipped` にしない）——
 	// 受ける側から見れば**「別の盤が映っている」に変わりは無い**ので、
@@ -1115,7 +1101,7 @@ func (s *CaptureService) readQuiet(img image.Image, region ikkyoku.Region, resul
 	started := time.Now()
 	board, err := recognize.FromImage(img)
 	// **かかった時間を毎回出す**（2026-10-07）。エンジンと CPU を取り合うと 2 秒強が 8 秒に延びた。
-	log.Info("81 マスを読みました（追跡）", "ms", time.Since(started).Milliseconds())
+	log.Follow.Info("81 マスを読みました（追跡）", "ms", time.Since(started).Milliseconds())
 	if err != nil {
 		result.RecognizeError = err.Error()
 		return result
@@ -1129,6 +1115,7 @@ func (s *CaptureService) readQuiet(img image.Image, region ikkyoku.Region, resul
 		result.HandTotal = h
 	}
 	result.Debug = board.Debug
+	result.CellConfidence = recognize.CellConfidence(board.Debug)
 	// 速い経路のマス割りを控える（`celldiff.go`）。
 	s.noteCellRects(img, board.Debug)
 
@@ -1136,8 +1123,8 @@ func (s *CaptureService) readQuiet(img image.Image, region ikkyoku.Region, resul
 	// 映り、あちらは**将棋の局面としては矛盾しない**ので盤面だけでは弾けない ——
 	// 解説が本譜から 1 手の変化を並べていたら**そのまま棋譜に足してしまう**。
 	s.mu.Lock()
-	anchor, has := s.boardAnchor, s.boardAnchor.Board.Dx() > 0
-	moved := has && s.anchorRegion != region
+	anchor, has := s.fol.boardAnchor, s.fol.boardAnchor.Board.Dx() > 0
+	moved := has && s.fol.anchorRegion != region
 	s.mu.Unlock()
 	if has {
 		if got, ok := recognize.SignatureOf(board.Debug); ok {
@@ -1146,14 +1133,14 @@ func (s *CaptureService) readQuiet(img image.Image, region ikkyoku.Region, resul
 			// **そこから全部見送られる**。**枠を動かすのは狙いを直す操作。**
 			if moved {
 				s.mu.Lock()
-				s.boardAnchor, s.anchorRegion = got, region
+				s.fol.boardAnchor, s.fol.anchorRegion = got, region
 				// ⚠️ **比べる相手も捨てること**（画像の中の座標が変わったので、もう比べられない）。
 				s.setCellBaseLocked(nil)
 				s.mu.Unlock()
-				log.Info("枠が動いたので追う盤を取り直しました", "board", got.Board)
+				log.Follow.Info("枠が動いたので追う盤を取り直しました", "board", got.Board)
 			} else if same, why := anchor.Matches(got); !same {
 				result.OffBoard, result.OffBoardReason = true, why
-				log.Info("別の盤と判断しました", "reason", why,
+				log.Follow.Info("別の盤と判断しました", "reason", why,
 					"master", anchor.Board, "got", got.Board,
 					"colorGap", anchor.ColorGap(got))
 			}
@@ -1191,8 +1178,8 @@ const (
 	// **外したら永久に止まる**という作りのほうが問題で、
 	// これは**外しても 10 秒で戻る**ことを保証する側。
 	//
-	// ⚠️ **長考中の無駄にはならない。** 10 秒に 1 枚 2.1 秒を払うだけで、
-	// **省く前（毎周 2.1 秒）とは桁が違う。**
+	// ⚠️ **長考中の無駄にはならない。** 10 秒に 1 枚の認識を払うだけで、
+	// **省く前（毎周払う）とは桁が違う。**
 	gateSkipMax = 40
 
 	// 省いた理由（`CaptureResult.Skipped`）。
@@ -1234,24 +1221,24 @@ func (s *CaptureService) gate(img image.Image, fc frameCells) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.gateShots++
-	anchor, prev := s.boardAnchor, s.gateFrame
-	s.gateFrame = img
+	s.fol.gateShots++
+	anchor, prev := s.fol.boardAnchor, s.fol.gateFrame
+	s.fol.gateFrame = img
 	// 変わったマスの組は毎周入れ替える（次の周が「2 枚続けて同じ」かを見るため。比べられない周も入れる）。
-	cellsStill := fc.same(s.gateCells) && !fc.same(s.cellsFailed)
+	cellsStill := fc.same(s.fol.gateCells) && !fc.same(s.fol.cellsFailed)
 	// unmoved は**読んで「駒は動いていない」と確かめた組のまま**か（`cellsUnmoved`。2026-10-08）。
-	unmoved := len(fc.cells) > 0 && fc.same(s.cellsUnmoved)
+	unmoved := len(fc.cells) > 0 && fc.same(s.fol.cellsUnmoved)
 	// failed は**速い経路で決まらなかった組のまま**か（`cellsFailed`）。
-	failed := len(fc.cells) > 0 && fc.same(s.cellsFailed)
-	s.gateCells = fc
+	failed := len(fc.cells) > 0 && fc.same(s.fol.cellsFailed)
+	s.fol.gateCells = fc
 
 	// ⚠️ **ここで数えないこと**（2026-09-18）。この先に**盤の有無のふるい**
 	// （`detectGate`）があり、そこでも落ちる。**数えるのは実際に認識した 1 枚だけ**
 	// （`noteRead`）で、そうでないと省いた割合が実態より悪く見える。
 	read := func(why string) string {
-		s.gateDirty, s.gateMoving = false, 0
-		s.gateSkipped, s.gateMaxSkip = 0, 0
-		s.gateRead = why
+		s.fol.gateDirty, s.fol.gateMoving = false, 0
+		s.fol.gateSkipped, s.fol.gateMaxSkip = 0, 0
+		s.fol.gateRead = why
 		return ""
 	}
 	if anchor.Board.Dx() <= 0 || prev == nil {
@@ -1264,9 +1251,9 @@ func (s *CaptureService) gate(img image.Image, fc frameCells) string {
 	insurance := func() string {
 		// ⚠️ **ここが「黙って止まらない」ための保険**（2026-09-18）。
 		// **ふるいが外していても、いずれ読む。**
-		log.Info("変化が無いまま続いたので 1 枚読みます（ふるいの取りこぼしの確認）",
-			"省いた周", s.gateSkipped,
-			"いちばん大きかった差", fmt.Sprintf("%.5f", s.gateMaxSkip),
+		log.Follow.Info("変化が無いまま続いたので 1 枚読みます（ふるいの取りこぼしの確認）",
+			"省いた周", s.fol.gateSkipped,
+			"いちばん大きかった差", fmt.Sprintf("%.5f", s.fol.gateMaxSkip),
 			"しきい値", gateChangedRatio)
 		return read(gateReadInsurance)
 	}
@@ -1275,9 +1262,9 @@ func (s *CaptureService) gate(img image.Image, fc frameCells) string {
 	// 数えると演出のあいだ 8 周ごとに 81 マスを読み、`read` で数え直すと保険（`gateSkipMax`）が
 	// 二度と来ない —— 変わったマスの測り違いで手を見落としたとき、戻れなくなる。
 	sameSkip := func() string {
-		s.gateDirty, s.gateMoving = false, 0
-		s.gateSkipped++
-		if s.gateSkipped < gateSkipMax {
+		s.fol.gateDirty, s.fol.gateMoving = false, 0
+		s.fol.gateSkipped++
+		if s.fol.gateSkipped < gateSkipMax {
 			return cellSkipSame
 		}
 		return insurance()
@@ -1289,7 +1276,7 @@ func (s *CaptureService) gate(img image.Image, fc frameCells) string {
 		}
 		if cellsStill && len(fc.cells) > 0 {
 			// 盤全体は動いているが、指し手のマスは落ち着いた（ゲーム画面の演出。`gateReadCells`）。
-			log.Info("盤全体は動いていますが、変わったマスが 2 枚続けて同じなので止まったと見なします（追跡）",
+			log.Follow.Info("盤全体は動いていますが、変わったマスが 2 枚続けて同じなので止まったと見なします（追跡）",
 				"変わったマス", len(fc.cells))
 			return read(gateReadCells)
 		}
@@ -1297,19 +1284,19 @@ func (s *CaptureService) gate(img image.Image, fc frameCells) string {
 			// **比べる相手から、どのマスも変わっていない**まま 2 枚続いた（演出だけが動いている）。
 			return sameSkip()
 		}
-		s.gateDirty = true
-		s.gateMoving++
-		if s.gateMoving < gateMovingMax {
+		s.fol.gateDirty = true
+		s.fol.gateMoving++
+		if s.fol.gateMoving < gateMovingMax {
 			return gateSkipMoving
 		}
 		return read(gateReadRestless) // 止まらないので、待つのをやめて読む
 	}
-	if !s.gateDirty {
-		s.gateSkipped++
-		if ratio > s.gateMaxSkip {
-			s.gateMaxSkip = ratio
+	if !s.fol.gateDirty {
+		s.fol.gateSkipped++
+		if ratio > s.fol.gateMaxSkip {
+			s.fol.gateMaxSkip = ratio
 		}
-		if s.gateSkipped < gateSkipMax {
+		if s.fol.gateSkipped < gateSkipMax {
 			return gateSkipUnchanged
 		}
 		return insurance()
@@ -1321,8 +1308,8 @@ func (s *CaptureService) gate(img image.Image, fc frameCells) string {
 	if failed {
 		// 盤全体は止まったが、速い経路で決まらなかった組のまま（駒を掴んで考えている。2026-10-08）。
 		// ⚠️ **盤全体が動いているときと同じく、組が変わるか待つ上限まで待つ**（すぐ読むと 1 周が塞がる）。
-		s.gateMoving++
-		if s.gateMoving < gateMovingMax {
+		s.fol.gateMoving++
+		if s.fol.gateMoving < gateMovingMax {
 			return gateSkipMoving
 		}
 		return read(gateReadRestless)
@@ -1340,13 +1327,10 @@ const detectMissMax = 8
 // detectGate は**81 マスの推論に入る前に、盤の有無だけで落とす**（2026-09-18）。
 //
 // **大盤（解説用）が映っているあいだ、画素は動き続ける**ので画素差分のふるいは
-// 素通りする。そこを 2.1 秒かけて読んでから「別の盤」と捨てていた ——
-// **盤の矩形を探すだけなら 0.15 秒程度**（認識 2.1 秒のうち検出は 15%）なので、
-// **矩形がマスタと合わないなら推論に入らない。**
+// 素通りする。**矩形がマスタと合わないなら推論に入らない。**
 //
-// ⚠️ **`suteme` に矩形を渡す案とは別物**（あちらは**却下済み**。録画中に画面の
-// 大きさが変わったときの振る舞いが難しくなる）。**こちらは渡さない**
-// —— 自分で探して、自分の持っているマスタと突き合わせるだけ。
+// ここで探した矩形は `Recognize` に渡していない（`Recognize` が同じ画像でもう一度探す。
+// 盤の検出は約 0.04 秒）。
 //
 // ⚠️ **見つからなかったときに落とさないこと。** `DetectRegion` は
 // `suteme.Recognize` と違って**画像全体へのフォールバックを持たない**ので、
@@ -1359,7 +1343,7 @@ const detectMissMax = 8
 // （待つ / 枠を直す）し、**画面にも別の顔で出る**。
 func (s *CaptureService) detectGate(img image.Image, region ikkyoku.Region) (string, string) {
 	s.mu.Lock()
-	anchor, moved := s.boardAnchor, s.anchorRegion != region
+	anchor, moved := s.fol.boardAnchor, s.fol.anchorRegion != region
 	s.mu.Unlock()
 	// ⚠️ **枠を動かしたら通すこと。** マスタは**画像の中の座標**なので、
 	// 枠が動けば盤は同じでも必ず食い違う —— ここで落とすと
@@ -1380,7 +1364,7 @@ func (s *CaptureService) detectGate(img image.Image, region ikkyoku.Region) (str
 		return s.detectMiss(detectOff, why)
 	}
 	s.mu.Lock()
-	s.detectMisses = 0
+	s.fol.detectMisses = 0
 	s.mu.Unlock()
 	return "", ""
 }
@@ -1397,9 +1381,9 @@ const (
 func (s *CaptureService) detectMiss(kind, why string) (string, string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.detectMisses++
-	if s.detectMisses >= detectMissMax {
-		s.detectMisses = 0
+	s.fol.detectMisses++
+	if s.fol.detectMisses >= detectMissMax {
+		s.fol.detectMisses = 0
 		return "", "" // 落とし続けない（読んで確かめる）
 	}
 	return kind, why
@@ -1408,19 +1392,19 @@ func (s *CaptureService) detectMiss(kind, why string) (string, string) {
 // noteRead は**実際に認識した 1 枚**を数える。
 func (s *CaptureService) noteRead() {
 	s.mu.Lock()
-	s.gateReads++
+	s.fol.gateReads++
 	s.mu.Unlock()
 }
 
-// resetGate はふるいを白紙に戻す（追跡の始まりと終わり）。
+// resetGate はふるいを白紙に戻す（追う盤を決め直すとき。`AnchorBoard`。追跡の始まりと終わりは `captureFollow` ごと作り直す）。
 //
 // ⚠️ **枚数も 0 に戻すこと** —— 数えているのは**この回の追跡**で、
 // 前の対局と混ぜると何を測ったのか分からなくなる。
 func (s *CaptureService) resetGate() {
-	s.gateFrame, s.gateDirty, s.gateMoving, s.detectMisses = nil, false, 0, 0
-	s.gateSkipped, s.gateMaxSkip = 0, 0
-	s.gateShots, s.gateReads = 0, 0
-	s.gateCells, s.cellsFailed, s.cellsUnmoved = frameCells{}, frameCells{}, frameCells{}
+	s.fol.gateFrame, s.fol.gateDirty, s.fol.gateMoving, s.fol.detectMisses = nil, false, 0, 0
+	s.fol.gateSkipped, s.fol.gateMaxSkip = 0, 0
+	s.fol.gateShots, s.fol.gateReads = 0, 0
+	s.fol.gateCells, s.fol.cellsFailed, s.fol.cellsUnmoved = frameCells{}, frameCells{}, frameCells{}
 }
 
 // noteQuiet は**結果の種類が変わったときだけ**ログに出す。
@@ -1453,15 +1437,15 @@ func (s *CaptureService) noteQuiet(r CaptureResult) {
 		kind, msg = "none", "盤が映っていません（追跡・見送り）"
 	}
 	s.mu.Lock()
-	changed := s.quietOutcome != kind
-	s.quietOutcome = kind
+	changed := s.fol.quietOutcome != kind
+	s.fol.quietOutcome = kind
 	s.mu.Unlock()
 	if changed {
-		log.Info(msg, "reason", r.OffBoardReason, "confidence", r.Confidence)
+		log.Follow.Info(msg, "reason", r.OffBoardReason, "confidence", r.Confidence)
 	}
 }
 
-// AnchorBoard は**今映っている盤を「これから追う盤」として覚える**（2026-09-15）。
+// AnchorBoard は**「これから追う盤」（マスタ）を決めて覚える**（2026-09-15）。
 //
 // ⚠️ **記述子だけを覚える**（局面は覚えない）。手が進めば駒は動くので、
 // **同じ盤かどうかの判断には使えない。**
@@ -1469,9 +1453,17 @@ func (s *CaptureService) noteQuiet(r CaptureResult) {
 // ⚠️ **覚えるのは人が「追う」と言ったときだけ。** 撮るたびに覚え直すと、
 // **大盤に切り替わった 1 枚でマスタがそちらへ移ってしまう**（そこから先は
 // ずっと大盤を追う）。
+//
+// **訂正してから追うときは、訂正した 1 枚の盤をマスタにする**（2026-10-09。`SetFollowShot` / `pickAnchor`）。
+// ⚠️ **押した瞬間の 1 枚をマスタにしない** —— 押したときに棋士の手が盤に被っていて、
+// 初手から「別の盤」になった（実機で踏んだ）。押した瞬間に盤が映っていなくても始められる。
+// 押した瞬間の 1 枚を使うのは、訂正した 1 枚が無いとき（棋譜・新規対局で根を入れ替えた）と、
+// 撮ったあとに枠を動かしたときだけ。返すのは今撮った 1 枚（最初の 1 周として流す）。
+//
+//wails:ignore
 func (s *CaptureService) AnchorBoard() (CaptureResult, error) {
 	s.mu.Lock()
-	s.boardAnchor, s.anchorRegion, s.quietOutcome = recognize.Signature{}, ikkyoku.Region{}, ""
+	s.fol.boardAnchor, s.fol.anchorRegion, s.fol.quietOutcome = recognize.Signature{}, ikkyoku.Region{}, ""
 	// ⚠️ **ふるいも白紙に戻すこと**（2026-09-18）。この 1 枚は
 	// **これから追う盤を決めるための 1 枚**なので、**必ず読む**。
 	s.resetGate()
@@ -1481,52 +1473,112 @@ func (s *CaptureService) AnchorBoard() (CaptureResult, error) {
 	if err != nil {
 		return r, err
 	}
-	sig, ok := recognize.SignatureOf(r.Debug)
-	if !ok {
-		return r, fmt.Errorf("盤が映っていないので、追う盤を決められません")
+	region, _, err := s.captureRegion()
+	if err != nil {
+		return r, err
 	}
-	dir := s.startFollowDir()
-	region, _, rerr := s.captureRegion()
-	if rerr != nil {
-		return r, rerr
+	session := ""
+	if s.studySession != nil {
+		session = s.studySession()
 	}
 	s.mu.Lock()
-	s.boardAnchor, s.anchorRegion = sig, region
+	shot := s.followShot
+	s.mu.Unlock()
+	live, liveOK := recognize.SignatureOf(r.Debug)
+	sig, fromShot, err := pickAnchor(shot, session, live, liveOK, region)
+	if err != nil {
+		return r, err
+	}
+	// master は録画に残すマスタ画像（nil なら今撮った 1 枚）。
+	var master image.Image
+	if fromShot {
+		master = shot.img
+		// ⚠️ **今撮った 1 枚もマスタと突き合わせる**（最初の 1 周として流すので、手が被った 1 枚や
+		// 大盤を、確かめないまま繋ぎに渡さない）。
+		if liveOK {
+			if same, why := sig.Matches(live); !same {
+				r.OffBoard, r.OffBoardReason = true, why
+			}
+		}
+		log.Follow.Info("訂正した 1 枚の盤を追う盤にします", "path", shot.path)
+	} else if shot.ok() && shot.session == session {
+		log.Follow.Info("撮ったあとに枠が動いたので、今映っている盤を追う盤にします")
+	}
+	dir := s.startFollowDir(master)
+	s.mu.Lock()
+	s.fol.boardAnchor, s.fol.anchorRegion = sig, region
 	s.mu.Unlock()
 	go s.syncEnginePriority()
-	log.Info("追う盤を決めました", "board", sig.Board, "color", sig.Color, "dir", dir)
+	log.Follow.Info("追う盤を決めました", "board", sig.Board, "color", sig.Color, "dir", dir)
+	// ⚠️ **始めたことと止めたことは本体のログにも出す**（2026-10-10）。追従のログは別のファイル（`log.Follow`）で、
+	// 本体だけ読んでいると、いつ追っていたのか（エンジンの優先度・CPU の取り合いが起きていた時間）が分からない。
+	log.Info("中継の追跡を始めました", "dir", dir)
 	return r, nil
+}
+
+// pickAnchor は**追う盤（マスタ）**を決める（2026-10-09）。fromShot は訂正した 1 枚を使ったか。
+//
+// shot は根を採った（訂正した）1 枚（`followShot`）、session は解析タブの今の検討の id、
+// live / liveOK は押した瞬間の 1 枚の盤、region は今の撮影範囲。
+//   - **訂正した 1 枚が今の根のもので、枠も動いていなければそれ**（押した瞬間の 1 枚は見ない）
+//   - ⚠️ **撮影範囲が違えば使わない** —— 記述子は画像の中の座標なので、枠を動かしたあとの盤は
+//     必ず食い違う（そこから全部見送られる）。枠を動かすのは狙いを直す操作なので、今の 1 枚で決め直す
+//   - それ以外は押した瞬間の 1 枚。盤が映っていなければ始めない
+func pickAnchor(shot shotAnchor, session string, live recognize.Signature, liveOK bool, region ikkyoku.Region) (recognize.Signature, bool, error) {
+	if shot.ok() && session != "" && shot.session == session && shot.region == region {
+		return shot.sig, true, nil
+	}
+	if !liveOK {
+		return recognize.Signature{}, false, fmt.Errorf("盤が映っていないので、追う盤を決められません")
+	}
+	return live, false, nil
 }
 
 // startFollowDir は録画の保存先を作り、**マスタ画像**を残す（2026-09-15）。
 //
+// ⚠️ **設定「中継の録画とログを残す（デバッグ）」が切ってあれば何も作らない**（2026-10-11。dev でも配る exe でも
+// この設定だけで決まる）。置き場所はログと同じ一時ディレクトリの ikkyoku の下（`followRecordRoot`）で、
+// 作るたびに 1 週間より古い録画を消す（`removeOldRecordings`）。
 // ⚠️ **マスタを残すのが要点。** 追いかける基準そのものなので、
 // **これが無いと「なぜ別の盤だと判断したか」を後から確かめられない**
 // （`recognize.Signature` は矩形と色しか持っていない）。
 //
+// master はマスタにした 1 枚（nil なら今撮った 1 枚）。撮った 1 枚の盤を使ったときは
+// そちらを渡す（2026-10-09）—— 盤の映っていない今の 1 枚を残しても基準にならない。
+//
 // ⚠️ **失敗しても追跡を止めないこと**（設計原則3）。録画はおまけで、
 // **残らなくても中継は追える。**
-func (s *CaptureService) startFollowDir() string {
-	base, err := ikkyoku.DefaultOutDir()
-	if err != nil {
-		log.Warn("録画の保存先が決められません", "error", err)
+func (s *CaptureService) startFollowDir(master image.Image) string {
+	s.mu.Lock()
+	on := s.followDebug
+	s.mu.Unlock()
+	if !on {
 		return ""
 	}
+	base := followRecordRoot()
+	if base == "" {
+		log.Follow.Warn("ログを書けていないので、録画も残しません")
+		return ""
+	}
+	removeOldRecordings(base, time.Now())
 	// ⚠️ **今撮った 1 枚をそのまま使うこと**（`CaptureQuiet` が控えている）。
 	// 撮り直すと**マスタと記述子が別のフレームになる** —— 数えるのは同じ盤でも、
 	// 手が被った瞬間などに**画像と判断がずれる**。
-	s.mu.Lock()
-	img := s.lastQuiet
-	s.mu.Unlock()
-	dir := filepath.Join(base, "follow", time.Now().Format("20060102-150405"))
+	img := master
+	if img == nil {
+		s.mu.Lock()
+		img = s.fol.lastQuiet
+		s.mu.Unlock()
+	}
+	dir := filepath.Join(base, time.Now().Format(followRecordLayout))
 	if img != nil {
 		if _, err := ikkyoku.SavePNGAs(img, dir, "master.png"); err != nil {
-			log.Warn("マスタ画像を残せません", "error", err)
+			log.Follow.Warn("マスタ画像を残せません", "error", err)
 			return ""
 		}
 	}
 	s.mu.Lock()
-	s.followDir, s.followMisses, s.lastMissKind = dir, 0, ""
+	s.fol.followDir, s.fol.followMisses, s.fol.lastMissKind = dir, 0, ""
 	s.mu.Unlock()
 	return dir
 }
@@ -1540,28 +1592,73 @@ func (s *CaptureService) startFollowDir() string {
 // ⚠️ **戻り値でエラーを返さないこと。** 呼ぶのは追跡のループの中なので、
 // **残せなかっただけで追跡が止まるのは割に合わない**（設計原則3）。
 // 理由はログに出す。
+//
+//wails:ignore
 func (s *CaptureService) SaveFollowFrame(number int, moves []string, guess bool) string {
 	s.mu.Lock()
-	dir, img := s.followDir, s.lastQuiet
+	dir, img, on := s.fol.followDir, s.fol.lastQuiet, s.followDebug
 	s.mu.Unlock()
-	if dir == "" || img == nil {
+	if dir == "" || img == nil || !on {
 		return ""
 	}
 	// ⚠️ **足せたら数え直すこと。** 残したいのは**崩れ始め**なので、
 	// 追いついているあいだに使い切っていては意味が無い。
 	s.mu.Lock()
-	s.followMisses, s.lastMissKind = 0, ""
+	s.fol.followMisses, s.fol.lastMissKind = 0, ""
 	s.mu.Unlock()
 
 	name := followFrameName(number, moves, guess)
 	path, err := ikkyoku.SavePNGAs(img, dir, name)
 	if err != nil {
-		log.Warn("採用した画像を残せません", "name", name, "error", err)
+		log.Follow.Warn("採用した画像を残せません", "name", name, "error", err)
 		return ""
 	}
 	// 直前の「手を足しました（追跡）」と並べて、その手を決めた 1 枚に辿れるようにする（2026-10-08）。
-	log.Info("録画を残しました（追跡）", "name", name)
+	log.Follow.Info("録画を残しました（追跡）", "name", name)
 	return path
+}
+
+// followRecordLayout は録画のディレクトリの名前（「追う」を押した時刻）。古いものを消すときもこれで読む。
+const followRecordLayout = "20060102-150405"
+
+// followRecordRoot は中継の録画を置くディレクトリ（ログのディレクトリの follow。2026-10-11）。ログを書けていなければ空。
+// それまでは撮った画像と同じ `%APPDATA%\ikkyoku\captures\follow` で、消す仕組みが無く 2GB 溜まっていた。
+func followRecordRoot() string {
+	if d := log.Dir(); d != "" {
+		return filepath.Join(d, "follow")
+	}
+	return ""
+}
+
+// removeOldRecordings は root の下の録画のうち、`log.KeepDays` より前に始めたものを消す（ログと同じ 1 週間）。
+// ⚠️ **名前が録画の時刻として読めるディレクトリだけ消す**（ほかのものは置いた人のもの）。消せなくても何もしない。
+func removeOldRecordings(root string, now time.Time) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return
+	}
+	limit := now.AddDate(0, 0, -log.KeepDays)
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		t, err := time.ParseInLocation(followRecordLayout, e.Name(), now.Location())
+		if err != nil || !t.Before(limit) {
+			continue
+		}
+		os.RemoveAll(filepath.Join(root, e.Name()))
+	}
+}
+
+// applyFollowDebug は設定「中継の録画とログを残す（デバッグ）」が切り替わったときに呼ばれる（`SettingsService.OnFollowDebug`）。
+// 追従のログは次の行から、録画は次に「追う」を押したときから（切ったときは次の 1 枚から残さない）。
+func (s *CaptureService) applyFollowDebug(v bool) {
+	s.mu.Lock()
+	s.followDebug = v
+	s.mu.Unlock()
+	log.SetFollow(v)
+	// 起動時（設定を読んだあと）と切り替えたときに 1 行（ログの最初の行は設定を読む前に書くので、そちらには出せない）。
+	log.Notice("中継の録画とログ（デバッグ）を設定しました", "残す", v)
 }
 
 // followMissMax は**繋げなかった周を残す枚数の上限**。
@@ -1577,15 +1674,20 @@ const followMissMax = 12
 //
 // ⚠️ **上限を超えたら黙って捨てること**（設計原則3）。追いつけない状態は
 // 何十分も続くので、全部残すとディスクが埋まる。
+//
+//wails:ignore
 func (s *CaptureService) SaveFollowMiss(number int, kind string) string {
 	s.mu.Lock()
-	dir, img, n := s.followDir, s.lastQuiet, s.followMisses
+	dir, img, n := s.fol.followDir, s.fol.lastQuiet, s.fol.followMisses
+	if !s.followDebug {
+		dir = "" // 追っている途中で設定を切った
+	}
 	// ⚠️ **同じ理由が続いているあいだは残さない**（変わり目だけ）。
 	// 「別の盤」も「変わっていない」も何十周も続くので、毎周残すと
 	// **同じ絵で上限を使い切り、そのあとの本当の変わり目が残らない。**
-	same := kind == s.lastMissKind
+	same := kind == s.fol.lastMissKind
 	if dir != "" && img != nil && n < followMissMax && !same {
-		s.followMisses, s.lastMissKind = n+1, kind
+		s.fol.followMisses, s.fol.lastMissKind = n+1, kind
 	}
 	s.mu.Unlock()
 	if dir == "" || img == nil || n >= followMissMax || same {
@@ -1594,10 +1696,10 @@ func (s *CaptureService) SaveFollowMiss(number int, kind string) string {
 	name := followMissName(number, kind, n)
 	path, err := ikkyoku.SavePNGAs(img, dir, name)
 	if err != nil {
-		log.Warn("繋げなかった画像を残せません", "name", name, "error", err)
+		log.Follow.Warn("繋げなかった画像を残せません", "name", name, "error", err)
 		return ""
 	}
-	log.Info("繋げなかった周を残しました", "name", name)
+	log.Follow.Info("繋げなかった周を残しました", "name", name)
 	return path
 }
 
@@ -1656,29 +1758,6 @@ func safeNameRune(r rune) rune {
 		return r
 	default:
 		return -1
-	}
-}
-
-// ClearBoardAnchor は追う盤を忘れる（追跡を止めたとき）。
-func (s *CaptureService) ClearBoardAnchor() {
-	s.mu.Lock()
-	// ⚠️ **録画も畳むこと。** 次に「追う」を押したら**別の対局**かもしれないので、
-	// 前の回の続きに書き足すと**1 つのディレクトリに 2 局が混ざる**。
-	s.boardAnchor, s.anchorRegion, s.quietOutcome = recognize.Signature{}, ikkyoku.Region{}, ""
-	s.followDir, s.lastQuiet, s.followMisses, s.lastMissKind = "", nil, 0, ""
-	s.setCellBaseLocked(nil)
-	s.cellRects = nil
-	// ⚠️ **ふるいがどれくらい効いたかを出す**（2026-09-18）。定数（変化のしきい値・
-	// 待つ周の上限・撮る間隔）は**どれも当て推量**なので、
-	// **実機の中継で詰めるための材料**が要る。
-	shots, reads := s.gateShots, s.gateReads
-	s.resetGate()
-	s.mu.Unlock()
-	// ⚠️ **エンジンの優先度を戻すこと**（追う盤を忘れたので「追っていない」になり、下げていれば戻す）。
-	s.syncEnginePriority()
-	if shots > 0 {
-		log.Info("追跡を止めました", "撮った枚数", shots, "認識した枚数", reads,
-			"省いた割合", fmt.Sprintf("%.0f%%", 100*float64(shots-reads)/float64(shots)))
 	}
 }
 

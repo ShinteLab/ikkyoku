@@ -77,7 +77,7 @@ func TestAnalyzeStartPos(t *testing.T) {
 // **ここが 2 に戻ったら、151 手の棋譜の解析が待ち時間だらけになる。**
 func TestSessionReusesConnection(t *testing.T) {
 	var opens int32
-	s := newSession(func(ctx context.Context) (*client.Session, error) {
+	s := newSession(func(ctx context.Context, _ *usiTap) (*client.Session, error) {
 		atomic.AddInt32(&opens, 1)
 		return localusi.Local(ctx)
 	})
@@ -749,7 +749,7 @@ func TestMateRejectsWithoutDefender(t *testing.T) {
 // あるかでテストが左右されると、壊れたときに切り分けられない）。
 func mateFake(t *testing.T, reply string) *Session {
 	t.Helper()
-	s := newSession(func(ctx context.Context) (*client.Session, error) {
+	s := newSession(func(ctx context.Context, _ *usiTap) (*client.Session, error) {
 		cmdR, cmdW := io.Pipe()
 		outR, outW := io.Pipe()
 		go func() {

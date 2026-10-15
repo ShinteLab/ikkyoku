@@ -202,8 +202,8 @@ wails3 task local:build-info                           # ビルド情報の反�
   `wails3 build` / `wails3 dev` まで落ちる。⚠️ **`Taskfile.yml` 側から `local:` のタスクを呼ばない**（同じ理由）
 - ⚠️ **ビルドは `wails3 build` ではなく `build:embed`**（`task: :build:embed`。先頭の `:` は
   `Taskfile.yml` 側を指す）。`wails3 build` の exe は認識器のデータが隣に無いと盤面を読めない
-- ⚠️ **コピーするのは exe だけ**（`bin/*` にしない）。ログは exe の隣に出るので、`bin` の exe を
-  試しに起動していると、そのログでコピー先の同じ日のログを上書きする。設定と棚は
+- ⚠️ **コピーするのは exe だけ**（`bin/*` にしない）。古いログ（2026-10-10 まではログが exe の隣に出ていた）や
+  `ikkyoku-log.json` を巻き込まない（ログは今は一時ディレクトリの `ikkyoku`）。設定と棚は
   `os.UserConfigDir()/ikkyoku` にあるので、exe を置き換えても消えない
 - ⚠️ **コミットは列挙したファイルだけ**（`git commit -- <paths>`）。作業中の変更は巻き込まないが、
   **exe には入る**。リリースとして残すなら、先にコミットしてから deploy する

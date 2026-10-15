@@ -4,9 +4,9 @@ package main
 //
 // ⚠️ **ここが守っているのは 3 つ。**
 //   - **変わっていない周で認識を呼ばないこと**（これがふるいの目的そのもの。
-//     崩れると長考中も 2.1 秒を払い続け、次の手に気づくのが遅れる）
+//     崩れると長考中も認識を払い続け、次の手に気づくのが遅れる）
 //   - **変化したら、止まってから読むこと**（動いている最中の 1 枚は、
-//     **棋士の手が被った盤**を 2.1 秒かけて読むことになる）
+//     **棋士の手が被った盤**を読むことになる）
 //   - ⚠️ **止まらなくても、いつかは読むこと**（`gateMovingMax`）。
 //     盤に重なるテロップのような「動き続けるもの」で**永久に認識しない**という
 //     壊れ方を作らないための保険。
@@ -46,7 +46,7 @@ func gateMoved(n int) *image.RGBA {
 
 func gateService() *CaptureService {
 	s := &CaptureService{}
-	s.boardAnchor = recognize.Signature{Board: gateBoard}
+	s.fol.boardAnchor = recognize.Signature{Board: gateBoard}
 	return s
 }
 
@@ -76,8 +76,8 @@ func TestGateSkipsUnchanged(t *testing.T) {
 			t.Fatalf("変わっていないのに %q（認識を呼んでいます）", got)
 		}
 	}
-	if s.gateShots != 4 {
-		t.Fatalf("撮った枚数が %d（4 のはず）", s.gateShots)
+	if s.fol.gateShots != 4 {
+		t.Fatalf("撮った枚数が %d（4 のはず）", s.fol.gateShots)
 	}
 }
 
@@ -128,8 +128,8 @@ func TestGateReadsWhenSkippedTooLong(t *testing.T) {
 		t.Fatalf("省き続けたのに %q（ふるいが外したら二度と読まない）", got)
 	}
 	// 読んだら数え直すこと（次の 10 秒がまた始まる）。
-	if s.gateSkipped != 0 {
-		t.Fatalf("数え直していません: %d", s.gateSkipped)
+	if s.fol.gateSkipped != 0 {
+		t.Fatalf("数え直していません: %d", s.fol.gateSkipped)
 	}
 }
 
@@ -139,8 +139,8 @@ func TestResetGate(t *testing.T) {
 	s.gateImg(gateFrame())
 	s.gateImg(gateFrame())
 	s.resetGate()
-	if s.gateShots != 0 || s.gateReads != 0 || s.gateFrame != nil || s.gateDirty {
-		t.Fatalf("白紙に戻っていません: shots=%d reads=%d dirty=%v", s.gateShots, s.gateReads, s.gateDirty)
+	if s.fol.gateShots != 0 || s.fol.gateReads != 0 || s.fol.gateFrame != nil || s.fol.gateDirty {
+		t.Fatalf("白紙に戻っていません: shots=%d reads=%d dirty=%v", s.fol.gateShots, s.fol.gateReads, s.fol.gateDirty)
 	}
 }
 
@@ -163,7 +163,7 @@ func TestDetectGatePassesWithoutAnchor(t *testing.T) {
 // ここで落とすと**マスタを取り直す後段に永久に辿り着かない**。
 func TestDetectGatePassesWhenFrameMoved(t *testing.T) {
 	s := gateService()
-	s.anchorRegion = ikkyoku.Region{X: 10, Y: 10, Width: 400, Height: 300}
+	s.fol.anchorRegion = ikkyoku.Region{X: 10, Y: 10, Width: 400, Height: 300}
 	moved := ikkyoku.Region{X: 40, Y: 10, Width: 400, Height: 300}
 	if kind, _ := s.detectGate(gateFrame(), moved); kind != "" {
 		t.Fatalf("枠を動かしたのに落としました: %q", kind)
@@ -183,8 +183,8 @@ func TestDetectMissGivesUp(t *testing.T) {
 	if kind, _ := s.detectMiss(detectOff, "盤の大きさが違います"); kind != "" {
 		t.Fatalf("上限まで見送ったのに %q（永久に読まない壊れ方）", kind)
 	}
-	if s.detectMisses != 0 {
-		t.Fatalf("数え直していません: %d", s.detectMisses)
+	if s.fol.detectMisses != 0 {
+		t.Fatalf("数え直していません: %d", s.fol.detectMisses)
 	}
 }
 
@@ -193,11 +193,11 @@ func TestDetectMissGivesUp(t *testing.T) {
 func TestNoteReadCountsOnlyRecognized(t *testing.T) {
 	s := gateService()
 	s.gateImg(gateFrame()) // 読むと決めた（まだ数えない）
-	if s.gateReads != 0 {
-		t.Fatalf("gate が数えています: %d", s.gateReads)
+	if s.fol.gateReads != 0 {
+		t.Fatalf("gate が数えています: %d", s.fol.gateReads)
 	}
 	s.noteRead()
-	if s.gateReads != 1 {
-		t.Fatalf("認識した枚数が %d", s.gateReads)
+	if s.fol.gateReads != 1 {
+		t.Fatalf("認識した枚数が %d", s.fol.gateReads)
 	}
 }

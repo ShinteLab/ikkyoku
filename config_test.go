@@ -906,3 +906,51 @@ func TestConfigFollowFirst(t *testing.T) {
 		t.Fatalf("保存した設定が残っていません: %+v（%v）", c.FollowFirst, err)
 	}
 }
+
+// ⚠️ **「中継の録画とログを残す（デバッグ）」は、キーが無ければ偽（残さない）・保存したら残ること**（2026-10-11）。
+// 偽が既定なのは、録画と追従のログは調べるための記録で、ふだん使うときに溜める理由が無いから（1 局で 200MB を超えた）。
+func TestConfigFollowDebug(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if c.FollowDebug {
+		t.Fatal("キーが無いのに録画とログを残す設定になっています（既定は残さない）")
+	}
+	c.FollowDebug = true
+	if err := SaveConfig(path, c); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+	if c, err = LoadConfig(path); err != nil || !c.FollowDebug {
+		t.Fatalf("保存した設定が残っていません: %+v（%v）", c.FollowDebug, err)
+	}
+}
+
+// ⚠️ **「ログの細かさ」は、キーが無ければ既定（空）・知らない値も既定に倒し・小文字でも読み・保存したら残ること**（2026-10-11）。
+// 既定に倒すのは、読めない値で全体のレベルが勝手に変わって、残るはずのログが消えたり埋もれたりしないため。
+func TestConfigLogLevel(t *testing.T) {
+	for in, want := range map[string]string{"": "", "debug": "DEBUG", " NOTICE ": "NOTICE", "LOUD": "", "INFO+2": ""} {
+		if got := NormalizeLogLevel(in); got != want {
+			t.Errorf("NormalizeLogLevel(%q) = %q, want %q", in, got, want)
+		}
+	}
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, err := LoadConfig(path)
+	if err != nil || c.LogLevel != "" {
+		t.Fatalf("キーが無いのに既定ではありません: %q（%v）", c.LogLevel, err)
+	}
+	c.LogLevel = "DEBUG"
+	if err := SaveConfig(path, c); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+	if c, err = LoadConfig(path); err != nil || c.LogLevel != "DEBUG" {
+		t.Fatalf("保存した設定が残っていません: %q（%v）", c.LogLevel, err)
+	}
+}

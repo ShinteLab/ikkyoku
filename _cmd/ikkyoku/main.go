@@ -24,9 +24,9 @@ package main
 import (
 	"embed"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -93,16 +93,31 @@ type appWindows struct {
 }
 
 func main() {
-	// ログは実行ファイルの隣（ikkyoku_<日付>.log）。wails3 dev のときはコンソールにも出す
+	// ログは一時ディレクトリの ikkyoku（ikkyoku_<日付>.log。2026-10-11 に実行ファイルの隣から移した。1 週間で消す）。
+	// wails3 dev のときはコンソールにも出す（追従のログは出さない）
 	// （consoleLog。devbuild.go / prodbuild.go）。⚠️ **書けなくても起動は止めない。**
-	logCloser, logErr := log.Init(log.Options{Console: consoleLog})
+	// 画面まわりの診断（心拍・表示状態・Wails と WebView2 のログ）は dev のときだけ
+	// ikkyoku-diag_<日付>.log に残す（devBuild。黒い画面の再現待ち。_docs/blackscreen.md）。
+	// 中継の追従（ikkyoku-follow_<日付>.log）は設定「中継の録画とログを残す（デバッグ）」のときだけ（下で設定を読んでから入れる）。
+	// レベルの設定（ikkyoku-log.json）は今までどおり実行ファイルの隣に置く。
+	// 全体の既定のレベルは dev で INFO、配る exe で NOTICE（2026-10-11。INFO は開発中に参考になるもの、
+	// NOTICE は常に残しておきたいもの）。画面の設定「ログの細かさ」は設定を読んでから当てる（applyLogLevel）。
+	logOpts := log.Options{Console: consoleLog, Diag: devBuild, Root: log.LevelNotice}
+	if devBuild {
+		logOpts.Root = log.LevelInfo
+	}
+	if exe, err := os.Executable(); err == nil {
+		logOpts.LevelsDir = filepath.Dir(exe)
+	}
+	logCloser, logErr := log.Init(logOpts)
 	if logErr != nil {
 		log.Warn("ログの準備で問題がありました", "error", logErr)
 	}
 	// ⚠️ **ここから下で panic したら、箱を出してから終わる**（fatal.go）。配る exe は
 	// 標準エラーの行き先が無いので、無いと**何も言わずに消える**。
 	defer recoverMain()
-	log.Info("ikkyoku を起動します", "version", appVersion())
+	// ⚠️ **起動した版は NOTICE**（常に残す。どれで動いたかが分からなくなる）。
+	log.Notice("ikkyoku を起動します", "version", appVersion())
 
 	// 起動はできたが足りないもの・できないこと（2026-10-04）。メイン画面のツールバーの ⚠ が
 	// 一覧にする。**どれも起動は止めない**（設計原則3）。載せ方は issues.go。
@@ -175,7 +190,7 @@ func main() {
 	app := application.New(application.Options{
 		Name:        "ikkyoku",
 		Description: "Ikkyoku - Shogi broadcast analyzer",
-		Logger:      slog.Default(),
+		Logger:      log.Diag, // Wails のログは診断へ（dev だけ残す。Warn 以上は本体にも。log/setup.go）
 		// ⚠️ **致命的なエラーを箱にする口**（fatal.go）。無いと Wails はログに出して
 		// os.Exit(1) するだけで、配る exe では**何も言わずに消える**（WebView2 が無いときなど）。
 		ErrorHandler: handleWailsError,
@@ -287,8 +302,22 @@ func main() {
 	// **枠の HWND を触るのは CaptureService** なので、設定タブからの切り替えは
 	// ここで繋いだこのフックを通る（SettingsService はウィンドウを持っていない）。
 	settingsSvc.OnClickThrough = captureSvc.applyClickThrough
+	// 中継を追う盤（マスタ）を訂正した 1 枚にするとき、それが今の根を採った 1 枚かを確かめる（2026-10-09）。
+	captureSvc.studySession = studySvc.Session
+	// 中継を追う 1 周の段取りは解析タブ側（`app` の中継セッション。2026-10-11）。撮る側はこちらを包んで渡す。
+	studySvc.Camera = followCamera{captureSvc}
+	captureSvc.onHideRefused = studySvc.FollowHideRefused
 	// 「中継を追うあいだは盤の読みを優先する」（2026-10-07。`enginepriority.go`）。
 	captureSvc.followFirst = cfg.FollowFirst
+	// 「中継の録画とログを残す（デバッグ）」（2026-10-11）。切ってあっても古い録画は消す（ログと同じ 1 週間）。
+	captureSvc.applyFollowDebug(cfg.FollowDebug)
+	if root := followRecordRoot(); root != "" {
+		go removeOldRecordings(root, time.Now())
+	}
+	// 撮った画像も 1 週間で消す（2026-10-11。suteme へ送れば役目を終える。置き場所は ikkyoku.DefaultOutDir）。
+	if dir, err := ikkyoku.DefaultOutDir(); err == nil {
+		go ikkyoku.RemoveOldCaptures(dir, time.Now(), log.KeepDays)
+	}
 	captureSvc.engineNames = func() []string {
 		var out []string
 		for _, e := range settingsSvc.Config().Engines {
@@ -297,6 +326,10 @@ func main() {
 		return out
 	}
 	settingsSvc.OnFollowFirst = captureSvc.applyFollowFirst
+	settingsSvc.OnFollowDebug = captureSvc.applyFollowDebug
+	// 「ログの細かさ」（2026-10-11）。
+	applyLogLevel(cfg.LogLevel)
+	settingsSvc.OnLogLevel = applyLogLevel
 	// 評価値グラフの切り離し（解析タブのスプリットバーのトグル / グラフ窓を閉じる）。
 	// **窓を出し入れするのは CaptureService**（SettingsService はウィンドウを持たない）。
 	settingsSvc.OnEvalGraphDetached = captureSvc.applyEvalGraphDetached
@@ -829,11 +862,11 @@ func registerPaneRaise(wins *appWindows) {
 
 // registerVisibilityLog は表示状態の変化(表示・非表示・最小化・復帰)をログに出す。
 //
-// ⚠️ **debug で出す**(2026-08-11)。枠を動かしたりリサイズしたりするだけで大量に出て
-// (「戻す」が連続する)、**他のログがこれに埋もれる**ため。アプリのログレベルは info の
-// ままなので、既定では出ない。**消さないこと** —— 下記のとおり現象の再現待ちで要る
-// 記録なので、出すのをやめるのではなく普段は黙らせているだけ。追うときは
-// この 1 行を Info に戻すか、ハンドラの Level を debug にする。
+// ⚠️ **診断のログ（log.Diag）に debug で出す**(2026-08-11 に debug、2026-10-10 に診断へ)。
+// 枠を動かしたりリサイズしたりするだけで大量に出て(「戻す」が連続する)、他のログが埋もれるため
+// 本体には出さない。**dev のときは ikkyoku-diag_<日付>.log に既定で残る**(診断だけ Debug まで残す)。
+// debug のままだと黒くなったその場の記録が無かったので、診断へ分けて常に残す形にした。
+// 配るビルドでは残さない(log.Options.Diag)。**消さないこと** —— 下記のとおり現象の再現待ちで要る記録。
 //
 // **これだけは推測ではなく記録が要る。** メイン画面が真っ黒になって触れなくなる現象は、
 // Wails が最小化のときに WebView2 を不可視にし、復帰の分岐でしか戻さない作りに
@@ -853,7 +886,7 @@ func registerVisibilityLog(wins *appWindows) {
 			"戻す":  events.Common.WindowRestore,
 		} {
 			w.OnWindowEvent(id, func(*application.WindowEvent) {
-				log.Debug("ウィンドウの表示状態", "window", name, "event", label)
+				log.Diag.Debug("ウィンドウの表示状態", "window", name, "event", label)
 			})
 		}
 	}
@@ -1027,4 +1060,19 @@ func pickFile(a *application.App) ikkyokuapp.FilePicker {
 		}
 		return dlg.PromptForSingleSelection()
 	}
+}
+
+// applyLogLevel は設定「ログの細かさ」を当てる（起動時と切り替えたとき。`SettingsService.OnLogLevel`）。
+// 空・読めない値は画面では決めない（ikkyoku-log.json の root、無ければビルドの既定）。
+func applyLogLevel(v string) {
+	if l, err := log.ParseLevel(v); v != "" && err == nil {
+		log.SetRootLevel(&l)
+	} else {
+		log.SetRootLevel(nil)
+	}
+	shown := v
+	if shown == "" {
+		shown = "既定"
+	}
+	log.Notice("ログの細かさを設定しました", "設定", shown, "全体", log.RootLevel().String())
 }

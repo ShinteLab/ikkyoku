@@ -55,6 +55,38 @@ func Noticef(format string, args ...any) { output(LevelNotice, "", format, args,
 func Warnf(format string, args ...any)   { output(LevelWarn, "", format, args, nil) }
 func Errorf(format string, args ...any)  { output(LevelError, "", format, args, nil) }
 
+// FollowName は中継を追う（Phase 6 の追従）ログの名前（wenteasy/log の名前付きの Logger）。
+const FollowName = "follow"
+
+// Follow は中継を追うログ（log.Follow.Info("手を足しました", ...)）。1 周ごとに何行も出るので、
+// Init が本体から分けて ikkyoku-follow_<日付>.log へ出し、**コンソールには出さない**
+// （中継中にコンソールが埋まって目につく。2026-10-10）。⚠️ **Warn 以上は本体にも出す**。
+// 中身は wenteasy/log の Named（書くたびに slog.Default() へ渡す *slog.Logger）なので、
+// 呼び出し元の位置は slog が記録する。レベルは LevelsFile の "loggers" に "follow" があれば
+// それで、無ければ呼び出し元のパッケージで決まる。
+var Follow = wlog.Named(FollowName)
+
+// DiagName は画面まわりの診断のログの名前（「メイン画面が真っ黒になる」の再現待ち）。
+const DiagName = "diag"
+
+// Diag は画面まわりの診断のログ（心拍・ウィンドウの表示状態）。Wails のログと標準の log の出力
+// （[WebView2] の行）も Init がここへ向ける。**dev のときだけ** ikkyoku-diag_<日付>.log に
+// Debug まで残す（黒くなるのは長時間動かしたときだけなので、起きたその場の記録が要る）。
+// 配るビルドでは残さない（Options.Diag）。どちらでも ⚠️ **Warn 以上は本体に出す**。
+// コンソールには出さない（2026-10-10）。
+var Diag = wlog.Named(DiagName)
+
+// USIName はエンジンとの USI のやり取りのログの名前。
+const USIName = "usi"
+
+// USI はエンジンとの USI のやり取りのログ（`analyze` が送った行・受けた行を出す）。
+// Init が本体から分けて ikkyoku-usi_<日付>.log へ出し、**コンソールには出さない**。
+// ⚠️ **Warn 以上は本体にも出す**（エンジンを落としたなど）。
+// 配るビルドでも残す（2026-10-10。中継中にエンジンが `stop` に応えなくなり、何を送って
+// 何が返っていたかが分からなかった）。`info` は Debug なので既定では出ない
+// （探索中は毎秒何十行も出る。困ったときの直前の行は analyze が覚えていて、まとめて出す）。
+var USI = wlog.Named(USIName)
+
 // callerSkip は runtime.Callers → output → 公開関数 → 呼び出し元 の段数。
 // ⚠️ **output は公開関数から直接呼ぶこと。** 間に関数を挟むと、記録される位置（と、
 // パッケージごとのレベルの判定）がこのパッケージになる。wenteasy/log の Info などを

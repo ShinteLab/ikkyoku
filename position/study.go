@@ -119,6 +119,7 @@ type Node struct {
 	// 木の形（`kids[0]` と印）で決まるので、**画面に出ている字下げからは読めない。**
 	CanPromote bool `json:"canPromote,omitempty"`
 	// Main は**本譜か**（根から `kids[0]` だけを辿って届く手）。
+	// ⚠️ **対局の終わり（`RecordEnd`）より先は本譜ではない**（投了図以下は変化。2026-10-09）。
 	//
 	// ⚠️ **「親の最初の子」ではない**（2026-08-13 に意味を変えた）。枝の中の
 	// 最初の子は「先に足した」以上の意味を持たないので、そこまで本筋扱いすると
@@ -134,6 +135,14 @@ type Node struct {
 	//
 	// ⚠️ **解析で足した手・盤で指した手には付かない**（棋譜の手ではないので、元から無い）。
 	Comment string `json:"comment,omitempty"`
+	// End は**この手で対局が終わった**ときの終局の種別（"投了" など。2026-10-09）。
+	//
+	// 手順リストはこの手の直後に「91 投了」の行を出す。⚠️ **終局は節点にしない** ——
+	// 指し手ではないので、節点にすると解析・分岐・中継の繋ぎ先が 1 手ずれる。
+	// 立つのは `Study.RecordEnd` の手だけ（棋譜に終局が書いてあったとき）。
+	End string `json:"end,omitempty"`
+	// EndNote は終局の説明（行のホバー。千日手を自動で立てたときだけ。2026-10-09）。
+	EndNote string `json:"endNote,omitempty"`
 }
 
 // MoveNote は**棋譜に書いてあった、その手の注記**（消費時間とコメント。2026-10-04）。
@@ -207,7 +216,8 @@ type Study struct {
 	nextID int
 	// end は**実際の対局が終わった節点**（0 なら分かっていない。2026-09-16）。
 	//
-	// **棋譜に終局（投了・中断など）が書いてあったときだけ入る**（`FromKIF`）。
+	// 入るのは**棋譜に終局（投了・中断など）が書いてあった**とき（`FromKIF`）・
+	// **人が投了した**とき（`Resign`）・**千日手**のとき（`settleRepetition`）だけ（2026-10-09）。
 	// ここから先に伸びている手は**対局の手ではなく検討**で、中継で言う
 	// **「投了図以下」**がそれ。
 	//
@@ -220,6 +230,19 @@ type Study struct {
 	// 持っているのは「どこで対局が終わったか」だけで、**手を消す/消さないの
 	// 判断には使っていない。**
 	end int
+	// endMark は終局の種別（"投了" など。`kifu.Document.EndMark`。2026-10-09）。
+	//
+	// ⚠️ **`end` と組で持つ**（`SetRecordEnd` が両方を入れ替える）。片方だけ
+	// 残ると、関係の無い手に「投了」が出る。
+	endMark string
+	// endHand は**人が投了した**終局か（解析タブの「投了」。2026-10-09）。
+	//
+	// ⚠️ **棋譜に書いてあった終局とは別の事実**（`variation` と `end` の関係と同じ）。
+	// 取り消せるのはこちらだけ —— 棋譜の終局は記録なので消せてはいけない。
+	endHand bool
+	// endNote は終局の説明（手順リストの行のホバー。2026-10-09）。千日手を自動で
+	// 立てたとき（`settleRepetition`）だけ入る（「連続王手の千日手（▲の反則負け）」）。
+	endNote string
 }
 
 // NewStudy は確定した局面を根にして検討を始める。
@@ -330,6 +353,17 @@ func (s *Study) Nodes() []Node {
 				out = append(out, k.node(depth+1, false).promotable(true))
 				walk(k, depth+1, head)
 			}
+		case mode == main && s.end != 0 && n.id == s.end:
+			// **対局はここで終わり**（棋譜に終局が書いてあった。2026-10-09）。
+			// 投了図から指した手は**終局の手数の変化**（KIF の「変化：91手」）なので、
+			// 「分岐にする」で下げた手と同じく**全部 1 段下げて頭にする**。
+			// ⚠️ **本譜の続きとして並べないこと** —— `MainLine` も評価値グラフも
+			// ここで止まるのに、手順リストだけ本譜に見えていた（実機で指摘された）。
+			// ⚠️ **「本線にする」は出さない**（`openFork` と揃える。投了図以下は本譜に戻せない）。
+			for _, k := range n.kids {
+				out = append(out, k.node(depth+1, false))
+				walk(k, depth+1, head)
+			}
 		case mode == main:
 			// **枝が先、本譜があと**（枝は 1 段下げて、そこが変化の頭になる）。
 			for _, k := range n.kids[1:] {
@@ -399,6 +433,15 @@ func (s *Study) Nodes() []Node {
 		}
 	}
 	walk(s.top, 0, main)
+	if s.end != 0 {
+		for i := range out {
+			if out[i].ID == s.end {
+				out[i].End = s.RecordEndMark()
+				out[i].EndNote = s.endNote
+				break
+			}
+		}
+	}
 	return out
 }
 
@@ -631,20 +674,89 @@ func (s *Study) branches(n *treeNode) bool {
 // RecordEnd は**実際の対局が終わった節点**（0 なら分かっていない）。
 func (s *Study) RecordEnd() int { return s.end }
 
-// SetRecordEnd は対局が終わった節点を覚える（**棋譜に終局が書いてあったとき**）。
+// RecordEndMark は終局の種別（"投了" など。終わっていなければ空）。
+//
+// ⚠️ **種別を覚えていない控え（2026-10-09 より前）は "終局" と返す** ——
+// 終わった節点は分かっているので、種別が分からないだけで行を消さない。
+func (s *Study) RecordEndMark() string {
+	if s.end == 0 {
+		return ""
+	}
+	if s.endMark == "" {
+		return "終局"
+	}
+	return s.endMark
+}
+
+// SetRecordEnd は対局が終わった節点と終局の種別を覚える（**棋譜に終局が書いてあったとき**）。
 //
 // ⚠️ **推測で立てないこと。** 「詰んでいるから終わり」も「これ以上手が無いから
-// 終わり」も**棋譜の事実ではない**。立ててよいのは**棋譜に終局印があった**ときだけ
-// （`kifu.Document.EndMark`）。
+// 終わり」も**棋譜の事実ではない**。立ててよいのは**棋譜に終局印があった**とき・
+// **人が投了したとき**（`Resign`）・**ルールで決まるとき**（千日手。`settleRepetition`）だけ。
 //
 // ⚠️ **知らない節点なら忘れること**（0 に戻す）。据え直しで節点が入れ替わったのに
 // 前の id を持ち続けると、**関係の無い手に「対局の終わり」の印が出る。**
-func (s *Study) SetRecordEnd(id int) {
-	if _, ok := s.index[id]; !ok || id == 0 {
-		s.end = 0
+func (s *Study) SetRecordEnd(id int, mark string) {
+	// **同じ終局なら何も変えない**（説明を残す。URL の取り直しは毎回ここを通るので、
+	// 自分で見つけた千日手の説明が取り直しのたびに消える）。
+	if id != 0 && id == s.end && mark == s.endMark {
 		return
 	}
-	s.end = id
+	s.endHand, s.endNote = false, ""
+	if _, ok := s.index[id]; !ok || id == 0 {
+		s.end, s.endMark = 0, ""
+		return
+	}
+	s.end, s.endMark = id, mark
+}
+
+// RecordEndByHand は**今の終局が人の投了か**（取り消せるのはこちらだけ）。
+func (s *Study) RecordEndByHand() bool { return s.end != 0 && s.endHand }
+
+// CanResign は**今ここで投了できるか**（2026-10-09）。
+//
+// できるのは**本譜の先端を見ていて、まだ終局していない**ときだけ。投了するのは
+// その局面の手番の側（KIF の「91 投了」も手番の側の投了と読まれる）。
+// ⚠️ **本譜の途中では投了させない** —— 後ろの手がまとめて投了図以下に回る事故になる。
+// ⚠️ **1 手も指していない局面でも断る**（終局は手に付ける印で、根には付けられない）。
+func (s *Study) CanResign() bool {
+	return s.end == 0 && s.cur != s.top && s.cur == s.mainTipNode()
+}
+
+// Resign は**手番の側が投了する**（2026-10-09）。本譜はここで終わり、
+// ここから先に指した手は投了図以下（変化）になる。
+func (s *Study) Resign() error {
+	if s.end != 0 {
+		return fmt.Errorf("ikkyoku/position: もう終局しています")
+	}
+	if s.cur == s.top {
+		return fmt.Errorf("ikkyoku/position: まだ 1 手も指していません")
+	}
+	if s.cur != s.mainTipNode() {
+		return fmt.Errorf("ikkyoku/position: 投了できるのは本譜の最後の手からです")
+	}
+	s.end, s.endMark, s.endHand, s.endNote = s.cur.id, "投了", true, ""
+	return nil
+}
+
+// Unresign は**人が投了したのを取り消す**（2026-10-09）。
+//
+// ⚠️ **棋譜に書いてあった終局は取り消さない**（記録なので消せてはいけない）。
+func (s *Study) Unresign() error {
+	if !s.RecordEndByHand() {
+		return fmt.Errorf("ikkyoku/position: 取り消せるのは自分で投了したときだけです")
+	}
+	s.end, s.endMark, s.endHand, s.endNote = 0, "", false, ""
+	return nil
+}
+
+// mainTipNode は本譜の先端の節点（`MainTip` と同じところ。局面は組み立てない）。
+func (s *Study) mainTipNode() *treeNode {
+	n := s.top
+	for k := s.mainNext(n); k != nil; k = s.mainNext(n) {
+		n = k
+	}
+	return n
 }
 
 // MainLine は本譜（根から `kids[0]` を辿った並び）の手を返す。
@@ -736,7 +848,14 @@ func (s *Study) Legal() ([]legal.Move, error) {
 //
 // ⚠️ **同じ手が既にあるならそれを辿る**（枝を増やさない）。別の手なら**枝が生える**
 // ——**前の手順は消えない**（2026-08-13。それまでは捨てていた）。
-func (s *Study) Play(move string) error { return s.play(move, mark{hand: true}) }
+func (s *Study) Play(move string) error {
+	if err := s.play(move, mark{hand: true}); err != nil {
+		return err
+	}
+	// 本譜の先端で指したなら、千日手で対局が終わったかを見る。
+	s.settleRepetition()
+	return nil
+}
 
 // play は印を指定して 1 手指す（`Play` の中身）。
 //
@@ -778,6 +897,7 @@ func (s *Study) PlayLine(move, source string, head bool) error {
 	if head && len(at.kids) > before {
 		s.cur.variation = true
 	}
+	s.settleRepetition()
 	return nil
 }
 
@@ -854,6 +974,8 @@ func (s *Study) GraftGuess(moves []string, n int) GraftResult {
 
 // graft は据え直す。markFrom 番目以降の手にだけ印を付ける。
 func (s *Study) graft(moves []string, markFrom int, m mark) GraftResult {
+	// 本譜が伸びたなら千日手で終わったかを見る（途中で止まっても、足せたぶんは本譜）。
+	defer s.settleRepetition()
 	var r GraftResult
 	at, pos := s.top, s.root.Clone()
 	for i, mv := range moves {
@@ -1114,7 +1236,7 @@ func (s *Study) Promote(id int) error {
 	// ⚠️ **断るのは「続きがもう決まっている」ときだけ**（`openFork`）。
 	// **1 本しか無くても、それが変化の頭なら選べる** —— 読み筋を 1 本だけ
 	// 足したときがそれ。**`len(kids) >= 2` を条件にしないこと。**
-	if !openFork(n.parent) {
+	if !openFork(n.parent, s.end) {
 		return fmt.Errorf("ikkyoku/position: もう本線が決まっています: %d", id)
 	}
 	p := n.parent
@@ -1124,6 +1246,8 @@ func (s *Study) Promote(id int) error {
 	//（`Branch` で下げた手をもう一度本譜に戻す、という道でもある）。
 	n.variation = false
 	n.chosen = true
+	// 本線にした手で本譜が伸びることがある（親が本譜なら、この手から先が本譜に戻る）。
+	s.settleRepetition()
 	return nil
 }
 
@@ -1131,7 +1255,7 @@ func (s *Study) Promote(id int) error {
 //
 // ⚠️ **`Nodes` の「全部 1 段下げる」場合と揃えてあること。** 食い違うと、
 // **画面では同格に並んでいるのにメニューに出ない**（あるいはその逆）になる。
-func openFork(p *treeNode) bool {
+func openFork(p *treeNode, end int) bool {
 	if len(p.kids) == 0 {
 		return false
 	}
@@ -1141,7 +1265,7 @@ func openFork(p *treeNode) bool {
 	if p.kids[0].variation {
 		return true
 	}
-	if onMainLine(p) {
+	if onMainLine(p, end) {
 		// 本譜の上なら、`kids[0]` がそのまま続き。
 		return false
 	}
@@ -1155,9 +1279,12 @@ func openFork(p *treeNode) bool {
 
 // onMainLine は根から本譜（`kids[0]` かつ「分岐にする」で下げていない）を
 // 辿って届く節点か。
-func onMainLine(n *treeNode) bool {
+//
+// ⚠️ **対局の終わり（`end`）より先は本譜ではない**（2026-10-09。`Nodes` が投了図以下を
+// 1 段下げるのと揃える）。
+func onMainLine(n *treeNode, end int) bool {
 	for ; n.parent != nil; n = n.parent {
-		if n.variation || n.parent.kids[0] != n {
+		if n.variation || n.parent.kids[0] != n || (end != 0 && n.parent.id == end) {
 			return false
 		}
 	}
@@ -1187,6 +1314,11 @@ func (s *Study) DropFrom(id int) ([]int, error) {
 		}
 	}
 	walk(n)
+	// ⚠️ **終わった手が消えたなら終局も忘れる**（2026-10-09）。id は使い回さないので
+	// 残しても悪さはしないが、控えに死んだ id と「投了」が残り続ける。
+	if _, alive := s.index[s.end]; !alive {
+		s.end, s.endMark, s.endHand, s.endNote = 0, "", false, ""
+	}
 
 	// 消えた先を見ていたなら親へ（見ていた節点が残っているならそのまま）。
 	if _, alive := s.index[s.cur.id]; !alive {

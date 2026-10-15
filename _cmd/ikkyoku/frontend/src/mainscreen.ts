@@ -108,7 +108,9 @@ import type { Stock } from "../bindings/github.com/ShinteLab/ikkyoku/position/mo
 // 認識の観測情報。**型を手で書き写さない**(Go 側は suteme の型をそのまま通しており、
 // ここで別に定義すると矩形の意味がずれても気づけない)。
 import type { Debug } from "../bindings/github.com/ShinteLab/suteme";
-import { confirmStopFollow, noteFollowing, setFollowStopper } from "./followguard";
+import {
+  confirmStopFollow, isFollowing, noteFollowing, onFollowingChange,
+} from "./followguard";
 
 // 「撮れた」ことだけを伝えるイベントのペイロード（Go 側 CaptureShot / `capture:shot`）。
 //
@@ -747,7 +749,7 @@ export function mountMainScreen(root: HTMLElement): void {
                折りたたみの中にしか無かった**。そのため認識がおかしいときに
                「矩形がずれているのか、駒種を外しているのか」が訂正の手を止めずには
                分からず、**撮った画像のほうを疑うことになった**(2026-09-12 の
-               20260912-144914。実際には矩形はピクセル単位で合っていた)。
+               撮った 1 枚。実際には矩形はピクセル単位で合っていた)。
                **判断に要るものを、判断する場所に出す。**
 
                ⚠️ **切り取っても余白を残すこと。** 矩形が画像の縁と重なると線が
@@ -1234,6 +1236,31 @@ export function mountMainScreen(root: HTMLElement): void {
             </span>
           </span>
         </label>
+        <label class="setting">
+          <input id="follow-debug" type="checkbox" />
+          <span class="setting-body">
+            <span class="setting-title" data-hint="hint-followdebug">中継の録画とログを残す（デバッグ）</span>
+            <span id="hint-followdebug" class="setting-note is-hint">
+              中継を追うとき、手を決めた画像と追従の細かいログを一時フォルダの ikkyoku に残します。
+              追従がおかしいときに調べるためのものです。1 週間より古いものは消えます。
+            </span>
+          </span>
+        </label>
+        <div class="setting is-block">
+          <span class="setting-body">
+            <span class="setting-title" data-hint="hint-loglevel">ログの細かさ</span>
+            <span id="hint-loglevel" class="setting-note is-hint">
+              一時フォルダの ikkyoku に残すログの細かさです。既定は、開発版が INFO、配布版が NOTICE です。
+              何か起きたときに細かくして調べ、済んだら既定に戻してください。
+            </span>
+          </span>
+          <div class="setting-fields">
+            <label class="field">
+              <span class="field-label">レベル</span>
+              <select id="log-level"></select>
+            </label>
+          </div>
+        </div>
 
         <details id="fold-analyze" class="setting-group setting-fold">
           <summary class="setting-fold-head">
@@ -1890,7 +1917,7 @@ export function mountMainScreen(root: HTMLElement): void {
   // **「新しい画像に前の認識の格子が乗る」という状態が作れない**のがこの形の要点。
   // 以前は canvas で切り取っており `img.onload` を挟む非同期だったため、
   // 撮り直しの前後で一瞬ぶれる余地があった（**実際に「前の格子が出ている」と
-  // 疑う元になった**。2026-09-12 の 20260912-144914）。
+  // 疑う元になった**。2026-09-12 に撮った 1 枚）。
   //
   // ⚠️ **切り取りは viewBox でやる（画素を作り直さない）。** `<image>` は常に
   // 撮った画像の座標系そのままに置き、viewBox だけを狭める。だから**矩形も
@@ -2108,6 +2135,88 @@ export function mountMainScreen(root: HTMLElement): void {
     (black ? studyHandSlots.black : studyHandSlots.white).appendChild(zone);
     return zone;
   });
+  // 投了（2026-10-09）。**駒台の外側の縁、手番のマークの横の角**（奥の駒台なら上、
+  // 手前の駒台なら下。置き場所は style.css の `.resign-btn` と `_docs/ui/layout.md` の「投了のボタン」）。
+  //
+  // **投了すると終局になり、投了の行の右クリックから棋譜タブに登録できる。** 対局の
+  // 途中で誤って登録する事故を防ぐため、登録の口は投了の行にしか無い（`movelist.ts`）。
+  // ⚠️ **駒台の中・盤の真ん中寄りに戻さないこと**（2026-10-09 に 2 度置いて外した）。
+  // 駒台の中は駒を取ろうとして押し、盤の真ん中寄りは視点のボタンと間違えて押す。
+  // **外側の縁は誰も押さない**（手番のマークしか無い）。
+  // ⚠️ **駒台の中の要素として置き、絶対配置で外側へ出す**（手番のマークと同じ）——
+  // 視点を反転すると駒台ごと動き、高さも食わない（盤が小さくならない）。
+  // ⚠️ **押せるのは手番の側だけ**（KIF の「91 投了」も手番の側の投了と読まれる）。
+  // **両側に常に置いて押せない側は `disabled`**（手番のマークと同じく出たり消えたりさせない）。
+  // ⚠️ **投了できるかは Go 側**（`StudyState.canResign`。本譜の先端で、終局していないとき）。
+  // ⚠️ **中継を追っているあいだは押させない**（盤の駒と同じ。追従の状態は Go 側に無い）。
+  // ⚠️ **押したら確認を出す**（初めは「やめる」。Enter の連打で投了しない）。
+  const studyResignBtns = studyHandZones.map((zone) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "resign-btn";
+    b.textContent = "投了";
+    b.hidden = true;
+    b.dataset.black = zone.dataset.black;
+    // ⚠️ **駒台のクリック（打つ駒を選ぶ）に流さない**（study.ts は `.stock-chip` しか見ないが念のため）。
+    b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      askResign(b, e);
+    });
+    zone.appendChild(b);
+    return b;
+  });
+  // 投了のボタンの出し入れに要る値（**局面の写しではない**。showStudy が入れる）。
+  let studyCanResign = false;
+  let studyTurnNow = 0;
+  let studyFromURL = false;
+  let studyLoadedForResign = false;
+  let studyDropped = false;
+  const resignSide = (b: HTMLButtonElement): boolean => b.dataset.black === "true";
+  const sideName = (black: boolean) =>
+    black ? (studyDropped ? "▲下手" : "▲先手") : (studyDropped ? "△上手" : "△後手");
+  const syncResign = () => {
+    for (const b of studyResignBtns) {
+      const black = resignSide(b);
+      const side = sideName(black);
+      const mine = studyTurnNow === (black ? 1 : 2);
+      // URL から読んだ棋譜は終局を取得元が決めるので、ボタンごと出さない。
+      b.hidden = !studyLoadedForResign || studyFromURL;
+      b.disabled = !(studyCanResign && mine && !isFollowing());
+      b.title = isFollowing()
+        ? "中継を追っているあいだは投了できません"
+        : !mine
+          ? `${side}の手番ではありません`
+          : studyCanResign
+            ? `${side}が投了します`
+            : "本譜の最後の手で、終局していないときだけ投了できます";
+    }
+  };
+  onFollowingChange(() => syncResign());
+  const askResign = (b: HTMLButtonElement, e: MouseEvent) => {
+    if (b.disabled || isFollowing()) {
+      return;
+    }
+    openPopup(e.clientX, e.clientY, {
+      label: "投了",
+      // ⚠️ **初期フォーカスは「やめる」**（手順を消す確認と同じ）。
+      focus: 1,
+      items: [
+        { label: `${sideName(resignSide(b))}が投了する`, onPick: () => void resignStudy() },
+        { label: "やめる", onPick: () => {} },
+      ],
+    });
+  };
+  const resignStudy = async () => {
+    if (isFollowing()) {
+      return;
+    }
+    try {
+      showStudy(await StudyService.Resign());
+      sidePane.setStatus("");
+    } catch (err) {
+      sidePane.setStatus(String(err instanceof Error ? err.message : err));
+    }
+  };
   // 訂正タブ側の一行。訂正の操作が通らなかった理由と、確定できない理由を出す。
   const editStatus = root.querySelector<HTMLParagraphElement>("#edit-status")!;
 
@@ -2118,6 +2227,8 @@ export function mountMainScreen(root: HTMLElement): void {
   // ⚠️ **映すだけ**（入り切りの持ち主は `setFollowing` と `StudyState.kifuFollow`）。
   const studyLiveFollow = root.querySelector<HTMLElement>("#study-live-follow")!;
   const studyLiveKifu = root.querySelector<HTMLElement>("#study-live-kifu")!;
+  // 棋譜の自動更新が入っているか（`StudyState.kifuFollow` の写し。**書き換えるのは `showStudy` だけ**）。
+  let kifuFollowOn = false;
 
   // 視点（手前が先手 / 手前が後手）。**表示だけの反転で、局面には効かない。**
   // 切り替えの中身は下の「視点」の節にまとめてある（ここは値の置き場所だけ）。
@@ -2512,6 +2623,13 @@ ${st.turnLabel}${n}`;
     // ⚠️ **手番のマークは局面と一緒に更新する。** 1 手ごとに入れ替わるので、
     // 落とすと**前の手番のまま光り続ける**（連続モードでは毎手ずれる）。
     showStudyTurn(loaded ? st.turn : 0);
+    // 投了のボタンも手番と一緒（押せるのは手番の側だけ）。
+    studyCanResign = loaded && !!st.canResign;
+    studyTurnNow = loaded ? st.turn : 0;
+    studyFromURL = loaded && (st.sourceUrl ?? "") !== "";
+    studyLoadedForResign = loaded;
+    studyDropped = loaded && (st.handicap ?? "") !== "";
+    syncResign();
     // ⚠️ **局面と一緒に更新する。** 根を入れ替えると対局者も変わる。
     showPlayers(st.black ?? "", st.white ?? "", st.handicap ?? "");
     if (!o?.fromBoard) {
@@ -2525,7 +2643,8 @@ ${st.turnLabel}${n}`;
     // 中継を追うボタンも局面があるときだけ（繋ぐ先が無いと足せない）。
     studyFollowBtn.hidden = !loaded;
     // 棋譜の自動更新の札。⚠️ **条件は自動更新のアイコンと同じ**（URL から読んだときだけ。sidepane.ts）。
-    studyLiveKifu.hidden = !(loaded && (st.sourceUrl ?? "") !== "" && !!st.kifuFollow);
+    kifuFollowOn = loaded && (st.sourceUrl ?? "") !== "" && !!st.kifuFollow;
+    studyLiveKifu.hidden = !kifuFollowOn;
     // ⚠️ **待っている手数はここで取ること。** 追跡のループの中だけで数えると、
     // **人が手順を消したり分岐にしたりしたときに古いまま**になる
     // （`study:changed` もここへ来る）。
@@ -2623,47 +2742,6 @@ ${st.turnLabel}${n}`;
     // **盤の下に行を積むぶんだけ盤が小さくなっていた。**
   };
 
-  // cellConfidence は認識器のマスごとの確信度を 81 個の並びにする（行優先）。
-  //
-  // ⚠️ **中継を追うときの「どのマスなら覆してよいか」の根拠**になるので、
-  // **撮ったときに必ず渡すこと**（渡さないと修復が働かず、認識が 1 マス外すたびに
-  // 人が直すことになる）。⚠️ **判断は Go 側** —— ここは形を整えるだけ。
-  // ⚠️ **並び順を信用せず row/col で置くこと**（欠けた行があっても崩れない）。
-  const cellConfidence = (dbg: Debug | null | undefined): number[] | undefined => {
-    const cells = dbg?.cells;
-    if (!cells || cells.length === 0) {
-      return undefined;
-    }
-    const out = new Array<number>(81).fill(0);
-    for (const c of cells) {
-      if (c.row >= 0 && c.row < 9 && c.col >= 0 && c.col < 9) {
-        out[c.row * 9 + c.col] = c.confidence ?? 0;
-      }
-    }
-    return out;
-  };
-
-  // cellHidden は**手や頭が被って見えないマス**を 81 個の並びにする（行優先。2026-10-06）。
-  //
-  // suteme が `CellDebug.Hidden` で返す印。⚠️ **判断は Go 側**（見えないマスを根拠にも
-  // 減点にもしない・行き先が見えない手は足さない）—— ここは形を整えるだけ。
-  // ⚠️ **1 つも立っていなければ undefined**（全部見えている。今までどおり）。
-  const cellHidden = (dbg: Debug | null | undefined): boolean[] | undefined => {
-    const cells = dbg?.cells;
-    if (!cells || cells.length === 0) {
-      return undefined;
-    }
-    const out = new Array<boolean>(81).fill(false);
-    let any = false;
-    for (const c of cells) {
-      if (c.hidden && c.row >= 0 && c.row < 9 && c.col >= 0 && c.col < 9) {
-        out[c.row * 9 + c.col] = true;
-        any = true;
-      }
-    }
-    return any ? out : undefined;
-  };
-
   // 訂正タブ → 解析タブ。**受け渡しはこの 1 か所だけ。**
   //
   // ⚠️ **確定しているかの判定は Go 側（StudyService.Adopt）に任せる。** 手番か
@@ -2690,6 +2768,15 @@ ${st.turnLabel}${n}`;
       editStatus.classList.add("is-error");
       return;
     }
+    // ⚠️ **訂正した 1 枚を、中継を追う盤（マスタ）にする**（2026-10-09。Go 側の `SetFollowShot`）。
+    // 押した瞬間の 1 枚をマスタにすると、手が盤に被っていたときに初手から「別の盤」になる。
+    // ⚠️ **追い始める前に待つこと**（下の `studyFollowBtn.click()` より先に覚えさせる）。
+    // 画像の無い局面・画像ファイルなら Go 側が忘れる（押した瞬間の 1 枚で決める）。
+    try {
+      await CaptureService.SetFollowShot(refShot?.path ?? "");
+    } catch {
+      // 覚えられなくても解析は始まる（押した瞬間の 1 枚で決めるだけ。設計原則3）。
+    }
     // ⚠️ **見え方を撮った画像に合わせる。** 後手目線で撮った局面は、解析タブへ
     // 渡るときに 180 度回っている（＝先後が実際どおりになっている）ので、
     // **そのまま描くと盤が上下逆に見える**。表示視点を後手にすれば、
@@ -2698,90 +2785,59 @@ ${st.turnLabel}${n}`;
     setStudyViewpoint(!editNearWhite);
     selectTab(studyTab);
     // ⚠️ **追っていたなら上の確認で止まっている**ので、ここでは必ず「入れる」側になる。
-    // 念のため入っているときは押さない（押すと止まる）。
-    if (follow && !followOn) {
-      studyFollowBtn.click();
+    // ⚠️ **ボタンを押す形にしないこと** —— 画面の写し（`followOn`）は止めた知らせが届くまで古いので、押すと止める側に倒れる。
+    if (follow) {
+      startFollow();
     }
   };
 
-  // ---- 中継を追う（2026-09-15）------------------------------------------
+  // ---- 中継を追う（2026-09-15。2026-10-11 に段取りを Go へ移した）-------------------
   //
-  // **撮る → 認識する → 繋がるなら足す、を止めるまで繰り返す。**
+  // **撮る → 認識する → 繋がるなら足す、を止めるまで繰り返すのは Go の中継セッション**（`app` の
+  // `StudyService.StartFollow` / `StopFollow`。`followsession.go`）。ここは**押して、来た様子を描くだけ**。
+  // ⚠️ **1 周の段取りをここに戻さないこと**（2026-10-11 に移した。判断が Go と画面に分かれていた。`_docs/design-follow.md` の「中継セッション」）。
+  // ⚠️ **状態を持たない** —— 追っているか・見失いの数・控え・帯の候補は Go が持ち、`follow:update` で来る。
+  // ここが持つのは**描くための写し**（`followOn` と最後の状態の行）だけ。
   //
-  // ⚠️ **訂正タブへ飛ばさないこと。** 「訂正を挟むかどうか」をこちらが決めることに
-  // なる。**おかしくてもとにかく進み、違うと思ったら人が戻る**（そのために
-  // 推測で足した手には印が付いている。`Node.Guess`）。
-  //
-  // ⚠️ **1 周ずつ順番に回すこと**（`setInterval` にしない）。認識は数秒かかるので、
-  // **間隔で撮ると前の 1 枚を認識している最中に次が積み上がる。**
-  //
-  // ⚠️ **繰り返しがフロントにあるのは連続解析と同じ形。** ただし**こちらは
-  // 局面を動かさない**（動かすかは `FollowAuto` が「先端を見ていたか」で決める）。
-  // ⚠️ **「撮る間隔」と「認識する間隔」は別**（2026-09-18）。**認識は 2.1 秒**だが、
-  // **撮って前の 1 枚と比べるだけなら数ミリ秒**（Go 側の画素差分のふるい）。
-  // だから**周期はふるいに合わせて短くする** —— 手が指されてから認識を始めるまでの
-  // 遅れがそのまま縮み、**1 手あたり 1 秒ぶん速くなる**。
-  //
-  // ⚠️ **0 に近づけないこと** —— 撮るのも画面の更新も只ではない。
-  const followTickMs = 250;
-  // followStallMs は**1 周が返ってこないと見なす**時間（見張り用）。
-  //
-  // ⚠️ **`followTickMs` の倍数で書かないこと**（2026-09-18 に分けた）。
-  // **認識する周だけ 2 秒以上かかる**ので、撮る間隔を基準にすると
-  // **認識しているだけの周を「死んだ」と見なして二重に回す。**
-  const followStallMs = 15000;
+  // ⚠️ **訂正タブへ飛ばさないこと。** 「訂正を挟むかどうか」をこちらが決めることになる。
+  // **おかしくてもとにかく進み、違うと思ったら人が戻る**（推測で足した手には印が付いている。`Node.Guess`）。
   let followOn = false;
-  let followTimer: number | undefined;
-  // ⚠️ **最後に 1 周を終えた時刻**（2026-09-15）。**これが「動いている証明」**で、
-  // 見張りの判断もこれ。⚠️ **経過秒だけでは証明にならない** ——
-  // ループが死んでも数字は増え続ける（実機で指摘された）。
-  let followTickAt = 0;
-  let followWatch: number | undefined;
-  // ⚠️ **繋がらない周が続いた回数**（2026-09-15）。**遅れが開きすぎると二度と
-  // 追いつけない** —— `Connect` が探すのは 4 手までなので、そこを超えたら
-  // **黙って「待機中」のまま何十手も過ぎる**（実機で 90 手ぶん無反応になった）。
-  // **人が気づけるようにするのが目的**で、直す手立ては追跡を止めて抜けた手を指し、追い直すこと。
-  let followLost = 0;
-  // followPending は**Go 側が答えを控えていて、次の 1 枚で確かめる**ところか（2026-10-05。
-  // `FollowAuto.pending`）。⚠️ **立っているときに「変わっていない」が来たら `FollowConfirm`**
-  // （控えた 1 枚から何も変わっていない ＝ 同じ画像を読み直したのと同じ）。
-  // ⚠️ **読んだ周の後でしか確かめないこと** —— 別の盤・盤が無い・動いている周を挟んだら倒す
-  // （その後の「変わっていない」は、控えた 1 枚ではなく挟まった 1 枚との比較になる）。
-  let followPending = false;
-  // followPendingCells は**控えた 1 枚の、比べる相手から変わったマス**（2026-10-07）。確かめの周
-  // （`unchanged` → `FollowConfirm`）は変わったマスを測らないので、足したあと `FrameFits` に渡すのはこちら。
-  // ⚠️ **落とすと、81 マスで読んだ手のあと比べる相手が替わらない**（実機で踏んだ。そこから先が全部 81 マスの読みになった）。
-  let followPendingCells: number[] | null = null;
 
-  // ⚠️ **状態は枠へも流すこと**（2026-09-15。実機で「枠側が録画しているか
-  // 分からない」と出た）。**追跡中に見ているのは中継**なので、
-  // 状態も操作も**枠に無いと届かない**（メイン画面は裏に回っている）。
+  // ⚠️ **状態は枠へも流すこと**（2026-09-15。実機で「枠側が録画しているか分からない」と出た）。
+  // **追跡中に見ているのは中継**なので、状態も操作も**枠に無いと届かない**（メイン画面は裏に回っている）。
   //
-  // ⚠️ **毎周の状態は札だけ**（2026-10-06）。足した手は手順そのものが知らせる。
-  // **人が知るべきとき**（見失った・止めた・始められなかった）だけ枠の下の帯に出す（`followNotice`）。
-  // detail は札のホバーに出す補足（「別の盤」の理由など。札は狭いので本文に入れない）。
-  const publishFollow = (text: string, detail = "") => {
+  // ⚠️ **札（text）は「追跡中・n手目待ち」だけ**（2026-10-10）。周ごとの様子は**枠の下の帯の状態の行**（status）へ。
+  // 札に混ぜると、札の長さが変わるたびにタイトルバーがチカチカした。状態の行は 1 行で切る（`frame.ts`）。
+  // 止めた理由など**たまに知らせるもの**は `followNotice`（同じ帯の、状態の行の下）。
+  let followStatus: { text: string; kind: FollowNoticeKind } = { text: "", kind: "" };
+  // 引数なしは**最後の状態を送り直す**（枠が出たとき。`frame:visible`）。
+  const publishFollow = (status?: string, kind: FollowNoticeKind = "") => {
+    if (status === undefined) {
+      ({ text: status, kind } = followStatus);
+    }
+    followStatus = { text: status, kind };
     noteFollowing(followOn);
-    void Events.Emit("follow:state", { on: followOn, text, detail });
+    void Events.Emit("follow:state", {
+      on: followOn,
+      text: followOn ? followNote("追跡中") : "",
+      status: followOn ? status : "",
+      statusKind: followOn ? kind : "",
+    });
   };
-  // followLostShown は「見失っています」を帯に出しているか。**繋がり直したら 1 回だけ消す**
-  // （足した手で上書きしないので、消さないと直ったあとも残る）。
-  let followLostShown = false;
 
-  // followNotice は中継の追従で**人に知らせる 1 行**を、**枠の下の帯**に出す（2026-10-07。空なら消す）。
+  // followNotice は中継の追従で**人に知らせる 1 行**を、**枠の下の帯**に出す（2026-10-07。空なら消す）。中身は Go が決める
+  // （`follow:update` の notice）。ここが決めるのは**どこに出すか**と**いつ消すか**だけ。
   //
-  // 以前は解析タブの手順の下に出していたが、**追っているあいだ見ているのは中継**なので届かなかった
-  // （札を枠に置いたのと同じ理由）。帯は文があるあいだだけ枠を下へ伸ばす（撮る範囲は動かない。
-  // `CaptureService.SetFrameFooter`）。
-  // ⚠️ **毎周の状態を流さないこと** —— 出入りのたびに枠が伸び縮みする。毎周の状態は札（`publishFollow`）。
-  // ⚠️ **枠が出ていないときは手順の下に出す**（見えないところに出しても届かない。枠が隠れていて
-  // 撮れずに止まったときがこれ）。
+  // ⚠️ **枠が出ていないときは手順の下に出す**（見えないところに出しても届かない。枠を出さずにメイン画面から追い始めて、
+  // 撮れずに止まったときがこれ。追っているあいだは枠を隠せない）。
   // fade は**しばらくして消す**か（人が自分で止めたときの「止めました」など。読めば済むもの）。
   type FollowNoticeKind = "" | "warn" | "error";
   const followNoticeFadeMs = 4000;
   let followNoticeTimer: number | undefined;
   let followNoticeInSide = false;
-  const followNotice = (text: string, kind: FollowNoticeKind = "", fade = false) => {
+  // choices は**人に選んでもらう候補**（2026-10-09。打った駒が決まらないとき。帯にボタンで並ぶ）。
+  type FollowNoticeChoice = { label: string; moves: string[] };
+  const followNotice = (text: string, kind: FollowNoticeKind = "", fade = false, choices: FollowNoticeChoice[] = []) => {
     if (followNoticeTimer !== undefined) {
       window.clearTimeout(followNoticeTimer);
       followNoticeTimer = undefined;
@@ -2796,21 +2852,20 @@ ${st.turnLabel}${n}`;
       void Events.Emit("follow:notice", { text: "", kind: "" });
       return;
     }
-    void Events.Emit("follow:notice", { text, kind });
+    void Events.Emit("follow:notice", { text, kind, choices });
     if (text && fade) {
       followNoticeTimer = window.setTimeout(() => followNotice(""), followNoticeFadeMs);
     }
   };
 
-  // followNote は状態に**次に来るはずの手数**を添える。
+  // followNote は札に**次に来るはずの手数**を添える。
   //
-  // ⚠️ **時刻も経過秒も出さないこと**（2026-09-15 に実機で外した）。どちらも
-  // **動いている証明にならない**うえ（止まっても数字は進む）、札は狭いので
-  // **役に立つものを 1 つだけ出す**。生きているかは
-  // **「追跡中」と「待機中」の切替**で読む。
+  // ⚠️ **時刻も経過秒も出さないこと**（2026-09-15 に実機で外した）。どちらも**動いている証明にならない**うえ、
+  // 札は狭いので**役に立つものを 1 つだけ出す**。
   const followNote = (label: string) =>
     followWaiting > 0 ? `${label}・${followWaiting}手目待ち` : label;
 
+  // setFollowing は**入り切りを画面に描く**（ボタン・札）。⚠️ **入り切りを決めるのは Go**（`follow:update` の on）。
   const setFollowing = (on: boolean) => {
     followOn = on;
     studyFollowBtn.setAttribute("aria-pressed", on ? "true" : "false");
@@ -2818,391 +2873,69 @@ ${st.turnLabel}${n}`;
     // ボタンは**押すと何が起きるか**だけを書き、光らせもしない（同じ状態を 2 か所に出さない）。
     studyFollowBtn.textContent = on ? "追跡を止める" : "中継を追う";
     studyLiveFollow.hidden = !on;
-    if (!on && followTimer !== undefined) {
-      window.clearTimeout(followTimer);
-      followTimer = undefined;
-    }
-    if (followWatch !== undefined) {
-      window.clearInterval(followWatch);
-      followWatch = undefined;
-    }
-    followPending = false;
-    followLostShown = false;
-    if (on) {
-      followTickAt = Date.now();
-      followLost = 0;
-      // ⚠️ **見張りを付けること**（2026-09-15）。**1 周の予約を取りこぼすと
-      // 追跡が黙って死ぬ**という壊れ方を実際にやったので、
-      // **止まっていたら自力で立て直す**。⚠️ **これは保険であって設計ではない** ——
-      // 予約の出口を 1 か所にしてあるのが本体（`followSchedule`）。
-      followWatch = window.setInterval(() => {
-        if (!followOn || Date.now() - followTickAt < followStallMs) {
-          return;
-        }
-        console.warn("[follow] 1 周が返ってこないので立て直します");
-        followTickAt = Date.now();
-        void followTick();
-      }, followStallMs / 3);
-    }
-    publishFollow(on ? followNote("追跡中") : "");
   };
 
-  // ⚠️ **枠のボタンからも入り切りできること。** 状態を持っているのはこちらだけで、
-  // 枠は映すだけ（2 か所が別々に覚えると食い違う）。
+  // **Go の中継セッションの様子**（`follow:update`。`app` の `FollowUpdate`。⚠️ **型は bindings に出ないので手書き**）。
+  type FollowUpdate = {
+    on: boolean;
+    waiting: number;
+    status: string;
+    statusKind: FollowNoticeKind;
+    notice?: { text: string; kind: FollowNoticeKind; fade: boolean; choices?: FollowNoticeChoice[] | null } | null;
+  };
+  Events.On("follow:update", (e: { data: FollowUpdate }) => {
+    const u = e.data;
+    if (!u) {
+      return;
+    }
+    if (u.on !== followOn) {
+      setFollowing(u.on);
+    }
+    followWaiting = u.waiting ?? 0;
+    publishFollow(u.status ?? "", u.statusKind ?? "");
+    // notice が無ければ知らせは変えない。
+    if (u.notice) {
+      followNotice(u.notice.text ?? "", u.notice.kind ?? "", !!u.notice.fade, u.notice.choices ?? []);
+    }
+  });
+
+  // ⚠️ **枠のボタンからも入り切りできること。** 押されたらメイン画面のボタンと同じことをする。
   Events.On("follow:toggle", () => studyFollowBtn.click());
-
-  // followStop は追跡を止めて、理由を帯に出す（`followNotice`）。
-  // kind が空なら**人が自分で止めた**ときで、読めば済むのでしばらくして消す。
-  const followStop = (message: string, kind: FollowNoticeKind = "") => {
-    setFollowing(false);
-    followNotice(message, kind, kind === "");
-  };
-
-  // 追従を壊す操作に「はい」と答えたときの止め方（2026-10-05。`followguard.ts`）。
-  // ⚠️ **ボタンで止めたときと同じにすること**（追う盤も忘れる）。切り離した窓からは
-  // `follow:stop` で届く。
-  const followStopByGuard = () => {
-    if (!followOn) {
+  // **帯で選ばれた、打った駒の候補**（2026-10-09。`frame.ts` が投げる）。足すのは Go（`ChooseFollow`）。
+  Events.On("follow:choose", (e: { data: { moves?: string[] } }) => {
+    const moves = e.data?.moves;
+    if (!followOn || !moves || moves.length === 0) {
       return;
     }
-    void CaptureService.ClearBoardAnchor();
-    followStop("中継の追跡を止めました");
-  };
-  setFollowStopper(followStopByGuard);
-  Events.On("follow:stop", followStopByGuard);
+    void StudyService.ChooseFollow(moves);
+  });
 
-  // followOnce は 1 周ぶん。**途中で return してよい**（次の予約は呼び出し側）。
-  //
-  // ⚠️ **ここで次の予約をしないこと**（2026-09-15 に実機で踏んだ）。
-  // 見送りの `return` が予約を飛ばしていて、**盤が映らなかった最初の 1 回で
-  // ループが死んでいた** —— 大盤解説で死に、盤に戻っても復活しなかった。
-  // **「1 周やる」と「回し続ける」を同じ関数に混ぜない。**
-  // given は**既に撮って読んだ 1 枚**（「追う」を押したときの 1 枚。2026-10-07）。無ければ撮る。
-  const followOnce = async (given?: Awaited<ReturnType<typeof CaptureService.CaptureQuiet>>): Promise<boolean> => {
-    const shot = given ?? (await CaptureService.CaptureQuiet());
-    // ⚠️ **読まなかった周は何もしない**（2026-09-18）。Go 側のふるいが
-    // **変わっていない / まだ動いている**と判断したときで、
-    // **長考中はほとんどの周がこれ**（認識 2.1 秒を丸々省いている）。
-    //
-    // ⚠️ **見送りとして数えないこと**。`followLost` も録画も
-    // **「読んだけれど繋がらなかった」のためのもの**で、
-    // 読んでいない周を混ぜると**長考のたびに「見失っています」になる**。
-    let got: Awaited<ReturnType<typeof StudyService.FollowAuto>>;
-    // cells は**この周の 1 枚の、比べる相手から変わったマス**（測っていなければ null）。
-    let cells: number[] | null = shot.cells ?? null;
-    if (shot.skipped) {
-      if (shot.skipped !== "unchanged" || !followPending) {
-        followPending = false;
-        publishFollow(followNote("追跡中"));
-        return false;
-      }
-      // **控えた 1 枚から変わっていない** ＝ 確かめが済んだ。読み直さずに足す。
-      got = await StudyService.FollowConfirm();
-      // 変わっていないので、変わったマスも控えた 1 枚と同じ。
-      cells = followPendingCells;
-    } else if (shot.fast) {
-      // **速い経路**（2026-10-07）。81 マスは読んでおらず、先端と合っていた 1 枚から変わったマスだけが来る。
-      // ⚠️ **「盤が映っていない」と取り違えないこと**（SFEN が空なのは読んでいないから）。
-      let fast = await StudyService.FollowCells(shot.cells ?? [], null, null);
-      const wantRead = fast.readCells && fast.readCells.length > 0 ? fast.readCells : null;
-      const wantCompare = fast.compare && fast.compare.length > 0 ? fast.compare : null;
-      if (!fast.applied && !fast.pending && !fast.atFrame && (wantRead || wantCompare)) {
-        // 成・不成や打った駒の種類で分かれた・行き先を確かめる。**頼まれたマスだけ読み、成・不成は見た目を比べて**
-        // もう一度（81 マスは読まない）。⚠️ **1 回だけ**（決まらなければ下で 81 マスを読む）。
-        const read = wantRead ? await CaptureService.ReadCells(wantRead) : null;
-        const promo = wantCompare ? await followEvidence(wantCompare) : null;
-        fast = await StudyService.FollowCells(shot.cells ?? [], read, promo);
-      }
-      if (fast.looksOnly) {
-        // **変わったのは空きのマスだけで、駒は動いていない**（駒台の駒をつまんで打てるマスが光っている。2026-10-08）。
-        // ⚠️ **81 マスを読まないこと**（光ったマスを歩と読み、3〜5 秒かけて繋がらないだけだった）。組を覚えさせ、
-        // ふるいが同じ組を「変わっていない」に数える（保険の 1 枚は残る）。⚠️ **見送りとして数えない**。
-        await CaptureService.CellsUnmoved();
-        followPending = false;
-        publishFollow(followNote("追跡中"));
-        return false;
-      }
-      if (fast.noMoves) {
-        // **変わったマスを説明できる手順が 1 つも無い**（駒を掴んで行き先が光っている 1 枚が多い。2026-10-08）。
-        // ⚠️ **すぐ 81 マスを読まないこと**（1〜5 秒塞がり、そのあいだに指した手と応手がまとめて遅れた）。
-        // 組が変わるのを待たせる（指せば速い経路ですぐ取れる。待つ上限ではふるいが 81 マスを読む）。
-        // ⚠️ **見送りとして数えない**（読んでいない周と同じ）。⚠️ **控えは捨てる** —— この 1 枚から
-        // 変わっていない次の 1 枚（`unchanged`）で、説明の付かない盤のまま控えた手を足さないため。
-        await CaptureService.CellsUnclear();
-        followPending = false;
-        publishFollow(followNote("追跡中"));
-        return false;
-      }
-      if (fast.applied || fast.pending || fast.atFrame) {
-        got = fast;
-      } else {
-        // 手が決まらなかった（成・不成・打った駒・手が被った 1 枚など）。**同じ 1 枚を 81 マスで読む。**
-        const read = await followRead(await CaptureService.RecognizeQuiet());
-        if (!read) {
-          followPending = false;
-          return false;
-        }
-        got = read;
-      }
-    } else {
-      const read = await followRead(shot);
-      if (!read) {
-        followPending = false;
-        return false;
-      }
-      got = read;
+  // startFollow は中継を追い始める（追っていれば Go が何もしない）。
+  // ⚠️ **画面の `followOn` で入り切りを決めないこと** —— 止めた知らせ（`follow:update`）は止め終わったあとに届くことがあり、
+  // 確認で止めてすぐ「そのまま追跡」すると、まだ追っている写しのまま止める側に倒れる（`adoptToStudy`）。
+  const startFollow = () => {
+    // 前に止めたときの知らせ（「止めました」など）が残っていれば消す。
+    followNotice("");
+    // ⚠️ **棋譜の自動更新は止める**（2026-10-10。同じ対局を両方で追う意味はほぼ無いので、
+    // 後から押したほうが勝つ。聞かない）。逆向きは `sidepane.ts`。理由は `_docs/app-kifu-load.md` の「自動更新」。
+    if (kifuFollowOn) {
+      void StudyService.SetKifuFollow(false)
+        .then(() => sidePane.setStatus("棋譜の自動更新を止めて、中継の追跡を始めました"))
+        .catch((err) => sidePane.setStatus(String(err instanceof Error ? err.message : err)));
     }
-    followPending = !!got.pending;
-    followPendingCells = got.pending ? cells : null;
-    showStudy(got.state);
-    if (got.kind === "same" && !got.atFrame && cells && cells.length > 0) {
-      // **81 マスを読んだら何も指していなかったのに、変わったマスがある**（駒を掴んで行き先が光っている。2026-10-08）。
-      // その組を覚えさせ、続くあいだは読み直させない（同じ組を 20 秒で 5 回読んでいた。保険の 1 枚は残る）。
-      // ⚠️ **駒が空いて見えるマスがあれば覚えさせない**（`CellsLookUnmoved`）—— 色付けで読めない駒が動いた跡かもしれない
-      // （▲7八金 を覚えた組のせいで 1 分見なかった）。
-      if (await StudyService.CellsLookUnmoved(cells)) {
-        void CaptureService.CellsUnmoved();
-      }
-    } else if (got.pending || got.applied) {
-      // **手が見つかった**。「動いていない」と覚えた組なら忘れさせる（次の 1 枚が `same` で省かれて控えが捨てられ、
-      // 確かめが次の保険まで延びる）。
-      void CaptureService.ForgetUnmoved();
-    }
-    // ⚠️ **先端と合った 1 枚だけを、速い経路の比べる相手にする**（判断は Go 側）。81 マスの読みで
-    // ぴったり合った（`atFrame`）か、比べる相手から変わったマスが足した手で説明できた（`FrameFits`）とき。
-    // ⚠️ **控えているあいだは替えない**（先端とこの 1 枚が食い違っている）。
-    let atFrame = !!got.atFrame;
-    if (!atFrame && !got.pending && cells) {
-      atFrame = await StudyService.FrameFits(cells);
-    }
-    if (atFrame) {
-      void CaptureService.SetCellBase();
-    }
-    // ⚠️ **足したうえで残りを控えた周（`applied` かつ `pending`）は足した側として出す**
-    // （2026-10-06。2 枚で揃った頭の手だけ足し、先へ進んだ分は次の 1 枚で確かめる）。
-    if (got.pending && !got.applied) {
-      // ⚠️ **見送りとして数えないこと**（足せる手は見つかっている）。間を置かずに
-      // 次の 1 枚を撮って確かめる（変わっていなければ `FollowConfirm` で足す）。
-      publishFollow(followNote("確かめています"));
-      return true;
-    }
-    return followAfter(got);
-  };
-
-  // followRead は**読んだ 1 枚**を追従に渡す（別の盤・盤が無いなら見送って null）。
-  const followRead = async (shot: Awaited<ReturnType<typeof CaptureService.CaptureQuiet>>) => {
-    // ⚠️ **別の盤を先に見ること**（2026-09-18）。盤の有無のふるいで落ちた周は
-    // **読んでいないので SFEN が空**で、順番が逆だと
-    // **大盤が映っているのに「盤が映っていません」**と出る。
-    // ⚠️ **追っている盤でなければ見送る**（2026-09-15）。中継には**大盤**
-    // （解説用）が映り、あちらは**将棋の局面としては矛盾しない**ので
-    // 盤面だけでは弾けない —— 解説が本譜から 1 手の変化を並べていたら、
-    // **その手をそのまま棋譜に足してしまう。**
-    if (shot.offBoard) {
-      // ⚠️ **止めないこと。** 大盤はすぐ本物へ戻るので、**待てばよい**。
-      // 理由は札のホバーへ（手順の下に出さない。`publishFollow`）。
-      void CaptureService.SaveFollowMiss(followWaiting, "offboard");
-      publishFollow(followNote("待機中（別の盤）"), `別の盤が映っています（${shot.offBoardReason}）`);
-      return null;
-    }
-    if (!shot.sfen) {
-      // 盤が取れなかった（枠に盤が映っていない）。**黙って次へ。**
-      void CaptureService.SaveFollowMiss(followWaiting, "noboard");
-      publishFollow(followNote("待機中（盤が映っていません）"));
-      return null;
-    }
-    // ⚠️ **訂正タブへ流さないこと**（2026-09-15 に実機で踏んだ）。
-    // 以前はここで `PositionService.Load` を呼んでいたので、
-    // **人が訂正タブで作業していると 1 秒ごとに中継の盤で上書きされた**
-    // （学習データを登録しようとして消えた）。**訂正タブは人の作業場。**
-    //
-    // ⚠️ **禁止事項で塞がないこと** —— 中継を観ながら学習データを作るのは
-    // **正当な使い方**（訂正結果を学習に回すのは 2026-08-07 の決定）。
-    const conf = cellConfidence(shot.debug) ?? null;
-    const hidden = cellHidden(shot.debug) ?? null;
-    const got = await StudyService.FollowAuto(shot.sfen, conf, hidden, null);
-    // ⚠️ **成りも不成も指せる手なら、動く前と後の見た目を比べて同じ 1 枚でもう一度**（2026-10-07）。
-    // 最初の呼び出しは何も動かしていない。⚠️ **2 回目は証拠が空でも渡す**（null だとまた頼まれる）。
-    if (got.compare && got.compare.length > 0) {
-      return await StudyService.FollowAuto(shot.sfen, conf, hidden, await followEvidence(got.compare));
-    }
-    return got;
-  };
-
-  // followEvidence は**動く前と後の駒の見た目を測って**成・不成の証拠にする（2026-10-07）。
-  // ⚠️ **ここで成ったかを決めないこと**（しきい値は Go 側の `app`）。測れなかった組（負の値）は渡さない。
-  const followEvidence = async (pairs: { from: number; to: number }[]) => {
-    let sims: number[] = [];
-    try {
-      sims = (await CaptureService.ComparePieces(pairs)) ?? [];
-    } catch {
-      sims = [];
-    }
-    return pairs
-      .map((p, i) => ({ from: p.from, to: p.to, sim: sims[i] ?? -1 }))
-      // ⚠️ **捨てるのは測れなかった組（ちょうど -1）だけ**（2026-10-08）。似ていない駒どうしは近さが負になりうる
-      // （つまんだ銀と光ったマス）。負の値まで捨てると「見た目が違う」証拠が消える。
-      .filter((e) => e.sim > -1);
-  };
-
-  // followAfter は追従の結果（足した・足せなかった）を画面と録画に出す。戻り値は「すぐ次の 1 周へ行くか」。
-  const followAfter = (got: Awaited<ReturnType<typeof StudyService.FollowAuto>>): boolean => {
-    if (got.applied) {
-      const moves = got.text?.join(" ") || got.moves?.join(" ") || "";
-      // ⚠️ **「足しました」を手順の下に出さないこと**（足した手は手順に出る。`publishFollow`）。
-      // ⚠️ **札の文に「（推測）」を付けないこと**（2026-10-06）。追従が足す手は全部
-      // 推測の印（`Node.Guess`）が付くので、付けても情報にならない。印は手順の橙の丸だけ。
-      if (followLostShown) {
-        followLostShown = false;
-        followNotice("");
-      }
-      // **推測で足した末尾の手を差し替えた**ときは、何を何にしたかを帯に出す（2026-10-08。`followRewindApply`）。
-      // ⚠️ **黙って差し替えないこと**（元の手は枝に残っているので、違えば人が戻せる）。
-      if (got.rewound && got.note) {
-        followNotice(got.note, "", true);
-      }
-      // ⚠️ **手を決めた 1 枚だけを残す**（2026-09-15。デバッグ用の「録画」）。
-      // 中継には**棋士の手が映り込む**ので、誤認識したときに
-      // **「手が被ったのか、認識器が弱いのか」を切り分ける手掛かり**が要る。
-      //
-      // ⚠️ **手数は足したあとの `followWaiting` から逆算すること** ——
-      // `showStudy` が先に走っているので、**次の手数**になっている。
-      // ⚠️ **待たないこと**（`void`）。残せなくても追跡は続く（設計原則3）。
-      const added = got.moves?.length ?? 0;
-      void CaptureService.SaveFollowFrame(
-        Math.max(followWaiting - added, 0),
-        got.moves ?? [],
-        !!got.guess,
-      );
-      publishFollow(followNote(moves));
-      followLost = 0;
-      // ⚠️ **手が増えたなら間を置かずにもう 1 周**。**認識に 2 秒かかる**ので、
-      // そのうえ待つと**1 手進むのに 3 秒以上**になり、早指しに構造的に追いつけない
-      // （実機で 4 手目以降ずっと置いていかれた）。
-      return true;
-    }
-    // ⚠️ **盤が上下逆なら、それを言うのが先**（2026-09-15 に実機で踏んだ）。
-    // **後手で対局すると盤が上下逆に映る**ので、そのままでは 1 手も進まない ——
-    // しかも**平手の初期局面は上下対称なので、盤を見ても気づけない。**
-    // ⚠️ **勝手に回さないこと**（盤の向きは局面の解釈そのもの）。
-    if (got.flipped) {
-      followStop(
-        `盤が上下逆に映っているようです（逆向きなら ${got.flipMove} で繋がります）。` +
-          "訂正タブの「目線」を『後手が手前』にして、撮り直して" +
-          "「この局面を解析する」からやり直してください",
-        "warn",
-      );
-      return false;
-    }
-    // ⚠️ **何かが盤に被っている周も迷子ではない**（2026-10-06）。手や頭がどけば次の 1 枚で
-    // 入るので**待つだけ**で、「見失っています」に数えない（頭が長く被ると誤って言い出す）。
-    // ⚠️ **「変わっていません」と言わないこと** —— 次にすることは同じ（待つ）でも理由が違う。
-    // 残す画像も「被っていた」と分かる名前にする（変わり目だけ。Go 側が間引く）。
-    if ((got.unseen ?? 0) > 0) {
-      void CaptureService.SaveFollowMiss(followWaiting, "covered");
-      followLost = 0;
-      publishFollow(followNote(`待機中（盤に何か被っています・${got.unseen} マス）`));
-      return false;
-    }
-    // ⚠️ **「変わっていない」は迷子ではない**（長考中は毎周これ）。
-    // 数えるのは**繋ごうとして繋がらなかった周**だけ。
-    if (got.kind === "same" || got.kind === "unreadable") {
-      // ⚠️ **ここも残すこと**（2026-09-15 に盲点だった）。「変わっていない」は
-      // 長考中の正常な状態だが、**認識が外して『変わっていない』に見えている**
-      // ときも同じ顔をする —— 実機で**1 手目から動かないのに証拠が 1 枚も
-      // 残らなかった**。⚠️ **残すのは変わり目だけ**（Go 側が間引く）。
-      void CaptureService.SaveFollowMiss(followWaiting, got.kind);
-      followLost = 0;
-      publishFollow(followNote("追跡中"));
-      return false;
-    }
-    followLost += 1;
-    // ⚠️ **繋げなかった周の画像を残す**（2026-09-15。上限つき）。
-    // **採用した画像だけでは、止まった原因が分からない** —— 実機で 4 手目から
-    // 90 手ぶん止まったとき、**止まった瞬間の証拠だけが残っていなかった。**
-    void CaptureService.SaveFollowMiss(followWaiting, got.kind ?? "miss");
-    if (followLost >= followLostLimit) {
-      // ⚠️ **帯に書くのは見失った最初の 1 回だけ**（理由は周ごとに変わるので、
-      // 毎周書くと文の長さで枠が伸び縮みする）。続いている間は札が「見失っています」を出す。
-      const reason = `中継の手順を見失っています（${got.reason || got.kind}）`;
-      if (!followLostShown) {
-        followLostShown = true;
-        followNotice(reason, "warn");
-      }
-      publishFollow(followNote("見失っています"), reason);
-      return false;
-    }
-    publishFollow(followNote("追跡中"));
-    return false;
-  };
-
-  // followLostLimit は「見失った」と言い出すまでの周回数。
-  //
-  // ⚠️ **1 周で言わないこと** —— 駒が飛んでいる途中のフレームは普通に繋がらないので、
-  // **たまたま繋がらない周は正常**。続くことが異常。
-  const followLostLimit = 5;
-
-  // followSchedule は次の 1 周を予約する。⚠️ **出口はここ 1 か所**
-  // （予約し忘れ ＝ 追跡が黙って死ぬ、という壊れ方を作らないため）。
-  const followSchedule = (soon = false) => {
-    if (followTimer !== undefined) {
-      window.clearTimeout(followTimer);
-      followTimer = undefined;
-    }
-    if (followOn) {
-      // ⚠️ **追いついていないなら間を置かない。** 認識だけで 2 秒かかるので、
-      // **待ち時間はそのぶん遅れが開く**。⚠️ **0 にはしないこと**
-      // （画面の更新が入る隙間が無くなる）。
-      followTimer = window.setTimeout(() => void followTick(), soon ? 50 : followTickMs);
-    }
-  };
-
-  const followTick = async (given?: Awaited<ReturnType<typeof CaptureService.CaptureQuiet>>) => {
-    if (!followOn) {
-      return;
-    }
-    followTickAt = Date.now();
-    let soon = false;
-    try {
-      soon = await followOnce(given);
-    } catch (err) {
-      // ⚠️ **枠が出ていない等はここに来る。** 黙って回し続けると理由が読めないので
-      // **止めて理由を出す**（設計原則3 は「落ちない」であって「黙る」ではない）。
-      followStop(String(err instanceof Error ? err.message : err), "error");
-      return;
-    }
-    followTickAt = Date.now();
-    followSchedule(soon);
+    // ⚠️ **押した瞬間の盤を「追う盤」として覚えるのは Go**（訂正してから追うなら訂正した 1 枚。撮る側の `AnchorBoard`）。
+    // 決まらなければ Go が理由を帯に出して止まる。
+    void StudyService.StartFollow().catch((err) => {
+      followNotice(String(err instanceof Error ? err.message : err), "error");
+    });
   };
 
   studyFollowBtn.addEventListener("click", () => {
     if (followOn) {
-      void CaptureService.ClearBoardAnchor();
-      followStop("中継の追跡を止めました");
+      void StudyService.StopFollow();
       return;
     }
-    // ⚠️ **押した瞬間の盤を「追う盤」として覚える。** 撮るたびに覚え直すと、
-    // **大盤に切り替わった 1 枚でマスタがそちらへ移る**（以降ずっと大盤を追う）。
-    // ⚠️ **だから押すときは本物の盤が映っていること**が前提 —— 失敗したら
-    // 理由を出して始めない（黙って始めると大盤を追い始める）。
-    setFollowing(true);
-    followNotice("追う盤を決めています…");
-    void CaptureService.AnchorBoard()
-      .then((first) => {
-        if (!followOn) {
-          return;
-        }
-        // 始まったら消す（追っていることはボタンと札が出す。帯は毎周は使わないので、
-        // 書いたままだと止めるまで残る。`publishFollow`）。
-        followNotice("");
-        // ⚠️ **押したときに読んだ 1 枚を、最初の 1 周として流すこと**（2026-10-07）。捨てると、
-        // 速い経路の比べる相手が決まるまで次の 81 マスの読み（重いときは 7〜10 秒）を待つことになり、
-        // そのあいだに 2 秒おきの手が 4〜5 手進んで初手から置いていかれた（ShogiHome の自動再生で踏んだ）。
-        void followTick(first);
-      })
-      .catch((err) => {
-        followStop(String(err instanceof Error ? err.message : err), "error");
-      });
+    startFollow();
   });
 
   // 解析タブの盤の操作（手を進める UI）。**合法手だけ。**
@@ -4692,7 +4425,7 @@ ${st.turnLabel}${n}`;
     // **追っている最中に枠を出し直すと「追跡中」が出ないまま**になる
     // （状態を持っているのはこちらだけ）。
     if (event.data) {
-      publishFollow(followOn ? followNote("追跡中") : "");
+      publishFollow();
     }
   });
   // 起動した時点で出ていることがある（設定「起動時に盤面を探す」）。
@@ -5077,6 +4810,10 @@ ${st.turnLabel}${n}`;
   const clickThrough = root.querySelector<HTMLInputElement>("#click-through")!;
   // 中継を追うあいだは盤の読みを優先する（2026-10-07）。**切り替えたその場で効く**（追っている最中なら）。
   const followFirst = root.querySelector<HTMLInputElement>("#follow-first")!;
+  // 中継の録画とログを残す（デバッグ。2026-10-11）。追従のログは切り替えたその場から、録画は次に追い始めたときから。
+  const followDebug = root.querySelector<HTMLInputElement>("#follow-debug")!;
+  // ログの細かさ（2026-10-11）。選択肢は Go 側が返したものをそのまま並べる（**フロントに表を書かない**）。
+  const logLevel = root.querySelector<HTMLSelectElement>("#log-level")!;
   // 認識器の読み込み元。**「焼き込みがあるビルドか」は Go が返す**
   // （`sutemeEmbedAvailable`）。⚠️ **フロントで判定できない**（バイナリの中身の話）。
   const sutemeSource = root.querySelector<HTMLSelectElement>("#suteme-source")!;
@@ -5675,6 +5412,9 @@ ${st.turnLabel}${n}`;
     fitOnStartup: boolean;
     clickThrough: boolean;
     followFirst: boolean;
+    followDebug: boolean;
+    logLevel: string;
+    logLevels: { value: string; label: string }[] | null;
     // 評価値グラフを別ウィンドウに切り離しているか（2026-09-08）。
     evalGraphDetached: boolean;
     // **候補手の面**を別ウィンドウに切り離しているか（2026-09-08）。
@@ -5720,6 +5460,17 @@ ${st.turnLabel}${n}`;
     fitOnStartup.checked = s.fitOnStartup;
     clickThrough.checked = s.clickThrough;
     followFirst.checked = s.followFirst;
+    followDebug.checked = s.followDebug;
+    if (logLevel.options.length !== (s.logLevels ?? []).length) {
+      logLevel.replaceChildren();
+      for (const o of s.logLevels ?? []) {
+        const opt = document.createElement("option");
+        opt.value = o.value;
+        opt.textContent = o.label;
+        logLevel.appendChild(opt);
+      }
+    }
+    logLevel.value = s.logLevel;
     // 配色。選択肢は Go 側が返したものをそのまま並べる（**フロントに表を書かない**）。
     if (themeSelect.options.length !== (s.themes ?? []).length) {
       themeSelect.replaceChildren();
@@ -6427,6 +6178,46 @@ ${st.turnLabel}${n}`;
         settingsStatus.classList.add("is-error");
       } finally {
         followFirst.disabled = false;
+      }
+    })();
+  });
+
+  logLevel.addEventListener("change", () => {
+    void (async () => {
+      const want = logLevel.value;
+      logLevel.disabled = true;
+      settingsStatus.textContent = "";
+      settingsStatus.classList.remove("is-error");
+      try {
+        showSettings(await SettingsService.SetLogLevel(want));
+      } catch (err) {
+        settingsStatus.textContent = `設定を保存できませんでした: ${String(err)}`;
+        settingsStatus.classList.add("is-error");
+        try {
+          showSettings(await SettingsService.Settings());
+        } catch {
+          /* 読み直せないなら画面はそのまま。理由は上に出ている。 */
+        }
+      } finally {
+        logLevel.disabled = false;
+      }
+    })();
+  });
+
+  followDebug.addEventListener("change", () => {
+    void (async () => {
+      const want = followDebug.checked;
+      followDebug.disabled = true;
+      settingsStatus.textContent = "";
+      settingsStatus.classList.remove("is-error");
+      try {
+        showSettings(await SettingsService.SetFollowDebug(want));
+      } catch (err) {
+        followDebug.checked = !want;
+        settingsStatus.textContent = `設定を保存できませんでした: ${String(err)}`;
+        settingsStatus.classList.add("is-error");
+      } finally {
+        followDebug.disabled = false;
       }
     })();
   });

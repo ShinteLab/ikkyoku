@@ -66,7 +66,7 @@ func gameFrame(n int, cells ...int) *image.RGBA {
 func gameService(t *testing.T) *CaptureService {
 	t.Helper()
 	s := fastService()
-	s.lastQuiet = gateFrame()
+	s.fol.lastQuiet = gateFrame()
 	s.SetCellBase()
 	if got := s.gateImg(gameFrame(0)); got != "" {
 		t.Fatalf("1 枚目なのに省きました: %q", got)
@@ -84,13 +84,13 @@ func fastService() *CaptureService {
 			rects[r*9+c] = image.Rect(x, y, x+20, y+20)
 		}
 	}
-	s.cellRects, s.cellRegion, s.cellBounds = rects, gateBoard, image.Rect(0, 0, 400, 300)
+	s.fol.cellRects, s.fol.cellRegion, s.fol.cellBounds = rects, gateBoard, image.Rect(0, 0, 400, 300)
 	return s
 }
 
 func TestFastCellsNeedsBase(t *testing.T) {
 	s := fastService()
-	s.gateRead = gateReadSettled
+	s.fol.gateRead = gateReadSettled
 	if _, comparable, fast := s.fastImg(gateMoved(0)); comparable || fast {
 		t.Fatal("比べる相手が無いのに速い経路を使いました")
 	}
@@ -98,10 +98,10 @@ func TestFastCellsNeedsBase(t *testing.T) {
 
 func TestFastCellsOnlyWhenSettled(t *testing.T) {
 	s := fastService()
-	s.lastQuiet = gateFrame()
+	s.fol.lastQuiet = gateFrame()
 	s.SetCellBase()
 	for _, why := range []string{gateReadFirst, gateReadRestless, gateReadInsurance} {
-		s.gateRead = why
+		s.fol.gateRead = why
 		cells, comparable, fast := s.fastImg(gateMoved(0))
 		if fast {
 			t.Fatalf("ふるいの理由が %q なのに速い経路を使いました", why)
@@ -115,9 +115,9 @@ func TestFastCellsOnlyWhenSettled(t *testing.T) {
 
 func TestFastCellsFindsTheChangedCell(t *testing.T) {
 	s := fastService()
-	s.lastQuiet = gateFrame()
+	s.fol.lastQuiet = gateFrame()
 	s.SetCellBase()
-	s.gateRead = gateReadSettled
+	s.fol.gateRead = gateReadSettled
 	// gateMoved(0) は (120,80)-(140,100) ＝ 2 行目・2 列目のマス。
 	cells, _, fast := s.fastImg(gateMoved(0))
 	if !fast {
@@ -143,8 +143,8 @@ func TestGateSettlesWhenCellsStayTheSame(t *testing.T) {
 	if got := s.gateImg(gameFrame(1, moved)); got != gateSkipMoving {
 		t.Fatalf("指した 1 枚目で %q（組がまだ 1 枚しか無いので待つはず）", got)
 	}
-	if got := s.gateImg(gameFrame(2, moved)); got != "" || s.gateRead != gateReadCells {
-		t.Fatalf("組が 2 枚続けて同じなのに %q / %q（止まったと見なしていない）", got, s.gateRead)
+	if got := s.gateImg(gameFrame(2, moved)); got != "" || s.fol.gateRead != gateReadCells {
+		t.Fatalf("組が 2 枚続けて同じなのに %q / %q（止まったと見なしていない）", got, s.fol.gateRead)
 	}
 	cells, _, fast := s.fastImg(gameFrame(2, moved))
 	if !fast || !slices.Equal(cells, []int{moved}) {
@@ -160,8 +160,8 @@ func TestGateWaitsWhileCellsChange(t *testing.T) {
 			t.Fatalf("%d 周目で %q（変わったマスが動いているのに止まったと見なした）", i, got)
 		}
 	}
-	if got := s.gateImg(gameFrame(gateMovingMax, 9+gateMovingMax%9)); got != "" || s.gateRead != gateReadRestless {
-		t.Fatalf("待つ上限で %q / %q（止まらなくても、いずれ読むはず）", got, s.gateRead)
+	if got := s.gateImg(gameFrame(gateMovingMax, 9+gateMovingMax%9)); got != "" || s.fol.gateRead != gateReadRestless {
+		t.Fatalf("待つ上限で %q / %q（止まらなくても、いずれ読むはず）", got, s.fol.gateRead)
 	}
 }
 
@@ -177,8 +177,8 @@ func TestGateIgnoresFailedCells(t *testing.T) {
 			t.Fatalf("%d 周目で %q（決まらなかった組で止まったと見なした）", i, got)
 		}
 	}
-	if got := s.gateImg(gameFrame(gateMovingMax, moved)); got != "" || s.gateRead != gateReadRestless {
-		t.Fatalf("待つ上限で %q / %q（止まらなくても、いずれ読むはず）", got, s.gateRead)
+	if got := s.gateImg(gameFrame(gateMovingMax, moved)); got != "" || s.fol.gateRead != gateReadRestless {
+		t.Fatalf("待つ上限で %q / %q（止まらなくても、いずれ読むはず）", got, s.fol.gateRead)
 	}
 }
 
@@ -191,8 +191,8 @@ func TestFastCellsPassesManyCells(t *testing.T) {
 		many = append(many, 2*9+i%9+9*(i/9))
 	}
 	s.gateImg(gameFrame(1, many...))
-	if got := s.gateImg(gameFrame(2, many...)); got != "" || s.gateRead != gateReadCells {
-		t.Fatalf("前提: 組が 2 枚続けて同じなら読むはず: %q / %q", got, s.gateRead)
+	if got := s.gateImg(gameFrame(2, many...)); got != "" || s.fol.gateRead != gateReadCells {
+		t.Fatalf("前提: 組が 2 枚続けて同じなら読むはず: %q / %q", got, s.fol.gateRead)
 	}
 	if cells, _, fast := s.fastImg(gameFrame(2, many...)); !fast || len(cells) != len(many) {
 		t.Fatalf("変わったマスが多い組を渡していません: fast=%v cells=%v", fast, cells)
@@ -207,11 +207,11 @@ func TestFastCellsPassesManyCells(t *testing.T) {
 func TestSetCellBaseForgetsCells(t *testing.T) {
 	s := gameService(t)
 	s.markCellsFailed(s.cellsOf(gameFrame(0, 10)))
-	gen := s.cellGen
-	s.lastQuiet = gameFrame(0, 10)
+	gen := s.fol.cellGen
+	s.fol.lastQuiet = gameFrame(0, 10)
 	s.SetCellBase()
-	if s.cellsFailed.ok || s.gateCells.ok || s.cellGen == gen {
-		t.Fatalf("比べる相手を替えたのに残っています: failed=%+v gate=%+v gen=%d→%d", s.cellsFailed, s.gateCells, gen, s.cellGen)
+	if s.fol.cellsFailed.ok || s.fol.gateCells.ok || s.fol.cellGen == gen {
+		t.Fatalf("比べる相手を替えたのに残っています: failed=%+v gate=%+v gen=%d→%d", s.fol.cellsFailed, s.fol.gateCells, gen, s.fol.cellGen)
 	}
 	// 替える前に測った組（前の版）とは、同じ組でも「2 枚続けて同じ」にならないこと。
 	old := frameCells{cells: []int{}, ok: true, gen: gen}
@@ -232,8 +232,8 @@ func TestGateCountsEmptyCellsAsUnchanged(t *testing.T) {
 			t.Fatalf("%d 周目で %q（何も変わっていないのに待つか読みました）", i, got)
 		}
 	}
-	if got := s.gateImg(gameFrame(gateSkipMax)); got != "" || s.gateRead != gateReadInsurance {
-		t.Fatalf("省き続けたのに %q / %q（保険の 1 枚が来ない）", got, s.gateRead)
+	if got := s.gateImg(gameFrame(gateSkipMax)); got != "" || s.fol.gateRead != gateReadInsurance {
+		t.Fatalf("省き続けたのに %q / %q（保険の 1 枚が来ない）", got, s.fol.gateRead)
 	}
 }
 
@@ -243,27 +243,27 @@ func TestGateCountsEmptyCellsAsUnchanged(t *testing.T) {
 func TestGateCountsUnmovedCellsAsUnchanged(t *testing.T) {
 	s := gameService(t)
 	lifted := 7*9 + 1
-	s.lastQuiet = gameFrame(0, lifted)
+	s.fol.lastQuiet = gameFrame(0, lifted)
 	s.CellsUnmoved() // 解析タブ側が `LooksOnly` を返した
 	for i := 1; i < gateSkipMax; i++ {
 		if got := s.gateImg(gameFrame(i, lifted)); got != cellSkipSame {
 			t.Fatalf("%d 周目で %q（駒は動いていないと確かめた組なのに待つか読みました）", i, got)
 		}
 	}
-	if got := s.gateImg(gameFrame(gateSkipMax, lifted)); got != "" || s.gateRead != gateReadInsurance {
-		t.Fatalf("省き続けたのに %q / %q（保険の 1 枚が来ない）", got, s.gateRead)
+	if got := s.gateImg(gameFrame(gateSkipMax, lifted)); got != "" || s.fol.gateRead != gateReadInsurance {
+		t.Fatalf("省き続けたのに %q / %q（保険の 1 枚が来ない）", got, s.fol.gateRead)
 	}
 
 	// 指した（組が変わった）。2 枚続けて同じなら速い経路に入る。
 	moved := []int{lifted, 6*9 + 1}
 	s.gateImg(gameFrame(1, moved...))
-	if got := s.gateImg(gameFrame(2, moved...)); got != "" || s.gateRead != gateReadCells {
-		t.Fatalf("組が変わったのに %q / %q（止まったと見なしていない）", got, s.gateRead)
+	if got := s.gateImg(gameFrame(2, moved...)); got != "" || s.fol.gateRead != gateReadCells {
+		t.Fatalf("組が変わったのに %q / %q（止まったと見なしていない）", got, s.fol.gateRead)
 	}
 
 	// 盤全体が止まった 1 枚でも、確かめた組のままなら読まない。
 	s.gateImg(gameFrame(3, lifted))
-	s.gateDirty = true
+	s.fol.gateDirty = true
 	if got := s.gateImg(gameFrame(3, lifted)); got != cellSkipSame {
 		t.Fatalf("止まった 1 枚で %q（確かめた組なのに読みました）", got)
 	}
@@ -279,29 +279,29 @@ func TestGateWaitsOnUnclearCells(t *testing.T) {
 	if got := s.gateImg(still); got != gateSkipMoving {
 		t.Fatalf("前提: 変わった 1 枚目は待つはず: %q", got)
 	}
-	if got := s.gateImg(still); got != "" || s.gateRead != gateReadSettled {
-		t.Fatalf("前提: 止まったら速い経路へ: %q / %q", got, s.gateRead)
+	if got := s.gateImg(still); got != "" || s.fol.gateRead != gateReadSettled {
+		t.Fatalf("前提: 止まったら速い経路へ: %q / %q", got, s.fol.gateRead)
 	}
-	s.lastQuiet = still
+	s.fol.lastQuiet = still
 	s.CellsUnclear() // 速い経路が NoMoves を返した
 	for i := 1; i < gateMovingMax; i++ {
 		if got := s.gateImg(still); got != gateSkipMoving {
 			t.Fatalf("%d 周目で %q（説明の付かない組のまま読むか、待つのをやめました）", i, got)
 		}
 	}
-	if got := s.gateImg(still); got != "" || s.gateRead != gateReadRestless {
-		t.Fatalf("待つ上限で %q / %q（止まらなくても、いずれ読むはず）", got, s.gateRead)
+	if got := s.gateImg(still); got != "" || s.fol.gateRead != gateReadRestless {
+		t.Fatalf("待つ上限で %q / %q（止まらなくても、いずれ読むはず）", got, s.fol.gateRead)
 	}
 
 	// 指した（組が変わった）なら、待たずに止まったかを見る。
-	s.lastQuiet = still
+	s.fol.lastQuiet = still
 	s.CellsUnclear()
 	moved := gameFrame(1, lifted, 6*9+1)
 	if got := s.gateImg(moved); got != gateSkipMoving {
 		t.Fatalf("指した 1 枚目で %q", got)
 	}
-	if got := s.gateImg(moved); got != "" || s.gateRead != gateReadSettled {
-		t.Fatalf("組が変わって止まったのに %q / %q（待ち続けた）", got, s.gateRead)
+	if got := s.gateImg(moved); got != "" || s.fol.gateRead != gateReadSettled {
+		t.Fatalf("組が変わって止まったのに %q / %q（待ち続けた）", got, s.fol.gateRead)
 	}
 }
 
@@ -317,14 +317,14 @@ func gateServiceStatic(t *testing.T) *CaptureService {
 // ⚠️ **比べる相手を替えたら、「駒は動いていない」組も忘れること**（相手が違えば同じ組でも意味が違う）。
 func TestSetCellBaseForgetsUnmovedCells(t *testing.T) {
 	s := gameService(t)
-	s.lastQuiet = gameFrame(0, 10)
+	s.fol.lastQuiet = gameFrame(0, 10)
 	s.CellsUnmoved()
-	if !s.cellsUnmoved.ok {
+	if !s.fol.cellsUnmoved.ok {
 		t.Fatal("前提: 組を覚えていません")
 	}
 	s.SetCellBase()
-	if s.cellsUnmoved.ok {
-		t.Fatalf("比べる相手を替えたのに残っています: %+v", s.cellsUnmoved)
+	if s.fol.cellsUnmoved.ok {
+		t.Fatalf("比べる相手を替えたのに残っています: %+v", s.fol.cellsUnmoved)
 	}
 }
 
@@ -333,7 +333,7 @@ func TestSetCellBaseForgetsUnmovedCells(t *testing.T) {
 func TestForgetUnmovedReadsTheSetAgain(t *testing.T) {
 	s := gameService(t)
 	lifted := 7*9 + 1
-	s.lastQuiet = gameFrame(0, lifted)
+	s.fol.lastQuiet = gameFrame(0, lifted)
 	s.CellsUnmoved()
 	if got := s.gateImg(gameFrame(1, lifted)); got != cellSkipSame {
 		t.Fatalf("前提: 覚えた組は省くはず: %q", got)
@@ -363,7 +363,7 @@ func TestComparePieces(t *testing.T) {
 			img.SetRGBA(x, y, color.RGBA{R: 30, G: 20, B: 10, A: 255})
 		}
 	}
-	s.lastQuiet = img
+	s.fol.lastQuiet = img
 	s.SetCellBase()
 	got := s.ComparePieces([]ikkyokuapp.CellPair{{From: 10, To: 10}, {From: 10, To: 99}})
 	if got[0] < 0.99 {

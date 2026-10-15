@@ -24,7 +24,7 @@
 | `kifuservice.go`（棚・カード・仮の一覧） | `_docs/app-shelf.md` |
 | `PositionService.SetViewpoint` / `adoptPosition`（目線） | `_docs/app-viewpoint.md` |
 | `settings.go`（エンジンの登録・option）・`analyzeservice.go` | `_docs/app-engines.md` |
-| `followstudy.go`（`followProbe` / `followApply` / `FollowAuto`） | `_docs/app-follow.md`（調整とデバッグはスキル `ikkyoku-follow`） |
+| `followstudy.go`（`followProbe` / `followApply` / `FollowAuto`）・`followsession.go`（中継セッション）・`followbase.go`・`followjudge.go` | `_docs/app-follow.md`（調整とデバッグはスキル `ikkyoku-follow`） |
 | `StudyService.PlayLine`・`evalgraph.go` | `_docs/app-study.md` |
 | `studystore.go` / `studyrecord.go` / `studykey.go` / `studyexport.go` | `_docs/app-studystore.md`（検討の控え・棚と結ぶ・出どころの鍵） |
 | `fontservice.go` | `piecefont/AGENTS.md`（テストの意図は下の「テスト」） |
@@ -46,7 +46,7 @@
 | `trainingservice.go` | 訂正した局面を suteme へ登録する Service（`Status` / `Send`）。**状態を持たない**（送るものはフロントが渡す） |
 | `fontservice.go` | **駒の字**の Service（`State` / `Scan` / `Preview` / `Add` / `Use` / `Remove` / `Rename` / **`SetGyoku` / `SetHidariUma`**）。返すのは **family 名と data URL、それに当てる `font-feature-settings` まで**で、画面に当てるのはフロント（`--shogi-font` と `--piece-features-*`）。⚠️ **焼いた TTF はディスクに残さない**（元フォントを入れ替えたのに古い字で描く事故が起きる）。⚠️ **玉の先後の判定を呼び出し側に書かせない**（`pieceStyle`。盤と自前の駒で別々に書くと「盤は玉なのに掴むと王」になる） |
 | `analyzeservice.go` | 確定した局面を解析する Service（`Start` / `Stop` / `State` / `CheckEngine`）。**順位 1 の評価値を `StudyService.recordEval` に渡す**（評価値グラフ。⚠️ **記録先の判断はしない** —— 手順を持っていないので、捨てた枝かどうかを確かめようがない）。**局面は持たない**（`StudyService` から読む。⚠️ **`PositionService` を見ないこと**）。⚠️ **登録した「解析に使う」エンジンを同時に走らせる**（1 エンジン 1 プロセス）。途中経過はイベント（**`engineId` つき**）。⚠️ **発火の口は持たない** ——`Emit`（`app.EventEmitter`）を `main.go` が差し込む |
-| `diagservice.go` | **フロントが生きているかの計測**（心拍・例外の中継）。局面にもキャプチャにも関与しない。「メイン画面が真っ黒になる」現象を切り分けるためのもの（`_docs/cmd-windows.md`） |
+| `diagservice.go` | **フロントが生きているかの計測**（心拍・例外の中継）。局面にもキャプチャにも関与しない。「メイン画面が真っ黒になる」現象を切り分けるためのもの（`_docs/cmd-windows.md`）。ログは `log.Diag`（dev だけ `ikkyoku-diag_<日付>.log` に残る。`log/AGENTS.md`） |
 | `issueservice.go` | **起動はできたが足りないもの・できないことの一覧**（2026-10-04。`Report` だけがフロントの API。`Set` / `Clear` / `SetLogDir` は `//wails:ignore` で `main` から呼ぶ）。メイン画面のツールバーの ⚠ が写す。⚠️ **鍵ごとに 1 つ・直ったら `Clear`**（積みっぱなしにしない）・⚠️ **同じ鍵は並びを動かさずに差し替える**・⚠️ **起動を止めるものはここに来ない**（`_cmd/ikkyoku/fatal.go`）。何を載せるかは `_cmd/ikkyoku/issues.go`、線引きは `_docs/cmd-windows.md` の「起動で黙って消えない」 |
 | `kifufetch.go` | **URL から棋譜を取ってくる**（`fetchKIF`）。文字コードの判別・HTML から .kif を辿る・上限つきの読み取りは全部 `kicho/scrape`。⚠️ **`kicho.Library` を経由しない** —— URL から棋譜を読むのは棚に依らない操作（設計原則3） |
 
@@ -57,9 +57,11 @@
 - **受け渡しは `StudyService.Adopt` の 1 か所だけ。** 確定しているかの判定も
   そこがする（`position.Position.SFEN()` が組み上がるか）。⚠️ **フロントで同じ
   判定を書かない**（2 か所に散る）
-  ⚠️ **違反（二歩・玉 1 枚・駒数超過）は見ない。** 断るのは**未決が残っているとき**
-  だけ —— 見ると**詰将棋が確定できなくなる**（`_docs/design-position.md`「詰将棋のような
-  『正常でない局面』も確定できること」）
+  ⚠️ **局面として成り立っていなければ断る**（2026-10-09。`foulOf`。中身は `Position.Warnings()`）。
+  **属性ごとに許すのは 1 つだけ** —— 駒落ち（`HandsFixed`）は**駒が少ないこと**、詰将棋（`MateProblem`）は
+  **攻方の玉が無いこと**。二歩・行き所のない駒・駒数の超過・玉方の玉が無いのはどれでも駄目。
+  ⚠️ **許す範囲は `Warnings()` の 1 か所で決める**（`foulOf` で属性を見て足さない。訂正タブの警告と食い違う）
+  （`_docs/design-position.md`「詰将棋のような『正常でない局面』も確定できること」）
 - **解析タブ → 訂正タブへ戻れる。** 戻って直し、もう一度確定すればよい。そのとき
   **前の手順と解析結果は捨てる**（別の局面の話になるため）。捨てるのは `Adopt` が
   根ごと入れ替えることで担保しており、フロントの片付けに依存していない
@@ -107,7 +109,7 @@
 
 - ⚠️ **変えたら必ず出すこと。** 出す場所は `Adopt` / `LoadKifu`（＝`loadKifuFrom`）/
   `LoadKifuURL` / `ReloadKifu` / `NewGame` / `Play` / `PlayLine` / `AddLine` / `Branch` /
-  `Promote` / `DropFrom` / `GoTo` / `Clear`。**足したメソッドで忘れると、
+  `Promote` / `DropFrom` / `GoTo` / `Clear` / `Resign` / `Unresign`。**足したメソッドで忘れると、
   そこだけ別の窓が更新されない**（画面からは「たまに古い」に見える）
 - ⚠️ **失敗したときは出さない**（状態は変わっていない）。判断は `publish` の 1 か所
 - ⚠️ **ロックを外してから出すこと。** 先はフロントなので、ロックを持ったまま渡すと
@@ -143,9 +145,12 @@
 | `handsfixed_test.go` / `mateengine_test.go` | `_docs/app-handicap-mate.md` |
 | `followstudy_test.go` | `_docs/app-follow.md` |
 | `studyservice_test.go`（`PlayLine`）・`evalgraph_test.go` / `evalgraph_end_test.go`・`players_test.go` | `_docs/app-study.md` |
-| `studystore_test.go` / `studyexport_test.go` / `studykey_test.go` | `_docs/app-studystore.md` |
+| `studystore_test.go` / `studyexport_test.go` / `studykey_test.go` / `resign_test.go` | `_docs/app-studystore.md` |
 | `kifunote_test.go`（棋譜の消費時間とコメント） | `_docs/position-study.md` |
 
+- `adoptfoul_test.go` — **局面として成り立っていない局面を確定させない**（2026-10-09。`foulOf`）。⚠️ 歯止めは ——
+  **二歩は平手・駒落ち・詰将棋のどれでも断ること**・**駒落ちは駒が少ないことだけ許すこと**（玉が無いのは駄目）・
+  **詰将棋は攻方の玉が無いことだけ許すこと**（玉方の玉が無い・どちらも無いのは駄目）
 - `issueservice_test.go` — **⚠ の一覧**（2026-10-04）。**直ったら消えること**・**同じ鍵は
   並びを変えずに差し替えること**（開いている吹き出しの中身が跳ねない）・中身が同じなら流さないこと
 - `settings_broken_test.go` — **壊れた設定ファイルの写し**（2026-10-04）。⚠️ **元のファイルを

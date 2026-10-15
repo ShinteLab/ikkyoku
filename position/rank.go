@@ -124,8 +124,10 @@ func Rank(from *Position, target *Board, opt ConnectOptions) (RankResult, error)
 	out := RankResult{Total: totalCost(cost, opt.Unseen)}
 
 	// **何も指していない**も候補（中継がまだ進んでいないことは普通にある）。
+	// ⚠️ **根で成駒が載っているマスは、動いていないあいだは見ない**（`Connect` と同じ。`staleKinds.promo`）。
+	promo := newPromoSkip(from.Board, opt.Unseen)
 	add := func(moves []string, board *Board) {
-		d := newDiff(board, target, cost, 0, opt.Unseen, staleKinds{})
+		d := newDiff(board, target, cost, 0, opt.Unseen, promo)
 		c := Candidate{Moves: moves, Cost: d.cost, Fixed: d.fixes(board, target, opt.Unseen)}
 		if out.Total > 0 {
 			c.Fit = 1 - c.Cost/out.Total

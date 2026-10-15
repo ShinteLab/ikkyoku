@@ -14,7 +14,7 @@ import (
 // （エンジンと取り合うと 2 秒強が 8 秒に延び、成る手で見失った）。
 //
 // ⚠️ **既定は解析を優先**（設定が偽なら何もしない）—— 解析がこのアプリの本命。
-// ⚠️ **止めたら「通常」に戻すこと**（`ClearBoardAnchor`）。
+// ⚠️ **止めたら「通常」に戻すこと**（`EndFollow`）。
 // ⚠️ **追っているあいだに新しく起きたエンジンも下げる**ので、81 マスを読むたびに合わせ直す（数ミリ秒）。
 // ⚠️ **同梱エンジンには効かない**（ikkyoku と同じプロセスで動く）。
 
@@ -30,7 +30,7 @@ func (s *CaptureService) applyFollowFirst(v bool) {
 // syncEnginePriority は**今あるべき優先度**にエンジンを合わせる（追っていて設定が真なら下げ、そうでなければ戻す）。
 func (s *CaptureService) syncEnginePriority() {
 	s.mu.Lock()
-	want := s.followFirst && s.boardAnchor.Board.Dx() > 0
+	want := s.followFirst && s.fol.boardAnchor.Board.Dx() > 0
 	lowered, names := s.enginesLowered, s.engineNames
 	s.mu.Unlock()
 	if !want && !lowered {
@@ -49,7 +49,7 @@ func (s *CaptureService) syncEnginePriority() {
 	}
 	n, err := setEnginePriority(set, want)
 	if err != nil {
-		log.Warn("エンジンの優先度を変えられません", "error", err)
+		log.Follow.Warn("エンジンの優先度を変えられません", "error", err)
 		return
 	}
 	s.mu.Lock()
@@ -57,9 +57,9 @@ func (s *CaptureService) syncEnginePriority() {
 	s.mu.Unlock()
 	if want != lowered {
 		if want {
-			log.Info("追っているあいだ、外部エンジンの優先度を下げました（盤の読みを優先）", "プロセス", n)
+			log.Follow.Info("追っているあいだ、外部エンジンの優先度を下げました（盤の読みを優先）", "プロセス", n)
 		} else {
-			log.Info("外部エンジンの優先度を戻しました", "プロセス", n)
+			log.Follow.Info("外部エンジンの優先度を戻しました", "プロセス", n)
 		}
 	}
 }

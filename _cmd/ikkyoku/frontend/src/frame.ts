@@ -95,15 +95,20 @@ export function mountFrame(root: HTMLElement): void {
     <div class="capture-guide">
       <img id="frame-flyout" class="capture-flyout" alt="">
     </div>
-    <!-- 枠の下の帯（2026-10-07）。中継の追従の知らせ（見失った・止めた理由など）。
+    <!-- 枠の下の帯（2026-10-07）。中継の追従の**状態の 1 行**（追っているあいだずっと。2026-10-10）と
+         **知らせ**（止めた理由・差し替えた手など）。
          ⚠️ **撮る範囲の外**（ガイド枠の下）で、**文があるあいだだけ高さを持つ**（普段は 0）。
          ⚠️ **ウィンドウを伸ばすのは Go**（SetFrameFooter）—— ここで高さを勝手に増やすと、
          伸びていないウィンドウの中で**ガイド枠が上へ押し上げられ、帯が撮る範囲に入る**。 -->
     <div class="frame-footer" role="status">
       <div class="frame-footer-body">
-        <span class="frame-footer-text"></span>
-        <button id="frame-footer-close" class="frame-btn is-icon" type="button"
-                aria-label="閉じる" title="閉じる">${iconMarkup(FiX)}</button>
+        <div class="frame-footer-status" hidden></div>
+        <div class="frame-footer-notice" hidden>
+          <span class="frame-footer-text"></span>
+          <span class="frame-footer-choices"></span>
+          <button id="frame-footer-close" class="frame-btn is-icon" type="button"
+                  aria-label="閉じる" title="閉じる">${iconMarkup(FiX)}</button>
+        </div>
       </div>
     </div>
   `;
@@ -122,16 +127,20 @@ export function mountFrame(root: HTMLElement): void {
   // **光が消えきる前に打ち直して 4Hz でチカチカする**（2026-10-05 に実機で気になると出た）。
   // ⚠️ **間引くだけで、打つのはループのまま** —— 止まれば光らない性質は残る。
   const followBeatMs = 1200;
+  type FooterKind = "" | "warn" | "error";
   let followBeatAt = 0;
-  Events.On("follow:state", (e: { data: { on: boolean; text: string; detail?: string } }) => {
+  Events.On("follow:state", (e: {
+    data: { on: boolean; text: string; status?: string; statusKind?: FooterKind };
+  }) => {
     const on = !!e.data?.on;
     followBtn.setAttribute("aria-pressed", on ? "true" : "false");
     followBtn.classList.toggle("is-active", on);
     followBtn.title = on ? "中継の追跡を止める" : "中継を追う（撮り続けて、進んだ手を本譜に足します）";
     followState.hidden = !on;
+    // ⚠️ **札は「追跡中・n手目待ち」だけ**（2026-10-10）。周ごとの様子（別の盤・盤が無い・被っている）は
+    // 下の帯の状態の行へ。札に混ぜると文の長さで札が伸び縮みし、タイトルバーがチカチカした。
     followState.textContent = e.data?.text ?? "";
-    // 補足（「別の盤」の理由など）はホバーで。⚠️ **本文に足さないこと**（札は狭い）。
-    followState.title = e.data?.detail ?? "";
+    setFooterStatus(on ? (e.data?.status ?? "") : "", on ? (e.data?.statusKind ?? "") : "");
     // ⚠️ **1 周ごとにボタンを打ち直すこと**（2026-09-15）。**これが動いている証明。**
     // このイベントは**追跡が 1 周するたびに来る**ので、**止まれば光らない**。
     // ⚠️ **CSS の `infinite` で点滅させないこと** —— 時計で回る点滅は
@@ -153,9 +162,14 @@ export function mountFrame(root: HTMLElement): void {
     void followBtn.offsetWidth;
     followBtn.classList.add("is-beat");
   });
-  // ---- 枠の下の帯（中継の追従の知らせ。2026-10-07）------------------------
+  // ---- 枠の下の帯（中継の追従の状態と知らせ。2026-10-07）--------------------
   //
-  // **中身もいつ出すかもメイン画面が決める**（`follow:notice`）。枠は映すだけ（札と同じ）。
+  // **中身もいつ出すかもメイン画面が決める**。枠は映すだけ（札と同じ）。中は 2 段:
+  //   - **状態の行**（`follow:state` の status。2026-10-10）: 追っているあいだずっと出る 1 行。
+  //     ⚠️ **1 行で切ること**（折り返すと文の長さで帯の高さが変わり、周ごとに枠が伸び縮みする）。
+  //     全文はホバー
+  //   - **知らせ**（`follow:notice`）: 止めた理由・差し替えた手など。たまにしか来ない。✕ で閉じられる。
+  //     **人に選んでもらう候補のボタン**も並ぶ（2026-10-09。打った駒が決まらないとき）
   //
   // ⚠️ **順番を守ること**（帯が撮る範囲に入らないための約束。`captureservice.go` の `SetFrameFooter`）:
   //   - 伸ばすとき: **先に Go がウィンドウを伸ばし、それから帯に高さを付ける**
@@ -165,26 +179,52 @@ export function mountFrame(root: HTMLElement): void {
   // ⚠️ **1 回ずつ順番に流すこと**（`footerQueue`）。重ねると上の順番が崩れる。
   const footer = root.querySelector<HTMLDivElement>(".frame-footer")!;
   const footerBody = footer.querySelector<HTMLDivElement>(".frame-footer-body")!;
+  const footerStatus = footer.querySelector<HTMLDivElement>(".frame-footer-status")!;
+  const footerNotice = footer.querySelector<HTMLDivElement>(".frame-footer-notice")!;
   const footerText = footer.querySelector<HTMLSpanElement>(".frame-footer-text")!;
   const footerClose = root.querySelector<HTMLButtonElement>("#frame-footer-close")!;
-  type FooterKind = "" | "warn" | "error";
+  // footerChoices は**人に選んでもらう候補**のボタン（2026-10-09。打った駒が決まらないとき）。
+  // ⚠️ **押したら `follow:choose` を投げるだけ**（足すのはメイン画面。状態の持ち主はあちら）。
+  const footerChoices = footer.querySelector<HTMLSpanElement>(".frame-footer-choices")!;
+  type FooterChoice = { label: string; moves: string[] };
   // footerPx は**今 Go に伸ばしてもらっている高さ**（＝帯に付けてよい高さ）。
   let footerPx = 0;
-  // footerWant は最後に頼まれた中身（順番待ちのあいだに来た分は、最後の 1 つだけ描けばよい）。
-  let footerWant: { text: string; kind: FooterKind } = { text: "", kind: "" };
+  // 最後に頼まれた中身（順番待ちのあいだに来た分は、最後の 1 つだけ描けばよい）。
+  let noticeWant: { text: string; kind: FooterKind; choices: FooterChoice[] } = { text: "", kind: "", choices: [] };
+  let statusWant: { text: string; kind: FooterKind } = { text: "", kind: "" };
   let footerQueue: Promise<void> = Promise.resolve();
   const painted = () =>
     new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+  const paintPart = (
+    el: HTMLElement,
+    textEl: HTMLElement,
+    want: { text: string; kind: FooterKind },
+  ) => {
+    el.hidden = !want.text;
+    textEl.textContent = want.text;
+    textEl.title = want.text; // 切れたときの全文
+    el.classList.toggle("is-warn", want.kind === "warn");
+    el.classList.toggle("is-error", want.kind === "error");
+  };
   const applyFooter = async () => {
-    const { text, kind } = footerWant;
-    if (text) {
-      footerText.textContent = text;
-      footerText.title = text; // 3 行で切れたときの全文
-      footer.classList.toggle("is-warn", kind === "warn");
-      footer.classList.toggle("is-error", kind === "error");
-    }
-    // ⚠️ **測るのは中身の高さ**（帯そのものは高さ 0 で切っているので、中身は描かれたまま測れる）。
-    const want = text ? Math.ceil(footerBody.getBoundingClientRect().height) : 0;
+    // 中身を先に入れ替えてよい —— 中身が減っても帯の高さ（`style.height`）は下で縮めるまで変わらず、
+    // 増えても帯は高さで切っているので、伸ばす前に撮る範囲へはみ出さない。
+    paintPart(footerStatus, footerStatus, statusWant);
+    paintPart(footerNotice, footerText, noticeWant);
+    // ⚠️ **ボタンも測る前に描くこと**（帯の高さは中身の高さで決まる）。
+    footerChoices.replaceChildren(
+      ...(noticeWant.text ? noticeWant.choices : []).map((c) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "frame-btn";
+        b.textContent = c.label;
+        b.addEventListener("click", () => void Events.Emit("follow:choose", { moves: c.moves }));
+        return b;
+      }),
+    );
+    // ⚠️ **測るのは中身の高さ**（帯そのものは高さで切っているので、中身は描かれたまま測れる）。
+    const any = !!(statusWant.text || noticeWant.text);
+    const want = any ? Math.ceil(footerBody.getBoundingClientRect().height) : 0;
     if (want > footerPx) {
       // 伸ばす: **Go が先**。上限で丸められたらその高さで描く（上限はこちらで持たない）。
       footerPx = await CaptureService.SetFrameFooter(want);
@@ -193,34 +233,42 @@ export function mountFrame(root: HTMLElement): void {
     }
     // 縮める（または同じ）: **描き消すのが先**。
     footer.style.height = `${want}px`;
-    if (!text) {
-      footerText.textContent = "";
-      footerText.title = "";
-    }
     if (want === footerPx) {
       return;
     }
     await painted();
     footerPx = await CaptureService.SetFrameFooter(want);
   };
-  const showFooter = (text: string, kind: FooterKind) => {
-    footerWant = { text, kind };
+  const queueFooter = () => {
     footerQueue = footerQueue.then(applyFooter).catch((err) => {
       console.warn("[frame] 枠の下の帯を出し入れできませんでした", err);
     });
   };
-  Events.On("follow:notice", (e: { data: { text?: string; kind?: FooterKind } }) => {
-    showFooter(e.data?.text ?? "", e.data?.kind ?? "");
+  const showFooter = (text: string, kind: FooterKind, choices: FooterChoice[] = []) => {
+    noticeWant = { text, kind, choices };
+    queueFooter();
+  };
+  // setFooterStatus は状態の行を入れる（空なら消す）。`follow:state` は**1 周ごとに来る**ので
+  // （長考中は 0.26 秒おき）、**同じ中身なら何もしない**。
+  function setFooterStatus(text: string, kind: FooterKind) {
+    if (statusWant.text === text && statusWant.kind === kind) {
+      return;
+    }
+    statusWant = { text, kind };
+    queueFooter();
+  }
+  Events.On("follow:notice", (e: { data: { text?: string; kind?: FooterKind; choices?: FooterChoice[] } }) => {
+    showFooter(e.data?.text ?? "", e.data?.kind ?? "", e.data?.choices ?? []);
   });
-  // ✕ は**この枠で閉じるだけ**（メイン画面の状態は変えない。次の知らせが来ればまた出る）。
+  // ✕ は**この枠で知らせを閉じるだけ**（状態の行は残る。メイン画面の状態は変えない。次の知らせが来ればまた出る）。
   footerClose.addEventListener("click", () => showFooter("", ""));
   // 幅が変わると折り返しが変わるので測り直す（自分で伸ばしたときも来るが、高さが同じなら何もしない）。
   let footerResize = 0;
   window.addEventListener("resize", () => {
     window.clearTimeout(footerResize);
     footerResize = window.setTimeout(() => {
-      if (footerWant.text) {
-        showFooter(footerWant.text, footerWant.kind);
+      if (noticeWant.text || statusWant.text) {
+        queueFooter();
       }
     }, 150);
   });

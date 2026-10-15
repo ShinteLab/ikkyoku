@@ -128,3 +128,25 @@ func TestParse(t *testing.T) {
 		t.Fatal("resign が手として読めました")
 	}
 }
+
+// **手番の側が王手されているか**（2026-10-09。連続王手の千日手を見分ける）。
+// ⚠️ **手番の側**を見ること —— 逆を見ると、王手をかけた側とかけられた側が入れ替わり、
+// 反則負けの側を取り違える。
+func TestInCheck(t *testing.T) {
+	for _, tc := range []struct {
+		sfen string
+		want bool
+	}{
+		{hirate, false},
+		{"4R3k/9/9/9/9/9/9/9/K8 w - 1", true},  // △玉に▲飛の王手。手番は△
+		{"4R3k/9/9/9/9/9/9/9/K8 b - 1", false}, // 同じ盤でも手番が▲なら▲は王手されていない
+	} {
+		got, err := legal.InCheck(tc.sfen)
+		if err != nil {
+			t.Fatalf("InCheck(%s): %v", tc.sfen, err)
+		}
+		if got != tc.want {
+			t.Errorf("InCheck(%s) = %v, want %v", tc.sfen, got, tc.want)
+		}
+	}
+}
