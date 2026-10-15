@@ -2,6 +2,7 @@
 
 **ikkyoku のログ。** ikkyoku のコードは `log.Info(msg, "key", v)`（slog と同じ形）・
 `log.Infof(format, ...)`（printf）などで出す。土台は `github.com/wenteasy/log`（v0.3.1〜）。
+作り方の決まりごとの正は wenteasy/log の README「使う側のやり方（自分の log パッケージを作る）」（ひな形・よくある間違い）。README のひな形はこの `log/` の基本の部分（出す関数・`Init`）を元にしている。名前付きの Logger の振り分けなど、README に無いものもある（`log/TODO.md`）。アプリだけなので `SetLogger` は無い。
 
 | ファイル | 役割 |
 |---|---|
