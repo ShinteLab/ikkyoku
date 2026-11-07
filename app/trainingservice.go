@@ -63,16 +63,16 @@ type TrainingStatus struct {
 func (s *TrainingService) Status() TrainingStatus {
 	cfg := s.settings.trainingConfig()
 	st := TrainingStatus{Configured: cfg.Enabled}
-	target, err := training.ParseBase(cfg.Host, cfg.Port)
+	c, err := training.New(cfg.URL, cfg.Token)
 	if err != nil {
 		st.Error = err.Error()
 		return st
 	}
+	target := c.BaseURL
 	st.Target = target
 
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
-	c := training.New(cfg.Host, cfg.Port, cfg.Token)
 	res, err := c.Status(ctx)
 	if err != nil {
 		st.Error = err.Error()
@@ -127,7 +127,10 @@ func (s *TrainingService) Send(path, sfen string, x1, y1, x2, y2 int) (TrainingS
 	// 送るのは 3.5MB 級の PNG になりうるので、状態の問い合わせより長めに取る。
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	c := training.New(cfg.Host, cfg.Port, cfg.Token)
+	c, err := training.New(cfg.URL, cfg.Token)
+	if err != nil {
+		return TrainingSendResult{}, err
+	}
 	res, err := c.Register(ctx, training.Sample{
 		ImagePath: path,
 		SFEN:      sfen,
