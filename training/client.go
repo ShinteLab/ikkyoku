@@ -24,6 +24,7 @@ import (
 	_ "image/png" // DecodeConfig 用（送る前に矩形が画像に収まっているか確かめる）
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -33,16 +34,18 @@ import (
 )
 
 // DefaultPort は suteme の学習用サーバの既定ポート（`suteme/_cmd/suteme-training`）。
+// **scheme を書かずにポートも書かなかった**ときだけ補う（ParseURL）。
 const DefaultPort = 8080
 
-// DefaultHost は既定の接続先。**同じマシンで動かすのが普通の使い方。**
+// DefaultURL は既定の接続先。**同じマシンで動かすのが普通の使い方。**
 // suteme はループバックからのアクセスを認証免除で受けるので、この既定なら
 // トークンも外部公開の設定も要らない。
-const DefaultHost = "127.0.0.1"
+const DefaultURL = "http://127.0.0.1:8080"
 
 // Client は suteme の学習用サーバの API を叩く。ゼロ値では使わない（New で作る）。
 type Client struct {
-	// BaseURL は "http://host:port"。末尾に / は付けない。
+	// BaseURL はサーバを載せた場所（"http://host:port" か、`-base` で載せたなら
+	// "http://host:port/st"）。末尾に / は付けない。API はこの下の "/api/..."。
 	BaseURL string
 	// Token は Bearer トークン。空なら付けない。
 	// **ループバックからは要求されない**ので、同じマシンで動かすなら空でよい。
@@ -51,32 +54,65 @@ type Client struct {
 	HTTP *http.Client
 }
 
-// New は host:port からクライアントを作る。host が空なら DefaultHost、
-// port が 0 以下なら DefaultPort を使う。
-func New(host string, port int, token string) *Client {
-	if strings.TrimSpace(host) == "" {
-		host = DefaultHost
+// New は接続先の URL からクライアントを作る（URL の読み方は ParseURL）。
+func New(rawURL, token string) (*Client, error) {
+	base, err := ParseURL(rawURL)
+	if err != nil {
+		return nil, err
 	}
-	if port <= 0 {
-		port = DefaultPort
-	}
-	host = strings.TrimSpace(host)
-	// scheme を書かれていたら尊重する（リバースプロキシ越しに置くこともありうる）。
-	if strings.Contains(host, "://") {
-		return &Client{BaseURL: strings.TrimSuffix(host, "/"), Token: strings.TrimSpace(token)}
-	}
-	return &Client{
-		BaseURL: "http://" + hostPort(host, port),
-		Token:   strings.TrimSpace(token),
-	}
+	return &Client{BaseURL: base, Token: strings.TrimSpace(token)}, nil
 }
 
-// hostPort は host:port を組み立てる（IPv6 のリテラルは [] で囲む）。
-func hostPort(host string, port int) string {
-	if strings.Contains(host, ":") && !strings.HasPrefix(host, "[") {
-		host = "[" + host + "]"
+// apiSuffixes は suteme の画面に出る URL の末尾のうち、剥がしてサーバの場所に戻すもの。
+// suteme の APIタブは「登録先」として `…/api/register` を出すので、**それを貼っても届くように**する。
+var apiSuffixes = []string{"/api/register", "/api/status"}
+
+// ParseURL は設定の URL を、実際に送る先（サーバを載せた場所。末尾の / なし）にする。
+//
+//   - 空なら DefaultURL
+//   - scheme が無ければ http を補い、**ポートも無ければ DefaultPort を補う**
+//     （"127.0.0.1" と打って 80 番へ行かないように。scheme を書いたときは URL のとおり ——
+//     リバースプロキシ越しなら 80 / 443 が普通）
+//   - パスは suteme の `-base`（"http://host:8080/st"）。末尾の `/api/register` などは剥がす
+//   - ⚠️ **組み立てられないものはエラーにする**（黙って別の宛先へ送らない）
+func ParseURL(raw string) (string, error) {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return DefaultURL, nil
 	}
-	return host + ":" + strconv.Itoa(port)
+	schemeless := !strings.Contains(s, "://")
+	if schemeless {
+		// "::1" のような IPv6 のリテラルは [] で囲まないと URL にならない
+		if ip := net.ParseIP(s); ip != nil && strings.Contains(s, ":") {
+			s = "[" + s + "]"
+		}
+		s = "http://" + s
+	}
+	u, err := url.Parse(s)
+	if err != nil {
+		return "", fmt.Errorf("接続先の URL を読めません: %q", raw)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "", fmt.Errorf("接続先の URL は http:// か https:// で書いてください: %q", raw)
+	}
+	if u.Hostname() == "" {
+		return "", fmt.Errorf("接続先の URL にホストがありません: %q", raw)
+	}
+	if u.RawQuery != "" || u.Fragment != "" || u.User != nil {
+		return "", fmt.Errorf("接続先の URL に ? や # や認証情報は書けません: %q", raw)
+	}
+	if schemeless && u.Port() == "" {
+		u.Host = net.JoinHostPort(u.Hostname(), strconv.Itoa(DefaultPort))
+	}
+	p := strings.TrimRight(u.Path, "/")
+	for _, suf := range apiSuffixes {
+		if strings.HasSuffix(p, suf) {
+			p = strings.TrimRight(strings.TrimSuffix(p, suf), "/")
+			break
+		}
+	}
+	u.Path, u.RawPath = p, ""
+	return u.String(), nil
 }
 
 func (c *Client) httpClient() *http.Client {
@@ -303,15 +339,4 @@ func boolOf(v any) bool {
 func intOf(v any) int {
 	f, _ := v.(float64)
 	return int(f)
-}
-
-// ParseBase は host/port から組み立てた接続先を返す（壊れていればエラー）。
-// 設定画面に「実際に送る先」をそのまま出すためのもの。
-func ParseBase(host string, port int) (string, error) {
-	c := New(host, port, "")
-	u, err := url.Parse(c.BaseURL)
-	if err != nil || u.Host == "" {
-		return "", fmt.Errorf("接続先を組み立てられません: %q", c.BaseURL)
-	}
-	return c.BaseURL, nil
 }

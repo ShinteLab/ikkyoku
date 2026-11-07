@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -1259,6 +1260,31 @@ func migrateEngines(c *Config) {
 	}}
 }
 
+// migrateTraining は旧形式（`host` / `port`）の接続先を `url` へ移す。
+//
+// **読み込みの一度きり**（`migrateEngines` と同じ）。旧欄は空にするので、次に保存した時点で
+// ファイルからも消える。`url` が既にあれば旧欄は捨てる（新しいほうを正とする）。
+// 旧形式の読み方をそのまま写す —— host に scheme があればそれが宛先（port は使われていなかった）、
+// 無ければ `http://host:port`（空の host は 127.0.0.1、0 の port は 8080）。
+func migrateTraining(t *TrainingConfig) {
+	host, port := strings.TrimSpace(t.Host), t.Port
+	t.Host, t.Port = "", 0
+	if t.URL != "" || (host == "" && port <= 0) {
+		return
+	}
+	if strings.Contains(host, "://") {
+		t.URL = host
+		return
+	}
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	if port <= 0 {
+		port = 8080
+	}
+	t.URL = "http://" + net.JoinHostPort(strings.Trim(host, "[]"), strconv.Itoa(port))
+}
+
 // TrainingConfig は訂正済みの局面を suteme に登録するための接続設定。
 //
 // **既定は無効。** 訂正結果の還元は 2026-08-07 に決めた方針だが、
@@ -1271,10 +1297,15 @@ type TrainingConfig struct {
 	//
 	// omitempty を付けないのは FitOnStartup と同じ理由（切ってあること自体を残す）。
 	Enabled bool `json:"enabled"`
-	// Host は suteme の学習用サーバのホスト。空なら 127.0.0.1。
+	// URL は suteme の学習用サーバの場所（2026-11-08。`http://127.0.0.1:8080` や、
+	// `-base /st` で載せたなら `http://host:8080/st`）。空なら既定（`training.DefaultURL`）。
+	// **書いたとおりに残す**（読み方と既定の解決は `training.ParseURL` の 1 か所）。
+	URL string `json:"url,omitempty"`
+	// Host / Port は**旧形式**（2026-11-08 までホストとポートを別の欄で持っていた）。
+	// ⚠️ **移行のためだけに残してある**（`migrateTraining` が URL へ移して空にする）。
+	// これより上のコードは URL しか見ない。
 	Host string `json:"host,omitempty"`
-	// Port は同ポート。0 なら 8080（suteme-training の既定）。
-	Port int `json:"port,omitempty"`
+	Port int    `json:"port,omitempty"`
 	// Token は Bearer トークン。**同じマシンで動かすなら不要**
 	// （suteme はループバックからのアクセスを認証免除にしている）。
 	// 別のマシンへ送るときだけ、suteme の APIタブで発行したものを入れる。
@@ -1357,6 +1388,7 @@ func LoadConfig(path string) (Config, error) {
 	// 旧形式（単一エンジン）をここで吸収する。**読み込みの入口 1 か所だけ**で行い、
 	// これより上のコードは新しい形（Engines）しか知らない。
 	migrateEngines(&c)
+	migrateTraining(&c.Training)
 	return c, nil
 }
 

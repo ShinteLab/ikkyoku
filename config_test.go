@@ -218,6 +218,43 @@ func TestLoadConfigMigratesLegacyEngine(t *testing.T) {
 	}
 }
 
+// 旧形式の接続先（host / port）を url へ移すこと（2026-11-08）。
+// ⚠️ 歯止めは —— **移さないと、上げたあと黙って既定（127.0.0.1:8080）へ送る**こと。
+// 旧形式の読み方（scheme があれば host がそのまま宛先・無ければ既定で埋める）を写すこと・
+// url があれば旧欄は捨てること・保存し直したら旧欄がファイルから消えること。
+func TestLoadConfigMigratesLegacyTraining(t *testing.T) {
+	cases := []struct{ json, want string }{
+		{`{"training":{"enabled":true,"host":"192.168.0.5","port":9000}}`, "http://192.168.0.5:9000"},
+		{`{"training":{"enabled":true,"host":"192.168.0.5"}}`, "http://192.168.0.5:8080"},
+		{`{"training":{"enabled":true,"port":9000}}`, "http://127.0.0.1:9000"},
+		{`{"training":{"enabled":true,"host":"::1","port":9000}}`, "http://[::1]:9000"},
+		{`{"training":{"enabled":true,"host":"https://example.test/suteme","port":9000}}`, "https://example.test/suteme"},
+		{`{"training":{"enabled":true,"url":"http://new:1/st","host":"old","port":2}}`, "http://new:1/st"},
+		{`{"training":{"enabled":true}}`, ""},
+	}
+	for _, tc := range cases {
+		path := filepath.Join(t.TempDir(), "config.json")
+		if err := os.WriteFile(path, []byte(tc.json), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		got, err := LoadConfig(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tr := got.Training
+		if tr.URL != tc.want || tr.Host != "" || tr.Port != 0 || !tr.Enabled {
+			t.Errorf("%s → %+v, want url=%q（旧欄は空）", tc.json, tr, tc.want)
+		}
+		if err := SaveConfig(path, got); err != nil {
+			t.Fatal(err)
+		}
+		b, _ := os.ReadFile(path)
+		if strings.Contains(string(b), `"host"`) || strings.Contains(string(b), `"port"`) {
+			t.Errorf("保存後も旧欄が残っている: %s", b)
+		}
+	}
+}
+
 // engines が既にあれば旧欄は無視すること（手で両方書いたときは新しいほうが正）。
 func TestLoadConfigPrefersEngines(t *testing.T) {
 	dir := t.TempDir()

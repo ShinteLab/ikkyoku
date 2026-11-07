@@ -189,15 +189,54 @@ func TestStatusHandlesPartialResponse(t *testing.T) {
 	}
 }
 
-func TestNewResolvesDefaults(t *testing.T) {
-	if got := New("", 0, "").BaseURL; got != "http://127.0.0.1:8080" {
-		t.Errorf("既定の宛先が違う: %q", got)
+// TestParseURL は設定の URL を「実際に送る先」に直す決まり。
+// ⚠️ 歯止めは —— **suteme の APIタブの「登録先」を貼っても届くこと**（末尾の /api/register を剥がす）・
+// **`-base` で載せたパスを落とさないこと**・**scheme を書かずにホストだけなら 8080 を補うこと**
+// （scheme を書いたら URL のとおり）・**組み立てられない指定を黙って通さないこと**（別の宛先へ送る）。
+func TestParseURL(t *testing.T) {
+	ok := []struct{ in, want string }{
+		{"", DefaultURL},
+		{"   ", DefaultURL},
+		{"127.0.0.1", "http://127.0.0.1:8080"},
+		{"myhost:8888", "http://myhost:8888"},
+		{"myhost/st", "http://myhost:8080/st"},
+		{"::1", "http://[::1]:8080"},
+		{"[::1]:9000", "http://[::1]:9000"},
+		{"http://myhost:8888/st/", "http://myhost:8888/st"},
+		{"http://myhost:8888/st/api/register", "http://myhost:8888/st"},
+		{"http://myhost:8888/api/status", "http://myhost:8888"},
+		{"https://example.test/suteme/", "https://example.test/suteme"},
+		{"http://myhost", "http://myhost"},
 	}
-	if got := New("::1", 9000, "").BaseURL; got != "http://[::1]:9000" {
-		t.Errorf("IPv6 を囲めていない: %q", got)
+	for _, tc := range ok {
+		got, err := ParseURL(tc.in)
+		if err != nil || got != tc.want {
+			t.Errorf("ParseURL(%q) = %q, %v; want %q", tc.in, got, err, tc.want)
+		}
 	}
-	// scheme まで書かれていたらそのまま使う（リバースプロキシ越しの指定）。
-	if got := New("https://example.test/suteme/", 0, "").BaseURL; got != "https://example.test/suteme" {
-		t.Errorf("scheme つきの指定を壊している: %q", got)
+	for _, in := range []string{"ftp://myhost", "http://", "http://myhost/st?x=1", "http://myhost/#a", "http://u:p@myhost"} {
+		if got, err := ParseURL(in); err == nil {
+			t.Errorf("ParseURL(%q) = %q; エラーになるべき", in, got)
+		}
+	}
+}
+
+// TestBaseURLReachesSubpath は `-base` の下に載せたサーバへ、その下の /api/... を叩くこと。
+func TestBaseURLReachesSubpath(t *testing.T) {
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.URL.Path
+		_, _ = w.Write([]byte(`{"enabled":true}`))
+	}))
+	defer srv.Close()
+	c, err := New(srv.URL+"/st/api/register", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Status(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got != "/st/api/status" {
+		t.Errorf("叩いたパスが違う: %q", got)
 	}
 }

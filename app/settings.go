@@ -117,7 +117,7 @@ type AppSettings struct {
 	// PonanzaConstant は評価値 → 勝率の変換に使う定数（解析タブの勝率バー）。
 	//
 	// **既定値（1500）は解決済みで返る**（`analyze.PonanzaConstantOr`）。
-	// ⚠️ **フロントに既定値を書かないこと** —— training の Host/Port と同じで、
+	// ⚠️ **フロントに既定値を書かないこと** —— training の URL と同じで、
 	// 2 か所に持つと既定を変えたときに食い違う。
 	PonanzaConstant float64 `json:"ponanzaConstant"`
 	// KifuFollowMinutes は棋譜の自動更新の間隔（分。**解決済み**）。
@@ -159,14 +159,16 @@ type AppSettings struct {
 // TrainingSettings は「訂正盤面を suteme に登録する」の設定。
 //
 // **ikkyoku.TrainingConfig をそのまま返していない。** 画面に出すのは
-// 「実際に送る先(Target)」まで組み立てた形で、Host/Port の既定値の解決を
+// 既定値を解決した URL と「実際に送る先(Target)」で、既定値の解決を
 // フロントに持たせないため(既定は training パッケージが持つ)。
 type TrainingSettings struct {
-	Enabled bool   `json:"enabled"`
-	Host    string `json:"host"`
-	Port    int    `json:"port"`
-	Token   string `json:"token"`
-	// Target は上の設定から組み立てた接続先("http://host:port")。**表示用。**
+	Enabled bool `json:"enabled"`
+	// URL は欄に出す接続先(2026-11-08 にホストとポートの 2 欄から 1 つにした)。
+	// 未設定なら既定(training.DefaultURL)が入る。
+	URL   string `json:"url"`
+	Token string `json:"token"`
+	// Target は URL から組み立てた実際に送る先(suteme の「登録先」を貼れば
+	// 末尾の /api/register を剥がしたもの)。**表示用。** 組み立てられなければ空。
 	Target string `json:"target"`
 }
 
@@ -1106,22 +1108,17 @@ func (s *SettingsService) RemoveEngine(id string) (AppSettings, error) {
 
 // trainingSettings は設定ファイルの値を、画面に出す形(既定値を解決した接続先つき)にする。
 func trainingSettings(c ikkyoku.TrainingConfig) TrainingSettings {
-	host := c.Host
-	if host == "" {
-		host = training.DefaultHost
+	u := c.URL
+	if u == "" {
+		u = training.DefaultURL
 	}
-	port := c.Port
-	if port <= 0 {
-		port = training.DefaultPort
-	}
-	target, err := training.ParseBase(c.Host, c.Port)
+	target, err := training.ParseURL(c.URL)
 	if err != nil {
 		target = "" // 組み立てられない設定。画面側で「宛先が不正」と出す
 	}
 	return TrainingSettings{
 		Enabled: c.Enabled,
-		Host:    host,
-		Port:    port,
+		URL:     u,
 		Token:   c.Token,
 		Target:  target,
 	}
@@ -1139,25 +1136,23 @@ func (s *SettingsService) trainingConfig() ikkyoku.TrainingConfig {
 // **接続の確認はしない。** 設定を保存する操作と、相手が受け付けているかを見る操作
 // (TrainingService.Status)は別。書けないサーバでも設定は保存できたほうがよい
 // (先に設定を入れてから suteme を起動する、という順序が普通にある)。
-func (s *SettingsService) SetTraining(enabled bool, host string, port int, token string) (AppSettings, error) {
+func (s *SettingsService) SetTraining(enabled bool, rawURL string, token string) (AppSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	next := ikkyoku.TrainingConfig{
 		Enabled: enabled,
-		Host:    strings.TrimSpace(host),
-		Port:    port,
+		URL:     strings.TrimSpace(rawURL),
 		Token:   strings.TrimSpace(token),
 	}
+	// ⚠️ **組み立てられない URL は保存しない**(保存すると、送るたびに失敗する設定が残る)。
+	target, err := training.ParseURL(next.URL)
+	if err != nil {
+		return s.settings(), err
+	}
 	// 既定値そのものは書き残さない(既定が変わったときに追従できるように)。
-	if next.Host == training.DefaultHost {
-		next.Host = ""
-	}
-	if next.Port == training.DefaultPort {
-		next.Port = 0
-	}
-	if next.Port < 0 || next.Port > 65535 {
-		return s.settings(), fmt.Errorf("ポート番号が範囲外です: %d", port)
+	if target == training.DefaultURL {
+		next.URL = ""
 	}
 
 	return s.save(func(cfg *ikkyoku.Config) { cfg.Training = next })
@@ -1184,7 +1179,7 @@ func (s *SettingsService) SetPonanzaConstant(v float64) (AppSettings, error) {
 		return s.settings(), fmt.Errorf("ポナンザ定数は正の数で指定してください: %v", v)
 	}
 	// **既定値そのものは書き残さない**（既定が変わったときに追従できるように。
-	// training の Host/Port と同じ扱い）。
+	// training の URL と同じ扱い）。
 	if v == analyze.DefaultPonanzaConstant {
 		v = 0
 	}

@@ -1584,13 +1584,12 @@ export function mountMainScreen(root: HTMLElement): void {
               </span>
             </label>
             <div class="setting-fields">
-              <label class="field">
-                <span class="field-label">サーバ</span>
-                <input id="train-host" type="text" placeholder="127.0.0.1" spellcheck="false" />
-              </label>
-              <label class="field">
-                <span class="field-label">ポート</span>
-                <input id="train-port" class="port" type="number" min="1" max="65535" />
+              <!-- 接続先は URL 1 つ(2026-11-08)。suteme を -base で載せたならパスまで書く。
+                   suteme の APIタブの「登録先」(…/api/register)をそのまま貼ってもよい
+                   (読み方は Go の training.ParseURL)。 -->
+              <label class="field is-wide">
+                <span class="field-label">URL</span>
+                <input id="train-url" type="text" spellcheck="false" autocomplete="off" />
               </label>
               <!-- トークンは**同じマシンなら要らない**(suteme はループバックを
                    認証免除にしている)。別のマシンへ送るときだけ入れる。 -->
@@ -4863,8 +4862,7 @@ ${st.turnLabel}${n}`;
     });
   });
   const trainEnabledInput = root.querySelector<HTMLInputElement>("#train-enabled")!;
-  const trainHost = root.querySelector<HTMLInputElement>("#train-host")!;
-  const trainPort = root.querySelector<HTMLInputElement>("#train-port")!;
+  const trainURL = root.querySelector<HTMLInputElement>("#train-url")!;
   const trainToken = root.querySelector<HTMLInputElement>("#train-token")!;
   // 勝率バーの変換に使う定数（解析タブ）。**空欄なら既定に戻す。**
   const ponanzaConstant = root.querySelector<HTMLInputElement>("#ponanza-constant")!;
@@ -5439,7 +5437,7 @@ ${st.turnLabel}${n}`;
     theme: string;
     themes: { value: string; label: string }[] | null;
     path: string;
-    training: { enabled: boolean; host: string; port: number; token: string; target: string };
+    training: { enabled: boolean; url: string; token: string; target: string };
     engines: EngineSettings[] | null;
     engineColors: EngineColorOption[] | null;
     analyzeSeconds: number;
@@ -5538,8 +5536,7 @@ ${st.turnLabel}${n}`;
     // 既定値を書かないこと**(2 か所に持つと、既定を変えたときに食い違う)。
     const t = s.training;
     trainEnabledInput.checked = t.enabled;
-    trainHost.value = t.host;
-    trainPort.value = String(t.port);
+    trainURL.value = t.url;
     trainToken.value = t.token;
     // 送信ボタンを出すかどうかはこの設定で決まる。
     trainEnabled = t.enabled;
@@ -5548,21 +5545,15 @@ ${st.turnLabel}${n}`;
 
   // 接続設定の保存。**接続の確認はしない**(保存と疎通は別の操作)。
   // 先に設定を入れてから suteme を起動する、という順序が普通にあるため。
+  // ⚠️ **URL の読み方をここに書かない**(既定の補い・/api/register を剥がすのは Go の training.ParseURL)。
   const saveTraining = async () => {
-    const port = Number(trainPort.value);
-    if (!Number.isInteger(port) || port < 1 || port > 65535) {
-      settingsStatus.textContent = "ポート番号は 1〜65535 で指定してください。";
-      settingsStatus.classList.add("is-error");
-      return;
-    }
     settingsStatus.textContent = "";
     settingsStatus.classList.remove("is-error");
     try {
       showSettings(
         await SettingsService.SetTraining(
           trainEnabledInput.checked,
-          trainHost.value,
-          port,
+          trainURL.value,
           trainToken.value,
         ),
       );
@@ -5578,7 +5569,7 @@ ${st.turnLabel}${n}`;
     }
   };
 
-  for (const el of [trainEnabledInput, trainHost, trainPort, trainToken]) {
+  for (const el of [trainEnabledInput, trainURL, trainToken]) {
     el.addEventListener("change", () => {
       void saveTraining();
     });

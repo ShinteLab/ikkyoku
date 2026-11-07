@@ -19,10 +19,19 @@ POST /api/register   multipart/form-data
 GET  /api/status     今このサーバに送ってよいか（**/api/health ではない**）
 ```
 
-- **設定は `config.json` の `training`**（`Enabled` / `Host` / `Port` / `Token`）。
-  既定は無効・`127.0.0.1:8080`（`suteme-training` の既定ポート）。
-  **既定値の解決は Go 側（`training.DefaultHost` / `DefaultPort`）に置き、
+- **設定は `config.json` の `training`**（`Enabled` / `URL` / `Token`）。
+  既定は無効・`http://127.0.0.1:8080`（`suteme-training` の既定ポート）。
+  **既定値の解決と URL の読み方は Go 側（`training.ParseURL` / `DefaultURL`）に置き、
   フロントに書かない**（2 か所に持つと既定を変えたときに食い違う）
+- **接続先は URL 1 つ**（2026-11-08。それまではホストとポートの 2 欄）。suteme が
+  `-base /st` でサブパスに載るようになり、2 欄ではパスを書く場所が無かった
+  （ホストの欄に `host/st` と書くと `http://host/st:8080` になり、**エラーにならずに違う宛先へ送った**）。
+  - ⚠️ **suteme の APIタブの「登録先」（`…/api/register`）を貼っても届くこと** —— 末尾の
+    `/api/register` / `/api/status` を剥がしてサーバの場所に戻す
+  - **scheme を書かずにポートも書かなければ 8080 を補う**（`127.0.0.1` と打って 80 番へ行かないように）。
+    scheme を書いたら URL のとおり（リバースプロキシ越しなら 80 / 443 が普通）
+  - ⚠️ **組み立てられない URL は保存しない**（`SetTraining` がエラーを返す）。黙って別の宛先へ送らない
+  - 旧形式（`host` / `port`）は読み込みの入口で `url` へ移す（`ikkyoku.migrateTraining`）
 - **設定の「有効」は送信ボタンを出すかどうかであって、自動送信のスイッチではない。**
   送るのは確定後にボタンを押したときだけ
 - ⚠️ **送るのは `EditState.labelSfen`。`sfen` を送らないこと。**
@@ -113,4 +122,8 @@ suteme 側の要求（`suteme/CLAUDE.md`「先後の割り当ては『手前が�
   （httptest のスタブ。**フィールド名も応答の形も suteme 側の実装が正**なので、
   向こうが変わったらこちらを直す）。座標が画像からはみ出す場合は**送る前に**弾くこと、
   再送が重複として通ること、`/api/status` が項目を絞って返しても壊れないこと、
-  エラーが**何をすればよいか分かる日本語**になること
+  エラーが**何をすればよいか分かる日本語**になること。**接続先の URL の読み方**（`TestParseURL`。
+  「登録先」を貼っても届く・`-base` のパスを落とさない・組み立てられない指定を通さない）と、
+  **サブパスの下の `/api/...` を叩くこと**（`TestBaseURLReachesSubpath`）
+- `config_test.go` の `TestLoadConfigMigratesLegacyTraining` — **旧形式の `host` / `port` を `url` へ移すこと**
+  （移さないと、上げたあと黙って既定の 127.0.0.1:8080 へ送る）
