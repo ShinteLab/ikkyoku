@@ -54,9 +54,13 @@ const (
 	//	{"root": "INFO", "packages": [{"name": "github.com/ShinteLab/ikkyoku/app", "level": "DEBUG"}],
 	//	 "loggers": [{"name": "follow", "level": "DEBUG"}]}
 	LevelsFile = "ikkyoku-log.json"
-	// KeepDays より古いログファイルは Init のときに消す（2026-10-11 に 14 日から 7 日へ。何日も前の記録を
-	// 掘ってデバッグすることは無い）。中継の録画も同じ日数で消す（`_cmd/ikkyoku`）。
-	KeepDays = 7
+	// KeepDays より古いログファイルは消す（2026-11-08 に 7 日から 90 日へ。CompressAfterDays で圧縮するぶん、
+	// 長く残しても場所を取らない。今日を含めて 90 日分が残る）。
+	// ⚠️ **中継の録画と撮った画像の日数とは別**（あちらは 7 日のまま。PNG は圧縮が効かない）。
+	KeepDays = 90
+	// CompressAfterDays 日前より前のログファイルは gzip にする（2026-11-08。今日と昨日はそのまま読める。
+	// それより前は ikkyoku_<日付>.log.gz。diag で 3MB → 0.28MB ほど）。
+	CompressAfterDays = 2
 	// dirName は DefaultDir のディレクトリの名前。
 	dirName = "ikkyoku"
 )
@@ -205,7 +209,7 @@ func NamedFile(name string) string { return FilePrefix + "-" + name }
 
 // Init はログの出口を組み、slog.Default() をそこへ向ける。main の最初に 1 回だけ呼ぶ。
 //
-//   - ファイル: Dir/ikkyoku_<日付>.log（日ごと。KeepDays より古いものは消す）
+//   - ファイル: Dir/ikkyoku_<日付>.log（日ごと。CompressAfterDays 日前より前は .log.gz に、KeepDays より古いものは消す）
 //   - 名前付き（log.Follow / log.Diag / log.USI）: Dir/ikkyoku-<名前>_<日付>.log だけ（コンソールに出さない。Warn 以上は本体にも）。
 //     Diag は Options.Diag のときだけ残し、Debug まで出す（LevelsFile の "loggers" に diag があればそちら）。
 //     Follow は Options.Follow / SetFollow が真のあいだだけ残す
@@ -239,6 +243,7 @@ func Init(opts Options) (io.Closer, error) {
 			errs = append(errs, fmt.Errorf("ログのディレクトリを作れません: %w", err))
 		} else {
 			w.SetPrefix(FilePrefix)
+			tidy(w)
 			sinks = append(sinks, wlog.NewSimpleHandler(w, LevelTrace))
 			closers = append(closers, w)
 			file = filepath.Join(dir, FilePrefix+"_"+time.Now().Format("20060102")+".log")
@@ -253,6 +258,7 @@ func Init(opts Options) (io.Closer, error) {
 					continue // 出口が無い名前は本体へ出る（namedRouter）
 				}
 				tw.SetPrefix(NamedFile(name))
+				tidy(tw)
 				namedSinks[name] = wlog.NewSimpleHandler(tw, LevelTrace)
 				if name == FollowName {
 					// 設定で切り替える（切ってあるあいだは書かないので、ファイルも作られない）。
@@ -422,8 +428,21 @@ func (s *switchHandler) WithGroup(name string) slog.Handler {
 	return &switchHandler{on: s.on, h: s.h.WithGroup(name)}
 }
 
-// removeOld は KeepDays より古いログファイルを消す。日付はファイル名から読む
+// tidy は古いログファイルの片付け（圧縮と削除）を w に任せる（2026-11-08。wenteasy/log v0.4.0〜）。
+// 動くのは w がファイルを開いたとき（その日に最初に書いたとき・日が変わったとき）で、別の goroutine で回る。
+// 片付けられなかった理由は本体のログに出す（片付けはおまけなので、止めない）。
+func tidy(w *wlog.RollingFileWriter) {
+	w.SetCompressAfter(CompressAfterDays)
+	w.SetKeep(KeepDays)
+	w.SetErrorHandler(func(err error) { Warn("古いログファイルを片付けられません", "error", err) })
+}
+
+// removeOld は KeepDays より古いログファイル（.log も .log.gz も）を消す。日付はファイル名から読む
 // （更新時刻は見ない。コピーや展開で変わるため）。消せなくても何もしない。
+//
+// ⚠️ **tidy があっても残すこと。** tidy が片付けるのはファイルを開いた名前だけで、開かない名前
+// （配る exe の diag・追従のログを切ってある日の follow）の古いファイルは、ここで消さないと残り続ける。
+// 圧縮はしない（開いたときに tidy がする）。
 func removeOld(dir string, now time.Time) {
 	prefixes := []string{FilePrefix}
 	for _, name := range separated {
@@ -431,17 +450,19 @@ func removeOld(dir string, now time.Time) {
 	}
 	limit := now.AddDate(0, 0, -KeepDays)
 	for _, prefix := range prefixes {
-		names, err := filepath.Glob(filepath.Join(dir, prefix+"_*.log"))
-		if err != nil {
-			continue
-		}
-		for _, path := range names {
-			date := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(path), prefix+"_"), ".log")
-			t, err := time.ParseInLocation("20060102", date, now.Location())
-			if err != nil || !t.Before(limit) {
+		for _, ext := range []string{".log", ".log.gz"} {
+			names, err := filepath.Glob(filepath.Join(dir, prefix+"_*"+ext))
+			if err != nil {
 				continue
 			}
-			os.Remove(path)
+			for _, path := range names {
+				date := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(path), prefix+"_"), ext)
+				t, err := time.ParseInLocation("20060102", date, now.Location())
+				if err != nil || !t.Before(limit) {
+					continue
+				}
+				os.Remove(path)
+			}
 		}
 	}
 }

@@ -10,6 +10,11 @@ import (
 	"time"
 )
 
+// CaptureKeepDays は撮った画像を置いておく日数（`RemoveOldCaptures`。2026-10-11）。
+// ⚠️ **ログの日数（`log.KeepDays`）とは別**（2026-11-08 にログだけ 90 日へ延ばした。PNG は圧縮が効かないうえ、
+// suteme へ送れば役目を終える）。
+const CaptureKeepDays = 7
+
 // timestampLayout は撮った画像のファイル名の時刻の形（古いものを消すときもこれで読む）。
 const timestampLayout = "20060102-150405"
 

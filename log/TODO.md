@@ -12,7 +12,7 @@ wenteasy/log の README「使う側のやり方（自分の log パッケージ�
 
 ### 1. wenteasy/log の版
 
-- `go.mod` は v0.3.1。v0.3.2 にすると、モジュールのキャッシュの README に「使う側のやり方」が入る（コードの変更は無い）
+- ~~`go.mod` は v0.3.1~~ → **v0.4.0 にした**（2026-11-08。古いファイルの圧縮・削除を使う）
 
 ### 2. 名前付きのファイルを作れなかったことが、Init のエラーに出ない
 
@@ -48,5 +48,8 @@ ikkyoku で実際に使って足したもの。ほかのプロジェクトでも
 - **標準の log の出力の向け先**（`stdlog.SetOutput`。Wails の [WebView2] の行は標準の log で来る）と、閉じるときに戻すこと
   （戻さないと log → slog → log と回り続ける）。→ **README に一部書いた**（`444a65e`。WebView2 の行は標準の log で来ること・
   ikkyoku は名前付きの Logger へ向け直していること）。向け直し方と、閉じるときに戻すことは、まだ README に無い
-- **古いファイルを消す**（`KeepDays` = 7。日付はファイル名から読む）と、**始まりの 1 行はレベルに関係なく残す**
+- **古いファイルを消す**（`KeepDays` = 90。日付はファイル名から読む）と、**始まりの 1 行はレベルに関係なく残す**。
+  → 圧縮・削除は v0.4.0 で入った（`SetCompressAfter` / `SetKeep`）。ただし**開いたファイルの名前しか片付けない**ので、
+  開かない名前（配る exe の diag など）のために ikkyoku は起動時の `removeOld` を残している。
+  **wenteasy/log 側で片付けを外から呼べる関数（dir・prefix・間隔・日数を渡す）にすれば `removeOld` も消せる**
 - **異常終了を残す**（`CatchCrash`。`debug.SetCrashOutput`）。README は「ikkyoku の log にある」と名前だけ

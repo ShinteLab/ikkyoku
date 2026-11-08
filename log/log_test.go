@@ -111,25 +111,57 @@ func TestInitWithoutFile(t *testing.T) {
 
 func TestRemoveOld(t *testing.T) {
 	dir := t.TempDir()
-	// 1 週間（KeepDays）を過ぎたものだけ消す（2026-10-11 に 14 日から縮めた）。
-	old := filepath.Join(dir, log.FilePrefix+"_"+time.Now().AddDate(0, 0, -(log.KeepDays+1)).Format("20060102")+".log")
-	recent := filepath.Join(dir, log.FilePrefix+"_"+time.Now().AddDate(0, 0, -(log.KeepDays-1)).Format("20060102")+".log")
+	// KeepDays（90 日）を過ぎたものだけ消す（2026-11-08 に 7 日から延ばした）。圧縮したもの（.log.gz）も消す。
+	// ⚠️ 名前付きのファイルは開かなければ wenteasy/log の片付けが走らないので、Init の removeOld が消すこと（oldFollow）。
+	day := func(n int) string { return time.Now().AddDate(0, 0, -n).Format("20060102") }
+	old := filepath.Join(dir, log.FilePrefix+"_"+day(log.KeepDays+1)+".log")
+	oldGz := filepath.Join(dir, log.FilePrefix+"_"+day(log.KeepDays+1)+".log.gz")
+	recentGz := filepath.Join(dir, log.FilePrefix+"_"+day(log.KeepDays-1)+".log.gz")
 	other := filepath.Join(dir, log.FilePrefix+"_memo.log")
-	oldFollow := filepath.Join(dir, log.NamedFile(log.FollowName)+"_"+time.Now().AddDate(0, 0, -30).Format("20060102")+".log")
-	for _, p := range []string{old, recent, other, oldFollow} {
+	oldFollow := filepath.Join(dir, log.NamedFile(log.FollowName)+"_"+day(log.KeepDays+30)+".log.gz")
+	for _, p := range []string{old, oldGz, recentGz, other, oldFollow} {
 		os.WriteFile(p, []byte("x\n"), 0o644)
 	}
 	initIn(t, dir, false)
 
-	for _, p := range []string{old, oldFollow} {
+	for _, p := range []string{old, oldGz, oldFollow} {
 		if _, err := os.Stat(p); !os.IsNotExist(err) {
 			t.Errorf("%s should be removed", filepath.Base(p))
 		}
 	}
-	for _, p := range []string{recent, other} {
+	for _, p := range []string{recentGz, other} {
 		if _, err := os.Stat(p); err != nil {
 			t.Errorf("%s should be kept: %v", filepath.Base(p), err)
 		}
+	}
+}
+
+// 今日と昨日のログはそのまま、CompressAfterDays（2 日）前より前は .log.gz にすること（2026-11-08。wenteasy/log v0.4.0 の片付け）。
+// 片付けは Init が最初の 1 行を書いて本体のファイルを開いたときに、別の goroutine で回る。
+func TestCompressOld(t *testing.T) {
+	dir := t.TempDir()
+	day := func(n int) string { return time.Now().AddDate(0, 0, -n).Format("20060102") }
+	yesterday := filepath.Join(dir, log.FilePrefix+"_"+day(log.CompressAfterDays-1)+".log")
+	old := filepath.Join(dir, log.FilePrefix+"_"+day(log.CompressAfterDays)+".log")
+	for _, p := range []string{yesterday, old} {
+		os.WriteFile(p, []byte("x\n"), 0o644)
+	}
+	initIn(t, dir, false)
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		_, errLog := os.Stat(old)
+		_, errGz := os.Stat(old + ".gz")
+		if os.IsNotExist(errLog) && errGz == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s が圧縮されません（.log: %v / .gz: %v）", filepath.Base(old), errLog, errGz)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, err := os.Stat(yesterday); err != nil {
+		t.Errorf("昨日の %s はそのまま残すこと: %v", filepath.Base(yesterday), err)
 	}
 }
 

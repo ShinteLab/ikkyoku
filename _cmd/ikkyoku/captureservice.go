@@ -1630,14 +1630,19 @@ func followRecordRoot() string {
 	return ""
 }
 
-// removeOldRecordings は root の下の録画のうち、`log.KeepDays` より前に始めたものを消す（ログと同じ 1 週間）。
+// followRecordKeepDays は中継の録画を置いておく日数（2026-10-11）。
+// ⚠️ **ログの日数（`log.KeepDays`）とは別**（2026-11-08 にログだけ 90 日へ延ばした。録画は PNG で圧縮が効かず、
+// 1 局で 200MB を超える）。
+const followRecordKeepDays = 7
+
+// removeOldRecordings は root の下の録画のうち、`followRecordKeepDays` より前に始めたものを消す（1 週間）。
 // ⚠️ **名前が録画の時刻として読めるディレクトリだけ消す**（ほかのものは置いた人のもの）。消せなくても何もしない。
 func removeOldRecordings(root string, now time.Time) {
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		return
 	}
-	limit := now.AddDate(0, 0, -log.KeepDays)
+	limit := now.AddDate(0, 0, -followRecordKeepDays)
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue

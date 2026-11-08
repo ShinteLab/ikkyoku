@@ -16,7 +16,7 @@
     python promo_similarity.py --logs "<ログのある場所>/ikkyoku-follow_20261010.log" [--logs ...]
                                [--follow "%TEMP%/ikkyoku/follow"] [--csv out.csv]
 
-    --logs    ikkyoku-follow_<日付>.log（2026-10-09 までは ikkyoku_<日付>.log。何個でも。glob も可）。録画のディレクトリ名と盤の矩形・目線をここから引く
+    --logs    ikkyoku-follow_<日付>.log（2 日前より前は .log.gz。そのまま渡してよい。2026-10-09 までは ikkyoku_<日付>.log。何個でも。glob も可）。録画のディレクトリ名と盤の矩形・目線をここから引く
     --follow  録画の親ディレクトリ。既定は環境変数 IKKYOKU_FOLLOW_DIR、無ければ %TEMP%/ikkyoku/follow
     --csv     1 手 1 行で書き出す（近さ・成ったか・録画・ファイル・手）
 
@@ -26,6 +26,7 @@
 import argparse
 import csv
 import glob
+import gzip
 import os
 import re
 import sys
@@ -45,7 +46,7 @@ def sessions(log_files):
     """ログから録画ごとの盤の矩形と目線を拾う。"""
     out, cur = {}, None
     for lf in log_files:
-        with open(lf, encoding="utf-8", errors="replace") as f:
+        with (gzip.open if lf.endswith(".gz") else open)(lf, "rt", encoding="utf-8", errors="replace") as f:
             for line in f:
                 m = BOARD_RE.search(line)
                 if m:

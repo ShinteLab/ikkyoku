@@ -93,7 +93,8 @@ type appWindows struct {
 }
 
 func main() {
-	// ログは一時ディレクトリの ikkyoku（ikkyoku_<日付>.log。2026-10-11 に実行ファイルの隣から移した。1 週間で消す）。
+	// ログは一時ディレクトリの ikkyoku（ikkyoku_<日付>.log。2026-10-11 に実行ファイルの隣から移した。
+	// 2 日前より前は gzip にし、90 日で消す。2026-11-08）。
 	// wails3 dev のときはコンソールにも出す（追従のログは出さない）
 	// （consoleLog。devbuild.go / prodbuild.go）。⚠️ **書けなくても起動は止めない。**
 	// 画面まわりの診断（心拍・表示状態・Wails と WebView2 のログ）は dev のときだけ
@@ -309,14 +310,14 @@ func main() {
 	captureSvc.onHideRefused = studySvc.FollowHideRefused
 	// 「中継を追うあいだは盤の読みを優先する」（2026-10-07。`enginepriority.go`）。
 	captureSvc.followFirst = cfg.FollowFirst
-	// 「中継の録画とログを残す（デバッグ）」（2026-10-11）。切ってあっても古い録画は消す（ログと同じ 1 週間）。
+	// 「中継の録画とログを残す（デバッグ）」（2026-10-11）。切ってあっても古い録画は消す（1 週間。`followRecordKeepDays`）。
 	captureSvc.applyFollowDebug(cfg.FollowDebug)
 	if root := followRecordRoot(); root != "" {
 		go removeOldRecordings(root, time.Now())
 	}
 	// 撮った画像も 1 週間で消す（2026-10-11。suteme へ送れば役目を終える。置き場所は ikkyoku.DefaultOutDir）。
 	if dir, err := ikkyoku.DefaultOutDir(); err == nil {
-		go ikkyoku.RemoveOldCaptures(dir, time.Now(), log.KeepDays)
+		go ikkyoku.RemoveOldCaptures(dir, time.Now(), ikkyoku.CaptureKeepDays)
 	}
 	captureSvc.engineNames = func() []string {
 		var out []string

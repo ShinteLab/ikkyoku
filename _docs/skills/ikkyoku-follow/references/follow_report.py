@@ -10,8 +10,11 @@ python follow_report.py <ikkyoku-follow_YYYYMMDD.log>（2026-10-09 までは ikk
 import re
 import sys
 import datetime
+import gzip
 
-lines = open(sys.argv[1], encoding='utf-8').read().splitlines()
+# 2 日前より前のログは gzip（ikkyoku-follow_<日付>.log.gz。2026-11-08）なので、.gz はそのまま読む。
+_open = gzip.open if sys.argv[1].endswith('.gz') else open
+lines = _open(sys.argv[1], 'rt', encoding='utf-8').read().splitlines()
 start = max(i for i, l in enumerate(lines) if '追う盤を決めました' in l)
 lines = lines[start:]
 

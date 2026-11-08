@@ -104,7 +104,7 @@
 - ⚠️ **録画は設定「中継の録画とログを残す（デバッグ）」（`followDebug`）を入れたときだけ**（2026-10-11。dev でも配る exe でも。
   `startFollowDir` が作らず、`SaveFollowFrame` / `SaveFollowMiss` も追っている途中で切ったら残さない）。
   置き場所は**ログと同じ一時ディレクトリの `ikkyoku` の `follow`**（`followRecordRoot`。それまでは `%APPDATA%\ikkyoku\captures\follow`
-  で、消す仕組みが無く 102 回分・2GB 溜まっていた）。⚠️ **1 週間（`log.KeepDays`）より前の録画は、起動時と追い始めに消す**
+  で、消す仕組みが無く 102 回分・2GB 溜まっていた）。⚠️ **1 週間（`followRecordKeepDays`。ログの `log.KeepDays` とは別）より前の録画は、起動時と追い始めに消す**
   （`removeOldRecordings`。名前が録画の時刻として読めるディレクトリだけ）
 - ⚠️ **録画は「追う盤」と「手を決めた 1 枚」だけ**（2026-09-15。
   `<録画の場所>/<開始時刻>/` に `master.png` / `042-7g7f.png`（推測なら `-guess`）/

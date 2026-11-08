@@ -52,14 +52,14 @@ func TestDefaultOutDir(t *testing.T) {
 func TestRemoveOldCaptures(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Now()
-	old := timestampName(now.AddDate(0, 0, -8))
-	recent := timestampName(now.AddDate(0, 0, -6))
+	old := timestampName(now.AddDate(0, 0, -(CaptureKeepDays+1)))
+	recent := timestampName(now.AddDate(0, 0, -(CaptureKeepDays-1)))
 	for _, name := range []string{old, recent, "memo.png", "20200101-000000.txt"} {
 		os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o644)
 	}
-	RemoveOldCaptures(dir, now, 7)
+	RemoveOldCaptures(dir, now, CaptureKeepDays)
 	if _, err := os.Stat(filepath.Join(dir, old)); !os.IsNotExist(err) {
-		t.Errorf("7 日より前の %s が残っています", old)
+		t.Errorf("%d 日より前の %s が残っています", CaptureKeepDays, old)
 	}
 	for _, name := range []string{recent, "memo.png", "20200101-000000.txt"} {
 		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {

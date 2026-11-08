@@ -106,7 +106,7 @@ type Config struct {
 	// **既定は false（残さない）。** 録画（手を決めた 1 枚・繋がらなかった周の PNG）と追従のログ
 	// （ikkyoku-follow_<日付>.log）は調べるための記録で、ふだん使うときに溜める理由が無い（1 局で 200MB を超えた）。
 	// dev でも配る exe でも、この設定だけで決まる。置き場所は一時ディレクトリの ikkyoku（`log.DefaultDir`）で、
-	// 1 週間（`log.KeepDays`）より古いものは消す。⚠️ **切ってあっても追従の警告は本体のログに出る**。
+	// 録画は 1 週間・ログは 90 日（`log.KeepDays`。2 日前より前は gzip）より古いものは消す。⚠️ **切ってあっても追従の警告は本体のログに出る**。
 	FollowDebug bool `json:"followDebug,omitempty"`
 
 	// LogLevel は**ログの全体のレベル**（2026-10-11）。空は既定（dev は INFO・配る exe は NOTICE）。

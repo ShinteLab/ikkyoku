@@ -187,7 +187,7 @@ kicho の UI が持っていた機能（取得 / 登録 / 蔵書）を ikkyoku �
 
 - **置き場所は一時ディレクトリの `ikkyoku\capture`**（`ikkyoku.DefaultOutDir`）。ログ・中継の録画と同じ `ikkyoku` の下だが、
   ⚠️ **録画（`follow`）とは別のディレクトリ** —— 撮った画像は人が撮る瞬間を決めたもの、録画は追従のデバッグの記録
-- **1 週間（`log.KeepDays`）より古いものは起動時に消す**（`ikkyoku.RemoveOldCaptures`。名前が撮った時刻の PNG だけ）
+- **1 週間（`ikkyoku.CaptureKeepDays`。2026-11-08 にログの `log.KeepDays` から分けた）より古いものは起動時に消す**（`ikkyoku.RemoveOldCaptures`。名前が撮った時刻の PNG だけ）
 - ⚠️ **学習データに送るなら 1 週間以内に**（送るときに画像をパスから読む。消えていたら送れない）
 - テストに使う画像は、撮った画像を指さずテストの側に写して持つ（suteme の `data/emptied/` など）。文書は画像の名前ではなく
   どういう 1 枚かで書く

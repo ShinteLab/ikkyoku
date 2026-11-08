@@ -6,17 +6,15 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
-
-	"github.com/ShinteLab/ikkyoku/log"
 )
 
-// ⚠️ **中継の録画は 1 週間（`log.KeepDays`）より前に始めたものだけ消し、録画の名前でないものは消さないこと**（2026-10-11）。
+// ⚠️ **中継の録画は 1 週間（`followRecordKeepDays`。ログの日数とは別）より前に始めたものだけ消し、録画の名前でないものは消さないこと**（2026-10-11）。
 // それまでは消す仕組みが無く、`%APPDATA%\ikkyoku\captures\follow` に 102 回分・2GB 溜まっていた。
 func TestRemoveOldRecordings(t *testing.T) {
 	root := t.TempDir()
 	now := time.Now()
-	old := now.AddDate(0, 0, -(log.KeepDays + 1)).Format(followRecordLayout)
-	recent := now.AddDate(0, 0, -(log.KeepDays - 1)).Format(followRecordLayout)
+	old := now.AddDate(0, 0, -(followRecordKeepDays + 1)).Format(followRecordLayout)
+	recent := now.AddDate(0, 0, -(followRecordKeepDays - 1)).Format(followRecordLayout)
 	for _, name := range []string{old, recent, "memo"} {
 		if err := os.MkdirAll(filepath.Join(root, name), 0o755); err != nil {
 			t.Fatal(err)

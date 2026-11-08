@@ -43,8 +43,8 @@ func TestKeepPreviousCrash(t *testing.T) {
 		t.Fatalf("元の名前が残っている: %v", err)
 	}
 
-	// 15 日後に片付けても消えない。
-	removeOld(dir, time.Now().AddDate(0, 0, 15))
+	// 保つ日数を過ぎてから片付けても消えない。
+	removeOld(dir, time.Now().AddDate(0, 0, KeepDays+15))
 	if _, err := os.Stat(got); err != nil {
 		t.Fatalf("古いログの片付けで記録が消えた: %v", err)
 	}
