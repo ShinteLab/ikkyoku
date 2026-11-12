@@ -1,4 +1,4 @@
-package main
+package followcam
 
 import (
 	"image"
@@ -22,7 +22,7 @@ func TestRemoveOldRecordings(t *testing.T) {
 		os.WriteFile(filepath.Join(root, name, "master.png"), []byte("x"), 0o644)
 	}
 
-	removeOldRecordings(root, now)
+	RemoveOldRecordings(root, now)
 
 	if _, err := os.Stat(filepath.Join(root, old)); !os.IsNotExist(err) {
 		t.Errorf("1 週間より前の録画 %s が残っています", old)
@@ -37,7 +37,7 @@ func TestRemoveOldRecordings(t *testing.T) {
 // ⚠️ **設定「中継の録画とログを残す（デバッグ）」が切ってあれば、録画を 1 枚も残さないこと**（2026-10-11。dev でも配る exe でも）。
 // 追っている途中で切ったら、次の 1 枚から残さない。
 func TestFollowRecordingNeedsDebugSetting(t *testing.T) {
-	s := &CaptureService{}
+	s := &Camera{}
 	s.fol.lastQuiet = image.NewRGBA(image.Rect(0, 0, 4, 4))
 	if dir := s.startFollowDir(nil); dir != "" {
 		t.Fatalf("設定が切ってあるのに録画の場所を作りました: %s", dir)
@@ -45,15 +45,15 @@ func TestFollowRecordingNeedsDebugSetting(t *testing.T) {
 
 	dir := t.TempDir()
 	s.fol.followDir = dir
-	if p := s.SaveFollowFrame(1, []string{"7g7f"}, false); p != "" {
+	if p := s.saveFollowFrame(1, []string{"7g7f"}, false); p != "" {
 		t.Errorf("設定が切ってあるのに手を決めた 1 枚を残しました: %s", p)
 	}
-	if p := s.SaveFollowMiss(1, "same"); p != "" {
+	if p := s.saveFollowMiss(1, "same"); p != "" {
 		t.Errorf("設定が切ってあるのに繋がらなかった周を残しました: %s", p)
 	}
 
-	s.followDebug = true
-	if p := s.SaveFollowFrame(1, []string{"7g7f"}, false); p == "" {
+	s.debug = true
+	if p := s.saveFollowFrame(1, []string{"7g7f"}, false); p == "" {
 		t.Errorf("設定を入れたのに手を決めた 1 枚を残しません")
 	}
 }

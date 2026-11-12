@@ -8,10 +8,10 @@ package app
 // 画面は「追う / 止める / 打った駒を選ぶ」を呼び、`follow:update` で来た様子を描くだけにした。
 //
 // **追従の状態もここが持つ**（第 2 段。2026-10-11）。解析タブ側の答えの控え（控え・差し替えの控え・聞いている候補・比べる相手の
-// 局面・最後に読んだ盤）は `followSession` の下半分、撮る側（マスタ・比べる相手の 1 枚・ふるい・録画）は `CaptureService` の
+// 局面・最後に読んだ盤）は `followSession` の下半分、撮る側（マスタ・比べる相手の 1 枚・ふるい・録画）は `followcam.Camera` の
 // `captureFollow`。どちらも**追い始めで作り直し、止めたときに捨てる**（`StartFollow` / `followStop` の 1 か所から）。
 //
-// ⚠️ **撮る側は `FollowCamera` として差し込む**（`StudyService.Camera`。`_cmd/ikkyoku` の `CaptureService` が満たす）。
+// ⚠️ **撮る側は `FollowCamera` として差し込む**（`StudyService.Camera`。実体は `ikkyoku/followcam` の `Camera`。2026-11-13 に `_cmd/ikkyoku` の `CaptureService` から移した）。
 // app は Wails を知らないので、段取りは Go のテストで確かめられる（`followsession_test.go`）。
 
 import (
@@ -21,40 +21,22 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ShinteLab/ikkyoku/followcam"
 	"github.com/ShinteLab/ikkyoku/log"
 	"github.com/ShinteLab/ikkyoku/position"
 )
 
-// FollowShot は撮る側が返す 1 枚のうち、中継の追従が使うもの（`_cmd/ikkyoku` の `CaptureResult` から写す）。
-type FollowShot struct {
-	// Skipped は読まなかった理由（`unchanged` / `moving` / `same`。読んだなら空）。
-	Skipped string
-	// Fast は速い経路の 1 枚か（81 マスは読んでおらず、変わったマスだけが来る）。
-	Fast bool
-	// Cells は比べる相手の 1 枚から変わったマス（撮った画像の向き）。⚠️ **nil は「測っていない」・空は「何も変わっていない」**
-	// （`FrameFits` は測った 1 枚なら空でも呼ぶ）。
-	Cells []int
-	// SFEN は読んだ盤（読んでいない・盤が無ければ空）。
-	SFEN string
-	// OffBoard / OffBoardReason は追っている盤とは別の盤が映っている（中継の大盤など）とその理由。
-	OffBoard       bool
-	OffBoardReason string
-	// CellConfidence / CellHidden はマスごとの読みの確かさと見えないマス（`FollowAuto` にそのまま渡す）。
-	CellConfidence []float64
-	CellHidden     []bool
-}
-
-// FollowCamera は中継セッションが使う**撮る側**（`_cmd/ikkyoku` の `CaptureService` を包んだもの）。
-// 中身の約束はそれぞれの `CaptureService` のメソッド（`_docs/cmd-capture.md`）。
+// FollowCamera は中継セッションが使う**撮る側**（実体は `ikkyoku/followcam` の `Camera`。返す 1 枚は `followcam.Shot`）。
+// 中身の約束はそれぞれの `followcam.Camera` のメソッド（`_docs/cmd-capture.md`）。
 type FollowCamera interface {
 	// AnchorBoard は追う盤（マスタ）を決めて、そのとき読んだ 1 枚を返す（最初の 1 周に流す）。
-	AnchorBoard() (FollowShot, error)
+	AnchorBoard() (followcam.Shot, error)
 	// CaptureQuiet は撮って、ふるい・速い経路・81 マスの読みのどこまで進んだかを返す。
-	CaptureQuiet() (FollowShot, error)
+	CaptureQuiet() (followcam.Shot, error)
 	// RecognizeQuiet は直前に撮った 1 枚を 81 マスで読む（速い経路で決まらなかったとき）。
-	RecognizeQuiet() (FollowShot, error)
-	ReadCells(cells []int) ([]CellPiece, error)
-	ComparePieces(pairs []CellPair) []float64
+	RecognizeQuiet() (followcam.Shot, error)
+	ReadCells(cells []int) ([]followcam.CellPiece, error)
+	ComparePieces(pairs []followcam.CellPair) []float64
 	CellsUnmoved()
 	CellsUnclear()
 	ForgetUnmoved()
@@ -115,7 +97,7 @@ const (
 	followOk = "正常に盤面を認識しています"
 )
 
-// followSession は**中継を追う 1 回の解析タブ側の持ち物**（`StudyService.follow`）。撮る側の持ち物は `CaptureService` の
+// followSession は**中継を追う 1 回の解析タブ側の持ち物**（`StudyService.follow`）。撮る側の持ち物は `followcam.Camera` の
 // `captureFollow`（`FollowCamera.BeginFollow` / `EndFollow` で作り直す・捨てる）。
 //
 // **守る mu が 2 つある**: ループの状態（上半分）は自分の mu、答えの控え（下半分）は `StudyService.mu`
@@ -320,9 +302,9 @@ func (s *StudyService) followLoop(gen int, done chan struct{}) {
 }
 
 // followOnce は 1 周ぶん。戻り値は「すぐ次の 1 周へ行くか」（手が増えた・控えた）。given は既に撮って読んだ 1 枚（最初の 1 周）。
-func (s *StudyService) followOnce(gen int, given *FollowShot) (bool, error) {
+func (s *StudyService) followOnce(gen int, given *followcam.Shot) (bool, error) {
 	cam := s.Camera
-	var shot FollowShot
+	var shot followcam.Shot
 	if given != nil {
 		shot = *given
 	} else {
@@ -368,7 +350,7 @@ func (s *StudyService) followOnce(gen int, given *FollowShot) (bool, error) {
 		if !fast.Applied && !fast.Pending && !fast.AtFrame && (len(fast.ReadCells) > 0 || len(fast.Compare) > 0) {
 			// 成・不成や打った駒の種類で分かれた・行き先を確かめる。**頼まれたマスだけ読み、成・不成は見た目を比べて**
 			// もう一度（81 マスは読まない）。⚠️ **1 回だけ**（決まらなければ下で 81 マスを読む）。
-			var read []CellPiece
+			var read []followcam.CellPiece
 			if len(fast.ReadCells) > 0 {
 				if read, err = cam.ReadCells(fast.ReadCells); err != nil {
 					return false, err
@@ -462,7 +444,7 @@ func (s *StudyService) followSetPending(on bool, cells []int) {
 }
 
 // followRead は**読んだ 1 枚**を追従に渡す（別の盤・盤が無いなら見送って ok は偽）。
-func (s *StudyService) followRead(gen int, shot FollowShot) (FollowAuto, bool, error) {
+func (s *StudyService) followRead(gen int, shot followcam.Shot) (FollowAuto, bool, error) {
 	cam := s.Camera
 	waiting := followWaitingOf(s.State())
 	// ⚠️ **別の盤を先に見ること**（2026-09-18）。盤の有無のふるいで落ちた周は読んでいないので SFEN が空で、
@@ -499,7 +481,7 @@ func (s *StudyService) followRead(gen int, shot FollowShot) (FollowAuto, bool, e
 // followEvidence は**動く前と後の駒の見た目を測って**成・不成の証拠にする（2026-10-07）。⚠️ **nil を返さない**（空でも渡す）。
 // ⚠️ **捨てるのは測れなかった組（ちょうど -1）だけ**（似ていない駒どうしは近さが負になりうる）。
 // ⚠️ **`Same` を落とさないこと**（打った駒と盤上の駒の比べ。2026-10-09）。
-func (s *StudyService) followEvidence(pairs []CellPair) []PromoEvidence {
+func (s *StudyService) followEvidence(pairs []followcam.CellPair) []PromoEvidence {
 	sims := s.Camera.ComparePieces(pairs)
 	out := []PromoEvidence{}
 	for i, p := range pairs {

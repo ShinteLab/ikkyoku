@@ -455,6 +455,15 @@
     そのまま終わっていた。ループが Go に移ると、根を入れ替える操作と 1 周が並んで走りうるので、`StopFollow` が待ってから返る
   - **見張り（1 周が返ってこなければ立て直す）は無くした**。画面の setTimeout は予約を取りこぼしたが、Go のループは取りこぼさない。
     立て直しは並んで走る 1 周を作るので、撮る側が固まったときはその回で止まったままにした
+  - **第 3 段（2026-11-13）: 撮る側を Wails の外のパッケージ `ikkyoku/followcam` へ移した**（全体の見直し。ユーザーの判断）。
+    撮る側（ふるい・速い経路・録画・持ち物。約 1,350 行）は `_cmd/ikkyoku` の `CaptureService` にあったが、Wails に触れていたのは
+    枠の矩形を取る 1 点だけだった。Wails のモジュールにあると、ルートの `go test ./...` に入らず、「追いつく」と「棋譜を起こす」を
+    分ける（`TODO.md` 4 の ①）ときに Wails のモジュールごと触ることになる。⚠️ **動かしたのは置き場所だけ** —— 持ち物を
+    `followSession` に混ぜていない（第 2 段の「`BeginFollow` / `EndFollow` で一生を決める」はそのまま。局面を知らない層の線引きも残す）・
+    `app.FollowCamera` の 13 個の口も狭めていない（段取りが変わるので別の段）。ウィンドウが要るもの（枠の矩形・訂正した 1 枚・
+    エンジンの優先度）は関数の差し込み口で受け、型（`Shot` / `CellPiece` / `CellPair`）は `followcam` に置いて `app` が import する
+    （写すだけの包み `followcamera.go` は無くした）。ロックは `CaptureService.mu` と分かれた（差し込み口は撮る側のロックの外で呼ぶ）。
+    変わった点は 1 つ: `RecognizeQuiet` と `AnchorBoard` の 2 回目の矩形の取得にも枠の門番が掛かる（追っているあいだは枠を隠せないので同じはず）
 
 **制約は `_docs/position-connect.md`（`Connect`）・`_docs/app-follow.md`（`followProbe` / `FollowAuto`）・
 `_docs/cmd-capture.md`（ふるい・録画・枠の札）。実機での調整とデバッグ（症状から引く表・

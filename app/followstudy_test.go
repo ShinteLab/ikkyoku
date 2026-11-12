@@ -8,6 +8,7 @@ import (
 
 	"github.com/ShinteLab/core/sfen"
 	"github.com/ShinteLab/ikkyoku/analyze"
+	"github.com/ShinteLab/ikkyoku/followcam"
 	"github.com/ShinteLab/ikkyoku/position"
 	"github.com/ShinteLab/ikkyoku/recognize"
 )
@@ -1130,9 +1131,9 @@ func cellIdx(sq ...string) []int {
 }
 
 // readAfter は**平手から moves を指した盤を撮った 1 枚**の、マス idx（撮った画像の向き）を読んだことにする
-// （`CaptureService.ReadCells` の代わり）。rotated は後手目線（撮った画像は解析の向きを 180 度回したもの）。
+// （`followcam.Camera.ReadCells` の代わり）。rotated は後手目線（撮った画像は解析の向きを 180 度回したもの）。
 // 撮った画像の向きなので、手前側の駒が大文字で `Side` が up になる。
-func readAfter(t *testing.T, rotated bool, idx []int, moves ...string) []CellPiece {
+func readAfter(t *testing.T, rotated bool, idx []int, moves ...string) []followcam.CellPiece {
 	t.Helper()
 	p, err := position.FromFullSFEN(hirateBoard + " b - 1")
 	if err != nil {
@@ -1143,7 +1144,7 @@ func readAfter(t *testing.T, rotated bool, idx []int, moves ...string) []CellPie
 			t.Fatalf("ApplyMove(%q): %v", m, err)
 		}
 	}
-	out := make([]CellPiece, 0, len(idx))
+	out := make([]followcam.CellPiece, 0, len(idx))
 	for _, c := range idx {
 		i := c
 		if rotated {
@@ -1153,7 +1154,7 @@ func readAfter(t *testing.T, rotated bool, idx []int, moves ...string) []CellPie
 		if err != nil {
 			t.Fatalf("At(%d): %v", i, err)
 		}
-		cp := CellPiece{Cell: c}
+		cp := followcam.CellPiece{Cell: c}
 		if !cell.IsEmpty() {
 			up := cell.Black() != rotated
 			l := strings.TrimPrefix(cell.Mark(), "+")
@@ -1490,11 +1491,11 @@ func TestFollowCellsReadsTheCellToDecidePromotion(t *testing.T) {
 		t.Fatalf("2二 だけを読むよう頼むはず: %+v", a)
 	}
 	// 空きに読めたら決めない（手が被っているなど別の事情）。
-	if a, _ := s.FollowCells(changed, []CellPiece{{Cell: cellIdx("2b")[0], Piece: ""}}, nil); a.Applied || a.Pending {
+	if a, _ := s.FollowCells(changed, []followcam.CellPiece{{Cell: cellIdx("2b")[0], Piece: ""}}, nil); a.Applied || a.Pending {
 		t.Fatalf("空きに読めたのに決め打ちしました: %+v", a)
 	}
 	// 角（成っていない姿）と読めたら ▲2二角不成。
-	if a, err := s.FollowCells(changed, []CellPiece{{Cell: cellIdx("2b")[0], Piece: "B"}}, nil); err != nil || !a.Pending {
+	if a, err := s.FollowCells(changed, []followcam.CellPiece{{Cell: cellIdx("2b")[0], Piece: "B"}}, nil); err != nil || !a.Pending {
 		t.Fatalf("角と読めたのに控えていません: %+v（%v）", a, err)
 	}
 	if a, err := s.FollowConfirm(); err != nil || !a.Applied || a.Moves[0] != "8h2b" {
@@ -1515,7 +1516,7 @@ func TestFollowCellsPromotesWhenNotTheMovedPiece(t *testing.T) {
 			t.Fatalf("followApply: %v", err)
 		}
 		changed := cellIdx("8h", "2b")
-		if a, err := s.FollowCells(changed, []CellPiece{{Cell: cellIdx("2b")[0], Piece: read, Side: recognize.SideUp}}, nil); err != nil || !a.Pending {
+		if a, err := s.FollowCells(changed, []followcam.CellPiece{{Cell: cellIdx("2b")[0], Piece: read, Side: recognize.SideUp}}, nil); err != nil || !a.Pending {
 			t.Fatalf("%q と読めたとき、成りで控えていません: %+v（%v）", read, a, err)
 		}
 		if a, err := s.FollowConfirm(); err != nil || !a.Applied || a.Moves[0] != "8h2b+" {
@@ -1592,16 +1593,16 @@ func TestFollowCellsArrivalMustBeReadable(t *testing.T) {
 	to := cellIdx("7f")[0]
 	for _, tc := range []struct {
 		name string
-		read CellPiece
+		read followcam.CellPiece
 		ok   bool
 	}{
-		{"空き", CellPiece{Cell: to, Piece: ""}, false},
-		{"切り出せない", CellPiece{Cell: to, Piece: "?"}, false},
-		{"向きだけ読めて相手の駒", CellPiece{Cell: to, Piece: "?", Side: recognize.SideDown}, false},
-		{"向きだけ読めて指した側の駒", CellPiece{Cell: to, Piece: "?", Side: recognize.SideUp}, true},
+		{"空き", followcam.CellPiece{Cell: to, Piece: ""}, false},
+		{"切り出せない", followcam.CellPiece{Cell: to, Piece: "?"}, false},
+		{"向きだけ読めて相手の駒", followcam.CellPiece{Cell: to, Piece: "?", Side: recognize.SideDown}, false},
+		{"向きだけ読めて指した側の駒", followcam.CellPiece{Cell: to, Piece: "?", Side: recognize.SideUp}, true},
 	} {
 		s, _ := following(t)
-		a, err := s.FollowCells(cellIdx("7g", "7f"), []CellPiece{tc.read}, nil)
+		a, err := s.FollowCells(cellIdx("7g", "7f"), []followcam.CellPiece{tc.read}, nil)
 		if err != nil {
 			t.Fatalf("%s: FollowCells: %v", tc.name, err)
 		}
@@ -1615,7 +1616,7 @@ func TestFollowCellsArrivalMustBeReadable(t *testing.T) {
 // 求めると正しい手まで落ちる）。▲7六歩 の 7六 を「先手の香」と読んでも ▲7六歩 を控える。
 func TestFollowCellsArrivalIgnoresKind(t *testing.T) {
 	s, _ := following(t)
-	a, err := s.FollowCells(cellIdx("7g", "7f"), []CellPiece{{Cell: cellIdx("7f")[0], Piece: "L", Side: recognize.SideUp}}, nil)
+	a, err := s.FollowCells(cellIdx("7g", "7f"), []followcam.CellPiece{{Cell: cellIdx("7f")[0], Piece: "L", Side: recognize.SideUp}}, nil)
 	if err != nil || !a.Pending {
 		t.Fatalf("先後が合っているのに控えていません: %+v（%v）", a, err)
 	}
@@ -1628,11 +1629,11 @@ func TestFollowCellsArrivalIgnoresKind(t *testing.T) {
 // 画面では上下逆なので、▲7六歩 は 3三→3四 が変わったように見え、来た先手の歩は向こう向き（"p"）に読める。
 func TestFollowCellsArrivalSideWhenRotated(t *testing.T) {
 	for _, tc := range []struct {
-		read CellPiece
+		read followcam.CellPiece
 		ok   bool
 	}{
-		{CellPiece{Cell: cellIdx("3d")[0], Piece: "p", Side: recognize.SideDown}, true},
-		{CellPiece{Cell: cellIdx("3d")[0], Piece: "P", Side: recognize.SideUp}, false},
+		{followcam.CellPiece{Cell: cellIdx("3d")[0], Piece: "p", Side: recognize.SideDown}, true},
+		{followcam.CellPiece{Cell: cellIdx("3d")[0], Piece: "P", Side: recognize.SideUp}, false},
 	} {
 		pos := NewPositionService()
 		if _, err := pos.Load(hirateBoard); err != nil {
@@ -1648,7 +1649,7 @@ func TestFollowCellsArrivalSideWhenRotated(t *testing.T) {
 		if _, err := s.Adopt(); err != nil {
 			t.Fatalf("Adopt: %v", err)
 		}
-		a, err := s.FollowCells(cellIdx("3c", "3d"), []CellPiece{tc.read}, nil)
+		a, err := s.FollowCells(cellIdx("3c", "3d"), []followcam.CellPiece{tc.read}, nil)
 		if err != nil {
 			t.Fatalf("FollowCells: %v", err)
 		}
@@ -1720,7 +1721,7 @@ func TestFollowAutoAsksToComparePromotion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FollowAuto: %v", err)
 	}
-	want := []CellPair{{From: cellIdx("2d")[0], To: cellIdx("2c")[0]}}
+	want := []followcam.CellPair{{From: cellIdx("2d")[0], To: cellIdx("2c")[0]}}
 	if a.Applied || a.Pending || !slices.Equal(a.Compare, want) {
 		t.Fatalf("見た目を比べるよう頼むはず: %+v", a)
 	}
@@ -1751,7 +1752,7 @@ func TestFollowAutoAsksToCompareWhenPromotionTies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FollowAuto: %v", err)
 	}
-	want := []CellPair{{From: cellIdx("2d")[0], To: cellIdx("2c")[0]}}
+	want := []followcam.CellPair{{From: cellIdx("2d")[0], To: cellIdx("2c")[0]}}
 	if a.Applied || a.Pending || !slices.Equal(a.Compare, want) {
 		t.Fatalf("成・不成が同点なのに見た目を比べるよう頼んでいません: %+v", a)
 	}
@@ -1786,7 +1787,7 @@ func TestFollowCellsChecksLooksOfPlainMove(t *testing.T) {
 			if err != nil {
 				t.Fatalf("FollowCells: %v", err)
 			}
-			want := []CellPair{{From: cellIdx("7f")[0], To: cellIdx("7e")[0]}}
+			want := []followcam.CellPair{{From: cellIdx("7f")[0], To: cellIdx("7e")[0]}}
 			if len(a.ReadCells) == 0 || !slices.Equal(a.Compare, want) {
 				t.Fatalf("行き先を読むのと同じ 1 回で見た目の比べを頼んでいません: %+v", a)
 			}
@@ -1932,8 +1933,8 @@ func TestFollowAutoPromotionGoteRotated(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FollowAuto: %v", err)
 	}
-	pair := CellPair{From: 80 - cellIdx("8f")[0], To: 80 - cellIdx("8g")[0]}
-	if a.Pending || !slices.Equal(a.Compare, []CellPair{pair}) {
+	pair := followcam.CellPair{From: 80 - cellIdx("8f")[0], To: 80 - cellIdx("8g")[0]}
+	if a.Pending || !slices.Equal(a.Compare, []followcam.CellPair{pair}) {
 		t.Fatalf("撮った画像の向きで 8六→8七 を比べるよう頼むはず: %+v", a)
 	}
 	a, err = s.FollowAuto(board, realConf(board, 0.9), nil, []PromoEvidence{{From: pair.From, To: pair.To, Sim: 0.55}})
@@ -1960,11 +1961,11 @@ func TestFollowCellsPromotionByLooks(t *testing.T) {
 		s.markBase()
 		changed := cellIdx("8h", "2b")
 		a, err := s.FollowCells(changed, nil, nil)
-		pair := CellPair{From: cellIdx("8h")[0], To: cellIdx("2b")[0]}
-		if err != nil || !slices.Equal(a.Compare, []CellPair{pair}) || !slices.Equal(a.ReadCells, cellIdx("2b")) {
+		pair := followcam.CellPair{From: cellIdx("8h")[0], To: cellIdx("2b")[0]}
+		if err != nil || !slices.Equal(a.Compare, []followcam.CellPair{pair}) || !slices.Equal(a.ReadCells, cellIdx("2b")) {
 			t.Fatalf("2二 を読み、8八→2二 の見た目を比べるよう頼むはず: %+v（%v）", a, err)
 		}
-		read := []CellPiece{{Cell: cellIdx("2b")[0], Piece: tc.read, Side: recognize.SideUp}}
+		read := []followcam.CellPiece{{Cell: cellIdx("2b")[0], Piece: tc.read, Side: recognize.SideUp}}
 		a, err = s.FollowCells(changed, read, []PromoEvidence{{From: pair.From, To: pair.To, Sim: tc.sim}})
 		if err != nil || !a.Pending {
 			t.Fatalf("近さ %.2f: 控えていません: %+v（%v）", tc.sim, a, err)

@@ -3,6 +3,7 @@
 **Wails3 GUI アプリ。ここに置くのは「Wails の口が要るもの」だけ。**
 Service は `ikkyoku/app`、枠の幾何は `ikkyoku/guide`、画面は `frontend/src/AGENTS.md`。
 ⚠️ **残っているのは main・`CaptureService`・ウィンドウ／Win32 まわりだけ。**
+中継を追うときの撮る側（ふるい・速い経路・録画）は `ikkyoku/followcam`（2026-11-13 に移した。ここから渡すのは枠の矩形・訂正した 1 枚・エンジンの優先度の口だけ。`NewCaptureService`）。
 
 ## ⚠️ 触る前に読む文書（**自動では読まれない**）
 
@@ -13,7 +14,7 @@ Service は `ikkyoku/app`、枠の幾何は `ikkyoku/guide`、画面は `fronten
 |---|---|
 | ウィンドウの生成・起動時に出す窓・Frameless・窓の位置と大きさ（`main.go` / `window.go`）・**メイン画面が真っ黒になる**・**起動で黙って消えない**（`fatal.go` / `issues.go`） | `_docs/cmd-windows.md` |
 | 枠の透過・素通し・移動とリサイズ・**キャプチャ領域（物理ピクセル・HWND）**・**枠の下の帯**（`SetFrameFooter`）（`native_windows.go` / `captureservice.go`） | `_docs/cmd-frame.md`（寸法と幾何は `guide/AGENTS.md`） |
-| 撮る・中継を追う（枠の札・ふるい・録画）・画像ファイル・撮った画像のパス・ホットキー（`captureservice.go`） | `_docs/cmd-capture.md`（調整とデバッグはスキル `ikkyoku-follow`） |
+| 撮る・中継を追う（枠の札）・画像ファイル・撮った画像のパス・ホットキー（`captureservice.go`）。ふるい・速い経路・録画は `followcam/`（同じ文書） | `_docs/cmd-capture.md`（調整とデバッグはスキル `ikkyoku-follow`） |
 
 ## GUI アプリ(Wails3)
 
@@ -63,9 +64,6 @@ CLI は無い。**
 |---|---|
 | `main.go` | ウィンドウ 2 枚の生成・**Service の登録**・フック登録・起動時の自動フィット・終了時の後始末。⚠️ **Service の実体は `ikkyoku/app`**（`application.NewService()` は任意のパッケージの値を取れる）。⚠️ **import は別名にしてある** —— パッケージ名 `app` が `application.App` の変数 `app` とぶつかる。**main しか使わない小物も畳んである**（`/shinte-web/` の配信・ホットキーのアクセラレータ変換・ファイル選択ダイアログ） |
 | `captureservice.go` | Wails にバインドする Service。**ウィンドウと HWND を触るのでここに残っている**（枠の表示/非表示・素通し・自分を隠して撮る・メイン画面の塗り潰し・終了(`Quit`)・認識の呼び出し・ガイド枠の自動フィット `FitFrame`・**画像ファイルの読み込み `OpenImage`**）。⚠️ **撮る（`Capture`）と読み込む（`loadImage`）は `deliver` で合流する** —— そこから先（サムネイル・`capture:shot` / `capture:done`・認識）は 1 本だけ。⚠️ **寸法と幾何は `ikkyoku/guide`**（`captureRegion` はそれを使って HWND の矩形から領域を出すだけ） |
-| `celldiff.go` | **追従の速い経路の撮る側**（2026-10-07）。先端とぴったり合った 1 枚（`SetCellBase`）と今の 1 枚をマスごとに比べ、変わったマスの番号だけを返す（`CaptureResult.Cells`）。手を決めるのは `StudyService.FollowCells`。制約は `_docs/cmd-capture.md` の「速い経路」 |
-| `followstate.go` | **中継を追う 1 回の撮る側の持ち物**（`captureFollow`。2026-10-11）。追う盤・録画・比べる相手の 1 枚・マス割り・ふるいの数え。`BeginFollow` で作り直し `EndFollow` で丸ごと捨てる（どちらも中継セッションが `followCamera` 越しに呼ぶ）。⚠️ **追従の状態を足すならここ**（`CaptureService` に直に足さない）・⚠️ **追う前から入るもの（訂正した 1 枚・設定）と外部エンジンの優先度を下げたかは入れない**。制約は `_docs/cmd-capture.md` |
-| `followcamera.go` | **中継セッションの撮る側**（2026-10-11）。`CaptureService` を `app.FollowCamera` として包み、`main.go` が `StudyService.Camera` に入れる。1 周の段取りは `app` の中継セッション（`followsession.go`）。⚠️ **ここに判断を書かない**（`CaptureResult` を写すだけ。`Cells` の nil と空を潰さない）。中継セッションが呼ぶ `CaptureService` のメソッド（`CaptureQuiet` など）は `//wails:ignore`（画面から直に呼ばせない） |
 | `enginepriority.go` | **追っているあいだ盤の読みを優先する**（設定 `followFirst`。2026-10-07）の判断。外部エンジンの優先度を下げる・戻す（Win32 は `native_windows.go` の `setEnginePriority`）。制約は `_docs/cmd-capture.md` |
 | `window.go` | ウィンドウの位置・サイズ。**永続化**（`app-window.json`・既定値・画面内へのクランプ）と**追跡**（動くたびに記録。⚠️ **終了時には `Position()` を読めない**）の 2 つ。⚠️ **5 枚ぶん**（枠・メイン画面・**評価値グラフ**・**候補手**・**手順**）。⚠️ **古いファイルには `graph` / `side` / `moves` が無い**ので既定に倒すこと（倒さないと大きさ 0 の窓が出る） |
 | `native_windows.go` | **Win32 の直呼び**（`golang.org/x/sys/windows` の LazyProc。**cgo を使わないための層**）。①ウィンドウの矩形 ②枠の素通し（`WS_EX_TRANSPARENT`）とカーソル ③画像を CF_DIB でクリップボードへ ④**メッセージボックス**（`fatal.go` が使う。WebView2 にも Wails にも頼らない）。⑤**重なりの順**（`placeBehind`。切り離した窓をメイン画面のすぐ後ろへ回す。`registerPaneRaise`）。⚠️ **ここに判断を書かないこと** —— 付け外しの判断は `captureservice.go` の `watchCursor`、寸法は `ikkyoku/guide` |
@@ -86,32 +84,10 @@ CLI は無い。**
   ヘッダ・ボトムアップの行順・BGR の並びを検証する。手で組み立てたバイト列なので、
   貼り付け先で初めて気づくより往復で確かめるほうが速い。
   **実行するとクリップボードの中身が置き換わる**（`cd _cmd\ikkyoku; go test .`）
-- `followgate_test.go` — **画素差分のふるい**（`gate`）。⚠️ **歯止めは 3 つ** ——
-  **変わっていない周で認識を呼ばないこと**（ふるいの目的そのもの）・
-  **変化したら止まってから読むこと**（動いている最中は**棋士の手が被った盤**を
-  認識 1 枚ぶんかけて読むことになる）・**止まらなくてもいつかは読むこと**
-  （盤に重なるテロップで**永久に認識しない**という壊れ方を作らない）
-  ⚠️ **盤の有無のふるい（`detectGate`）の歯止めも同じファイル** ——
-  **実際の検出は見ない**（`suteme` の仕事）。見ているのは**通す側の約束**で、
-  **追う盤が無い / 枠が動いた / 見送りが続いた**ときに通すこと
-- `anchor_test.go` — **追う盤（マスタ）の決め方**（2026-10-09。`pickAnchor` / `SetFollowShot` / `noteShot`）。
+- `anchor_test.go` — **追う盤（マスタ）に使う 1 枚の控え方**（2026-10-09。`SetFollowShot` / `noteShot`。決め方 `PickAnchor` と、ふるい・速い経路・録画のテストは `followcam/AGENTS.md`）。
   ⚠️ 歯止めは —— **訂正してから追うなら押した瞬間の 1 枚ではなく訂正した 1 枚にすること**（盤が映っていなくても始める）・
   **今の根を採った 1 枚のときだけ使うこと**・**撮ったあとに枠が動いていたら使わないこと**・
   **盤の取れなかった 1 枚を採ったら前の 1 枚の盤を使わないこと**
-- `followrecord_test.go` — **中継の録画**（2026-10-11）。⚠️ 歯止めは —— **設定「中継の録画とログを残す（デバッグ）」が
-  切ってあれば 1 枚も残さないこと**（追っている途中で切っても次の 1 枚から）・**1 週間より前の録画だけ消し、録画の名前で
-  ないものは消さないこと**
-- `followstate_test.go` — **撮る側の持ち物の一生**（2026-10-11）。⚠️ 歯止めは —— **追い始めで作り直し、止めたら丸ごと捨てること**・
-  **訂正した 1 枚（追う前から入るもの）は捨てないこと**
-- `celldiff_test.go` — **速い経路の撮る側**（2026-10-07）。⚠️ 歯止めは —— **比べる相手が無ければ使わないこと**・
-  **ふるいが「変化して止まった」と言った 1 枚でしか使わないこと**（保険の 1 枚は答え合わせの役）・
-  **変わったマスの番号が塗り替えたマスだけになること**。変わったマスの組で「止まった」と見なすふるい（`gateReadCells`）も
-  ここ —— **盤全体が動き続けても組が 2 枚続けて同じなら速い経路に入ること**（ゲーム画面の演出）・**組が毎周変わる
-  あいだは待つこと**・⚠️ **決まらなかった組（`cellsFailed`）では見なさず、それでも待つ上限で読むこと**・
-  **比べる相手を替えたら組を忘れること**・⚠️ **何も変わっていない組が続くのは「変わっていない」に数え、保険で読むこと**・
-  ⚠️ **説明の付かない組（`CellsUnclear`）は盤全体が止まっていても待つ上限まで待つこと**・⚠️ **81 マスで「何も指していない」と
-  出た組（`CellsUnmoved`）は「変わっていない」に数えること**（どちらも 2026-10-08）。
-  **`ComparePieces`**（2026-10-07。成・不成の証拠）も —— **比べる相手が無ければ -1・同じ駒なら 1 に近いこと**
 - `fatal_test.go` — **続けられないときの箱の文面**（`fatalMessage`）と **⚠ の合わせ方**
   （`syncRecognizerIssue` / `syncKifuDBIssue`）。⚠️ 歯止めは —— **WebView2 が原因なら
   名指しすること**（利用者が自分で直せる唯一のもの）・**panic のスタックを箱に全部載せない

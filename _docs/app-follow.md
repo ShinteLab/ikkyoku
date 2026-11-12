@@ -162,7 +162,7 @@ followProbe ─> Rank（候補から選ぶ。29µs）─┬─ 読めていな�
 - ⚠️ **見ている場所は「先端を見ていたときだけ」動かす**（`tail -f` と同じ）。
   戻って検討している最中に飛ばされると、**中継が進むたびに読んでいた枝から
   引き剥がされる**
-- ⚠️ **撮るのは `CaptureService.CaptureQuiet`**（`Capture` ではない）。
+- ⚠️ **撮るのは `followcam.Camera.CaptureQuiet`**（`Capture` ではない）。
   あちらはイベントを出し、メイン画面を前に出し、訂正タブへ飛ばす ——
   **追従中に前に出られたら中継が見えない。** PNG も残さない
   （1 秒ごとに撮るので埋まる。**大半は捨てるフレーム**）
@@ -302,7 +302,7 @@ followProbe ─> Rank（候補から選ぶ。29µs）─┬─ 読めていな�
   読めたマス」があれば偽**（2026-10-08）。中継セッションはこれが真のときだけ「何も指していない」の組を覚えさせる
   （色付けで読めない駒が動いた跡を「動いていない」にしない。▲7八金 で 1 分見なかった）
   ⚠️ **成・不成や打った駒で分かれたときは `ReadCells`（違いの出るマス。撮った画像の向き）を返す** —— 中継セッションは
-  `CaptureService.ReadCells` で読み、結果（`CellPiece`）を添えてもう一度呼ぶ。⚠️ **比べるのは駒の種類と成りだけ**
+  `followcam.Camera.ReadCells` で読み、結果（`CellPiece`）を添えてもう一度呼ぶ。⚠️ **比べるのは駒の種類と成りだけ**
   （先後は候補どうしで同じ）・読むマスは `followReadMax` まで。⚠️ **成駒の候補は「動いた駒の成っていない姿と
   読めなければ合う」**（`followCellFits`。読めない "?" も合う —— 成駒は学習データに入らないので読めないのが普通）。
   ⚠️ **成っていない駒の候補は、その駒と読めたときだけ合う**（打つ手で "?" なら決めずに 81 マスを読む）。
@@ -334,7 +334,7 @@ followProbe ─> Rank（候補から選ぶ。29µs）─┬─ 読めていな�
 - ⚠️ **成・不成は、動く前と後の駒の見た目を比べて決める**（2026-10-07。`followPromoPairs` / `followApplyPromo` /
   `followPickByPromo`。理由は `_docs/design-follow.md` の「速い経路」）。
   ⚠️ **`FollowAuto` は promo が nil で、足そうとしている手に成りも不成も指せる手があれば、何も動かさずに `Compare` を返す**
-  （控えも足しも `Rev` も動かさない。中継セッションが `CaptureService.ComparePieces` で測り、同じ盤と証拠でもう一度呼ぶ）。
+  （控えも足しも `Rev` も動かさない。中継セッションが `followcam.Camera.ComparePieces` で測り、同じ盤と証拠でもう一度呼ぶ）。
   ⚠️ **promo が nil でなければ（空でも）もう頼まない**（無限に頼み直さない）。
   ⚠️ **手が 1 つに決まらなくても、候補が「同じ手順で成るか成らないかだけ違う」なら同じく `Compare` を返す**
   （`followPromoOnly`。2026-10-08）。行き先を成駒とも元の駒とも読めないと 2 通りが同点で残り、ゲーム画面の ▲6四銀成 は
@@ -427,8 +427,8 @@ followProbe ─> Rank（候補から選ぶ。29µs）─┬─ 読めていな�
 `follow:update`（`FollowUpdate`）を描くだけ。理由は `_docs/design-follow.md`。
 
 - ⚠️ **段取りを画面に戻さないこと**（判断が Go と画面に分かれていた。観点 4）。⚠️ **画面に状態を持たせない**（描くための写しだけ）
-- ⚠️ **撮る側は `FollowCamera` として差し込む**（`StudyService.Camera`。`_cmd/ikkyoku/followcamera.go` が `CaptureService` を包む）。
-  ⚠️ **包みに判断を書かない**・⚠️ **`FollowShot.Cells` の nil（測っていない）と空（何も変わっていない）を潰さない**
+- ⚠️ **撮る側は `FollowCamera` として差し込む**（`StudyService.Camera`。実体は `ikkyoku/followcam` の `Camera` で、`main.go` がそのまま入れる。2026-11-13。それまでは `_cmd/ikkyoku` の `CaptureService` を包んでいた）。
+  ⚠️ **`FollowShot.Cells` の nil（測っていない）と空（何も変わっていない）を潰さない**
   （`FrameFits` は測った 1 枚なら空でも呼ぶ）
 - ⚠️ **`StopFollow` は走っている 1 周が終わるまで待ってから返す**（`followStopWait` まで）。画面の見張り（`followguard.ts`）は
   これを待ってから根を入れ替える操作を通す —— 待たないと、走っている 1 周が入れ替えた局面へ手を足す
@@ -442,8 +442,8 @@ followProbe ─> Rank（候補から選ぶ。29µs）─┬─ 読めていな�
 - ⚠️ **`follow:update` の型は bindings に出ない**（`mainscreen.ts` の `FollowUpdate` を手で合わせる）
 - 枠を隠すのを断ったこと（`HideFrame`）は `FollowHideRefused` で受けて帯に出す（打った駒の候補は次の 1 周で出し直す）
 - **追従の状態も 1 回の持ち物**（第 2 段。2026-10-11）。解析タブ側の答えの控え（`pending` / `rewind` / `dropOffer` / `base` /
-  `lastFrame`）は `followSession` の下半分、撮る側（マスタ・録画・比べる相手の 1 枚・ふるい）は `CaptureService.fol`
-  （`captureFollow`。`_cmd/ikkyoku/followstate.go`）。⚠️ **追い始め（`StartFollow` → `BeginFollow`）で作り直し、止めたとき
+  `lastFrame`）は `followSession` の下半分、撮る側（マスタ・録画・比べる相手の 1 枚・ふるい）は `followcam.Camera` の持ち物
+  （`captureFollow`。`followcam/camera.go`）。⚠️ **追い始め（`StartFollow` → `BeginFollow`）で作り直し、止めたとき
   （`followStop` → `EndFollow`）に捨てる** —— 前の回の控えを次の回の最初の「変わっていない」1 枚で足さない・録画を前の回の
   ディレクトリに混ぜない。⚠️ **`followSession` は守る mu が 2 つ**（ループの状態は自分の mu、答えの控えは `StudyService.mu`）。
   ⚠️ **追う前から入るものは持ち物に入れない**（訂正した 1 枚 `followShot`・設定・外部エンジンの優先度を下げたか）

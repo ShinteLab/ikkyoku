@@ -1,4 +1,4 @@
-package main
+package followcam
 
 import (
 	"image"
@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/ShinteLab/ikkyoku"
-	ikkyokuapp "github.com/ShinteLab/ikkyoku/app"
 	"github.com/ShinteLab/ikkyoku/log"
 	"github.com/ShinteLab/ikkyoku/recognize"
 )
@@ -39,7 +38,7 @@ const (
 	// ⚠️ **解析タブ側の `followCellsMax` と同じ値にすること**（あちらが超えた組を 81 マスへ回す）。
 	cellFastMax = 8
 
-	// cellSkipSame は**比べる相手から、どのマスも変わっていない**（`CaptureResult.Skipped`）。
+	// cellSkipSame は**比べる相手から、どのマスも変わっていない**（`Shot.Skipped`）。
 	// ⚠️ **`unchanged`（前の 1 枚と同じ）とは別物。** 中継セッションは `unchanged` で控えた手を確かめる
 	// （`FollowConfirm`）ので、混ぜると「先端に戻った」1 枚で控えた手を足してしまう。
 	cellSkipSame = "same"
@@ -49,9 +48,7 @@ const (
 //
 // 呼ぶのは中継セッション（`app` の `followsession.go`）で、解析タブ側が `FollowAuto.AtFrame`（本譜の先端がこの 1 枚とぴったり合う）を
 // 返したときだけ。⚠️ **ここで「合っているか」を判断しないこと**（局面を知らない層なので）。
-//
-//wails:ignore
-func (s *CaptureService) SetCellBase() {
+func (s *Camera) SetCellBase() {
 	s.mu.Lock()
 	s.setCellBaseLocked(s.fol.lastQuiet)
 	s.mu.Unlock()
@@ -63,7 +60,7 @@ func (s *CaptureService) SetCellBase() {
 // 同じ組でも意味が違う —— 残すと、替えた直後の 1 枚が「2 枚続けて同じ」と見なされたり、
 // 決まらなかった組の印が別の相手の組に掛かったりする。版（`cellGen`）も進める（測っている最中に
 // 替わった 1 枚を、ふるいが前の版の組と比べないため）。
-func (s *CaptureService) setCellBaseLocked(img image.Image) {
+func (s *Camera) setCellBaseLocked(img image.Image) {
 	s.fol.cellBase = img
 	s.fol.cellGen++
 	s.fol.gateCells, s.fol.cellsFailed, s.fol.cellsUnmoved = frameCells{}, frameCells{}, frameCells{}
@@ -76,9 +73,7 @@ func (s *CaptureService) setCellBaseLocked(img image.Image) {
 // 1 周が 1〜5 秒塞がり、そのあいだに指した手と相手の応手がまとめて遅れた（1 組 10 秒前後。2026-10-08 に実機で踏んだ）。
 // 待っているあいだに指せば組が変わり、速い経路ですぐ取れる。⚠️ **待つ上限（`gateMovingMax`）では読む**（`gate`）——
 // 盤全体が止まっていても待つ側に数えるため、「変化した」印（`gateDirty`）を立てる。
-//
-//wails:ignore
-func (s *CaptureService) CellsUnclear() {
+func (s *Camera) CellsUnclear() {
 	s.mu.Lock()
 	img := s.fol.lastQuiet
 	s.mu.Unlock()
@@ -98,9 +93,7 @@ func (s *CaptureService) CellsUnclear() {
 // 呼ぶのは中継セッション（`app` の `followsession.go`）で、81 マスの読み（保険の 1 枚など）で手が見つかったとき（控えた・足した）。覚えたままだと、
 // 次の 1 枚が同じ組のまま `same` で省かれ、中継セッションが控えを捨てて、確かめが次の保険（10 秒後）まで延びる
 // （ゲーム画面の ▲7八金 で踏んだ）。
-//
-//wails:ignore
-func (s *CaptureService) ForgetUnmoved() {
+func (s *Camera) ForgetUnmoved() {
 	s.mu.Lock()
 	s.fol.cellsUnmoved = frameCells{}
 	s.mu.Unlock()
@@ -114,9 +107,7 @@ func (s *CaptureService) ForgetUnmoved() {
 // 81 マスで読み直さない（2026-10-08 に、同じ組を 20 秒で 5 回読んでいた）。保険（`gateSkipMax`）は残る。
 // ⚠️ **ここで「動いていないか」を判断しないこと**（局面を知らない層なので）。
 // ⚠️ **比べる相手を替えたら忘れる**（`setCellBaseLocked`）。
-//
-//wails:ignore
-func (s *CaptureService) CellsUnmoved() {
+func (s *Camera) CellsUnmoved() {
 	s.mu.Lock()
 	img := s.fol.lastQuiet
 	s.mu.Unlock()
@@ -134,7 +125,7 @@ type frameCells struct {
 	cells []int
 	// ok は比べられたか（比べる相手とマス割りがあり、画像の大きさが同じ）。偽なら cells は nil。
 	ok bool
-	// gen は比べた相手の版（`CaptureService.cellGen`）。
+	// gen は比べた相手の版（`captureFollow.cellGen`）。
 	gen int
 }
 
@@ -146,7 +137,7 @@ func (a frameCells) same(b frameCells) bool {
 // cellsOf は**比べる相手から変わったマスを測る**（測るだけ。ログも判断もしない。数ミリ秒）。
 //
 // 1 枚につき 1 回だけ測り、ふるい（`gate`。2 枚続けて同じ組か）と速い経路（`fastCells`）の両方に渡す。
-func (s *CaptureService) cellsOf(img image.Image) frameCells {
+func (s *Camera) cellsOf(img image.Image) frameCells {
 	s.mu.Lock()
 	base, rects, region, bounds, gen := s.fol.cellBase, s.fol.cellRects, s.fol.cellRegion, s.fol.cellBounds, s.fol.cellGen
 	s.mu.Unlock()
@@ -170,7 +161,7 @@ func (s *CaptureService) cellsOf(img image.Image) frameCells {
 //
 // 覚えておくと、同じ組が 2 枚続いてもふるいは「止まった」と見なさない（盤全体が止まるか、組が変わるか、
 // 待つ上限 `gateMovingMax` で読むまで待つ）。⚠️ **比べる相手を替えたら忘れる**（`setCellBaseLocked`）。
-func (s *CaptureService) markCellsFailed(fc frameCells) {
+func (s *Camera) markCellsFailed(fc frameCells) {
 	if !fc.ok {
 		return
 	}
@@ -186,9 +177,7 @@ func (s *CaptureService) markCellsFailed(fc frameCells) {
 // 手順が 1 通りに決まったときも、行き先に指した側の駒が来たかを確かめるために呼ばれる（同日。`app.FollowCells`）。
 // ⚠️ **撮り直さない**（変わったマスを測った 1 枚と同じ 1 枚を読む）。
 // ⚠️ **駒の向き（`CellPiece.Side`）を落とさないこと**（種類が読めない "?" でも向きで先後を確かめる）。
-//
-//wails:ignore
-func (s *CaptureService) ReadCells(cells []int) ([]ikkyokuapp.CellPiece, error) {
+func (s *Camera) ReadCells(cells []int) ([]CellPiece, error) {
 	s.mu.Lock()
 	img, rects, region := s.fol.lastQuiet, s.fol.cellRects, s.fol.cellRegion
 	s.mu.Unlock()
@@ -196,10 +185,10 @@ func (s *CaptureService) ReadCells(cells []int) ([]ikkyokuapp.CellPiece, error) 
 	if err != nil {
 		return nil, err
 	}
-	out := make([]ikkyokuapp.CellPiece, len(cells))
+	out := make([]CellPiece, len(cells))
 	names := make([]string, len(cells))
 	for i, c := range cells {
-		out[i] = ikkyokuapp.CellPiece{Cell: c, Piece: pieces[i].Piece, Side: pieces[i].Side}
+		out[i] = CellPiece{Cell: c, Piece: pieces[i].Piece, Side: pieces[i].Side}
 		names[i] = cellName(c) + "=" + pieces[i].Piece
 		if pieces[i].Piece == "?" && pieces[i].Side != "" {
 			names[i] += "(" + pieces[i].Side + ")" // 種類は読めないが向きは読めた
@@ -213,14 +202,12 @@ func (s *CaptureService) ReadCells(cells []int) ([]ikkyokuapp.CellPiece, error) 
 //
 // 組ごとに、動く前のマス（From）は速い経路の比べる相手の 1 枚（`cellBase`）から、動いた先のマス（To）は
 // 直前に撮った 1 枚（`lastQuiet`）から、マス割り（`cellRects`）で切り出して `ikkyoku.PieceSimilarity` で比べる。
-// マスは撮った画像の向きの番号（`app.CellPair`。中継セッションが `FollowAuto.Compare` をそのまま渡す）。
+// マスは撮った画像の向きの番号（`CellPair`。中継セッションが `FollowAuto.Compare` をそのまま渡す）。
 // 測れない組は -1（比べる相手もマス割りも無い・画像の大きさが違う・一様なマス）。
 //
 // ⚠️ **測るだけ。成ったかどうかは決めない**（しきい値は `app` の `promoChangedBelow` / `promoSameFrom`）。
 // ⚠️ **撮り直さない**（変わったマスを測った・81 マスを読んだ 1 枚と同じ 1 枚を見る）。
-//
-//wails:ignore
-func (s *CaptureService) ComparePieces(pairs []ikkyokuapp.CellPair) []float64 {
+func (s *Camera) ComparePieces(pairs []CellPair) []float64 {
 	s.mu.Lock()
 	base, cur, rects, bounds := s.fol.cellBase, s.fol.lastQuiet, s.fol.cellRects, s.fol.cellBounds
 	s.mu.Unlock()
@@ -249,7 +236,7 @@ func (s *CaptureService) ComparePieces(pairs []ikkyokuapp.CellPair) []float64 {
 }
 
 // noteCellRects は 81 マスを読んだときのマス割りを控える（速い経路はこれでマスを切る）。
-func (s *CaptureService) noteCellRects(img image.Image, d *recognize.Debug) {
+func (s *Camera) noteCellRects(img image.Image, d *recognize.Debug) {
 	if d == nil || len(d.Cells) != 81 {
 		return
 	}
@@ -273,7 +260,7 @@ func (s *CaptureService) noteCellRects(img image.Image, d *recognize.Debug) {
 // 15 マスほど光る。光っているだけか（空きのマスだけが変わったか）は局面を知っている解析タブ側が決め
 // （`StudyService.FollowCells` の `LooksOnly`）、そうでなければ手順を割り出さずに返す —— 中継セッションがその 1 枚を
 // 81 マスで読み、`RecognizeQuiet` が決まらなかった組として覚える（今までと同じ）。
-func (s *CaptureService) fastCells(fc frameCells) bool {
+func (s *Camera) fastCells(fc frameCells) bool {
 	if !fc.ok {
 		return false
 	}

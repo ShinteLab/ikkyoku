@@ -7,14 +7,16 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/ShinteLab/ikkyoku/followcam"
 )
 
 // fakeCamera は中継セッションの撮る側の偽物（台本どおりに 1 枚ずつ返す）。台本が尽きたら「変わっていない」を返し続ける。
 type fakeCamera struct {
 	mu        sync.Mutex
-	anchor    FollowShot
+	anchor    followcam.Shot
 	anchorErr error
-	shots     []FollowShot
+	shots     []followcam.Shot
 	// hold が nil でなければ、CaptureQuiet はそれが閉じるまで返らない（走っている 1 周を作る）。
 	hold      chan struct{}
 	entered   chan struct{}
@@ -24,8 +26,8 @@ type fakeCamera struct {
 	frames    int
 }
 
-func (c *fakeCamera) AnchorBoard() (FollowShot, error) { return c.anchor, c.anchorErr }
-func (c *fakeCamera) CaptureQuiet() (FollowShot, error) {
+func (c *fakeCamera) AnchorBoard() (followcam.Shot, error) { return c.anchor, c.anchorErr }
+func (c *fakeCamera) CaptureQuiet() (followcam.Shot, error) {
 	c.mu.Lock()
 	hold, entered := c.hold, c.entered
 	c.mu.Unlock()
@@ -41,22 +43,24 @@ func (c *fakeCamera) CaptureQuiet() (FollowShot, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if len(c.shots) == 0 {
-		return FollowShot{Skipped: "unchanged"}, nil
+		return followcam.Shot{Skipped: "unchanged"}, nil
 	}
 	s := c.shots[0]
 	c.shots = c.shots[1:]
 	return s, nil
 }
-func (c *fakeCamera) RecognizeQuiet() (FollowShot, error) {
-	return FollowShot{}, errors.New("読み直す 1 枚がありません")
+func (c *fakeCamera) RecognizeQuiet() (followcam.Shot, error) {
+	return followcam.Shot{}, errors.New("読み直す 1 枚がありません")
 }
-func (c *fakeCamera) ReadCells([]int) ([]CellPiece, error)     { return nil, nil }
-func (c *fakeCamera) ComparePieces(pairs []CellPair) []float64 { return make([]float64, len(pairs)) }
-func (c *fakeCamera) CellsUnmoved()                            {}
-func (c *fakeCamera) CellsUnclear()                            {}
-func (c *fakeCamera) ForgetUnmoved()                           {}
-func (c *fakeCamera) SetCellBase()                             {}
-func (c *fakeCamera) SaveFollowFrame(int, []string, bool)      { c.mu.Lock(); c.frames++; c.mu.Unlock() }
+func (c *fakeCamera) ReadCells([]int) ([]followcam.CellPiece, error) { return nil, nil }
+func (c *fakeCamera) ComparePieces(pairs []followcam.CellPair) []float64 {
+	return make([]float64, len(pairs))
+}
+func (c *fakeCamera) CellsUnmoved()                       {}
+func (c *fakeCamera) CellsUnclear()                       {}
+func (c *fakeCamera) ForgetUnmoved()                      {}
+func (c *fakeCamera) SetCellBase()                        {}
+func (c *fakeCamera) SaveFollowFrame(int, []string, bool) { c.mu.Lock(); c.frames++; c.mu.Unlock() }
 func (c *fakeCamera) SaveFollowMiss(_ int, kind string) {
 	c.mu.Lock()
 	c.misses = append(c.misses, kind)
@@ -131,7 +135,7 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 // （2026-10-11。1 周の段取りを画面から Go へ移した。`followsession.go`）。止めたら追う盤を忘れ、撮る側の入り切りを戻すこと。
 func TestFollowSessionAddsAfterTwoFrames(t *testing.T) {
 	board := boardAfter(t, "7g7f")
-	cam := &fakeCamera{anchor: FollowShot{SFEN: board, CellConfidence: realConf(board, 0.9)}}
+	cam := &fakeCamera{anchor: followcam.Shot{SFEN: board, CellConfidence: realConf(board, 0.9)}}
 	s, u := sessionFollowing(t, cam)
 
 	if err := s.StartFollow(); err != nil {
@@ -164,9 +168,9 @@ func TestFollowSessionSaysLostAfterLimit(t *testing.T) {
 	// 歩が一気に 2 マス進んだ盤（どの手順でも繋がらない。費用表が無いので修復もしない）。
 	far := strings.Replace(hirateBoard, "PPPPPPPPP", "PPPPPP1PP", 1)
 	far = strings.Replace(far, "/9/9/9/", "/9/9/2P6/", 1)
-	cam := &fakeCamera{anchor: FollowShot{SFEN: hirateBoard}}
+	cam := &fakeCamera{anchor: followcam.Shot{SFEN: hirateBoard}}
 	for i := 0; i < followLostLimit+1; i++ {
-		cam.shots = append(cam.shots, FollowShot{SFEN: far})
+		cam.shots = append(cam.shots, followcam.Shot{SFEN: far})
 	}
 	s, u := sessionFollowing(t, cam)
 	if err := s.StartFollow(); err != nil {
@@ -198,7 +202,7 @@ func TestFollowSessionStopsWhenAnchorFails(t *testing.T) {
 // ⚠️ **`StopFollow` は走っている 1 周が終わるまで待ってから返ること**（2026-10-11）。画面はこれを待ってから根を入れ替える
 // 操作を通す（`followguard.ts`）—— 待たないと、走っている 1 周が入れ替えた局面へ手を足す。
 func TestFollowSessionStopWaitsForCycle(t *testing.T) {
-	cam := &fakeCamera{anchor: FollowShot{Skipped: "unchanged"}, hold: make(chan struct{}), entered: make(chan struct{})}
+	cam := &fakeCamera{anchor: followcam.Shot{Skipped: "unchanged"}, hold: make(chan struct{}), entered: make(chan struct{})}
 	entered := cam.entered
 	s, _ := sessionFollowing(t, cam)
 	if err := s.StartFollow(); err != nil {
@@ -239,7 +243,7 @@ func TestFollowSessionNeedsCamera(t *testing.T) {
 // 最初の「変わっていない」1 枚で足さない。
 func TestFollowSessionDropsHoldsAtStartAndStop(t *testing.T) {
 	board := boardAfter(t, "7g7f")
-	cam := &fakeCamera{anchor: FollowShot{Skipped: "unchanged"}}
+	cam := &fakeCamera{anchor: followcam.Shot{Skipped: "unchanged"}}
 	s, _ := sessionFollowing(t, cam)
 	// 追っていないあいだに 1 枚目の答えを控えた（前の回の名残）。
 	if a, err := s.FollowAuto(board, realConf(board, 0.9), nil, nil); err != nil || !a.Pending {

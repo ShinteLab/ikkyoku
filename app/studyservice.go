@@ -52,7 +52,7 @@ type StudyService struct {
 	// 戻り値で描ける**ので今までどおり動く。効かなくなるのは**別の窓との連動**だけ。
 	Emit EventEmitter
 
-	// Camera は**中継を追うときの撮る側**（`followsession.go`。2026-10-11）。`main.go` が `CaptureService` を包んで
+	// Camera は**中継を追うときの撮る側**（`followsession.go`。2026-10-11）。`main.go` が `followcam.Camera`（`CaptureService.follow`）を
 	// 起動時に 1 度だけ入れる。⚠️ **nil なら中継は追えない**（`StartFollow` が断る。ほかは今までどおり動く）。
 	// ⚠️ **公開フィールドで差し込む**（メソッドにすると bindings に出る。`app/AGENTS.md`）。
 	Camera FollowCamera

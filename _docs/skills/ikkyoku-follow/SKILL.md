@@ -17,7 +17,7 @@ description: ikkyoku（一局）の「中継を追う」（Phase 6 の追従）�
 
 ```
 中継セッション followLoop（app/followsession.go。1 周ずつ順番に。撮る間隔 250ms。2026-10-11 に画面から移した）
-  └─> CaptureService.CaptureQuiet（_cmd/ikkyoku/captureservice.go）
+  └─> followcam.Camera.CaptureQuiet（followcam/camera.go）
         撮る(数ms)
         └─ gate: 前の 1 枚と盤の矩形の中だけ比べる(数ms)
              ├─ 変わっていない ─────────────> Skipped="unchanged"（読まない）

@@ -40,6 +40,7 @@ import (
 	// ⚠️ **別名にしてあるのは、この関数の中の `app`（application.App）と
 	// パッケージ名がぶつかるから。**
 	ikkyokuapp "github.com/ShinteLab/ikkyoku/app"
+	"github.com/ShinteLab/ikkyoku/followcam"
 	"github.com/ShinteLab/ikkyoku/guide"
 	"github.com/ShinteLab/ikkyoku/log"
 	"github.com/ShinteLab/ikkyoku/recognize"
@@ -305,15 +306,16 @@ func main() {
 	settingsSvc.OnClickThrough = captureSvc.applyClickThrough
 	// 中継を追う盤（マスタ）を訂正した 1 枚にするとき、それが今の根を採った 1 枚かを確かめる（2026-10-09）。
 	captureSvc.studySession = studySvc.Session
-	// 中継を追う 1 周の段取りは解析タブ側（`app` の中継セッション。2026-10-11）。撮る側はこちらを包んで渡す。
-	studySvc.Camera = followCamera{captureSvc}
+	// 中継を追う 1 周の段取りは解析タブ側（`app` の中継セッション。2026-10-11）。撮る側は `ikkyoku/followcam`
+	// （2026-11-13 に `CaptureService` から移した。枠の矩形などウィンドウが要るものは `NewCaptureService` が差し込む）。
+	studySvc.Camera = captureSvc.follow
 	captureSvc.onHideRefused = studySvc.FollowHideRefused
 	// 「中継を追うあいだは盤の読みを優先する」（2026-10-07。`enginepriority.go`）。
 	captureSvc.followFirst = cfg.FollowFirst
 	// 「中継の録画とログを残す（デバッグ）」（2026-10-11）。切ってあっても古い録画は消す（1 週間。`followRecordKeepDays`）。
 	captureSvc.applyFollowDebug(cfg.FollowDebug)
-	if root := followRecordRoot(); root != "" {
-		go removeOldRecordings(root, time.Now())
+	if root := followcam.RecordRoot(); root != "" {
+		go followcam.RemoveOldRecordings(root, time.Now())
 	}
 	// 撮った画像も 1 週間で消す（2026-10-11。suteme へ送れば役目を終える。置き場所は ikkyoku.DefaultOutDir）。
 	if dir, err := ikkyoku.DefaultOutDir(); err == nil {

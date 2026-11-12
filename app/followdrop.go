@@ -8,7 +8,7 @@ package app
 //
 // 決め方は 2 段（ユーザーの判断）:
 //
-//  1. **盤上の同じ側の駒と見た目を比べる**（`followDropPairs` → `CaptureService.ComparePieces` → `followPickDrop`）。
+//  1. **盤上の同じ側の駒と見た目を比べる**（`followDropPairs` → `followcam.Camera.ComparePieces` → `followPickDrop`）。
 //     成・不成を見た目で決めたのと同じ考え方で、認識器の読み違いに左右されない（比べる相手は盤上の実物）
 //  2. **それでも決まらなければ人に聞く**（`DropChoices` → 枠の下の帯 → `FollowChoose`）。中継を観ている人なら一目で分かる
 //
@@ -21,6 +21,7 @@ import (
 
 	"github.com/ShinteLab/core/sfen"
 
+	"github.com/ShinteLab/ikkyoku/followcam"
 	"github.com/ShinteLab/ikkyoku/log"
 	"github.com/ShinteLab/ikkyoku/position"
 )
@@ -93,7 +94,7 @@ func followDropOnly(p FollowProbe) *followDropSplit {
 // 比べる駒は、打つ直前の局面（本譜の先端から候補の手順の打つ手の前まで）で**指した側の成っていない同じ種類の駒**で、
 // 打つ手のあとの手が動かしていないもの（今の 1 枚のそのマスに写っている）。
 // ⚠️ **比べる駒が無い種類が 1 つでもあれば ok は偽**（その種類を外せないので見た目では決められない。人に聞く）。
-func (s *StudyService) followDropPairs(ds *followDropSplit, rotated bool) (pairs []CellPair, letters []byte, ok bool) {
+func (s *StudyService) followDropPairs(ds *followDropSplit, rotated bool) (pairs []followcam.CellPair, letters []byte, ok bool) {
 	s.mu.Lock()
 	if s.study == nil {
 		s.mu.Unlock()
@@ -130,7 +131,7 @@ func (s *StudyService) followDropPairs(ds *followDropSplit, rotated bool) (pairs
 			if rotated {
 				from = 80 - i
 			}
-			pairs = append(pairs, CellPair{From: from, To: to, Same: true})
+			pairs = append(pairs, followcam.CellPair{From: from, To: to, Same: true})
 			letters = append(letters, letter)
 			n++
 		}
@@ -144,7 +145,7 @@ func (s *StudyService) followDropPairs(ds *followDropSplit, rotated bool) (pairs
 // followPickDrop は見た目の証拠から**打った駒の種類**を決める（決まらなければ decided は偽）。
 // 種類ごとに盤上の駒との近さの最大を取り、1 位が `dropLooksMin` 以上で 2 位と `dropLooksMargin` 以上離れていれば決める。
 // ⚠️ **測れなかった種類があれば決めない**（その種類を外す根拠が無い）。
-func followPickDrop(pairs []CellPair, letters []byte, promo []PromoEvidence) (letter byte, sims string, decided bool) {
+func followPickDrop(pairs []followcam.CellPair, letters []byte, promo []PromoEvidence) (letter byte, sims string, decided bool) {
 	best := map[byte]float64{}
 	for i, p := range pairs {
 		for _, e := range promo {

@@ -1,6 +1,6 @@
-package main
+package followcam
 
-// 画素差分のふるい（`CaptureService.gate`）の歯止め（2026-09-18）。
+// 画素差分のふるい（`Camera.gate`）の歯止め（2026-09-18）。
 //
 // ⚠️ **ここが守っているのは 3 つ。**
 //   - **変わっていない周で認識を呼ばないこと**（これがふるいの目的そのもの。
@@ -44,21 +44,21 @@ func gateMoved(n int) *image.RGBA {
 	return img
 }
 
-func gateService() *CaptureService {
-	s := &CaptureService{}
+func gateService() *Camera {
+	s := &Camera{}
 	s.fol.boardAnchor = recognize.Signature{Board: gateBoard}
 	return s
 }
 
 // gateImg は 1 枚をふるいに掛ける（`CaptureQuiet` と同じく、比べる相手から変わったマスを測ってから）。
-func (s *CaptureService) gateImg(img image.Image) string {
+func (s *Camera) gateImg(img image.Image) string {
 	return s.gate(img, s.cellsOf(img))
 }
 
 // ⚠️ **追う盤が決まっていない / 比べる相手が無いなら読む。**
 // 見落とすより 1 枚余分に読むほうが軽い。
 func TestGateReadsWithoutAnchorOrPrev(t *testing.T) {
-	bare := &CaptureService{}
+	bare := &Camera{}
 	if got := bare.gateImg(gateFrame()); got != "" {
 		t.Fatalf("追う盤が決まっていないのに省きました: %q", got)
 	}
@@ -152,7 +152,7 @@ func TestResetGate(t *testing.T) {
 
 // ⚠️ **追う盤が決まっていなければ通すこと。**
 func TestDetectGatePassesWithoutAnchor(t *testing.T) {
-	s := &CaptureService{}
+	s := &Camera{}
 	if kind, _ := s.detectGate(gateFrame(), ikkyoku.Region{X: 1, Y: 2, Width: 3, Height: 4}); kind != "" {
 		t.Fatalf("追う盤が決まっていないのに落としました: %q", kind)
 	}

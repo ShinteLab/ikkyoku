@@ -118,7 +118,7 @@ Claude Code でスキルとして使いたい人は、各自の `.claude/skills/
 | スキル **`ikkyoku-handicap-mate`**（`_docs/skills/`） | **手合割（駒落ち）と詰将棋の全体像**（3 通りの解釈・4 つの入口・側の呼び名）と**詰将棋エンジンを繋ぐ手順**、⚠️ **どのエンジンが何を返すかの実測**（`references/engines.md`） | 駒落ち・詰将棋・詰み探索を触るとき |
 | スキル **`ikkyoku-cloud`**（`_docs/skills/`） | **クラウド（Linux コンテナ）で組む・テストする 1 コマンド**（`cloud.sh test` / `check`）と、使用量を抑える約束。⚠️ **`CLAUDE_CODE_REMOTE=true` のときだけ読む**（手元では要らない） | クラウドで動いているとき（**手探りで準備する前に**） |
 | スキル `wails3` | Wails3 全般。⚠️ **alpha2.117 前提なので beta.26 と食い違う** | Wails の API で詰まったとき |
-| **各パッケージの `AGENTS.md`** | **そのコードを触るときの制約**（`recognize` / `position` / `analyze` / `app` / `guide` / `piecefont` / `training` / `legal` / `usi` / `_cmd/ikkyoku`）。**テストが何の歯止めか**も、それぞれの「テスト」節 | そのディレクトリを触るとき（自動で読まれる） |
+| **各パッケージの `AGENTS.md`** | **そのコードを触るときの制約**（`recognize` / `position` / `analyze` / `app` / `guide` / `piecefont` / `training` / `legal` / `usi` / `followcam` / `_cmd/ikkyoku`）。**テストが何の歯止めか**も、それぞれの「テスト」節 | そのディレクトリを触るとき（自動で読まれる） |
 | `_cmd/ikkyoku/frontend/src/AGENTS.md` | **画面（フロント）の地図と、崩さないこと 12 箇条** | フロントを触るとき（自動で読まれる） |
 | **`_docs/app-*.md` / `cmd-*.md` / `position-*.md`** | **大きすぎたパッケージの制約を話題ごとに分けたもの**（`app` = 棋譜を読む・手合割と詰将棋・棚・目線・エンジン・追従・指し継ぎ・控え / `cmd` = `_cmd/ikkyoku` のウィンドウ・枠・撮る / `position` = `Connect`・手の木）。⚠️ **自動では読まれない** —— 各パッケージの `AGENTS.md` の索引で引く | そのパッケージを触るとき（**触る前に開く**） |
 | `_docs/ui/*.md` | **画面の作りの全部**（寸法・訂正・手順と分岐・解析の面・評価値グラフ・切り離し・タブ） | 上の表が指したとき |
@@ -192,7 +192,7 @@ Claude Code でスキルとして使いたい人は、各自の `.claude/skills/
   途中で分かれる答えは差し替えの関門へ。⚠️ **関門は道ごとに分けない**・⚠️ **比べる相手から修復でしか合わないなら、その前の推測の手も疑う**
 - **中継を追う 1 回は Go の中継セッションが持つ**（2026-10-11。`app/followsession.go`。1 周の段取り・ループ・見失い・控えの有無・帯の候補）。
   ⚠️ **段取りを画面に戻さない**（画面は押して描くだけ）・⚠️ **止めるときは走っている 1 周の終わりを待つ**（`StopFollow`）。
-  追従の状態も 1 回の持ち物（解析タブ側は `followSession`・撮る側は `captureFollow`）で、⚠️ **追い始めで作り直し、止めたときに捨てる**
+  追従の状態も 1 回の持ち物（解析タブ側は `followSession`・撮る側は `ikkyoku/followcam` の `captureFollow`。2026-11-13 に Wails の外へ移した）で、⚠️ **追い始めで作り直し、止めたときに捨てる**
 - **空きの読みも確かさを持つ**（2026-10-11。`1 − 被覆率 ÷ 空きの線`。`recognize.CellConfidence`）。⚠️ **空きを一律の下限（0.15）に戻さない**・
   ⚠️ **読んだマスと候補の盤のマスの判定は `followJudge` だけ**（弱い読み・成駒・"?" の決まりを呼ぶ側に書かない）
 - **駒の種類の読みは、その 1 枚で動いていない駒の種類をほぼ当てている（読み違い 1 以下）ときだけ信じる**（2026-10-10）。
@@ -290,6 +290,7 @@ Claude Code でスキルとして使いたい人は、各自の `.claude/skills/
 | `usi/` | Step 1 の足場（同一プロセスの `engine` を `io.Pipe` で USI として繋ぐ。Step 2 で消える） |
 | `app/` | **フロントに公開する Service 9 つ**（設定・訂正・解析・棋譜・駒の字・学習送信・計測・**問題の一覧**）。`app/AGENTS.md` は索引で、制約は `_docs/app-*.md` |
 | `guide/` | ガイド枠の寸法と幾何（自動フィット。ウィンドウにも Wails にも依存しない） |
+| `followcam/` | **中継を追うときの撮る側**（2026-11-13 に `_cmd/ikkyoku` から移した。ふるい・速い経路の変わったマス・81 マスの読み・録画・追う 1 回の持ち物）。局面を知らない・Wails に依存しない。`app` の中継セッションが `FollowCamera` として使う |
 | `piecefont/` / `training/` | 端末のフォントから駒の字を焼く / 訂正した局面を `suteme` へ登録するクライアント |
 | `_cmd/ikkyoku/` | **Wails3 アプリ**（独立したネストモジュール。**Wails の口が要るものだけ**。CLI は無い）。ウィンドウ 5 枚（枠 / メイン画面 / 評価値グラフ / 候補手 / 手順）・キャプチャ領域は枠のクライアント矩形そのもの。`_cmd/ikkyoku/AGENTS.md`、画面は `_cmd/ikkyoku/frontend/src/AGENTS.md` |
 | `_cmd/ikkyoku-trim/` | **録画した動画を、盤が変わった前後だけに詰める開発用のコマンド**（2026-10-11。ルートモジュールの中・Wails を使わない・ffmpeg を外から呼ぶ）。ikkyoku アプリとは関わらない。`_cmd/ikkyoku-trim/README.md` |
@@ -297,7 +298,7 @@ Claude Code でスキルとして使いたい人は、各自の `.claude/skills/
 ## ビルドと実機確認 — スキル `ikkyoku-build`
 
 ```powershell
-go build ./...      # app / guide / position / analyze / recognize / legal / piecefont / training / usi
+go build ./...      # app / guide / position / analyze / recognize / legal / piecefont / training / usi / followcam
 go vet ./...
 go test ./...
 ```

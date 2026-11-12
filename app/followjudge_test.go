@@ -3,6 +3,7 @@ package app
 import (
 	"testing"
 
+	"github.com/ShinteLab/ikkyoku/followcam"
 	"github.com/ShinteLab/ikkyoku/position"
 )
 
@@ -65,7 +66,7 @@ func TestFollowJudge(t *testing.T) {
 // 種類が読めない "?" でも、向きが読めていれば先後を言う（成駒は種類が読めないのが普通）。
 func TestFollowObsRead(t *testing.T) {
 	black := cellOf(t, "+P")
-	read := []CellPiece{{Cell: 0, Piece: "?", Side: "up"}, {Cell: 80, Piece: "p"}}
+	read := []followcam.CellPiece{{Cell: 0, Piece: "?", Side: "up"}, {Cell: 80, Piece: "p"}}
 	if v := followJudge(black, followObsRead(read, 0, false)); v.side != followAgree {
 		t.Errorf("手前向きの \"?\" が先手の駒と合いません: %+v", v)
 	}

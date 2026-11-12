@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/ShinteLab/core/kifu"
+	"github.com/ShinteLab/ikkyoku/followcam"
 	"github.com/ShinteLab/ikkyoku/legal"
 	"github.com/ShinteLab/ikkyoku/log"
 	"github.com/ShinteLab/ikkyoku/position"
@@ -690,7 +691,7 @@ func (s *StudyService) fallbackFollow(ranked position.RankResult, r position.Con
 // ⚠️ **無くても動くこと**（nil・数が合わない → 全部見えていることにする。今までどおり）。
 //
 // promo は**成・不成の見た目の証拠**（2026-10-07。`PromoEvidence`）。nil で呼ばれ、足そうとしている手に
-// 成りも不成も指せる手があれば、何も動かさずに `Compare` を返す（中継セッションが `CaptureService.ComparePieces` で
+// 成りも不成も指せる手があれば、何も動かさずに `Compare` を返す（中継セッションが `followcam.Camera.ComparePieces` で
 // 測って、同じ盤と証拠でもう一度呼ぶ）。⚠️ **nil でない（空でも）ときは、もう頼まない**（今までどおり決める）。
 //
 //wails:ignore
@@ -863,7 +864,7 @@ const followCellsBehind = 2
 
 // followBase は**速い経路の比べる相手の 1 枚が、どの局面だったか**（2026-10-07）。
 //
-// 比べる相手（`CaptureService.cellBase`）を入れたときの、根と本譜の手順を覚える。
+// 比べる相手（`followcam.Camera` の `cellBase`）を入れたときの、根と本譜の手順を覚える。
 // ⚠️ **本譜の先端は比べる相手より先へ進むことがある**（81 マスの読みで手を足したとき）。そのとき
 // 変わったマスは「比べる相手 → 今の 1 枚」の分なので、**比べる相手の局面から突き合わせる**。
 type followBase struct {
@@ -932,7 +933,7 @@ func (s *StudyService) cellsMask(cells []int) *position.CellMask {
 
 // FollowCells は**変わったマスだけで手を割り出して**追従する（速い経路。2026-10-07）。
 //
-// changed は**撮った画像の向き**での 81 マスの番号（行優先。`CaptureResult.Cells`）で、比べた相手は
+// changed は**撮った画像の向き**での 81 マスの番号（行優先。`followcam.Shot.Cells`）で、比べた相手は
 // 本譜の先端と合っていた 1 枚（`AtFrame` / `FrameFits`）。認識（約 0.1 秒）を回さないので、
 // **指されてから手が入るまでが「止まったのを確かめる 0.25〜0.5 秒」＋数ミリ秒**になる。
 //
@@ -941,12 +942,12 @@ func (s *StudyService) cellsMask(cells []int) *position.CellMask {
 // 踏んだ。先端から突き合わせて「合う手順 0」が続いた）。足し済みの手順で始まる答えだけを採り、残りを足す。
 // ⚠️ **合う手順が 1 つに決まるときだけ進む**（`position.ChangedMoves`）。成・不成、打った駒の種類、
 // 手や頭が被った 1 枚など、決まらなければ何もせずに返す（`Applied` も `Pending` も `AtFrame` も偽）。
-// **中継セッションはそれを見て、同じ 1 枚を 81 マスで読む**（`CaptureService.RecognizeQuiet` → `FollowAuto`）。
+// **中継セッションはそれを見て、同じ 1 枚を 81 マスで読む**（`followcam.Camera.RecognizeQuiet` → `FollowAuto`）。
 // ⚠️ **合う手順が 1 つも無いときだけは `NoMoves` を立てる**（2026-10-08）—— 中継セッションはすぐには読まず、組が変わるのを待つ。
 // 残りが無ければ（今の 1 枚が先端そのもの）`AtFrame` だけを立てて返す。
 // ⚠️ **1 通りに決まっても、行き先に指した側の駒が読めるまで控えも足しもしない**（2026-10-07。
 // `followBackedByRead`）。read が行き先を読んでいなければ `ReadCells` に行き先を入れて返し
-// （中継セッションが `CaptureService.ReadCells` で読んでもう一度呼ぶ）、読めて先後が違えば何もせずに返す（81 マスを読む）。
+// （中継セッションが `followcam.Camera.ReadCells` で読んでもう一度呼ぶ）、読めて先後が違えば何もせずに返す（81 マスを読む）。
 // 手が分かれたときに頼むマスは、**違いの出るマスとどの候補の行き先も合わせたもの**（中継セッションが読むのは 1 回だけ）。
 // ⚠️ **成・不成で分かれたら、同じ 1 回で見た目の比べも頼む**（`Compare`。2026-10-07）。promo はその答えで、
 // **読んだマスより先に使う**（`followPickByPromo`。成駒は成っていない姿に読み違えるが、見た目が変わったかは分かる）。
@@ -955,7 +956,7 @@ func (s *StudyService) cellsMask(cells []int) *position.CellMask {
 // `FollowConfirm` で足す。⚠️ **比べる相手の 1 枚に至った手のマスは、見た目だけ変わってよい**（色付け）。
 //
 //wails:ignore
-func (s *StudyService) FollowCells(changed []int, read []CellPiece, promo []PromoEvidence) (FollowAuto, error) {
+func (s *StudyService) FollowCells(changed []int, read []followcam.CellPiece, promo []PromoEvidence) (FollowAuto, error) {
 	// 控えた差し替えは、この 1 枚が同じ差し替えを言うまで「残しているだけ」にする（`followCellsRewind`）。
 	s.holdRewind()
 	mask := s.cellsMask(changed)
@@ -1061,7 +1062,7 @@ func (s *StudyService) FollowCells(changed []int, read []CellPiece, promo []Prom
 			diffOK := len(diff) > 0 && len(diff) <= followReadMax
 			// ⚠️ **成・不成で分かれたら、見た目も比べてもらう**（2026-10-07。`followPromoSplit`）。
 			// 読むだけだと、成駒を成っていない姿に読み違えたとき不成に決まる（龍を「飛」と読む）。
-			var pairs []CellPair
+			var pairs []followcam.CellPair
 			if fromBase {
 				pairs = followPromoSplit(since, rests, rotated)
 			}
@@ -1121,7 +1122,7 @@ func (s *StudyService) FollowCells(changed []int, read []CellPiece, promo []Prom
 	// 確かめの周（もう一度ここへ来たとき）にも掛かる。読むのは数マスなので数ミリ秒。
 	arrivals := followArrivals(base, since, moves)
 	// looks は**成らない手の、動く前と動いた先のマス**（見た目が同じ駒かを確かめる。2026-10-08。`followLookPairs`）。
-	var looks []CellPair
+	var looks []followcam.CellPair
 	if fromBase {
 		looks = followLookPairs(since, moves, rotated)
 	}
@@ -1216,9 +1217,9 @@ func followGlowOnly(base *position.Position, since []string, mask, extra *positi
 }
 
 // CellsLookUnmoved は、**直前に 81 マスで読んだ 1 枚（`FollowAuto`）で、変わったマス cells に「本譜の先端では駒が
-// あるのに空きと読めたマス」が無いか**を返す（2026-10-08）。cells は撮った画像の向きの番号（`CaptureResult.Cells`）。
+// あるのに空きと読めたマス」が無いか**を返す（2026-10-08）。cells は撮った画像の向きの番号（`followcam.Shot.Cells`）。
 //
-// 中継セッションは 81 マスの読みが「何も指していない」だったとき、これが真なら `CaptureService.CellsUnmoved` でその組を
+// 中継セッションは 81 マスの読みが「何も指していない」だったとき、これが真なら `followcam.Camera.CellsUnmoved` でその組を
 // 覚えさせる（続くあいだ読み直さない）。⚠️ **駒が空いて見えるマスがあれば偽** —— 駒が動いた跡かもしれない。
 // ゲーム画面で ▲7八金 の金が直前の手の赤い色付けで空きと読まれ、6九 が空いたのも安く数えられて「何も指していない」に
 // なった。その組を覚えたせいで 10 秒ごとの保険でしか見なくなり、▲7八金 が入るまで 1 分かかった。
@@ -1282,17 +1283,6 @@ func (s *StudyService) followLooksOnly(n int) FollowAuto {
 	return FollowAuto{Kind: FollowSame, Reason: "駒は動いていません", LooksOnly: true, State: s.State()}
 }
 
-// CellPiece は**マス 1 つの読み**（`CaptureService.ReadCells` が返し、`FollowCells` が受ける。2026-10-07）。
-// Cell は撮った画像の向きの 81 マスの番号、Piece は撮った画像の向きの SFEN の駒（手前側が大文字。
-// 空は ""、読めなければ "?"）。Side は駒の向き（`recognize.SideUp` = 手前向き / `SideDown` = 向こう向き /
-// "" = 空き・切り出せない）。⚠️ **Piece が "?" でも Side は入っていることがある**（成駒は種類が読めないのが
-// 普通だが、向きは読める。`recognize.CellRead`）。
-type CellPiece struct {
-	Cell  int    `json:"cell"`
-	Piece string `json:"piece"`
-	Side  string `json:"side"`
-}
-
 // followImageCells は解析の向きのマスの番号を、撮った画像の向きの番号にする（後手目線なら回す）。
 func followImageCells(cells []int, rotated bool) []int {
 	out := make([]int, 0, len(cells))
@@ -1306,7 +1296,7 @@ func followImageCells(cells []int, rotated bool) []int {
 }
 
 // followReadAt は read のうち、解析の向きのマス i を読んだものを返す。
-func followReadAt(read []CellPiece, i int, rotated bool) (CellPiece, bool) {
+func followReadAt(read []followcam.CellPiece, i int, rotated bool) (followcam.CellPiece, bool) {
 	if rotated {
 		i = 80 - i // 解析の向き → 撮った画像の向き
 	}
@@ -1315,12 +1305,12 @@ func followReadAt(read []CellPiece, i int, rotated bool) (CellPiece, bool) {
 			return cp, true
 		}
 	}
-	return CellPiece{}, false
+	return followcam.CellPiece{}, false
 }
 
 // followReadOnly は read のうち、解析の向きのマス cells を読んだものだけを返す。
-func followReadOnly(read []CellPiece, cells []int, rotated bool) []CellPiece {
-	var out []CellPiece
+func followReadOnly(read []followcam.CellPiece, cells []int, rotated bool) []followcam.CellPiece {
+	var out []followcam.CellPiece
 	for _, i := range cells {
 		if cp, ok := followReadAt(read, i, rotated); ok {
 			out = append(out, cp)
@@ -1330,7 +1320,7 @@ func followReadOnly(read []CellPiece, cells []int, rotated bool) []CellPiece {
 }
 
 // followReadCovers は read が解析の向きのマス cells をすべて読んでいるか。
-func followReadCovers(read []CellPiece, cells []int, rotated bool) bool {
+func followReadCovers(read []followcam.CellPiece, cells []int, rotated bool) bool {
 	for _, i := range cells {
 		if _, ok := followReadAt(read, i, rotated); !ok {
 			return false
@@ -1384,7 +1374,7 @@ func followArrivals(base *position.Position, since, moves []string) []int {
 // 81 マスを読む）。⚠️ **種類が読めない "?" でも、向きが読めていれば見る**（成駒は種類が読めないのが
 // 普通。向きまで捨てると、成る手が毎回 81 マスの読みに落ちる）。
 // read は撮った画像の向き（手前側が大文字・`Side` が up）なので、後手目線なら先後を入れ替えて比べる。
-func followBackedByRead(base *position.Position, since, moves []string, read []CellPiece, rotated bool) (ok bool, bad, got string) {
+func followBackedByRead(base *position.Position, since, moves []string, read []followcam.CellPiece, rotated bool) (ok bool, bad, got string) {
 	final := followBoard(base, since, moves)
 	if final == nil {
 		return false, "", ""
@@ -1405,7 +1395,7 @@ func followBackedByRead(base *position.Position, since, moves []string, read []C
 
 // cellPieceUp は読んだ駒が**撮った画像の手前向きか**を返す。readable が偽なら向きが読めていない
 // （空き・切り出せなかった "?"）。向き（`Side`）があればそれを、無ければ駒の字の大小で決める。
-func cellPieceUp(cp CellPiece) (up, readable bool) {
+func cellPieceUp(cp followcam.CellPiece) (up, readable bool) {
 	switch {
 	case cp.Piece == "":
 		return false, false
@@ -1467,7 +1457,7 @@ func followDiffCells(base *position.Position, since []string, rests [][]string) 
 // （角・飛・歩はほぼ成る、など）は使わない**（ユーザーの判断。証拠だけで決める）。
 // ⚠️ **行き先が空きに読めたら、どの候補とも合わない**（手が被っているなど別の事情。81 マスを読む）。
 // ⚠️ **比べるのは駒の種類と成りだけ**（先後は候補どうしで同じ —— 指した側の駒）。向きの読み違いで落とさない。
-func followPickByRead(base *position.Position, since []string, rests [][]string, read []CellPiece, rotated bool) [][]string {
+func followPickByRead(base *position.Position, since []string, rests [][]string, read []followcam.CellPiece, rotated bool) [][]string {
 	var out [][]string
 	for _, r := range rests {
 		b := followBoard(base, since, r)
@@ -1516,13 +1506,13 @@ func followCellFits(c position.Cell, piece string) bool {
 
 // FrameFits は**比べる相手の 1 枚から今の 1 枚までに変わったマスが、その間に本譜へ足した手で
 // ぴったり説明できるか**を返す（2026-10-07）。説明できれば今の 1 枚は先端と合っているので、
-// 比べる相手の局面を覚え直して真を返す（中継セッションは `CaptureService.SetCellBase` を呼ぶ）。
+// 比べる相手の局面を覚え直して真を返す（中継セッションは `followcam.Camera.SetCellBase` を呼ぶ）。
 //
 // ⚠️ **81 マスの読みの一致度には頼らない。** ゲーム画面は色付けのマスの読み違いなどで一致度 1 に
 // なりにくく、それだけを条件にしていたら比べる相手が古いまま残り、速い経路がほとんど効かなかった
 // （2026-10-07 に実機で踏んだ。変わったマスが 10 → 34 と増え続けた）。**画素の変化と、足した手の
 // 動かすマスが合うか**で確かめる（`position.ChangedFits`）。
-// cells は撮った画像の向きのマスの番号（`CaptureResult.Cells`）。
+// cells は撮った画像の向きのマスの番号（`followcam.Shot.Cells`）。
 //
 //wails:ignore
 func (s *StudyService) FrameFits(cells []int) bool {
@@ -1604,7 +1594,7 @@ func followProbeWhy(p FollowProbe) string {
 }
 
 // followLookSims は成らない手の見た目の近さを「7f>7e=0.977」の形で並べる（撮った画像の向き。測れた組だけ）。
-func followLookSims(looks []CellPair, promo []PromoEvidence) string {
+func followLookSims(looks []followcam.CellPair, promo []PromoEvidence) string {
 	var out []string
 	for _, l := range looks {
 		for _, e := range promo {
@@ -1965,27 +1955,27 @@ type FollowAuto struct {
 	// 判断には使わないこと**（それは `position` がマスごとにやっている）。
 	Unseen int `json:"unseen"`
 	// AtFrame は**本譜の先端が、この 1 枚とぴったり合っているか**（2026-10-07）。
-	// 真なら、この 1 枚を**速い経路の比べる相手**にしてよい（中継セッションが `CaptureService.SetCellBase` を呼ぶ）。
+	// 真なら、この 1 枚を**速い経路の比べる相手**にしてよい（中継セッションが `followcam.Camera.SetCellBase` を呼ぶ）。
 	// ⚠️ **ぴったり（一致度 1）のときだけ立てること。** 行き先の駒が読めていないだけの 1 枚
 	// （一致度 0.9965）を比べる相手にすると、その手のマスの変化が二度と見えなくなる。
 	AtFrame bool `json:"atFrame"`
 	// ReadCells は**速い経路で、読めば決まる・確かめられるマス**（撮った画像の向きの番号。2026-10-07）。
 	// 手が分かれたときの違いの出るマスと、決まった手順の行き先（指した側の駒が来たかを確かめる）。
-	// 空でなければ中継セッションは `CaptureService.ReadCells` で読み、結果を添えて `FollowCells` をもう一度呼ぶ。
+	// 空でなければ中継セッションは `followcam.Camera.ReadCells` で読み、結果を添えて `FollowCells` をもう一度呼ぶ。
 	ReadCells []int `json:"readCells"`
 	// Compare は**成・不成を見た目で確かめたい手の、動く前と動いた先のマス**（撮った画像の向き。2026-10-07。
-	// `followPromoPairs`）。空でなければ中継セッションは `CaptureService.ComparePieces` で測り、結果を
+	// `followPromoPairs`）。空でなければ中継セッションは `followcam.Camera.ComparePieces` で測り、結果を
 	// `PromoEvidence` にして同じ 1 枚でもう一度呼ぶ（`FollowAuto` / `FollowCells`）。⚠️ **これを返した周は
 	// 局面も控えも 1 つも動かしていない**（もう一度呼ばれて初めて決める）。
-	Compare []CellPair `json:"compare"`
+	Compare []followcam.CellPair `json:"compare"`
 	// NoMoves は**速い経路で、変わったマスを説明できる手順が 1 つも無かった**か（2026-10-08）。
 	// ゲーム画面で駒を掴むと、その駒が浮いて行き先が光り、考えているあいだ同じ組が続く。そこで 81 マスを
 	// 読むと 1 周が 1〜5 秒塞がり、そのあいだに指した手と相手の応手がまとめて遅れた（1 組 10 秒前後）。
-	// 真なら中継セッションはすぐ 81 マスを読まず、`CaptureService.CellsUnclear` で組が変わるのを待たせる
+	// 真なら中継セッションはすぐ 81 マスを読まず、`followcam.Camera.CellsUnclear` で組が変わるのを待たせる
 	// （ふるいが待つ上限で読む）。⚠️ **成・不成や打った駒で決まらなかった周には立てない**（手はある。すぐ読む）。
 	NoMoves bool `json:"noMoves"`
 	// LooksOnly は**速い経路で、変わったのは空きのマスだけで、駒は動いていない**か（2026-10-08。`followGlowOnly`）。
-	// 駒台の駒をつまんで、打てるマスが光っている 1 枚。真なら中継セッションは 81 マスを読まず、`CaptureService.CellsUnmoved` で
+	// 駒台の駒をつまんで、打てるマスが光っている 1 枚。真なら中継セッションは 81 マスを読まず、`followcam.Camera.CellsUnmoved` で
 	// その組を覚えさせる（ふるいは同じ組を「変わっていない」に数え、保険の 1 枚は残る）。
 	LooksOnly bool `json:"looksOnly"`
 	// DropChoices は**打った駒の種類が決まらず、人に聞く候補**（2026-10-09。`offerDrop`）。空でなければ中継セッションは枠の下の帯に
@@ -1993,22 +1983,13 @@ type FollowAuto struct {
 	DropChoices []FollowChoice `json:"dropChoices,omitempty"`
 }
 
-// CellPair は**動いた駒の、動く前のマスと動いた先のマス**（撮った画像の向きの 81 マスの番号。2026-10-07）。
-// From は速い経路の比べる相手の 1 枚（`CaptureService.cellBase`）、To は今の 1 枚で見る。
-// Same が真なら**どちらも今の 1 枚で見る**（2026-10-09。打った駒と盤上の駒の比べ。`followDropPairs`）。
-type CellPair struct {
-	From int  `json:"from"`
-	To   int  `json:"to"`
-	Same bool `json:"same,omitempty"`
-}
-
-// PromoEvidence は CellPair を測った**見た目の近さ**（`ikkyoku.PieceSimilarity`。-1〜1。2026-10-07）。
+// PromoEvidence は followcam.CellPair を測った**見た目の近さ**（`ikkyoku.PieceSimilarity`。-1〜1。2026-10-07）。
 // 中継セッションは測れなかった組（ちょうど -1）を渡さない（2026-10-08 から、負の近さは渡す —— 似ていない駒どうしは負になりうる）。
 type PromoEvidence struct {
 	From int     `json:"from"`
 	To   int     `json:"to"`
 	Sim  float64 `json:"sim"`
-	// Same は測った組の `CellPair.Same`（打った駒の比べ。成・不成の証拠には使わない）。
+	// Same は測った組の `followcam.CellPair.Same`（打った駒の比べ。成・不成の証拠には使わない）。
 	Same bool `json:"same,omitempty"`
 }
 
@@ -2081,23 +2062,23 @@ func usiTouches(mv string, i int) bool {
 //
 // ⚠️ **将棋の見込み（敵陣に入った飛車はほぼ成る、など）は使わない**（ユーザーの判断）。ここは
 // 「比べられるか」を決めるだけで、成ったかどうかは測った見た目で決める。
-func followPromoPairs(base *position.Position, since, moves []string, rotated bool) []CellPair {
+func followPromoPairs(base *position.Position, since, moves []string, rotated bool) []followcam.CellPair {
 	p := base.Clone()
 	for _, m := range since {
 		if p.ApplyMove(m) != nil {
 			return nil
 		}
 	}
-	var out []CellPair
+	var out []followcam.CellPair
 	for j, mv := range moves {
 		from, to, ok := usiFromTo(mv)
 		plain := strings.TrimSuffix(mv, "+")
 		if ok && followBothLegal(p, plain) && !slices.ContainsFunc(since, func(m string) bool { return usiTouches(m, from) }) &&
 			!slices.ContainsFunc(moves[:j], func(m string) bool { return usiTouches(m, from) }) &&
 			!slices.ContainsFunc(moves[j+1:], func(m string) bool { return usiTouches(m, to) }) {
-			pair := CellPair{From: from, To: to}
+			pair := followcam.CellPair{From: from, To: to}
 			if rotated {
-				pair = CellPair{From: 80 - from, To: 80 - to} // 解析の向き → 撮った画像の向き
+				pair = followcam.CellPair{From: 80 - from, To: 80 - to} // 解析の向き → 撮った画像の向き
 			}
 			if !slices.Contains(out, pair) {
 				out = append(out, pair)
@@ -2114,8 +2095,8 @@ func followPromoPairs(base *position.Position, since, moves []string, rotated bo
 // （2026-10-08。`followLooksDiffer`）。比べてよいのは、動く前のマスを since とその手より前の手が動かしておらず、
 // 動いた先のマスをその手より後の手が動かしていない手だけ（比べる相手の 1 枚と今の 1 枚に、指した駒がそれぞれ写っている）。
 // 条件は `followPromoPairs` と同じで、成りも不成も指せるかは問わない。
-func followLookPairs(since, moves []string, rotated bool) []CellPair {
-	var out []CellPair
+func followLookPairs(since, moves []string, rotated bool) []followcam.CellPair {
+	var out []followcam.CellPair
 	for j, mv := range moves {
 		if strings.HasSuffix(mv, "+") {
 			continue // 成る手は見た目が変わる（`followPromoPairs` の受け持ち）
@@ -2127,9 +2108,9 @@ func followLookPairs(since, moves []string, rotated bool) []CellPair {
 			slices.ContainsFunc(moves[j+1:], func(m string) bool { return usiTouches(m, to) }) {
 			continue
 		}
-		pair := CellPair{From: from, To: to}
+		pair := followcam.CellPair{From: from, To: to}
 		if rotated {
-			pair = CellPair{From: 80 - from, To: 80 - to} // 解析の向き → 撮った画像の向き
+			pair = followcam.CellPair{From: 80 - from, To: 80 - to} // 解析の向き → 撮った画像の向き
 		}
 		if !slices.Contains(out, pair) {
 			out = append(out, pair)
@@ -2144,7 +2125,7 @@ func followLookPairs(since, moves []string, rotated bool) []CellPair {
 //
 // ⚠️ **見た目で救うのは「空き・読めない」と読めたマスだけ**（相手の駒と読めたマスは救わない —— 読みが違うと言っている）。
 // ⚠️ **証拠が無い・間の値なら救わない**（今までどおり 81 マスを読む）。
-func followBackedByLooks(base *position.Position, since, moves []string, read []CellPiece, looks []CellPair,
+func followBackedByLooks(base *position.Position, since, moves []string, read []followcam.CellPiece, looks []followcam.CellPair,
 	promo []PromoEvidence, rotated bool) bool {
 	final := followBoard(base, since, moves)
 	if final == nil {
@@ -2187,7 +2168,7 @@ func followBackedByLooks(base *position.Position, since, moves []string, read []
 
 // followLooksDiffer は、成らない手の組 looks のどれかで、**行き先の見た目が動く前の駒と違う**（近さが
 // `promoChangedBelow` より低い）かを返す。測れなかった組（promo に無い）は証拠にしない。
-func followLooksDiffer(looks []CellPair, promo []PromoEvidence) (CellPair, float64, bool) {
+func followLooksDiffer(looks []followcam.CellPair, promo []PromoEvidence) (followcam.CellPair, float64, bool) {
 	for _, l := range looks {
 		for _, e := range promo {
 			if e.From == l.From && e.To == l.To && e.Sim < promoChangedBelow {
@@ -2195,7 +2176,7 @@ func followLooksDiffer(looks []CellPair, promo []PromoEvidence) (CellPair, float
 			}
 		}
 	}
-	return CellPair{}, 0, false
+	return followcam.CellPair{}, 0, false
 }
 
 // followPromoOnly は、下見の候補が**同じ手順で、成るか成らないかだけが違う**なら、その手順（1 本目）を返す（2026-10-08）。
@@ -2338,8 +2319,8 @@ func followPickByPromo(rests [][]string, promo []PromoEvidence, rotated bool) []
 // followPromoSplit は**成・不成だけで分かれた候補**の、成・不成を見た目で確かめられる手のマスを返す（速い経路）。
 // 候補のどれかに成る手 mv+"+" があり、別の候補の同じ位置に成らない mv があるもの。確かめられるかの条件は
 // `followPromoPairs` と同じ（成りも不成も合法かは、候補に両方あることで分かっている）。
-func followPromoSplit(since []string, rests [][]string, rotated bool) []CellPair {
-	var out []CellPair
+func followPromoSplit(since []string, rests [][]string, rotated bool) []followcam.CellPair {
+	var out []followcam.CellPair
 	for _, r := range rests {
 		for j, mv := range r {
 			if !strings.HasSuffix(mv, "+") {
@@ -2355,9 +2336,9 @@ func followPromoSplit(since []string, rests [][]string, rotated bool) []CellPair
 				slices.ContainsFunc(r[j+1:], func(m string) bool { return usiTouches(m, to) }) {
 				continue
 			}
-			pair := CellPair{From: from, To: to}
+			pair := followcam.CellPair{From: from, To: to}
 			if rotated {
-				pair = CellPair{From: 80 - from, To: 80 - to}
+				pair = followcam.CellPair{From: 80 - from, To: 80 - to}
 			}
 			if !slices.Contains(out, pair) {
 				out = append(out, pair)

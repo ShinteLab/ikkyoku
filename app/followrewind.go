@@ -19,6 +19,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/ShinteLab/ikkyoku/followcam"
 	"github.com/ShinteLab/ikkyoku/log"
 	"github.com/ShinteLab/ikkyoku/position"
 )
@@ -160,7 +161,7 @@ func (s *StudyService) holdRewind() {
 // ⚠️ **先端そのものが（先後と駒の有無で）合うなら戻さない**。
 // ⚠️ **行き先に指した側の駒が読めてから控える**（`followBackedByRead`。読んでいなければ行き先を読むよう頼む）。
 // ⚠️ **2 枚続けて同じ差し替えで据える**のは 81 マスの読みの差し替えと同じ（控えは共通。`followRewindHold`）。
-func (s *StudyService) followCellsRewind(base *position.Position, since []string, mask, extra *position.CellMask, read []CellPiece, rotated bool) (FollowAuto, bool, error) {
+func (s *StudyService) followCellsRewind(base *position.Position, since []string, mask, extra *position.CellMask, read []followcam.CellPiece, rotated bool) (FollowAuto, bool, error) {
 	s.mu.Lock()
 	if s.study == nil {
 		s.mu.Unlock()
@@ -666,7 +667,7 @@ func followGone(anc *position.Position, old, moves []string) []int {
 
 // followGoneSeen は、消える手の行き先 gone のどれかに**元の手の駒（同じ側）が読めているか**。読めていれば、その手は本当に
 // 指されているので差し替えない。⚠️ **先後まで見る**（`followBackedByRead` と同じ。種類は問わない）。
-func followGoneSeen(anc *position.Position, old []string, gone []int, read []CellPiece, rotated bool) (sq, got string, seen bool) {
+func followGoneSeen(anc *position.Position, old []string, gone []int, read []followcam.CellPiece, rotated bool) (sq, got string, seen bool) {
 	before := followBoard(anc, nil, old)
 	if before == nil {
 		return "", "", false
@@ -691,7 +692,7 @@ func followGoneSeen(anc *position.Position, old []string, gone []int, read []Cel
 // 差し替えが ▲5九歩打 を ▲5九金（5八 の金が動いた）に替えた。5九 は「歩」と読めていたが、速い経路の差し替えは先後と駒の
 // 有無しか比べない（`TestFollowCellsRewindKeepsDropWhoseKindIsSeen`）。⚠️ **新しい盤と合う読みなら今までどおり替える**
 // （デジタル盤の △7二角打 → △7二金。7二 は金と読める。`TestFollowCellsRewindsGuessedDrop`）。合い方は `followCellFits`。
-func followKindKeepsOld(anc *position.Position, old, moves []string, cells []int, read []CellPiece, rotated bool) (sq, got string, kept bool) {
+func followKindKeepsOld(anc *position.Position, old, moves []string, cells []int, read []followcam.CellPiece, rotated bool) (sq, got string, kept bool) {
 	before, after := followBoard(anc, nil, old), followBoard(anc, nil, moves)
 	if before == nil || after == nil {
 		return "", "", false

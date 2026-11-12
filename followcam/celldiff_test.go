@@ -1,4 +1,4 @@
-package main
+package followcam
 
 // 速い経路の撮る側（`fastCells`）の歯止め（2026-10-07）。
 //
@@ -22,12 +22,10 @@ import (
 	"image/color"
 	"slices"
 	"testing"
-
-	ikkyokuapp "github.com/ShinteLab/ikkyoku/app"
 )
 
 // fastImg は `CaptureQuiet` と同じ順に、変わったマスを測ってから速い経路で扱えるかを返す。
-func (s *CaptureService) fastImg(img image.Image) (cells []int, comparable, fast bool) {
+func (s *Camera) fastImg(img image.Image) (cells []int, comparable, fast bool) {
 	fc := s.cellsOf(img)
 	return fc.cells, fc.ok, s.fastCells(fc)
 }
@@ -62,8 +60,8 @@ func gameFrame(n int, cells ...int) *image.RGBA {
 	return img
 }
 
-// gameService は比べる相手（演出の無い 1 枚）を入れ、ふるいに 1 枚目を通した CaptureService。
-func gameService(t *testing.T) *CaptureService {
+// gameService は比べる相手（演出の無い 1 枚）を入れ、ふるいに 1 枚目を通した Camera。
+func gameService(t *testing.T) *Camera {
 	t.Helper()
 	s := fastService()
 	s.fol.lastQuiet = gateFrame()
@@ -74,8 +72,8 @@ func gameService(t *testing.T) *CaptureService {
 	return s
 }
 
-// fastService は 9x9（1 マス 20px）のマス割りを控えた CaptureService。
-func fastService() *CaptureService {
+// fastService は 9x9（1 マス 20px）のマス割りを控えた Camera。
+func fastService() *Camera {
 	s := gateService()
 	rects := make([]image.Rectangle, 81)
 	for r := 0; r < 9; r++ {
@@ -306,7 +304,7 @@ func TestGateWaitsOnUnclearCells(t *testing.T) {
 }
 
 // gateServiceStatic は gameService のあと、光の位置が同じ 1 枚を 2 回通して「変わっていない」まで落ち着かせる。
-func gateServiceStatic(t *testing.T) *CaptureService {
+func gateServiceStatic(t *testing.T) *Camera {
 	t.Helper()
 	s := gameService(t)
 	s.gateImg(gameFrame(1))
@@ -347,7 +345,7 @@ func TestForgetUnmovedReadsTheSetAgain(t *testing.T) {
 // ⚠️ **ComparePieces は測るだけ**（2026-10-07）。比べる相手が無ければ -1（証拠にしない）、同じ駒なら 1 に近いこと。
 func TestComparePieces(t *testing.T) {
 	s := fastService()
-	if got := s.ComparePieces([]ikkyokuapp.CellPair{{From: 10, To: 10}}); len(got) != 1 || got[0] != -1 {
+	if got := s.ComparePieces([]CellPair{{From: 10, To: 10}}); len(got) != 1 || got[0] != -1 {
 		t.Fatalf("比べる相手が無いのに測りました: %v", got)
 	}
 	img := gateFrame()
@@ -365,7 +363,7 @@ func TestComparePieces(t *testing.T) {
 	}
 	s.fol.lastQuiet = img
 	s.SetCellBase()
-	got := s.ComparePieces([]ikkyokuapp.CellPair{{From: 10, To: 10}, {From: 10, To: 99}})
+	got := s.ComparePieces([]CellPair{{From: 10, To: 10}, {From: 10, To: 99}})
 	if got[0] < 0.99 {
 		t.Fatalf("同じ駒なのに %.3f", got[0])
 	}

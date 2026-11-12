@@ -16,6 +16,7 @@ package app
 import (
 	"strings"
 
+	"github.com/ShinteLab/ikkyoku/followcam"
 	"github.com/ShinteLab/ikkyoku/position"
 )
 
@@ -123,11 +124,11 @@ func followObsCell(b position.Cell, w float64) followObs {
 	return followObs{read: true, sided: true, black: b.Black(), mark: strings.ToUpper(b.Mark()), weight: w}
 }
 
-// followObsRead は**速い経路で読んだマス**（解析の向きのマス i。`CellPiece` は撮った画像の向き）の読み。読んでいなければゼロ値。
+// followObsRead は**速い経路で読んだマス**（解析の向きのマス i。`followcam.CellPiece` は撮った画像の向き）の読み。読んでいなければゼロ値。
 //
-// `CellPiece` の形: 空きは Piece も Side も ""、切り出せなければ Piece が "?" で Side が ""、種類が読めなくても向きが読めれば
+// `followcam.CellPiece` の形: 空きは Piece も Side も ""、切り出せなければ Piece が "?" で Side が ""、種類が読めなくても向きが読めれば
 // Piece が "?" で Side が入る。後手目線（rotated）なら先後を入れ替える（撮った画像の手前側が後手）。
-func followObsRead(read []CellPiece, i int, rotated bool) followObs {
+func followObsRead(read []followcam.CellPiece, i int, rotated bool) followObs {
 	cp, found := followReadAt(read, i, rotated)
 	if !found {
 		return followObs{}

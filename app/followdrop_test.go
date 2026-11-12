@@ -12,6 +12,8 @@ package app
 import (
 	"slices"
 	"testing"
+
+	"github.com/ShinteLab/ikkyoku/followcam"
 )
 
 // dropFrame は 3六 に先手の駒が打たれ、認識器がそれを「先手の歩」と読んだ 1 枚（玉と盤上の香・桂・銀ははっきり読めている）。
@@ -26,7 +28,7 @@ func dropFrameConf() []float64 {
 }
 
 // dropEvidence は頼まれた組を、盤上の駒の種類ごとの近さで測ったことにする（9九=香・8九=桂・7九=銀）。
-func dropEvidence(pairs []CellPair, sims map[int]float64) []PromoEvidence {
+func dropEvidence(pairs []followcam.CellPair, sims map[int]float64) []PromoEvidence {
 	out := []PromoEvidence{}
 	for _, p := range pairs {
 		out = append(out, PromoEvidence{From: p.From, To: p.To, Sim: sims[p.From], Same: p.Same})

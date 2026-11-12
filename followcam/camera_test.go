@@ -1,4 +1,4 @@
-package main
+package followcam
 
 import (
 	"image"
@@ -7,12 +7,21 @@ import (
 
 // ⚠️ **撮る側の持ち物は追い始めで作り直し、止めたら丸ごと捨てること**（2026-10-11。`captureFollow`）。
 // 捨て損ねると、次に追ったときの録画が前の回のディレクトリに混ざり、前の回の比べる相手の 1 枚と比べてしまう。
-// 訂正した 1 枚（`followShot`）は追う前から入るものなので、捨てない。
+// 訂正した 1 枚（`CaptureService.followShot`）は追う前から入るものなので、捨てない（そちらの歯止めは
+// `_cmd/ikkyoku` の `anchor_test.go`）。設定（`debug`）も追う前から入るものなので、捨てない。
 func TestFollowStateLifecycle(t *testing.T) {
-	s := &CaptureService{}
-	s.followShot = shotAnchor{path: "corrected.png"}
+	s := &Camera{}
+	s.SetDebug(true)
+	ended := 0
+	s.AfterEnd = func() {
+		ended++
+		// ⚠️ **持ち物を捨てたあとに呼ぶこと**（外部エンジンの優先度を戻す側は `Anchored` を見る）。
+		if s.Anchored() || s.Following() {
+			t.Errorf("持ち物を捨てる前に AfterEnd を呼びました")
+		}
+	}
 	s.BeginFollow()
-	if !s.fol.following {
+	if !s.fol.following || !s.Following() {
 		t.Fatalf("追い始めたのに追っていることになっていません")
 	}
 	s.fol.followDir = "follow/20261011-000000"
@@ -26,8 +35,11 @@ func TestFollowStateLifecycle(t *testing.T) {
 		f.followMisses != 0 || f.cellsUnmoved.ok {
 		t.Fatalf("止めたのに撮る側の持ち物が残っています: %+v", f)
 	}
-	if s.followShot.path != "corrected.png" {
-		t.Errorf("追う前から入る訂正した 1 枚まで捨てました")
+	if ended != 1 {
+		t.Errorf("止めたのに AfterEnd を %d 回呼びました（1 回のはず）", ended)
+	}
+	if !s.debug {
+		t.Errorf("追う前から入る設定まで捨てました")
 	}
 	s.BeginFollow()
 	if s.fol.followDir != "" || !s.fol.following {

@@ -29,8 +29,10 @@ func (s *CaptureService) applyFollowFirst(v bool) {
 
 // syncEnginePriority は**今あるべき優先度**にエンジンを合わせる（追っていて設定が真なら下げ、そうでなければ戻す）。
 func (s *CaptureService) syncEnginePriority() {
+	// ⚠️ **撮る側（`followcam.Camera`）は `mu` を持たずに呼ぶ**（あちらは自分のロックを持つ）。
+	anchored := s.follow != nil && s.follow.Anchored()
 	s.mu.Lock()
-	want := s.followFirst && s.fol.boardAnchor.Board.Dx() > 0
+	want := s.followFirst && anchored
 	lowered, names := s.enginesLowered, s.engineNames
 	s.mu.Unlock()
 	if !want && !lowered {
