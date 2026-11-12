@@ -24,6 +24,7 @@ package main
 import (
 	"embed"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -40,6 +41,7 @@ import (
 	// ⚠️ **別名にしてあるのは、この関数の中の `app`（application.App）と
 	// パッケージ名がぶつかるから。**
 	ikkyokuapp "github.com/ShinteLab/ikkyoku/app"
+	"github.com/ShinteLab/ikkyoku/config"
 	"github.com/ShinteLab/ikkyoku/followcam"
 	"github.com/ShinteLab/ikkyoku/guide"
 	"github.com/ShinteLab/ikkyoku/log"
@@ -94,16 +96,70 @@ type appWindows struct {
 }
 
 func main() {
-	// ログは一時ディレクトリの ikkyoku（ikkyoku_<日付>.log。2026-10-11 に実行ファイルの隣から移した。
-	// 2 日前より前は gzip にし、90 日で消す。2026-11-08）。
-	// wails3 dev のときはコンソールにも出す（追従のログは出さない）
-	// （consoleLog。devbuild.go / prodbuild.go）。⚠️ **書けなくても起動は止めない。**
-	// 画面まわりの診断（心拍・表示状態・Wails と WebView2 のログ）は dev のときだけ
-	// ikkyoku-diag_<日付>.log に残す（devBuild。黒い画面の再現待ち。_docs/blackscreen.md）。
-	// 中継の追従（ikkyoku-follow_<日付>.log）は設定「中継の録画とログを残す（デバッグ）」のときだけ（下で設定を読んでから入れる）。
-	// レベルの設定（ikkyoku-log.json）は今までどおり実行ファイルの隣に置く。
-	// 全体の既定のレベルは dev で INFO、配る exe で NOTICE（2026-10-11。INFO は開発中に参考になるもの、
-	// NOTICE は常に残しておきたいもの）。画面の設定「ログの細かさ」は設定を読んでから当てる（applyLogLevel）。
+	// ⚠️ **呼ぶ順番を変えないこと**（2026-11-13 に関数へ割った。中身の順番も割る前と同じ）。
+	// フックの差し込み・起動時の設定の流し込みは、順番が変わると黙って効かなくなるものがある。
+	logCloser, logErr := initLog()
+	// ⚠️ **ここから下で panic したら、箱を出してから終わる**（fatal.go）。配る exe は
+	// 標準エラーの行き先が無いので、無いと**何も言わずに消える**。
+	defer recoverMain()
+	// ⚠️ **起動した版は NOTICE**（常に残す。どれで動いたかが分からなくなる）。
+	log.Notice("ikkyoku を起動します", "version", appVersion())
+
+	issues := newIssues(logErr)
+
+	// 焼き込んだ認識器（-tags embedmodel のときだけ。embedmodel_on.go）を recognize へ渡す。
+	// ⚠️ **認識器を読む（ReloadRecognizer）より前に**（3 段の 3 段目）。
+	recognize.SetEmbedded(embeddedModel())
+
+	sv := newServices(issues)
+	app := newApp(sv, issues)
+	state := loadAppState()
+	wins := newAppWindows(app, state)
+	wireWails(app, wins, sv, issues)
+	openKifuDBAtStartup(sv, issues)
+	studyStore := openStudyStore(sv, issues)
+	wireCapture(sv)
+	quit := newQuit(wins, sv, studyStore)
+	registerHooks(app, wins, state, sv, quit)
+	startRecognizer(sv, issues)
+	watchMainReveal(sv, issues)
+
+	if err := app.Run(); err != nil {
+		showFatal(err.Error())
+		logCloser.Close()
+		os.Exit(1)
+	}
+	logCloser.Close()
+}
+
+// services は main が作る Service の一式と、起動時に読んだ設定（2026-11-13 に main() を関数へ割ったときにまとめた）。
+// ⚠️ **cfg は起動時の写し**（設定タブで変えた値は SettingsService が持つ）。
+type services struct {
+	cfg      config.Config
+	settings *ikkyokuapp.SettingsService
+	capture  *CaptureService
+	position *ikkyokuapp.PositionService
+	training *ikkyokuapp.TrainingService
+	font     *ikkyokuapp.FontService
+	study    *ikkyokuapp.StudyService
+	analyze  *ikkyokuapp.AnalyzeService
+	kifu     *ikkyokuapp.KifuService
+	diag     *ikkyokuapp.DiagService
+}
+
+// ログは一時ディレクトリの ikkyoku（ikkyoku_<日付>.log。2026-10-11 に実行ファイルの隣から移した。
+// 2 日前より前は gzip にし、90 日で消す。2026-11-08）。
+// wails3 dev のときはコンソールにも出す（追従のログは出さない）
+// （consoleLog。devbuild.go / prodbuild.go）。⚠️ **書けなくても起動は止めない。**
+// 画面まわりの診断（心拍・表示状態・Wails と WebView2 のログ）は dev のときだけ
+// ikkyoku-diag_<日付>.log に残す（devBuild。黒い画面の再現待ち。_docs/blackscreen.md）。
+// 中継の追従（ikkyoku-follow_<日付>.log）は設定「中継の録画とログを残す（デバッグ）」のときだけ（下で設定を読んでから入れる）。
+// レベルの設定（ikkyoku-log.json）は今までどおり実行ファイルの隣に置く。
+// 全体の既定のレベルは dev で INFO、配る exe で NOTICE（2026-10-11。INFO は開発中に参考になるもの、
+// NOTICE は常に残しておきたいもの）。画面の設定「ログの細かさ」は設定を読んでから当てる（applyLogLevel）。
+//
+// initLog はログを用意する（main の最初。⚠️ **書けなくても起動は止めない**）。
+func initLog() (io.Closer, error) {
 	logOpts := log.Options{Console: consoleLog, Diag: devBuild, Root: log.LevelNotice}
 	if devBuild {
 		logOpts.Root = log.LevelInfo
@@ -115,14 +171,13 @@ func main() {
 	if logErr != nil {
 		log.Warn("ログの準備で問題がありました", "error", logErr)
 	}
-	// ⚠️ **ここから下で panic したら、箱を出してから終わる**（fatal.go）。配る exe は
-	// 標準エラーの行き先が無いので、無いと**何も言わずに消える**。
-	defer recoverMain()
-	// ⚠️ **起動した版は NOTICE**（常に残す。どれで動いたかが分からなくなる）。
-	log.Notice("ikkyoku を起動します", "version", appVersion())
+	return logCloser, logErr
+}
 
-	// 起動はできたが足りないもの・できないこと（2026-10-04）。メイン画面のツールバーの ⚠ が
-	// 一覧にする。**どれも起動は止めない**（設計原則3）。載せ方は issues.go。
+// newIssues は ⚠ の一覧を作り、ログの準備と前回の異常終了の問題を載せる。
+// 起動はできたが足りないもの・できないこと（2026-10-04）。メイン画面のツールバーの ⚠ が
+// 一覧にする。**どれも起動は止めない**（設計原則3）。載せ方は issues.go。
+func newIssues(logErr error) *ikkyokuapp.IssueService {
 	issues := ikkyokuapp.NewIssueService()
 	issues.SetLogDir(log.Dir())
 	if logErr != nil {
@@ -145,11 +200,11 @@ func main() {
 			Title: "前回は異常終了しました", Detail: prev,
 		})
 	}
+	return issues
+}
 
-	// 焼き込んだ認識器（-tags embedmodel のときだけ。embedmodel_on.go）を recognize へ渡す。
-	// ⚠️ **認識器を読む（ReloadRecognizer）より前に**（3 段の 3 段目）。
-	recognize.SetEmbedded(embeddedModel())
-
+// newServices は Service を作る（設定を読み、読めなければ ⚠ に載せる）。
+func newServices(issues *ikkyokuapp.IssueService) services {
 	settingsSvc := ikkyokuapp.NewSettingsService()
 	settingsSvc.AppVersion = appVersion()
 	cfg := settingsSvc.Config()
@@ -188,8 +243,17 @@ func main() {
 	// フロントが生きているかの計測だけを持つ Service(diagservice.go)。
 	// 局面にもキャプチャにも関与しない。
 	diagSvc := ikkyokuapp.NewDiagService()
+	return services{
+		cfg: cfg, settings: settingsSvc, capture: captureSvc, position: positionSvc,
+		training: trainingSvc, font: fontSvc, study: studySvc, analyze: analyzeSvc,
+		kifu: kifuSvc, diag: diagSvc,
+	}
+}
 
-	app := application.New(application.Options{
+// newApp は Wails のアプリを作り、Service を登録する。
+func newApp(sv services, issues *ikkyokuapp.IssueService) *application.App {
+	settingsSvc, captureSvc, positionSvc, trainingSvc, fontSvc, studySvc, analyzeSvc, kifuSvc, diagSvc := sv.settings, sv.capture, sv.position, sv.training, sv.font, sv.study, sv.analyze, sv.kifu, sv.diag
+	return application.New(application.Options{
 		Name:        "ikkyoku",
 		Description: "Ikkyoku - Shogi broadcast analyzer",
 		Logger:      log.Diag, // Wails のログは診断へ（dev だけ残す。Warn 以上は本体にも。log/setup.go）
@@ -213,8 +277,10 @@ func main() {
 			ApplicationShouldTerminateAfterLastWindowClosed: true,
 		},
 	})
+}
 
-	state := loadAppState()
+// newAppWindows はウィンドウ 5 枚を作り、位置と大きさの追跡を付ける。
+func newAppWindows(app *application.App, state appState) *appWindows {
 	frame := newFrameWindow(app, state.Frame)
 	main, mainHasSavedPos := newMainWindow(app, state.Main)
 	graph := newGraphWindow(app, state.Graph)
@@ -239,6 +305,12 @@ func main() {
 	wins.graphGeom.attach(graph)
 	wins.sideGeom.attach(side)
 	wins.movesGeom.attach(moves)
+	return wins
+}
+
+// wireWails は Wails の口（ウィンドウ・ダイアログ・イベント）を Service へ差し込む。
+func wireWails(app *application.App, wins *appWindows, sv services, issues *ikkyokuapp.IssueService) {
+	settingsSvc, captureSvc, studySvc, analyzeSvc := sv.settings, sv.capture, sv.study, sv.analyze
 	captureSvc.bind(app, wins)
 	// ⚠️ **Wails の口はここで差し込む。** Service 本体は ikkyoku/app にあり
 	// wails3 を import していないので、ダイアログとイベントだけを関数で渡す。
@@ -249,6 +321,11 @@ func main() {
 	// （`app.Event.Emit` はアプリ全体に届く）。
 	studySvc.Emit = func(name string, data any) { app.Event.Emit(name, data) }
 	issues.Emit = func(name string, data any) { app.Event.Emit(name, data) }
+}
+
+// openKifuDBAtStartup は棚を開き、設定タブで場所を変えたときに開き直す口を繋ぐ。
+func openKifuDBAtStartup(sv services, issues *ikkyokuapp.IssueService) {
+	cfg, settingsSvc, kifuSvc := sv.cfg, sv.settings, sv.kifu
 	// 棚を開く。⚠️ **失敗してもここで止めない** —— 理由は KifuService が抱えて
 	// 設定タブに出す（撮った 1 局面と貼った棋譜の解析は棚に依らない。設計原則3）。
 	// ⚠️ **開けたかどうかを ⚠ に合わせること**（開き直すたびに。直ったら消える）。
@@ -264,6 +341,11 @@ func main() {
 	}
 	// 設定タブで場所を変えたらその場で開き直す（認識器の読み込み元と同じ扱い）。
 	settingsSvc.OnKifuDBPath = openKifuDB
+}
+
+// openStudyStore は検討の控えを開いて前回の続きを戻す（開けなければ nil。⚠ に載せる）。
+func openStudyStore(sv services, issues *ikkyokuapp.IssueService) *ikkyokuapp.StudyStore {
+	cfg, studySvc, kifuSvc := sv.cfg, sv.study, sv.kifu
 	// 検討の控え（2026-09-16）。**再起動しても前回の続きから始められるように、
 	// 木と評価値を丸ごと残す。**
 	//
@@ -300,6 +382,13 @@ func main() {
 		// ⚠️ **繋がなくても棚も解析も動く**（印が出ず、毎回まっさらに始まるだけ）。
 		kifuSvc.Store = studyStore
 	}
+	return studyStore
+}
+
+// wireCapture は設定タブ・解析タブと CaptureService を繋ぐ（素通し・中継を追う・切り離した窓・認識器）。
+// ⚠️ **繋ぐ順番を変えないこと**（起動時の設定を入れてから `applyClickThrough` を呼ぶ、など）。
+func wireCapture(sv services) {
+	cfg, settingsSvc, captureSvc, studySvc := sv.cfg, sv.settings, sv.capture, sv.study
 	// 枠の素通し（設定「枠の内側で後ろの画面を操作する」）。
 	// **枠の HWND を触るのは CaptureService** なので、設定タブからの切り替えは
 	// ここで繋いだこのフックを通る（SettingsService はウィンドウを持っていない）。
@@ -371,7 +460,11 @@ func main() {
 	// `globalApplication.impl == nil` で即 return する）ので、**設定は「切り離し」の
 	// ままなのに窓が出ず、グラフがどこにも無い**という状態になる。
 	// 出すのは窓自身の `WindowRuntimeReady`（`registerGraphHooks`）。
+}
 
+// newQuit は終了の後始末を作り、枠のメニューの「終了」にも繋ぐ。
+func newQuit(wins *appWindows, sv services, studyStore *ikkyokuapp.StudyStore) func() {
+	captureSvc, analyzeSvc, kifuSvc := sv.capture, sv.analyze, sv.kifu
 	// 終了の入口は 2 つ（メイン画面を閉じる / 枠のメニューの「終了」）。
 	// **後始末はこの 1 本に寄せる**（保存の経路を 1 本にしてあるのと同じ理由）。
 	quit := func() {
@@ -385,7 +478,12 @@ func main() {
 		kifuSvc.Close()
 	}
 	captureSvc.beforeQuit = quit
+	return quit
+}
 
+// registerHooks はウィンドウのフック・ホットキー・計測を登録する。
+func registerHooks(app *application.App, wins *appWindows, state appState, sv services, quit func()) {
+	cfg, settingsSvc, captureSvc, diagSvc := sv.cfg, sv.settings, sv.capture, sv.diag
 	registerFrameHooks(app, wins, state.Frame, captureSvc, cfg.FitOnStartup)
 	registerMainHooks(app, wins, state.Main, quit)
 	registerGraphHooks(wins, state.Graph, settingsSvc)
@@ -395,13 +493,19 @@ func main() {
 	registerPaneRaise(wins)
 	registerVisibilityLog(wins)
 	diagSvc.Watch()
+}
 
+func startRecognizer(sv services, issues *ikkyokuapp.IssueService) {
+	captureSvc := sv.capture
 	// 駒種推論器(suteme)を先に用意しておく。3.5MB の学習データを読むので、
 	// 最初のキャプチャのときに読み始めると撮った瞬間に待たされる。
 	// ⚠️ **読み直すたびに ⚠ を合わせる**（設定タブで指し直したときも。issues.go）。
 	captureSvc.onRecognizer = func(st RecognizerStatus) { syncRecognizerIssue(issues, st) }
 	captureSvc.ReloadRecognizer()
+}
 
+func watchMainReveal(sv services, issues *ikkyokuapp.IssueService) {
+	captureSvc := sv.capture
 	// メイン画面が出ないまま動き続けるのを防ぐ（2026-10-04。revealIfStuck）。
 	// ⚠️ **app.Run() の前の Show() は何もしない**ので、時間が来るのは Run の中になる
 	// ように、待ち時間は起動にかかる時間より十分長くとる。
@@ -417,13 +521,6 @@ func main() {
 			Detail: fmt.Sprintf("起動から %v たっても枠の画面の準備が終わらなかったため、メイン画面だけを出しました", mainRevealTimeout),
 		})
 	})
-
-	if err := app.Run(); err != nil {
-		showFatal(err.Error())
-		logCloser.Close()
-		os.Exit(1)
-	}
-	logCloser.Close()
 }
 
 // mainRevealTimeout は、枠の準備が来ないときにメイン画面だけを出すまでの待ち時間（revealIfStuck）。

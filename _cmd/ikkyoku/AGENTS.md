@@ -13,7 +13,7 @@ Service は `ikkyoku/app`、枠の幾何は `ikkyoku/guide`、画面は `fronten
 | 触るもの | 読む文書 |
 |---|---|
 | ウィンドウの生成・起動時に出す窓・Frameless・窓の位置と大きさ（`main.go` / `window.go`）・**メイン画面が真っ黒になる**・**起動で黙って消えない**（`fatal.go` / `issues.go`） | `_docs/cmd-windows.md` |
-| 枠の透過・素通し・移動とリサイズ・**キャプチャ領域（物理ピクセル・HWND）**・**枠の下の帯**（`SetFrameFooter`）（`native_windows.go` / `captureservice.go`） | `_docs/cmd-frame.md`（寸法と幾何は `guide/AGENTS.md`） |
+| 枠の透過・素通し・移動とリサイズ・**キャプチャ領域（物理ピクセル・HWND）**・**枠の下の帯**（`SetFrameFooter`）（`native_windows.go` / `capture_windows.go` / `captureservice.go` の `captureRegion`） | `_docs/cmd-frame.md`（寸法と幾何は `guide/AGENTS.md`） |
 | 撮る・中継を追う（枠の札）・画像ファイル・撮った画像のパス・ホットキー（`captureservice.go`）。ふるい・速い経路・録画は `followcam/`（同じ文書） | `_docs/cmd-capture.md`（調整とデバッグはスキル `ikkyoku-follow`） |
 
 ## GUI アプリ(Wails3)
@@ -62,8 +62,12 @@ CLI は無い。**
 
 | `_cmd/ikkyoku/` のファイル | 役割 |
 |---|---|
-| `main.go` | ウィンドウ 2 枚の生成・**Service の登録**・フック登録・起動時の自動フィット・終了時の後始末。⚠️ **Service の実体は `ikkyoku/app`**（`application.NewService()` は任意のパッケージの値を取れる）。⚠️ **import は別名にしてある** —— パッケージ名 `app` が `application.App` の変数 `app` とぶつかる。**main しか使わない小物も畳んである**（`/shinte-web/` の配信・ホットキーのアクセラレータ変換・ファイル選択ダイアログ） |
-| `captureservice.go` | Wails にバインドする Service。**ウィンドウと HWND を触るのでここに残っている**（枠の表示/非表示・素通し・自分を隠して撮る・メイン画面の塗り潰し・終了(`Quit`)・認識の呼び出し・ガイド枠の自動フィット `FitFrame`・**画像ファイルの読み込み `OpenImage`**）。⚠️ **撮る（`Capture`）と読み込む（`loadImage`）は `deliver` で合流する** —— そこから先（サムネイル・`capture:shot` / `capture:done`・認識）は 1 本だけ。⚠️ **寸法と幾何は `ikkyoku/guide`**（`captureRegion` はそれを使って HWND の矩形から領域を出すだけ） |
+| `main.go` | ウィンドウ 2 枚の生成・**Service の登録**・フック登録・起動時の自動フィット・終了時の後始末。⚠️ **`main()` は手順を関数で並べただけ**（2026-11-13 に割った。`initLog` → `newIssues` → `newServices` → `newApp` → `newAppWindows` → `wireWails` → `openKifuDBAtStartup` → `openStudyStore` → `wireCapture` → `newQuit` → `registerHooks` → `startRecognizer` → `watchMainReveal` → `app.Run`）。⚠️ **呼ぶ順番を変えない**（フックの差し込みと起動時の設定の流し込みは、順番が変わると黙って効かなくなる）。⚠️ **Service の実体は `ikkyoku/app`**（`application.NewService()` は任意のパッケージの値を取れる）。⚠️ **import は別名にしてある** —— パッケージ名 `app` が `application.App` の変数 `app` とぶつかる。**main しか使わない小物も畳んである**（`/shinte-web/` の配信・ホットキーのアクセラレータ変換・ファイル選択ダイアログ） |
+| `captureservice.go` | Wails にバインドする Service。**ウィンドウと HWND を触るのでここに残っている**。⚠️ **型は 1 つのまま、メソッドを役割ごとのファイルに分けてある**（2026-11-13。⚠️ **複数の Service に割らない**（フロントの API になっている）・⚠️ **`mu` は 1 つ**）。このファイルは型・`NewCaptureService`・撮る（`Capture`）・**画像ファイルの読み込み `OpenImage`**・撮る範囲（`captureRegion`）。⚠️ **撮る（`Capture`）と読み込む（`loadImage`）は `deliver` で合流する** —— そこから先（サムネイル・`capture:shot` / `capture:done`・認識）は 1 本だけ。⚠️ **寸法と幾何は `ikkyoku/guide`**（`captureRegion` はそれを使って HWND の矩形から領域を出すだけ） |
+| `capture_recognizer.go` | `CaptureService` のうち**認識器の読み込み（3 段）**（`loadRecognizer` / `recognizerOrder` / `ReloadRecognizer`）。歯止めは `recognizersource_test.go` |
+| `capture_windows.go` | `CaptureService` のうち**ウィンドウ**（枠とメイン画面を出す・隠す・終了(`Quit`)・メイン画面の塗り潰し・素通しの見張り `watchCursor`・**枠の下の帯** `SetFrameFooter`）。制約は `_docs/cmd-windows.md` / `_docs/cmd-frame.md` |
+| `capture_fit.go` | `CaptureService` のうち**ガイド枠の自動フィット**（`FitFrame`・自分を隠して撮る `captureWithoutSelf`） |
+| `capture_panes.go` | `CaptureService` のうち**切り離した窓**（評価値グラフ・候補手・手順）の出し入れ（`SetStudyTabActive` / `syncPaneWindows` / `maskWindows`）。制約は `_docs/ui/detach.md` |
 | `enginepriority.go` | **追っているあいだ盤の読みを優先する**（設定 `followFirst`。2026-10-07）の判断。外部エンジンの優先度を下げる・戻す（Win32 は `native_windows.go` の `setEnginePriority`）。制約は `_docs/cmd-capture.md` |
 | `window.go` | ウィンドウの位置・サイズ。**永続化**（`app-window.json`・既定値・画面内へのクランプ）と**追跡**（動くたびに記録。⚠️ **終了時には `Position()` を読めない**）の 2 つ。⚠️ **5 枚ぶん**（枠・メイン画面・**評価値グラフ**・**候補手**・**手順**）。⚠️ **古いファイルには `graph` / `side` / `moves` が無い**ので既定に倒すこと（倒さないと大きさ 0 の窓が出る） |
 | `native_windows.go` | **Win32 の直呼び**（`golang.org/x/sys/windows` の LazyProc。**cgo を使わないための層**）。①ウィンドウの矩形 ②枠の素通し（`WS_EX_TRANSPARENT`）とカーソル ③画像を CF_DIB でクリップボードへ ④**メッセージボックス**（`fatal.go` が使う。WebView2 にも Wails にも頼らない）。⑤**重なりの順**（`placeBehind`。切り離した窓をメイン画面のすぐ後ろへ回す。`registerPaneRaise`）。⚠️ **ここに判断を書かないこと** —— 付け外しの判断は `captureservice.go` の `watchCursor`、寸法は `ikkyoku/guide` |

@@ -1,6 +1,6 @@
 # _cmd/ikkyoku: 枠（透過・素通し・移動とリサイズ・キャプチャ領域）
 
-**`native_windows.go`・`captureservice.go` の枠とキャプチャ領域 を触るときに読む。** `_cmd/ikkyoku/AGENTS.md` から分けた**制約**（「⚠️ …しないこと」）で、
+**`native_windows.go`・`capture_windows.go`（枠）・`captureservice.go`（キャプチャ領域）を触るときに読む。** `_cmd/ikkyoku/AGENTS.md` から分けた**制約**（「⚠️ …しないこと」）で、
 ⚠️ **自動では読まれないので、触る前に必ずここを開くこと**（索引は `_cmd/ikkyoku/AGENTS.md`）。
 
 ## 透過と Frameless

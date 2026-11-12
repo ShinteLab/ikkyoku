@@ -121,7 +121,7 @@
 | 3. 焼き込み（2 と同じ形。`_cmd/ikkyoku/model/` を埋め込んで `SetEmbedded` で渡す） | `LoadEmbedded` | — |
 
 どれも**読んで 1 組（`Set`）を返すだけ**で、差し替えるのは `Set.Use`。どの段を使うかは
-`_cmd/ikkyoku/captureservice.go` の `loadRecognizer` / `recognizerOrder`。
+`_cmd/ikkyoku/capture_recognizer.go` の `loadRecognizer` / `recognizerOrder`。
 
 - ⚠️ **置かれていない（`ErrNoPack`）と読めないを分けること。** 既定の置き場所が空なのは
   普通の状態で、⚠ に出すことではない
@@ -153,7 +153,7 @@
   （設定の値そのものではない）。⚠️ 焼き込みのとき `Source` は出所のラベルであって
   パスではないので、「実際に使われた推論器」との突き合わせ（`showPredictor` の
   「※設定と別の場所」）は `mode === "dir"` のときだけにしてある
-- 解決は `recognizerOrder` / `loadRecognizer`（`_cmd/ikkyoku/captureservice.go`）の 1 か所。
+- 解決は `recognizerOrder` / `loadRecognizer`（`_cmd/ikkyoku/capture_recognizer.go`）の 1 か所。
   回帰テストは `_cmd/ikkyoku/recognizersource_test.go`（見る順と落ち方）と
   `recognize/predictor_test.go`（1 組の読み方・`ErrNoPack`・版違い・日時・焼き込み・`FromImage` の門番）
 

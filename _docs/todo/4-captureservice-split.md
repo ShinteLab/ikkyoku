@@ -1,7 +1,7 @@
 # `CaptureService` と `main()` を役割ごとのファイルに分ける
 
-2026-11-13 の全体の見直しで出た改善点。**まだ実装していない。** 終わったらこの文書を消し、
-`_cmd/ikkyoku/AGENTS.md` のファイル表を直し、`TODO.md` 7 の行を消す。
+2026-11-13 の全体の見直しで出た改善点。**第 1 段と第 2 段は済んだ**（2026-11-13）。残りは任意の第 3 段だけで、
+やらないと決めたらこの文書と `TODO.md` 7 の行を消す（`_cmd/ikkyoku/AGENTS.md` のファイル表は直してある）。
 
 ## 何が問題か
 
@@ -20,7 +20,7 @@
 
 ## 進め方
 
-### 第 1 段: ファイルを分ける（型はそのまま。**これだけでも済ませてよい**）
+### 第 1 段: ファイルを分ける（型はそのまま。**済んだ**。`capture_recognizer.go` / `capture_windows.go` / `capture_fit.go` / `capture_panes.go`）
 
 同じ `CaptureService` のまま、メソッドを役割ごとのファイルへ移す（Go は同じパッケージなら型のメソッドを複数のファイルに置ける）。
 bindings もフロントの呼び出しも 1 行も変わらない。
@@ -33,7 +33,7 @@ bindings もフロントの呼び出しも 1 行も変わらない。
 
 構造体のフィールド（約 25 個）も、役割ごとに並べ直してコメントで区切る。コメントは消さない。
 
-### 第 2 段: `main()` を分ける
+### 第 2 段: `main()` を分ける（**済んだ**。`initLog` から `watchMainReveal` までの関数を順に呼ぶ形。型 `services`）
 
 `main()`（96〜445 行）を、やっていることの順に関数へ割る（設定を読む → Service を作る → フックを繋ぐ → ウィンドウを作る →
 走らせる）。**繋ぐ順番を変えない** —— フックの nil チェックで動いている箇所があり、順番が変わると黙って効かなくなる。
@@ -42,7 +42,8 @@ bindings もフロントの呼び出しも 1 行も変わらない。
 
 認識器の読み込み（`loadRecognizer` / `recognizerOrder`）が Wails に触れていなければ、`followcam` と同じ要領で
 `recognize` の側へ出せる。`recognizersource_test.go` がルートの `go test ./...` に入る。
-⚠️ **確かめていない**。先に `grep -n "application\.\|s\.app\b\|s\.wins" ` をその範囲に掛けること。
+**確かめた**（2026-11-13）: `capture_recognizer.go` は `application` / `s.app` / `s.wins` に触れていない。触れているのは
+`config`・`recognize`・`s.mu`（設定の 3 つと直近の結果を守る）と `onRecognizer`（⚠ を合わせるフック）だけ。
 出すなら焼き込み（`embedmodel_on.go` / `recognize.SetEmbedded`）の受け渡しがどうなっているかも読む
 （`_docs/design-capture.md` の「決定: 認識器は 3 段」）。
 

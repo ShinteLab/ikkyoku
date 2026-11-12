@@ -43,7 +43,7 @@
 //
 // 枠(frame.ts)とは別ウィンドウなので、ここに置いた要素はキャプチャに写り込まない
 // ——ただし**枠に重なる位置に動かすと写り込む**(画面の合成結果を撮るため)。初回だけ
-// Go 側が枠の外へ逃がす(captureservice.go の placeMainBesideFrame)。
+// Go 側が枠の外へ逃がす(capture_windows.go の placeMainBesideFrame)。
 import { Clipboard, Events, Window } from "@wailsio/runtime";
 import {
   FiAlertTriangle,

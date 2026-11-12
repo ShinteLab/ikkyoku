@@ -17,7 +17,7 @@ import (
 // の LazyProc 経由。ikkyoku は PureGo が方針）。
 //
 // ⚠️ **ここに判断を書かないこと。** 素通しを付け外しするかの判断は
-// `captureservice.go` の `watchCursor`、寸法の計算は `ikkyoku/guide` にある。
+// `capture_windows.go` の `watchCursor`、寸法の計算は `ikkyoku/guide` にある。
 // ここにあるのは **OS を叩くところだけ**。
 //
 // ⚠️ **Windows 以外は `native_other.go`**（スタブ）。関数を足したら**両方に足す**。
@@ -191,7 +191,7 @@ func setWindowLong(h windows.HWND, index, value uintptr) {
 // `GetForegroundWindow` を見ること。
 //
 // ⚠️ **付けっぱなしにしない。** 付いているあいだはツールバーも押せなくなるので、
-// 呼ぶ側（captureservice.go の watchCursor）がカーソルの位置で付け外しする。
+// 呼ぶ側（capture_windows.go の watchCursor）がカーソルの位置で付け外しする。
 // 戻すときは **LAYERED も一緒に外して元の姿に戻す** —— 枠は WebView2 の合成で
 // 透過している（`BackgroundTypeTransparent` = `WS_EX_NOREDIRECTIONBITMAP`）ので、
 // 素通しでないあいだまで layered を残す理由が無い。
