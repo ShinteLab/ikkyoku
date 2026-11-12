@@ -384,7 +384,7 @@ AnalyzeService.runOne ──record──> StudyService.recordEval ──> evalSt
 `.eval-graph` は**ここから 38px 詰めた高さ**で描く（`EVAL_GRAPH_CHROME`）——
 **箱いっぱいに引くと折れ線が縦に間延びして読みにくい**（実測で 218px のとき
 180px 前後がちょうどよかった）。**詰めるぶんを 2 か所に書いてある**ので
-（`style.css` の `.eval-graph` の `calc` と `mainscreen.ts` の `EVAL_GRAPH_CHROME`）、
+（`style.css` の `.eval-graph` の `calc` と `studylayout.ts` の `EVAL_GRAPH_CHROME`）、
 **片方だけ直さないこと。**
 
 - ⚠️ **`--board-size` の式は今までどおり `--eval-graph-h` を引く**（定数も変えない）。

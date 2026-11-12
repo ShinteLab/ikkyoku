@@ -1,4 +1,7 @@
-# 盤の寸法とスプリットバー（`style.css` / `mainscreen.ts`）
+# 盤の寸法とスプリットバー（`style.css` / `studylayout.ts` / `mainscreen.ts`）
+
+⚠️ **スプリットバー・折り畳み・切り離しの JS は `studylayout.ts`**（2026-11-13 に `mainscreen.ts` から切り出した）。
+盤の上の 1 行（`applyStudyTopRow`）・投了のボタン・黒地の右クリックは `mainscreen.ts` に残っている。
 
 **盤の大きさは式で決まる。DOM から自動では決まらない。**
 行を増やしたら `--board-size` の引き算からも引くこと —— さもないと盤がはみ出す。

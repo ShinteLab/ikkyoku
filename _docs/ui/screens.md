@@ -124,7 +124,7 @@
   - ⚠️ **取得元の判別を画面に書かないこと**（連盟 / 読売 / それ以外の `.kif` /
     棋譜 ID の見分けは `kicho.Fetcher.Fetch`）
   - ⚠️ **`#kifu-url` の持ち主は `fetchcards.ts` の 1 か所**（`#fetch-input` は無い）。
-    **`mainscreen.ts` から読まないこと** —— 読む側が 2 つあると、どちらの値で
+    **`mainscreen.ts` / `inputtab.ts` から読まないこと** —— 読む側が 2 つあると、どちらの値で
     動いたのかが追えない
   - ⚠️ **この群の状態の行は 1 つ**（`#fetch-status`）。**貼り付けの群は別の行**
     （`#kifu-status`）で、押した場所の近くに出す
