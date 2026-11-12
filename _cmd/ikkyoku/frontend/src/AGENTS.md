@@ -27,6 +27,7 @@
 | `frame.ts` / `main.ts` | `_docs/ui/screens.md` + 親 `AGENTS.md` の「透過と Frameless」（**枠の下の帯**は `_docs/cmd-frame.md`） |
 | `inputtab.ts`（入力タブ） | `_docs/ui/screens.md`（タブの分け方の節。入力タブの並び） |
 | `trainsend.ts`（訂正データの送信） | `_docs/ui/editor.md` |
+| `followcontrol.ts`（中継を追う） | `_docs/cmd-frame.md`（枠の下の帯）+ `_docs/app-follow.md`（中継セッション） |
 | `settingstab.ts`（設定タブ） | `_docs/ui/screens.md`（設定タブの節） |
 | `hint.ts`（設定の説明の吹き出し） | `_docs/ui/screens.md`（設定タブの節） |
 | `fetchcards.ts` / `library.ts` | `_docs/app-shelf.md`（理由は `_docs/design-capture.md` の「棋譜データベース（棚）」） |
