@@ -40,10 +40,10 @@ type CaptureService struct {
 
 	// ---- 認識器（capture_recognizer.go）-----------------------------------
 	// recognizerDir は学習データの置き場所(config.Config の SutemeDataDir)。
-	// 空ならこの段は無い(suteme 既定の探索には任せない。loadRecognizer)。
+	// 空ならこの段は無い(suteme 既定の探索には任せない。recognize.LoadSources)。
 	recognizerDir string
 	// recognizerModelDir は配布モデルの置き場所の設定(config.Config の SutemeModelDir)。
-	// **空なら既定の置き場所**(解決は loadRecognizer が config.Config.ModelDir で毎回する)。
+	// **空なら既定の置き場所**(解決は recognize.LoadSources が config.Config.ModelDir で毎回する)。
 	recognizerModelDir string
 	// recognizerSource は読み込み元の設定(config.Config の SutemeSource)。
 	// **設定タブから変えられる**ので、mu で守る(applyRecognizerSource)。

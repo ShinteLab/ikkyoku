@@ -23,7 +23,7 @@ import (
 //	2. 配布モデル   … 置いた配布セット（`SutemeModelDir`。LoadPack）
 //	3. 焼き込み     … exe に最初から入っている配布セット（`-tags embedmodel`。LoadEmbedded）
 //
-// どの段を使うかの判断は `_cmd/ikkyoku/capture_recognizer.go` の `loadRecognizer`。
+// どの段を使うかの判断は `sources.go` の `LoadSources`。
 // ここは**1 つの段から 1 組を読む**ことと、**読んだ 1 組をまとめて差し替える**ことだけを持つ。
 //
 // ⚠️ **駒種の推論器と盤の縁の判定器は 1 組で差し替えること**（`Set.Use`）。

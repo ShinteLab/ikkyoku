@@ -1425,7 +1425,7 @@ func (s *SettingsService) SetTheme(v string) (AppSettings, error) {
 //
 // **焼き込みの無いビルドで "embed" を弾いていない。** 設定ファイルは配布ビルドと
 // 開発ビルドで共用されるので、「焼き込みで使う」という意思表示は残せたほうがよい
-// （実際にどの段から読むかは `_cmd/ikkyoku` の `recognizerOrder` が上の段へも回して決める）。
+// （実際にどの段から読むかは `recognize` の `recognizerOrder` が上の段へも回して決める）。
 func (s *SettingsService) SetSutemeSource(v string) (AppSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

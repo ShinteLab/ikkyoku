@@ -297,8 +297,7 @@ suteme 側の課題（確率分布・駒台・速さなど）は `suteme/TODO.md
 | 1 | `_docs/todo/1-follow-session-type.md` —— 追従の段取りを `StudyService` から別の型に分ける | 大 | 追従の作り直し（4）を実機で通したかをユーザーに聞く |
 | 2 | `_docs/todo/2-follow-camera-verdict.md` —— `FollowCamera` の合図 4 つを見直す | 小 | 1 と同時にやらない。価値が薄ければやめてよい |
 | 3 | `_docs/todo/3-mainscreen-split.md` —— `mainscreen.ts`（6,425 行・関数 1 つ）をタブごとに割る。**途中まで済んだ**（3,020 行。設定・入力・送信の行・寸法と切り離し・中継を追う） | 中（残りは解析タブの盤と訂正タブ） | 文書の「残り」の 3 つの置き場所を先に決める |
-| 4 | `_docs/todo/4-captureservice-split.md` —— `CaptureService` と `main()` を役割ごとのファイルに分ける。**第 1・2 段は済んだ** | 小（任意の第 3 段だけ） | 第 3 段（認識器の読み込みを `recognize` へ）をやるかユーザーに聞く |
 | 6 | `_docs/todo/6-usi-bundled.md` —— `usi/` は「Step 2 で消える足場」ではなくなっている | 小（文書） | 同梱エンジンを残すのが決定かをユーザーに確かめる |
 | 7 | `_docs/todo/7-gomod-docs-drift.md` —— suteme の版のずれ・Wails の版の記述・`go.mod` のコメント | 小 | スキル `ikkyoku-build` を読む |
 
-互いに独立しているのは 3・4・6・7。1 と 2 は同じ場所を触る。5（設定を `ikkyoku/config` パッケージへ出す）は済んだ（`_docs/design-capture.md`）。
+互いに独立しているのは 3・6・7。1 と 2 は同じ場所を触る。4（`CaptureService` と `main()` を分ける）と 5（設定を `ikkyoku/config` パッケージへ出す）は済んだ（`_docs/design-capture.md`）。

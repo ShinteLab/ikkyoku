@@ -205,6 +205,22 @@ kicho の UI が持っていた機能（取得 / 登録 / 蔵書）を ikkyoku �
 - 識別子の名前は変えていない（`config.Config` / `config.LoadConfig` と重なるが、改名は置き場所の移動と分けた）
 - bindings の型の出る場所が `…/ikkyoku/models` から `…/ikkyoku/config/models` に変わった
 
+## 決定: `CaptureService` を役割ごとのファイルに分け、認識器の 3 段を `recognize` へ出す（2026-11-13）
+
+全体の見直しで決めた。`_cmd/ikkyoku/captureservice.go`（1,626 行）は 1 つの型に 5 つの役割（認識器・ウィンドウ・撮る・
+自動フィット・切り離した窓）が同居し、`main()` は 349 行あった。
+
+- **型は `CaptureService` 1 つのまま、メソッドだけをファイルに分けた**（`capture_recognizer.go` / `capture_windows.go` /
+  `capture_fit.go` / `capture_panes.go`）。⚠️ **複数の Service に割らない** —— メソッドはフロントの API で、割ると TS の
+  呼び出しを全部直すことになり、得るものが少ない。⚠️ **`mu` も 1 つのまま**
+- **`main()` は手順を関数で並べただけにした**（`initLog` → … → `watchMainReveal`）。⚠️ **呼ぶ順番を変えない** ——
+  フックの差し込みと起動時の設定の流し込みは、順番が変わると黙って効かなくなる
+- **3 段のどれを使うかを決めて読む処理（`LoadSources` / `recognizerOrder`）は `recognize` へ出した。** Wails に触れていなかった
+  （使っていたのは `config`・`recognize`・ロックだけ）ので、`followcam` と同じ理由で Wails の外に置き、歯止めのテストを
+  ルートの `go test ./...` に入れた。⚠️ **設定（3 つ）を持つのは `CaptureService` のまま**（`recognize` に状態を持たせない）。
+  `RecognizerStatus` は `recognize` に定義し、`_cmd/ikkyoku` は型エイリアスで使う（bindings もエイリアスで出るので、フロントは変わらない）
+- ログの出どころ（パッケージ）が `main` から `recognize` に変わった（「認識器を読み込みました」など。文言は同じ）
+
 ## 想定される躓き
 
 **認識の精度・学習データの育て方・実盤とCG盤の難易度差は `recognize/AGENTS.md`。**

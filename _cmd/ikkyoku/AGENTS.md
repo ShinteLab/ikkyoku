@@ -64,7 +64,7 @@ CLI は無い。**
 |---|---|
 | `main.go` | ウィンドウ 2 枚の生成・**Service の登録**・フック登録・起動時の自動フィット・終了時の後始末。⚠️ **`main()` は手順を関数で並べただけ**（2026-11-13 に割った。`initLog` → `newIssues` → `newServices` → `newApp` → `newAppWindows` → `wireWails` → `openKifuDBAtStartup` → `openStudyStore` → `wireCapture` → `newQuit` → `registerHooks` → `startRecognizer` → `watchMainReveal` → `app.Run`）。⚠️ **呼ぶ順番を変えない**（フックの差し込みと起動時の設定の流し込みは、順番が変わると黙って効かなくなる）。⚠️ **Service の実体は `ikkyoku/app`**（`application.NewService()` は任意のパッケージの値を取れる）。⚠️ **import は別名にしてある** —— パッケージ名 `app` が `application.App` の変数 `app` とぶつかる。**main しか使わない小物も畳んである**（`/shinte-web/` の配信・ホットキーのアクセラレータ変換・ファイル選択ダイアログ） |
 | `captureservice.go` | Wails にバインドする Service。**ウィンドウと HWND を触るのでここに残っている**。⚠️ **型は 1 つのまま、メソッドを役割ごとのファイルに分けてある**（2026-11-13。⚠️ **複数の Service に割らない**（フロントの API になっている）・⚠️ **`mu` は 1 つ**）。このファイルは型・`NewCaptureService`・撮る（`Capture`）・**画像ファイルの読み込み `OpenImage`**・撮る範囲（`captureRegion`）。⚠️ **撮る（`Capture`）と読み込む（`loadImage`）は `deliver` で合流する** —— そこから先（サムネイル・`capture:shot` / `capture:done`・認識）は 1 本だけ。⚠️ **寸法と幾何は `ikkyoku/guide`**（`captureRegion` はそれを使って HWND の矩形から領域を出すだけ） |
-| `capture_recognizer.go` | `CaptureService` のうち**認識器の読み込み（3 段）**（`loadRecognizer` / `recognizerOrder` / `ReloadRecognizer`）。歯止めは `recognizersource_test.go` |
+| `capture_recognizer.go` | `CaptureService` のうち**認識器の設定と読み直しの口**（`ReloadRecognizer` / `Recognizer` / `apply*`）。⚠️ **3 段のどれを使うかを決めて読むのは `recognize.LoadSources`**（2026-11-13 に移した）。ここは設定の 3 つと直近の結果を持って渡すだけ。`RecognizerStatus` は `recognize` の型エイリアス |
 | `capture_windows.go` | `CaptureService` のうち**ウィンドウ**（枠とメイン画面を出す・隠す・終了(`Quit`)・メイン画面の塗り潰し・素通しの見張り `watchCursor`・**枠の下の帯** `SetFrameFooter`）。制約は `_docs/cmd-windows.md` / `_docs/cmd-frame.md` |
 | `capture_fit.go` | `CaptureService` のうち**ガイド枠の自動フィット**（`FitFrame`・自分を隠して撮る `captureWithoutSelf`） |
 | `capture_panes.go` | `CaptureService` のうち**切り離した窓**（評価値グラフ・候補手・手順）の出し入れ（`SetStudyTabActive` / `syncPaneWindows` / `maskWindows`）。制約は `_docs/ui/detach.md` |
@@ -100,9 +100,5 @@ CLI は無い。**
 - `embedmodel_test.go`（`-tags embedmodel` のときだけ）— **焼き込んだ `model/` が実際に認識器として
   組み立てられること**。go:embed はファイルがあれば通るので、中身が壊れていても（gzip でない・
   版が違う）ビルドでは気づけない。**配布ビルドの前に `go test -tags embedmodel -skip Clipboard .`**
-- `recognizersource_test.go` — **認識器の 3 段**（2026-10-04。`recognizerOrder` と `loadRecognizer`）。
-  ⚠️ 歯止めは —— **`auto` を「焼き込み優先」にしないこと**（開発中に焼き込みへ倒れると、
-  **学習データを更新しても反映されない**という最も気づきにくい事故になる）・**置いてあるのに
-  読めない段は Skipped に残して下へ落ちること**・**既定の置き場所が空なのは Skipped に入れない
-  こと**・**どれも読めなければ認識器を外すこと**。落ち方の確かめは焼き込みの無いビルドでだけ走る
-  （焼き込みがあると最後の段が埋まる）
+- 認識器の 3 段（見る順と落ち方）のテストは **`recognize/sources_test.go` / `sources_internal_test.go` へ移した**
+  （2026-11-13。ルートの `go test ./...` に入る）。歯止めの中身は `recognize/AGENTS.md`

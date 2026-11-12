@@ -62,7 +62,7 @@ type Config struct {
 	// **見始めた段から下へ順に見て、読めた最初の段を使う。** 置かれていない段は黙って
 	// 飛ばし、**置いてあるのに読めなかった段は ⚠ に出して**下へ落とす。下に何も無ければ
 	// 上の段も見る(焼き込みの無いビルドで "embed" にしていても動くように)。
-	// 解決は `_cmd/ikkyoku` の `recognizerOrder` / `loadRecognizer`。
+	// 解決は `recognize` の `recognizerOrder` / `LoadSources`。
 	// 設計原則3(段階的に劣化する)のとおり、**どれも読めなくてもアプリは動く**(盤面が読めないだけ)。
 	SutemeSource string `json:"sutemeSource,omitempty"`
 
@@ -955,7 +955,7 @@ const (
 // **空・未知の値は auto** として扱う（設定ファイルは手で編集する前提なので、
 // 綴り間違いでアプリが認識できなくなるより既定へ倒す）。
 // ⚠️ **これが「どの段が在るか」までは見ない。** 実際にどこから読むかの解決は
-// `_cmd/ikkyoku` の `loadRecognizer` の仕事。
+// `recognize` の `LoadSources` の仕事。
 func (c Config) SutemeSourceOr() string {
 	switch c.SutemeSource {
 	case SutemeSourceDir, SutemeSourceModel, SutemeSourceEmbed:

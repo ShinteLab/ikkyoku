@@ -283,7 +283,7 @@ Claude Code でスキルとして使いたい人は、各自の `.claude/skills/
 | `config/` | **設定はすべてここ**（`config/config.go`。2026-11-13 にルートパッケージから移した。標準ライブラリとルートの `Region` のみ。⚠️ **ルートパッケージからは参照しない**・⚠️ **JSON のキーは変えない**）。⚠️ **各項目の約束はフィールドのコメント**。共通の型は 3 つ —— **bool はゼロ値が既定になる向きで持つ**（`Hide...`）・**既定の解決は関数 1 か所**（`ThinkSeconds` / `KifuDB` / `PonanzaConstantOr` など）・**知らない値は読める値に丸めて安全側に倒す**（`NormalizeEvalAxis` / `NormalizeGyoku` / `PieceInk`）。⚠️ **棚の既定は `ikkyoku/kicho.db`**（kicho アプリと同じ SQLite を 2 プロセスから開かない） |
 | `dialog.go` | ファイル選択ダイアログ（`app` へ `FilePicker` として差し込む。Wails の口なのでここ） |
 | `log/` | **ログ**（`log.Info` など。ikkyoku のコードはここで出す）。出口は一時ディレクトリの `ikkyoku`（`%TEMP%\ikkyoku`）の `ikkyoku_<日付>.log`（2 日前より前は `.log.gz` にし、90 日で消す。dev のときはターミナルにも）。全体の既定のレベルは dev で INFO・配る exe で NOTICE（INFO は開発中の参考、NOTICE は常に残すもの）で、設定「ログの細かさ」で変えられる。中継の追従は `log.Follow` で `ikkyoku-follow_<日付>.log` へ、エンジンとの USI は `log.USI` で `ikkyoku-usi_<日付>.log` へ分ける・レベルはパッケージごと。⚠️ **Logger を引数で配らない**（`log/AGENTS.md`） |
-| `recognize/` | 画像 → 盤面（`suteme` を呼ぶだけ）・盤の矩形を探す `DetectRegion`・マスごとの読みの確かさ `CellConfidence` |
+| `recognize/` | 画像 → 盤面（`suteme` を呼ぶだけ）・盤の矩形を探す `DetectRegion`・マスごとの読みの確かさ `CellConfidence`・**認識器の 3 段から 1 組を選んで読む `LoadSources`** |
 | `position/` | **「とある局面」**（訂正の操作・手番・駒台・SFEN・`Rotate180`・手の木 `Study`・棋譜の取り込み・新規対局・`Connect`）。画像を知らない |
 | `legal/` | 合法手生成のラッパ（`engine` を呼ぶのはここだけ） |
 | `analyze/` | 確定した局面 → 評価値（同梱 / 外部エンジン・先手視点・勝率の式）。**正式な SFEN を要求するのはここだけ** |
