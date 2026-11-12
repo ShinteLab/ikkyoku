@@ -1,4 +1,4 @@
-package ikkyoku
+package config
 
 import (
 	"os"
@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/ShinteLab/ikkyoku"
 )
 
 func TestConfigRoundTrip(t *testing.T) {
@@ -15,7 +17,7 @@ func TestConfigRoundTrip(t *testing.T) {
 	display := 1
 	want := Config{
 		Display: &display,
-		Region:  &Region{X: 0, Y: 0, Width: 1920, Height: 1080},
+		Region:  &ikkyoku.Region{X: 0, Y: 0, Width: 1920, Height: 1080},
 		OutDir:  filepath.Join(dir, "captures"),
 	}
 

@@ -3,7 +3,7 @@ package app
 import (
 	"testing"
 
-	ikkyoku "github.com/ShinteLab/ikkyoku"
+	"github.com/ShinteLab/ikkyoku/config"
 )
 
 // ⚠️ **「解析に使う」と「詰将棋」は独立した軸**（2026-09-12）。
@@ -12,7 +12,7 @@ import (
 // していたが、**チェックを入れたのに使われない**のは画面から理由が読めない。
 // どう使うかを決めるのは人で、こちらは説明するだけにする。
 func TestEngineAxesAreIndependent(t *testing.T) {
-	cfg := ikkyoku.Config{Engines: []ikkyoku.EngineEntry{
+	cfg := config.Config{Engines: []config.EngineEntry{
 		{ID: "a", Path: "a.exe", Enabled: true},
 		{ID: "both", Path: "komoring.exe", Enabled: true, Mate: true},
 		{ID: "off", Path: "b.exe", Enabled: false},
@@ -30,7 +30,7 @@ func TestEngineAxesAreIndependent(t *testing.T) {
 
 // ⚠️ **「詰将棋にだけ使う」が成り立つこと**（解析には使わない設定が一番ありふれた形）。
 func TestMateEngineWithoutAnalysis(t *testing.T) {
-	cfg := ikkyoku.Config{Engines: []ikkyoku.EngineEntry{
+	cfg := config.Config{Engines: []config.EngineEntry{
 		{ID: "m", Path: "komoring.exe", Enabled: false, Mate: true},
 	}}
 	if got := cfg.EnabledEngines(); len(got) != 0 {
@@ -44,7 +44,7 @@ func TestMateEngineWithoutAnalysis(t *testing.T) {
 
 // 詰将棋エンジンの印を切り替えられること（設定タブのチェック）。
 func TestSetEngineMate(t *testing.T) {
-	s := newTestSettings(t, []ikkyoku.EngineEntry{
+	s := newTestSettings(t, []config.EngineEntry{
 		{ID: "a", Path: "a.exe", Enabled: true},
 	})
 	got, err := s.SetEngineMate("a", true)
@@ -83,7 +83,7 @@ func TestSolveMateWithoutMateEngine(t *testing.T) {
 	}
 	s := &AnalyzeService{
 		study:    study,
-		settings: newTestSettings(t, []ikkyoku.EngineEntry{{ID: "a", Path: "a.exe", Enabled: true}}),
+		settings: newTestSettings(t, []config.EngineEntry{{ID: "a", Path: "a.exe", Enabled: true}}),
 	}
 	if _, err := s.SolveMate(1); err == nil {
 		t.Fatal("詰将棋エンジンが無いのに通りました")
@@ -157,14 +157,14 @@ func TestEngineKeyMultiPV(t *testing.T) {
 	one := map[string]string{"MultiPV": "1", "Threads": "4"}
 	three := map[string]string{"MultiPV": "3", "Threads": "4"}
 
-	normal := ikkyoku.EngineEntry{ID: "a", Path: "a.exe", Options: one}
-	normal3 := ikkyoku.EngineEntry{ID: "a", Path: "a.exe", Options: three}
+	normal := config.EngineEntry{ID: "a", Path: "a.exe", Options: one}
+	normal3 := config.EngineEntry{ID: "a", Path: "a.exe", Options: three}
 	if engineKey(normal) != engineKey(normal3) {
 		t.Error("通常のエンジンで MultiPV が指紋に入っています（繋ぎ直しが起きる）")
 	}
 
-	mate := ikkyoku.EngineEntry{ID: "m", Path: "k.exe", Options: one, Mate: true}
-	mate3 := ikkyoku.EngineEntry{ID: "m", Path: "k.exe", Options: three, Mate: true}
+	mate := config.EngineEntry{ID: "m", Path: "k.exe", Options: one, Mate: true}
+	mate3 := config.EngineEntry{ID: "m", Path: "k.exe", Options: three, Mate: true}
 	if engineKey(mate) == engineKey(mate3) {
 		t.Error("詰将棋エンジンで MultiPV が指紋に入っていません（変えても効かない）")
 	}

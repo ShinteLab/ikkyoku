@@ -19,7 +19,7 @@ import (
 //	① 永続化 … app-window.json の読み書き・既定値・画面内へのクランプ
 //	② 追跡   … 動くたびに記録しておく（終了時には読めないため）
 //
-// ⚠️ **`ikkyoku` ルートの Config(config.json) とはあえて分けてある。**
+// ⚠️ **`ikkyoku/config` の Config(config.json) とはあえて分けてある。**
 // ルートパッケージに Wails 依存(`application` パッケージ)を持ち込まないための分離で、
 // ウィンドウ状態は GUI アプリ固有の関心事なのでこちらに閉じる。
 //
@@ -79,7 +79,7 @@ const (
 
 // appState は永続化するウィンドウ状態の全体。
 //
-// ikkyoku ルートパッケージの Config(config.json)とはあえて分けてある。
+// `ikkyoku/config` の Config(config.json)とはあえて分けてある。
 // ルートパッケージに Wails 依存(application パッケージ)を持ち込まないための分離で、
 // ウィンドウ状態は GUI アプリ固有の関心事なのでこちらに閉じる。
 //

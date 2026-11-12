@@ -7,7 +7,7 @@ import "math"
 // **1500 は「評価値 1500 でおよそ 73%」という当たり方をする値**で、
 // 将棋 UI で広く使われている。エンジンによって評価値の尺度は違う
 // （⚠️ **自作 `engine` の PST は手作り・未調整なので特にそう**）ので、
-// **設定で変えられるようにしてある**（`ikkyoku.Config.PonanzaConstant`）。
+// **設定で変えられるようにしてある**（`config.Config.PonanzaConstant`）。
 const DefaultPonanzaConstant = 1500.0
 
 // PonanzaConstantOr は指定された定数を、指定が無ければ既定値を返す。

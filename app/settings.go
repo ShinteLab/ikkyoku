@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ShinteLab/ikkyoku"
 	"github.com/ShinteLab/ikkyoku/analyze"
+	"github.com/ShinteLab/ikkyoku/config"
 	"github.com/ShinteLab/ikkyoku/log"
 	"github.com/ShinteLab/ikkyoku/recognize"
 	"github.com/ShinteLab/ikkyoku/training"
@@ -21,7 +21,7 @@ import (
 
 // AppSettings はメイン画面の設定タブに出す設定。
 //
-// **ikkyoku.Config そのものを返していない。** あちらは CLI 用の項目(領域・ディスプレイ番号)
+// **config.Config そのものを返していない。** あちらは CLI 用の項目(領域・ディスプレイ番号)
 // まで含む「設定ファイルの形」で、画面に出すものとは範囲が違う。ここは
 // 「設定タブが読み書きするもの」だけを持つ。
 type AppSettings struct {
@@ -33,10 +33,10 @@ type AppSettings struct {
 	FollowFirst bool `json:"followFirst"`
 	// FollowDebug は中継を追うときに、デバッグ用の録画とログを残すか（2026-10-11。`Config.FollowDebug`）。
 	FollowDebug bool `json:"followDebug"`
-	// LogLevel はログの全体のレベル（2026-10-11。空は既定。`ikkyoku.NormalizeLogLevel` 済み）。
+	// LogLevel はログの全体のレベル（2026-10-11。空は既定。`config.NormalizeLogLevel` 済み）。
 	LogLevel string `json:"logLevel"`
 	// LogLevels は選べるログの細かさ（**フロントに表を書かせない**）。
-	LogLevels []ikkyoku.LogLevelOption `json:"logLevels"`
+	LogLevels []config.LogLevelOption `json:"logLevels"`
 	// EvalGraphDetached は評価値グラフを**別ウィンドウに切り離しているか**
 	// （2026-09-08）。
 	//
@@ -60,7 +60,7 @@ type AppSettings struct {
 	// ここに載せてあるのは、**起動時にどれで始めるかをフロントが知る必要が
 	// ある**から（切り離した窓も同じ設定を読む）。
 	//
-	// ⚠️ **解決済みの値が返る**（`ikkyoku.NormalizeEvalAxis`）。フロントに
+	// ⚠️ **解決済みの値が返る**（`config.NormalizeEvalAxis`）。フロントに
 	// 「知らない値をどうするか」を書かせないこと。
 	//
 	// ⚠️ **勝率バーを隠す設定とは別物**（あちらは盤の上の帯）。
@@ -78,20 +78,20 @@ type AppSettings struct {
 	HidePlayerNames bool `json:"hidePlayerNames"`
 	// FlipWinRateBar は解析タブの**勝率バーの左右を入れ替えているか**（2026-10-02）。
 	// 立っていれば**左が先手・右が後手**。⚠️ **盤の視点とは別の設定**
-	// （`ikkyoku.Config.FlipWinRateBar`）。
+	// （`config.Config.FlipWinRateBar`）。
 	FlipWinRateBar bool `json:"flipWinRateBar"`
 	// ShowMoveComment は解析タブの**手順の下にコメント欄を出しているか**（2026-10-04。
-	// 手順の左下のボタン）。⚠️ **既定は出さない**（`ikkyoku.Config.ShowMoveComment`）。
+	// 手順の左下のボタン）。⚠️ **既定は出さない**（`config.Config.ShowMoveComment`）。
 	ShowMoveComment bool `json:"showMoveComment"`
 	// Theme は画面の配色（2026-10-02。"dark" / "light" / "system"。**既定は "dark"**）。
 	//
-	// ⚠️ **解決済みの値が返る**（`ikkyoku.NormalizeTheme`）。ただし "system" は
+	// ⚠️ **解決済みの値が返る**（`config.NormalizeTheme`）。ただし "system" は
 	// "system" のまま返す —— OS の設定は WebView からしか読めないので、
 	// **ライトかダークかを決めるのはフロント**（`theme.ts`）。
 	// ⚠️ **切り離した窓も枠も起動時にここを読む**（どの窓も同じ配色で始める）。
 	Theme string `json:"theme"`
 	// Themes は選べる配色の一覧（**フロントに表を書かせない**）。
-	Themes []ikkyoku.ThemeOption `json:"themes"`
+	Themes []config.ThemeOption `json:"themes"`
 	// Training は訂正した局面を suteme へ登録する設定。
 	Training TrainingSettings `json:"training"`
 	// Engines は登録した USI エンジンの一覧（登録順）。
@@ -103,15 +103,15 @@ type AppSettings struct {
 	//
 	// ⚠️ **フロントに色の表を書かないこと**（既定色の解決も Go 側なので、
 	// 2 つ持つと「選べる色」と「既定で付く色」が食い違う）。
-	EngineColors []ikkyoku.EngineColorOption `json:"engineColors"`
+	EngineColors []config.EngineColorOption `json:"engineColors"`
 	// AnalyzeSeconds は解析タブの「考える秒数」（**0 は無制限**）。
 	//
-	// **既定値（3）は解決済みで返る**（`ikkyoku.Config.ThinkSeconds`）。
+	// **既定値（3）は解決済みで返る**（`config.Config.ThinkSeconds`）。
 	// ⚠️ **フロントに既定値を書かないこと。**
 	AnalyzeSeconds int `json:"analyzeSeconds"`
 	// BatchSeconds は連続解析の 1 手の秒数（2026-10-08。**必ず 1 以上**。無制限は無い）。
 	//
-	// **既定値は解決済みで返る**（`ikkyoku.Config.BatchThinkSeconds`）。
+	// **既定値は解決済みで返る**（`config.Config.BatchThinkSeconds`）。
 	// ⚠️ **フロントに既定値を書かないこと。**
 	BatchSeconds int `json:"batchSeconds"`
 	// PonanzaConstant は評価値 → 勝率の変換に使う定数（解析タブの勝率バー）。
@@ -125,7 +125,7 @@ type AppSettings struct {
 	// ⚠️ **設定タブには出さない**（設定ファイルを手で書くだけ）。側の列が
 	// タイマーを刻むのに使う。
 	KifuFollowMinutes int `json:"kifuFollowMinutes"`
-	// SutemeSource は認識器の読み込み元（`ikkyoku.SutemeSourceAuto` / `Dir` / `Model` / `Embed`）。
+	// SutemeSource は認識器の読み込み元（`config.SutemeSourceAuto` / `Dir` / `Model` / `Embed`）。
 	// **どの段から見始めるか**（学習データ → 配布モデル → 焼き込み。2026-10-04）。
 	//
 	// **正規化済みで返る**（空は "auto"）。⚠️ **フロントで「空なら auto」を
@@ -135,7 +135,7 @@ type AppSettings struct {
 	SutemeDataDir string `json:"sutemeDataDir"`
 	// SutemeModelDir は配布モデルを置いたディレクトリ（2 段目。2026-10-04）。**設定の値そのまま**
 	// で、空なら既定の置き場所。⚠️ **既定の場所をフロントで組み立てないこと** —— 実際に
-	// 探した場所は `RecognizerStatus.ModelDir`（解決は `ikkyoku.Config.ModelDir` の 1 か所）。
+	// 探した場所は `RecognizerStatus.ModelDir`（解決は `config.Config.ModelDir` の 1 か所）。
 	SutemeModelDir string `json:"sutemeModelDir"`
 	// SutemeEmbedAvailable はこのビルドに認識器が焼き込まれているか
 	// （`-tags embedmodel`）。**false なら「焼き込み」は選ばせない。**
@@ -143,7 +143,7 @@ type AppSettings struct {
 	// SutemeEmbedSource は焼き込んだデータの出所（表示用。焼き込みが無ければ空）。
 	SutemeEmbedSource string `json:"sutemeEmbedSource"`
 	// KifuDBPath は棋譜データベース（棚）の場所。**既定は解決済みで返る**
-	// （`ikkyoku.Config.KifuDB`）。⚠️ **フロントに既定値を書かないこと。**
+	// （`config.Config.KifuDB`）。⚠️ **フロントに既定値を書かないこと。**
 	//
 	// **実際に開けているかどうかはここには出ない**（`KifuService.Status`）——
 	// 設定は「どこを開こうとしているか」、状態は「開けたか」で別のもの。
@@ -158,7 +158,7 @@ type AppSettings struct {
 
 // TrainingSettings は「訂正盤面を suteme に登録する」の設定。
 //
-// **ikkyoku.TrainingConfig をそのまま返していない。** 画面に出すのは
+// **config.TrainingConfig をそのまま返していない。** 画面に出すのは
 // 既定値を解決した URL と「実際に送る先(Target)」で、既定値の解決を
 // フロントに持たせないため(既定は training パッケージが持つ)。
 type TrainingSettings struct {
@@ -176,7 +176,7 @@ type TrainingSettings struct {
 //
 // **「外部エンジンを使うか」の真偽値は持たない。** パスが空なら同梱のエンジン、
 // 入っていれば外部エンジン。2 つ持つと「パスが入っているのに無効」という
-// 食い違いが起きる（ikkyoku.EngineEntry の注記と同じ）。
+// 食い違いが起きる（config.EngineEntry の注記と同じ）。
 type EngineSettings struct {
 	// ID は一覧の中でこのエンジンを指す識別子（操作のときに渡す）。
 	ID string `json:"id"`
@@ -208,7 +208,7 @@ type EngineSettings struct {
 	// MultiPV は候補手の本数（**解析タブのエンジンの見出しで変える**）。
 	//
 	// ⚠️ **`Options` の一覧には出さない**（編集口を 2 つにしない。`engineOptionSettings`）。
-	// **既定は解決済みで返る**（`ikkyoku.DefaultMultiPV`）。
+	// **既定は解決済みで返る**（`config.DefaultMultiPV`）。
 	MultiPV int `json:"multiPv"`
 	// Enabled は解析に使うか。**外した登録も残る。**
 	Enabled bool `json:"enabled"`
@@ -271,11 +271,11 @@ type EngineOptionSettings struct {
 // **同じ値の編集口が 2 つ**になり、どちらが今の値か分からなくなる。
 // ⚠️ **値そのものは `Options` に入っている**（`EngineEntry.MultiPV`）。
 // 「出さない」だけで「持たない」ではない。
-func engineOptionSettings(e ikkyoku.EngineEntry) []EngineOptionSettings {
+func engineOptionSettings(e config.EngineEntry) []EngineOptionSettings {
 	out := make([]EngineOptionSettings, 0, len(e.OptionSpecs)+len(e.Options))
-	seen := map[string]bool{ikkyoku.MultiPVOption: true}
+	seen := map[string]bool{config.MultiPVOption: true}
 	for _, o := range e.OptionSpecs {
-		if o.Name == ikkyoku.MultiPVOption {
+		if o.Name == config.MultiPVOption {
 			continue
 		}
 		seen[o.Name] = true
@@ -304,7 +304,7 @@ func engineOptionSettings(e ikkyoku.EngineEntry) []EngineOptionSettings {
 // engineSettings は設定ファイルのエントリを画面に出す形にする。
 //
 // i は**一覧の中での位置**（未設定の色を登録順で決めるのに要る）。
-func engineSettings(e ikkyoku.EngineEntry, i int) EngineSettings {
+func engineSettings(e config.EngineEntry, i int) EngineSettings {
 	opts := engineOptionSettings(e)
 	custom := 0
 	for _, o := range opts {
@@ -371,7 +371,7 @@ type SettingsService struct {
 	// OnFollowDebug は「中継の録画とログを残す（デバッグ）」を切り替えたときに呼ぶ（2026-10-11）。
 	// ⚠️ **設定のロックを持ったまま呼ぶ**ので、先で `Config()` を呼び返さないこと（値は引数で渡す）。
 	OnFollowDebug func(bool)
-	// OnLogLevel は「ログの細かさ」を切り替えたときに呼ぶ（2026-10-11。値は `ikkyoku.NormalizeLogLevel` 済み）。
+	// OnLogLevel は「ログの細かさ」を切り替えたときに呼ぶ（2026-10-11。値は `config.NormalizeLogLevel` 済み）。
 	// ⚠️ **設定のロックを持ったまま呼ぶ**ので、先で `Config()` を呼び返さないこと（値は引数で渡す）。
 	OnLogLevel func(string)
 
@@ -392,7 +392,7 @@ type SettingsService struct {
 
 	mu   sync.Mutex
 	path string
-	cfg  ikkyoku.Config
+	cfg  config.Config
 
 	// loadErr は起動時に設定を読めなかった理由（2026-10-04）。**起動は止めない**
 	// （既定の設定で動く）が、黙っていると**次に設定を 1 つ変えた瞬間に上書きして、
@@ -406,13 +406,13 @@ type SettingsService struct {
 // 読めなければゼロ値で続ける(設定ファイルが無いのは正常な状態)。
 func NewSettingsService() *SettingsService {
 	s := &SettingsService{}
-	path, err := ikkyoku.DefaultConfigPath()
+	path, err := config.DefaultConfigPath()
 	if err != nil {
 		log.Warn("設定ファイルの場所を決められませんでした", "error", err)
 		return s
 	}
 	s.path = path
-	cfg, err := ikkyoku.LoadConfig(path)
+	cfg, err := config.LoadConfig(path)
 	if err != nil {
 		log.Warn("設定を読み込めませんでした", "path", path, "error", err)
 		s.loadErr = err
@@ -465,7 +465,7 @@ type FilePicker func(title, startDir string, filters ...string) (string, error)
 // 呼ぶための口で、**フロントの API ではない**（外すと bindings に出てしまう）。
 //
 //wails:ignore
-func (s *SettingsService) Config() ikkyoku.Config {
+func (s *SettingsService) Config() config.Config {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.cfg
@@ -490,21 +490,21 @@ func (s *SettingsService) settings() AppSettings {
 		ClickThrough:      s.cfg.ClickThrough,
 		FollowFirst:       s.cfg.FollowFirst,
 		FollowDebug:       s.cfg.FollowDebug,
-		LogLevel:          ikkyoku.NormalizeLogLevel(s.cfg.LogLevel),
-		LogLevels:         ikkyoku.LogLevelOptions,
+		LogLevel:          config.NormalizeLogLevel(s.cfg.LogLevel),
+		LogLevels:         config.LogLevelOptions,
 		EvalGraphDetached: s.cfg.EvalGraphDetached,
 		StudyPaneDetached: s.cfg.StudyPaneDetached,
 		MovePaneDetached:  s.cfg.MovePaneDetached,
-		EvalGraphAxis:     ikkyoku.NormalizeEvalAxis(s.cfg.EvalGraphAxis),
+		EvalGraphAxis:     config.NormalizeEvalAxis(s.cfg.EvalGraphAxis),
 		HideWinRateBar:    s.cfg.HideWinRateBar,
 		HidePlayerNames:   s.cfg.HidePlayerNames,
 		FlipWinRateBar:    s.cfg.FlipWinRateBar,
 		ShowMoveComment:   s.cfg.ShowMoveComment,
-		Theme:             ikkyoku.NormalizeTheme(s.cfg.Theme),
-		Themes:            ikkyoku.ThemeOptions,
+		Theme:             config.NormalizeTheme(s.cfg.Theme),
+		Themes:            config.ThemeOptions,
 		Training:          trainingSettings(s.cfg.Training),
 		Engines:           engines,
-		EngineColors:      ikkyoku.EngineColors,
+		EngineColors:      config.EngineColors,
 		AnalyzeSeconds:    s.cfg.ThinkSeconds(),
 		BatchSeconds:      s.cfg.BatchThinkSeconds(),
 		PonanzaConstant:   analyze.PonanzaConstantOr(s.cfg.PonanzaConstant),
@@ -527,7 +527,7 @@ func (s *SettingsService) settings() AppSettings {
 
 // kifuDBPathLocked は棋譜データベースの場所を解決して返す。
 //
-// ⚠️ **「空なら既定」の解決は `ikkyoku.Config.KifuDB` の 1 か所。**
+// ⚠️ **「空なら既定」の解決は `config.Config.KifuDB` の 1 か所。**
 // ここに既定のパスを書かないこと。
 func (s *SettingsService) kifuDBPathLocked() string {
 	p, err := s.cfg.KifuDB()
@@ -540,9 +540,9 @@ func (s *SettingsService) kifuDBPathLocked() string {
 
 // enabledEngines は解析に使うエンジンを返す(AnalyzeService が使う)。
 //
-// ⚠️ **「空なら同梱」の解決はここではなく `ikkyoku.Config.EngineList`。**
+// ⚠️ **「空なら同梱」の解決はここではなく `config.Config.EngineList`。**
 // 判断を 2 か所に持たない。
-func (s *SettingsService) enabledEngines() []ikkyoku.EngineEntry {
+func (s *SettingsService) enabledEngines() []config.EngineEntry {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.cfg.EnabledEngines()
@@ -552,27 +552,27 @@ func (s *SettingsService) enabledEngines() []ikkyoku.EngineEntry {
 //
 // ⚠️ **同梱していないので、入れていない環境が普通**（呼び出し側は「入れてください」
 // と言うだけにして、通常の解析を巻き込まないこと）。
-func (s *SettingsService) mateEngine() (ikkyoku.EngineEntry, bool) {
+func (s *SettingsService) mateEngine() (config.EngineEntry, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.cfg.MateEngine()
 }
 
 // engineEntry は ID で 1 つ引く（「接続を確認」がこれ 1 つを繋ぐ）。
-func (s *SettingsService) engineEntry(id string) (ikkyoku.EngineEntry, bool) {
+func (s *SettingsService) engineEntry(id string) (config.EngineEntry, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.entryLocked(id)
 }
 
 // entryLocked は engineEntry の中身。**ロックを取った状態で呼ぶこと。**
-func (s *SettingsService) entryLocked(id string) (ikkyoku.EngineEntry, bool) {
+func (s *SettingsService) entryLocked(id string) (config.EngineEntry, bool) {
 	for _, e := range s.cfg.EngineList() {
 		if e.ID == id {
 			return e, true
 		}
 	}
-	return ikkyoku.EngineEntry{}, false
+	return config.EngineEntry{}, false
 }
 
 // editEngines は一覧を書き換えて保存する共通処理。**ロックを取った状態で呼ぶこと。**
@@ -580,8 +580,8 @@ func (s *SettingsService) entryLocked(id string) (ikkyoku.EngineEntry, bool) {
 // ⚠️ **書き換える前に `EngineList()` を通す**（＝登録が空なら同梱エンジン 1 件に
 // 実体化してから触る）。そうしないと、既定の同梱エンジンの「解析に使う」を外した
 // つもりが**何も保存されず、次に開くとまた有効に見える**。
-func (s *SettingsService) editEngines(apply func([]ikkyoku.EngineEntry) []ikkyoku.EngineEntry) (AppSettings, error) {
-	return s.save(func(cfg *ikkyoku.Config) {
+func (s *SettingsService) editEngines(apply func([]config.EngineEntry) []config.EngineEntry) (AppSettings, error) {
+	return s.save(func(cfg *config.Config) {
 		cfg.Engines = apply(cfg.EngineList())
 	})
 }
@@ -619,11 +619,11 @@ func (s *SettingsService) AddEngine(path string) (AppSettings, error) {
 	if err != nil {
 		return s.settings(), err
 	}
-	return s.editEngines(func(list []ikkyoku.EngineEntry) []ikkyoku.EngineEntry {
+	return s.editEngines(func(list []config.EngineEntry) []config.EngineEntry {
 		// 足したものは**そのまま使える状態**にする（追加したのに解析に出てこないと、
 		// なぜ出ないのかを探すことになる）。
-		return append(list, ikkyoku.EngineEntry{
-			ID: ikkyoku.NextEngineID(list), Path: p, Enabled: true,
+		return append(list, config.EngineEntry{
+			ID: config.NextEngineID(list), Path: p, Enabled: true,
 		})
 	})
 }
@@ -702,7 +702,7 @@ func (s *SettingsService) SetEnginePath(id, path string) (AppSettings, error) {
 	if err != nil {
 		return s.settings(), err
 	}
-	return s.editEngines(func(list []ikkyoku.EngineEntry) []ikkyoku.EngineEntry {
+	return s.editEngines(func(list []config.EngineEntry) []config.EngineEntry {
 		for i := range list {
 			if list[i].ID != id || list[i].Path == p {
 				continue
@@ -728,10 +728,10 @@ func (s *SettingsService) SetEnginePath(id, path string) (AppSettings, error) {
 //
 // ⚠️ **控えるのは宣言だけで、値（`Options`）には触らない。** 人が書いた値を
 // 繋ぎ直しただけで消さない（宣言に無い値は画面でもそう出る）。
-func (s *SettingsService) setEngineOptionSpecs(id string, specs []ikkyoku.EngineOption) {
+func (s *SettingsService) setEngineOptionSpecs(id string, specs []config.EngineOption) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, err := s.editEngines(func(list []ikkyoku.EngineEntry) []ikkyoku.EngineEntry {
+	if _, err := s.editEngines(func(list []config.EngineEntry) []config.EngineEntry {
 		for i := range list {
 			if list[i].ID == id {
 				list[i].OptionSpecs = specs
@@ -764,7 +764,7 @@ func (s *SettingsService) rememberEngineName(id, name string) {
 	if e, ok := s.entryLocked(id); !ok || e.EngineName == name {
 		return
 	}
-	if _, err := s.editEngines(func(list []ikkyoku.EngineEntry) []ikkyoku.EngineEntry {
+	if _, err := s.editEngines(func(list []config.EngineEntry) []config.EngineEntry {
 		for i := range list {
 			if list[i].ID == id {
 				list[i].EngineName = name
@@ -810,7 +810,7 @@ func (s *SettingsService) SetEngineOption(id, name, value string) (AppSettings, 
 			return s.settings(), err
 		}
 	}
-	return s.editEngines(func(list []ikkyoku.EngineEntry) []ikkyoku.EngineEntry {
+	return s.editEngines(func(list []config.EngineEntry) []config.EngineEntry {
 		for i := range list {
 			if list[i].ID != id {
 				continue
@@ -837,7 +837,7 @@ func (s *SettingsService) SetEngineOption(id, name, value string) (AppSettings, 
 // **弾くのは「エンジンが必ず断る値」だけ。** 範囲外の spin や、選択肢に無い combo は
 // 送っても無視されるうえ、**`setoption` には応答が返らないので画面では気づけない**。
 // 入れた瞬間に断るほうが早い。
-func checkOptionValue(o ikkyoku.EngineOption, v string) (string, error) {
+func checkOptionValue(o config.EngineOption, v string) (string, error) {
 	switch o.Type {
 	case "button":
 		// ⚠️ **button は値を持たない**（送ること自体が「押した」という動作）。
@@ -906,10 +906,10 @@ func (s *SettingsService) SetEngineMultiPV(id string, n int) (AppSettings, error
 	}
 	// エンジンが上限を宣言しているなら、それを超える値は断る（送っても無視されるうえ、
 	// **`setoption` には応答が返らないので画面では気づけない**）。
-	if spec, known := entry.OptionSpec(ikkyoku.MultiPVOption); known && spec.HasMax && n > spec.Max {
+	if spec, known := entry.OptionSpec(config.MultiPVOption); known && spec.HasMax && n > spec.Max {
 		return s.settings(), fmt.Errorf("このエンジンの候補手は %d 本までです: %d", spec.Max, n)
 	}
-	return s.editEngines(func(list []ikkyoku.EngineEntry) []ikkyoku.EngineEntry {
+	return s.editEngines(func(list []config.EngineEntry) []config.EngineEntry {
 		for i := range list {
 			if list[i].ID != id {
 				continue
@@ -921,7 +921,7 @@ func (s *SettingsService) SetEngineMultiPV(id string, n int) (AppSettings, error
 			// 違って、ここでの既定は**エンジンの宣言ではなくアプリの都合**なので、
 			// 消すと「エンジンの既定に従う」ではなく「アプリの既定に戻る」になる。
 			// **選んだ値がそのまま残るほうが素直。**
-			list[i].Options[ikkyoku.MultiPVOption] = strconv.Itoa(n)
+			list[i].Options[config.MultiPVOption] = strconv.Itoa(n)
 		}
 		return list
 	})
@@ -938,15 +938,15 @@ func (s *SettingsService) SetEngineMultiPV(id string, n int) (AppSettings, error
 func (s *SettingsService) ResetEngineOptions(id string) (AppSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.editEngines(func(list []ikkyoku.EngineEntry) []ikkyoku.EngineEntry {
+	return s.editEngines(func(list []config.EngineEntry) []config.EngineEntry {
 		for i := range list {
 			if list[i].ID != id {
 				continue
 			}
-			keep := list[i].Options[ikkyoku.MultiPVOption]
+			keep := list[i].Options[config.MultiPVOption]
 			list[i].Options = nil
 			if keep != "" {
-				list[i].Options = map[string]string{ikkyoku.MultiPVOption: keep}
+				list[i].Options = map[string]string{config.MultiPVOption: keep}
 			}
 		}
 		return list
@@ -961,7 +961,7 @@ func (s *SettingsService) SetEngineName(id, name string) (AppSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	n := strings.TrimSpace(name)
-	return s.editEngines(func(list []ikkyoku.EngineEntry) []ikkyoku.EngineEntry {
+	return s.editEngines(func(list []config.EngineEntry) []config.EngineEntry {
 		for i := range list {
 			if list[i].ID == id {
 				list[i].Name = n
@@ -987,7 +987,7 @@ func (s *SettingsService) SetEngineColor(id, color string) (AppSettings, error) 
 	if c != "" && !isHexColor(c) {
 		return s.settings(), fmt.Errorf("色は #rrggbb で指定してください: %s", color)
 	}
-	return s.editEngines(func(list []ikkyoku.EngineEntry) []ikkyoku.EngineEntry {
+	return s.editEngines(func(list []config.EngineEntry) []config.EngineEntry {
 		for i := range list {
 			if list[i].ID == id {
 				list[i].Color = c
@@ -999,7 +999,7 @@ func (s *SettingsService) SetEngineColor(id, color string) (AppSettings, error) 
 
 // isHexColor は `#rrggbb` かどうか。
 //
-// ⚠️ **選べる色の一覧（`ikkyoku.EngineColors`）に限定しないこと** —— 設定ファイルは
+// ⚠️ **選べる色の一覧（`config.EngineColors`）に限定しないこと** —— 設定ファイルは
 // 手で編集する前提で、一覧の外の色を書くのは正当。画面から選べる範囲と、
 // 受け付ける範囲は別物。
 func isHexColor(s string) bool {
@@ -1021,7 +1021,7 @@ func isHexColor(s string) bool {
 func (s *SettingsService) SetEngineEnabled(id string, enabled bool) (AppSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.editEngines(func(list []ikkyoku.EngineEntry) []ikkyoku.EngineEntry {
+	return s.editEngines(func(list []config.EngineEntry) []config.EngineEntry {
 		for i := range list {
 			if list[i].ID == id {
 				list[i].Enabled = enabled
@@ -1044,7 +1044,7 @@ func (s *SettingsService) SetEngineEnabled(id string, enabled bool) (AppSettings
 func (s *SettingsService) SetEngineMate(id string, mate bool) (AppSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.editEngines(func(list []ikkyoku.EngineEntry) []ikkyoku.EngineEntry {
+	return s.editEngines(func(list []config.EngineEntry) []config.EngineEntry {
 		for i := range list {
 			if list[i].ID == id {
 				list[i].Mate = mate
@@ -1071,7 +1071,7 @@ func (s *SettingsService) SetEngineMate(id string, mate bool) (AppSettings, erro
 func (s *SettingsService) MoveEngine(id string, delta int) (AppSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.editEngines(func(list []ikkyoku.EngineEntry) []ikkyoku.EngineEntry {
+	return s.editEngines(func(list []config.EngineEntry) []config.EngineEntry {
 		from := -1
 		for i, e := range list {
 			if e.ID == id {
@@ -1090,12 +1090,12 @@ func (s *SettingsService) MoveEngine(id string, delta int) (AppSettings, error) 
 
 // RemoveEngine は登録を消す。
 //
-// **全部消すと同梱エンジン 1 つに戻る**（`ikkyoku.Config.EngineList`）。
+// **全部消すと同梱エンジン 1 つに戻る**（`config.Config.EngineList`）。
 // 解析できない状態に落とし込まないため。
 func (s *SettingsService) RemoveEngine(id string) (AppSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.editEngines(func(list []ikkyoku.EngineEntry) []ikkyoku.EngineEntry {
+	return s.editEngines(func(list []config.EngineEntry) []config.EngineEntry {
 		out := list[:0]
 		for _, e := range list {
 			if e.ID != id {
@@ -1107,7 +1107,7 @@ func (s *SettingsService) RemoveEngine(id string) (AppSettings, error) {
 }
 
 // trainingSettings は設定ファイルの値を、画面に出す形(既定値を解決した接続先つき)にする。
-func trainingSettings(c ikkyoku.TrainingConfig) TrainingSettings {
+func trainingSettings(c config.TrainingConfig) TrainingSettings {
 	u := c.URL
 	if u == "" {
 		u = training.DefaultURL
@@ -1125,7 +1125,7 @@ func trainingSettings(c ikkyoku.TrainingConfig) TrainingSettings {
 }
 
 // trainingConfig は今の接続設定を返す(TrainingService が使う)。
-func (s *SettingsService) trainingConfig() ikkyoku.TrainingConfig {
+func (s *SettingsService) trainingConfig() config.TrainingConfig {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.cfg.Training
@@ -1140,7 +1140,7 @@ func (s *SettingsService) SetTraining(enabled bool, rawURL string, token string)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	next := ikkyoku.TrainingConfig{
+	next := config.TrainingConfig{
 		Enabled: enabled,
 		URL:     strings.TrimSpace(rawURL),
 		Token:   strings.TrimSpace(token),
@@ -1155,7 +1155,7 @@ func (s *SettingsService) SetTraining(enabled bool, rawURL string, token string)
 		next.URL = ""
 	}
 
-	return s.save(func(cfg *ikkyoku.Config) { cfg.Training = next })
+	return s.save(func(cfg *config.Config) { cfg.Training = next })
 }
 
 // ponanzaConstant は評価値 → 勝率の変換に使う定数を返す（AnalyzeService が使う）。
@@ -1183,7 +1183,7 @@ func (s *SettingsService) SetPonanzaConstant(v float64) (AppSettings, error) {
 	if v == analyze.DefaultPonanzaConstant {
 		v = 0
 	}
-	return s.save(func(cfg *ikkyoku.Config) { cfg.PonanzaConstant = v })
+	return s.save(func(cfg *config.Config) { cfg.PonanzaConstant = v })
 }
 
 // SetAnalyzeSeconds は「考える秒数」を保存する（解析タブの選択。**0 は無制限**）。
@@ -1200,7 +1200,7 @@ func (s *SettingsService) SetAnalyzeSeconds(v int) (AppSettings, error) {
 	if v < 0 {
 		return s.settings(), fmt.Errorf("考える秒数は 0 以上で指定してください（0 は無制限）: %d", v)
 	}
-	return s.save(func(cfg *ikkyoku.Config) { cfg.AnalyzeSeconds = &v })
+	return s.save(func(cfg *config.Config) { cfg.AnalyzeSeconds = &v })
 }
 
 // SetBatchSeconds は連続解析の 1 手の秒数を保存する（連続解析を押したときのダイアログで選んだ値）。
@@ -1213,7 +1213,7 @@ func (s *SettingsService) SetBatchSeconds(v int) (AppSettings, error) {
 	if v <= 0 {
 		return s.settings(), fmt.Errorf("連続解析の秒数は 1 以上で指定してください: %d", v)
 	}
-	return s.save(func(cfg *ikkyoku.Config) { cfg.BatchSeconds = v })
+	return s.save(func(cfg *config.Config) { cfg.BatchSeconds = v })
 }
 
 // SetFollowFirst は「中継を追うあいだは盤の読みを優先する」を切り替えて保存し、**その場で効かせる**
@@ -1222,7 +1222,7 @@ func (s *SettingsService) SetBatchSeconds(v int) (AppSettings, error) {
 func (s *SettingsService) SetFollowFirst(v bool) (AppSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	st, err := s.save(func(cfg *ikkyoku.Config) { cfg.FollowFirst = v })
+	st, err := s.save(func(cfg *config.Config) { cfg.FollowFirst = v })
 	if err == nil && s.OnFollowFirst != nil {
 		s.OnFollowFirst(v)
 	}
@@ -1235,7 +1235,7 @@ func (s *SettingsService) SetFollowFirst(v bool) (AppSettings, error) {
 func (s *SettingsService) SetFollowDebug(v bool) (AppSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	st, err := s.save(func(cfg *ikkyoku.Config) { cfg.FollowDebug = v })
+	st, err := s.save(func(cfg *config.Config) { cfg.FollowDebug = v })
 	if err == nil && s.OnFollowDebug != nil {
 		s.OnFollowDebug(v)
 	}
@@ -1243,12 +1243,12 @@ func (s *SettingsService) SetFollowDebug(v bool) (AppSettings, error) {
 }
 
 // SetLogLevel は「ログの細かさ」を切り替えて保存し、**その場で効かせる**（`OnLogLevel`。2026-10-11）。
-// ⚠️ **知らない値は既定に倒す**（`ikkyoku.NormalizeLogLevel`）・⚠️ **保存できたときだけ効かせること**。
+// ⚠️ **知らない値は既定に倒す**（`config.NormalizeLogLevel`）・⚠️ **保存できたときだけ効かせること**。
 func (s *SettingsService) SetLogLevel(v string) (AppSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	lv := ikkyoku.NormalizeLogLevel(v)
-	st, err := s.save(func(cfg *ikkyoku.Config) { cfg.LogLevel = lv })
+	lv := config.NormalizeLogLevel(v)
+	st, err := s.save(func(cfg *config.Config) { cfg.LogLevel = lv })
 	if err == nil && s.OnLogLevel != nil {
 		s.OnLogLevel(lv)
 	}
@@ -1259,7 +1259,7 @@ func (s *SettingsService) SetLogLevel(v string) (AppSettings, error) {
 func (s *SettingsService) SetFitOnStartup(v bool) (AppSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.save(func(cfg *ikkyoku.Config) { cfg.FitOnStartup = v })
+	return s.save(func(cfg *config.Config) { cfg.FitOnStartup = v })
 }
 
 // SetClickThrough は「枠の内側で後ろの画面を操作する」を切り替えて保存し、**その場で効かせる。**
@@ -1272,7 +1272,7 @@ func (s *SettingsService) SetFitOnStartup(v bool) (AppSettings, error) {
 func (s *SettingsService) SetClickThrough(v bool) (AppSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	st, err := s.save(func(cfg *ikkyoku.Config) { cfg.ClickThrough = v })
+	st, err := s.save(func(cfg *config.Config) { cfg.ClickThrough = v })
 	if err != nil {
 		return st, err
 	}
@@ -1293,7 +1293,7 @@ func (s *SettingsService) SetClickThrough(v bool) (AppSettings, error) {
 func (s *SettingsService) SetEvalGraphDetached(v bool) (AppSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	st, err := s.save(func(cfg *ikkyoku.Config) { cfg.EvalGraphDetached = v })
+	st, err := s.save(func(cfg *config.Config) { cfg.EvalGraphDetached = v })
 	if err != nil {
 		return st, err
 	}
@@ -1310,7 +1310,7 @@ func (s *SettingsService) SetEvalGraphDetached(v bool) (AppSettings, error) {
 func (s *SettingsService) SetStudyPaneDetached(v bool) (AppSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	st, err := s.save(func(cfg *ikkyoku.Config) { cfg.StudyPaneDetached = v })
+	st, err := s.save(func(cfg *config.Config) { cfg.StudyPaneDetached = v })
 	if err != nil {
 		return st, err
 	}
@@ -1328,7 +1328,7 @@ func (s *SettingsService) SetStudyPaneDetached(v bool) (AppSettings, error) {
 func (s *SettingsService) SetMovePaneDetached(v bool) (AppSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	st, err := s.save(func(cfg *ikkyoku.Config) { cfg.MovePaneDetached = v })
+	st, err := s.save(func(cfg *config.Config) { cfg.MovePaneDetached = v })
 	if err != nil {
 		return st, err
 	}
@@ -1348,7 +1348,7 @@ func (s *SettingsService) SetMovePaneDetached(v bool) (AppSettings, error) {
 // 持たない）。**記録している点は 1 つも変わらない** —— 変わるのは
 // **どれを縦軸にするか**だけ。
 //
-// ⚠️ **知らない値は評価値に倒す**（`ikkyoku.NormalizeEvalAxis`）。エラーにしない
+// ⚠️ **知らない値は評価値に倒す**（`config.NormalizeEvalAxis`）。エラーにしない
 // のは、**軸が読めないことで解析まで止める理由が無い**から（設計原則3）。
 //
 // ⚠️ **勝率バーを隠す設定（`SetHideWinRateBar`）を巻き添えにしないこと。**
@@ -1356,8 +1356,8 @@ func (s *SettingsService) SetMovePaneDetached(v bool) (AppSettings, error) {
 func (s *SettingsService) SetEvalGraphAxis(v string) (AppSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	axis := ikkyoku.NormalizeEvalAxis(v)
-	return s.save(func(cfg *ikkyoku.Config) { cfg.EvalGraphAxis = axis })
+	axis := config.NormalizeEvalAxis(v)
+	return s.save(func(cfg *config.Config) { cfg.EvalGraphAxis = axis })
 }
 
 // SetHideWinRateBar は解析タブの勝率バー（評価値バー）の表示を切り替えて保存する。
@@ -1368,7 +1368,7 @@ func (s *SettingsService) SetEvalGraphAxis(v string) (AppSettings, error) {
 func (s *SettingsService) SetHideWinRateBar(v bool) (AppSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.save(func(cfg *ikkyoku.Config) { cfg.HideWinRateBar = v })
+	return s.save(func(cfg *config.Config) { cfg.HideWinRateBar = v })
 }
 
 // SetHidePlayerNames は解析タブの対局者名の表示を切り替えて保存する。
@@ -1379,7 +1379,7 @@ func (s *SettingsService) SetHideWinRateBar(v bool) (AppSettings, error) {
 func (s *SettingsService) SetHidePlayerNames(v bool) (AppSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.save(func(cfg *ikkyoku.Config) { cfg.HidePlayerNames = v })
+	return s.save(func(cfg *config.Config) { cfg.HidePlayerNames = v })
 }
 
 // SetFlipWinRateBar は解析タブの勝率バーの左右を入れ替えて保存する（2026-10-02）。
@@ -1391,7 +1391,7 @@ func (s *SettingsService) SetHidePlayerNames(v bool) (AppSettings, error) {
 func (s *SettingsService) SetFlipWinRateBar(v bool) (AppSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.save(func(cfg *ikkyoku.Config) { cfg.FlipWinRateBar = v })
+	return s.save(func(cfg *config.Config) { cfg.FlipWinRateBar = v })
 }
 
 // SetShowMoveComment は解析タブの手順の下のコメント欄を出し入れして保存する（2026-10-04）。
@@ -1400,7 +1400,7 @@ func (s *SettingsService) SetFlipWinRateBar(v bool) (AppSettings, error) {
 func (s *SettingsService) SetShowMoveComment(v bool) (AppSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.save(func(cfg *ikkyoku.Config) { cfg.ShowMoveComment = v })
+	return s.save(func(cfg *config.Config) { cfg.ShowMoveComment = v })
 }
 
 // SetTheme は画面の配色を切り替えて保存する（2026-10-02）。
@@ -1409,13 +1409,13 @@ func (s *SettingsService) SetShowMoveComment(v bool) (AppSettings, error) {
 // 知らせるのはフロント（`theme:changed`）—— 縦軸と同じく、Go 側が持つのは
 // 「次の起動でどれで始めるか」だけ。
 //
-// ⚠️ **知らない値はダークに倒す**（`ikkyoku.NormalizeTheme`）。エラーにしない
+// ⚠️ **知らない値はダークに倒す**（`config.NormalizeTheme`）。エラーにしない
 // のは、**配色が読めないことで他の設定の保存まで止める理由が無い**から。
 func (s *SettingsService) SetTheme(v string) (AppSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	theme := ikkyoku.NormalizeTheme(v)
-	return s.save(func(cfg *ikkyoku.Config) { cfg.Theme = theme })
+	theme := config.NormalizeTheme(v)
+	return s.save(func(cfg *config.Config) { cfg.Theme = theme })
 }
 
 // SetSutemeSource は認識器の読み込み元を切り替えて保存し、**その場で読み直す。**
@@ -1429,7 +1429,7 @@ func (s *SettingsService) SetTheme(v string) (AppSettings, error) {
 func (s *SettingsService) SetSutemeSource(v string) (AppSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	st, err := s.save(func(cfg *ikkyoku.Config) { cfg.SutemeSource = v })
+	st, err := s.save(func(cfg *config.Config) { cfg.SutemeSource = v })
 	if err != nil {
 		return st, err
 	}
@@ -1445,7 +1445,7 @@ func (s *SettingsService) SetSutemeDataDir(dir string) (AppSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	dir = strings.TrimSpace(dir)
-	st, err := s.save(func(cfg *ikkyoku.Config) { cfg.SutemeDataDir = dir })
+	st, err := s.save(func(cfg *config.Config) { cfg.SutemeDataDir = dir })
 	if err != nil {
 		return st, err
 	}
@@ -1456,13 +1456,13 @@ func (s *SettingsService) SetSutemeDataDir(dir string) (AppSettings, error) {
 }
 
 // SetSutemeModelDir は配布モデルの置き場所を変えて保存し、**その場で読み直す**（2026-10-04）。
-// **空にすると既定の置き場所**（`ikkyoku.DefaultModelDir`）。解決は `ikkyoku.Config.ModelDir`
+// **空にすると既定の置き場所**（`config.DefaultModelDir`）。解決は `config.Config.ModelDir`
 // の 1 か所なので、ここでは空をそのまま保存する。
 func (s *SettingsService) SetSutemeModelDir(dir string) (AppSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	dir = strings.TrimSpace(dir)
-	st, err := s.save(func(cfg *ikkyoku.Config) { cfg.SutemeModelDir = dir })
+	st, err := s.save(func(cfg *config.Config) { cfg.SutemeModelDir = dir })
 	if err != nil {
 		return st, err
 	}
@@ -1475,7 +1475,7 @@ func (s *SettingsService) SetSutemeModelDir(dir string) (AppSettings, error) {
 // SetKifuDBPath は棋譜データベース（棚）の場所を変えて保存し、**その場で開き直す。**
 //
 // **空にすると既定へ戻る**（`os.UserConfigDir()/ikkyoku/kicho.db`）。
-// 解決は `ikkyoku.Config.KifuDB` の 1 か所なので、ここでは空をそのまま保存する。
+// 解決は `config.Config.KifuDB` の 1 か所なので、ここでは空をそのまま保存する。
 //
 // ⚠️ **保存できたときだけ効かせること**（`SetClickThrough` と同じ）。先に開き直すと、
 // 保存に失敗したときに「画面のパスと実際に開いている DB が食い違う」。
@@ -1486,7 +1486,7 @@ func (s *SettingsService) SetKifuDBPath(path string) (AppSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	path = strings.TrimSpace(path)
-	st, err := s.save(func(cfg *ikkyoku.Config) { cfg.KifuDBPath = path })
+	st, err := s.save(func(cfg *config.Config) { cfg.KifuDBPath = path })
 	if err != nil {
 		return st, err
 	}
@@ -1530,7 +1530,7 @@ func (s *SettingsService) BrowseKifuDB() (AppSettings, error) {
 // 自分の形（`FontState`）を組み立てる。**AppSettings に駒フォントの項目を
 // 足していないのはそのため** —— あちらは設定タブの 1 枚岩で、
 // 焼いた data URL のような「画面に出さない値」を混ぜたくない。
-func (s *SettingsService) editConfig(apply func(*ikkyoku.Config)) (ikkyoku.Config, error) {
+func (s *SettingsService) editConfig(apply func(*config.Config)) (config.Config, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, err := s.save(apply); err != nil {
@@ -1539,19 +1539,19 @@ func (s *SettingsService) editConfig(apply func(*ikkyoku.Config)) (ikkyoku.Confi
 	return s.cfg, nil
 }
 
-func (s *SettingsService) save(apply func(*ikkyoku.Config)) (AppSettings, error) {
+func (s *SettingsService) save(apply func(*config.Config)) (AppSettings, error) {
 	if s.path == "" {
 		// 保存先が決められない環境。今回限りの変更にする。
 		apply(&s.cfg)
 		return s.settings(), nil
 	}
-	cfg, err := ikkyoku.LoadConfig(s.path)
+	cfg, err := config.LoadConfig(s.path)
 	if err != nil {
 		log.Warn("設定を読み直せませんでした。読み込み済みの内容に書きます", "error", err)
 		cfg = s.cfg
 	}
 	apply(&cfg)
-	if err := ikkyoku.SaveConfig(s.path, cfg); err != nil {
+	if err := config.SaveConfig(s.path, cfg); err != nil {
 		log.Error("設定を保存できませんでした", "path", s.path, "error", err)
 		return s.settings(), err
 	}

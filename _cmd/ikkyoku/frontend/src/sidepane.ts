@@ -23,7 +23,7 @@ import type {
   EngineSettings,
   StudyState,
 } from "../bindings/github.com/ShinteLab/ikkyoku/app/models";
-import type { EngineColorOption } from "../bindings/github.com/ShinteLab/ikkyoku/models";
+import type { EngineColorOption } from "../bindings/github.com/ShinteLab/ikkyoku/config/models";
 import { iconMarkup } from "./icon";
 import { mountMoveList } from "./movelist";
 import { isFollowing as isFollowingNow, stopFollow } from "./followguard";

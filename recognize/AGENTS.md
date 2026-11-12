@@ -53,7 +53,7 @@
 どちらも 3.5MB 級で、**しかも育て続けるファイル**。
 
 **実行ファイルの隣にコピーを置く運用は取らない。** 更新のたびにコピーし直す必要があり、
-古いデータで認識する事故が起きる。代わりに `ikkyoku.Config` の `SutemeDataDir` で
+古いデータで認識する事故が起きる。代わりに `config.Config` の `SutemeDataDir` で
 場所を指し、`recognize.LoadDir` → `Set.Use` で読み込む。
 開発中は `suteme` のリポジトリを直接指しておけばよい:
 

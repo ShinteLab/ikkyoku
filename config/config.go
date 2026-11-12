@@ -1,4 +1,10 @@
-package ikkyoku
+// Package config は**アプリ全体の設定**（読み書き・既定の解決・正規化）。
+//
+// 標準ライブラリとルートパッケージ（`ikkyoku`）の `Region` だけに依存する。
+// ⚠️ **撮る層（ルートパッケージ）からは参照しない**（依存の向きは `config → ikkyoku` だけ）。
+// 2026-11-13 にルートパッケージの `config.go` から移した（ルートは「画面の指定領域を画像にする層」で、
+// 設定はそれとは別の関心）。⚠️ **JSON のキーは変えない**（利用者の設定ファイルが読めなくなる）。
+package config
 
 import (
 	"crypto/rand"
@@ -11,15 +17,17 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ShinteLab/ikkyoku"
 )
 
 // Config は永続化する設定（ディスプレイ番号・領域・保存先）。
 // CLI のフラグが指定された場合はフラグを優先し、Config はあくまで既定値の置き場所として使う。
 type Config struct {
-	Display *int    `json:"display,omitempty"`
-	Region  *Region `json:"region,omitempty"`
-	OutDir  string  `json:"outDir,omitempty"`
-	Hotkey  string  `json:"hotkey,omitempty"`
+	Display *int            `json:"display,omitempty"`
+	Region  *ikkyoku.Region `json:"region,omitempty"`
+	OutDir  string          `json:"outDir,omitempty"`
+	Hotkey  string          `json:"hotkey,omitempty"`
 
 	// SutemeDataDir は suteme の学習ディレクトリ(training_data_v*.bin / strip_data_v1.bin)。
 	// **自分で育てた学習データ**で、認識器の 3 段の 1 段目(SutemeSource 参照)。

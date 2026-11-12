@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ShinteLab/ikkyoku"
+	"github.com/ShinteLab/ikkyoku/config"
 	"github.com/ShinteLab/ikkyoku/recognize"
 	"github.com/ShinteLab/suteme"
 )
@@ -22,12 +22,12 @@ import (
 //   - 見始めた段から下へ、**そのあと上の段へも回る**（焼き込みの無いビルドで
 //     「焼き込み」にしていても動くように）
 func TestRecognizerOrder(t *testing.T) {
-	d, m, e := ikkyoku.SutemeSourceDir, ikkyoku.SutemeSourceModel, ikkyoku.SutemeSourceEmbed
+	d, m, e := config.SutemeSourceDir, config.SutemeSourceModel, config.SutemeSourceEmbed
 	tests := []struct {
 		pref string
 		want []string
 	}{
-		{ikkyoku.SutemeSourceAuto, []string{d, m, e}},
+		{config.SutemeSourceAuto, []string{d, m, e}},
 		{d, []string{d, m, e}},
 		{m, []string{m, e, d}},
 		{e, []string{e, d, m}},
@@ -91,9 +91,9 @@ func TestLoadRecognizerFallsThrough(t *testing.T) {
 	broken := t.TempDir() // 学習データとして指定したが、中身が無い
 	pack := packDir(t, trainingDir(t), "2026-10-01")
 
-	s := NewCaptureService(broken, pack, ikkyoku.SutemeSourceAuto)
+	s := NewCaptureService(broken, pack, config.SutemeSourceAuto)
 	st := s.loadRecognizer()
-	if !st.Ready || st.Mode != ikkyoku.SutemeSourceModel || st.Source != pack {
+	if !st.Ready || st.Mode != config.SutemeSourceModel || st.Source != pack {
 		t.Fatalf("配布モデルへ落ちていない: %+v", st)
 	}
 	if len(st.Skipped) != 1 || !strings.Contains(st.Skipped[0], "学習データ") {
@@ -102,7 +102,7 @@ func TestLoadRecognizerFallsThrough(t *testing.T) {
 
 	// 学習データを指定せず、配布モデルの場所も既定（ここでは空のディレクトリを指定して
 	// 置かれていない状態を作る）。指定した場所に無いので Skipped に入り、認識器は外れる。
-	s = NewCaptureService("", t.TempDir(), ikkyoku.SutemeSourceAuto)
+	s = NewCaptureService("", t.TempDir(), config.SutemeSourceAuto)
 	st = s.loadRecognizer()
 	if st.Ready || st.Error == "" || recognize.Ready() {
 		t.Fatalf("どれも無いのに読めたことになっている: %+v ready=%v", st, recognize.Ready())
@@ -112,14 +112,14 @@ func TestLoadRecognizerFallsThrough(t *testing.T) {
 	}
 
 	// 学習データを指定すれば、それが使われる（配布モデルより上の段）。
-	s = NewCaptureService(trainingDir(t), pack, ikkyoku.SutemeSourceAuto)
-	if st = s.loadRecognizer(); st.Mode != ikkyoku.SutemeSourceDir || len(st.Skipped) != 0 {
+	s = NewCaptureService(trainingDir(t), pack, config.SutemeSourceAuto)
+	if st = s.loadRecognizer(); st.Mode != config.SutemeSourceDir || len(st.Skipped) != 0 {
 		t.Fatalf("学習データが使われていない: %+v", st)
 	}
 
 	// 「配布モデルから」にすれば、学習データがあっても配布モデル。
-	s = NewCaptureService(trainingDir(t), pack, ikkyoku.SutemeSourceModel)
-	if st = s.loadRecognizer(); st.Mode != ikkyoku.SutemeSourceModel {
+	s = NewCaptureService(trainingDir(t), pack, config.SutemeSourceModel)
+	if st = s.loadRecognizer(); st.Mode != config.SutemeSourceModel {
 		t.Fatalf("配布モデルから見始めていない: %+v", st)
 	}
 }

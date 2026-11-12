@@ -125,5 +125,5 @@ suteme 側の要求（`suteme/CLAUDE.md`「先後の割り当ては『手前が�
   エラーが**何をすればよいか分かる日本語**になること。**接続先の URL の読み方**（`TestParseURL`。
   「登録先」を貼っても届く・`-base` のパスを落とさない・組み立てられない指定を通さない）と、
   **サブパスの下の `/api/...` を叩くこと**（`TestBaseURLReachesSubpath`）
-- `config_test.go` の `TestLoadConfigMigratesLegacyTraining` — **旧形式の `host` / `port` を `url` へ移すこと**
+- `config/config_test.go` の `TestLoadConfigMigratesLegacyTraining` — **旧形式の `host` / `port` を `url` へ移すこと**
   （移さないと、上げたあと黙って既定の 127.0.0.1:8080 へ送る）

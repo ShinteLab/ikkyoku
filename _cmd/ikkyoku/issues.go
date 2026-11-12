@@ -3,8 +3,8 @@ package main
 import (
 	"strings"
 
-	"github.com/ShinteLab/ikkyoku"
 	ikkyokuapp "github.com/ShinteLab/ikkyoku/app"
+	"github.com/ShinteLab/ikkyoku/config"
 )
 
 // 起動はできたが足りないもの・できないことを `app.IssueService` へ載せる（2026-10-04）。
@@ -35,11 +35,11 @@ const recognizerEffect = "撮った画像から盤面を読めません（撮る
 // recognizerModeLabel は段の呼び名（画面に出す）。
 func recognizerModeLabel(mode string) string {
 	switch mode {
-	case ikkyoku.SutemeSourceDir:
+	case config.SutemeSourceDir:
 		return "学習データ"
-	case ikkyoku.SutemeSourceModel:
+	case config.SutemeSourceModel:
 		return "配布モデル"
-	case ikkyoku.SutemeSourceEmbed:
+	case config.SutemeSourceEmbed:
 		return "焼き込み"
 	}
 	return mode

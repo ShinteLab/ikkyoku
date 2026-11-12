@@ -132,7 +132,7 @@ Frameless の下端 1px はどれも実機で踏んで分かったもの。
 
 ## 起動時の自動フィット
 
-設定「起動時に盤面を探す」（`ikkyoku.Config.FitOnStartup`、`config.json` の
+設定「起動時に盤面を探す」（`config.Config.FitOnStartup`、`config.json` の
 `fitOnStartup`）が有効なら、**起動のたびに一度だけ** `FitFrame` を走らせる
 （`main.go` の `startupFit`）。**既定はオフ。** 枠の位置はユーザーが手で合わせたもので、
 起動のたびに勝手に動かすのを既定の挙動にはしない。

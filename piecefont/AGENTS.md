@@ -99,7 +99,7 @@ Config.PieceColor + PieceOpacity ──PieceInk──> rgba(…) ──> --shogi
       （設定は別々）                （1 つに合成）        （盤も自前の駒も同じ値）
 ```
 
-- ⚠️ **画面に渡すのは 1 つの値**（`ikkyoku.PieceInk` が alpha 込みの色に合成する）。
+- ⚠️ **画面に渡すのは 1 つの値**（`config.PieceInk` が alpha 込みの色に合成する）。
   盤の中は SVG なので `fill-opacity` でも足りるが、**ikkyoku は HTML でも駒を描く**
   （駒台のチップ・掴んだ駒の絵）。そちらで濃さを別に当てると element の
   `opacity` になり、**駒の背景（木地）ごと透ける**

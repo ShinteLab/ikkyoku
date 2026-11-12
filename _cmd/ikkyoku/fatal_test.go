@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ShinteLab/ikkyoku"
 	ikkyokuapp "github.com/ShinteLab/ikkyoku/app"
+	"github.com/ShinteLab/ikkyoku/config"
 )
 
 // fatalMessage（2026-10-04）の歯止め。
@@ -58,7 +58,7 @@ func TestSyncRecognizerIssue(t *testing.T) {
 
 	// 学習データが読めず配布モデルで動いている: 黄。判定データが無ければそれも黄。
 	syncRecognizerIssue(issues, RecognizerStatus{
-		Ready: true, Mode: ikkyoku.SutemeSourceModel,
+		Ready: true, Mode: config.SutemeSourceModel,
 		Skipped: []string{"学習データ（D:/x）を読めません"}, StripError: "no strip",
 	})
 	if level(issueRecognizer) != ikkyokuapp.IssueWarn || level(issueStrip) != ikkyokuapp.IssueWarn {
@@ -69,7 +69,7 @@ func TestSyncRecognizerIssue(t *testing.T) {
 	}
 
 	// 直った: 消える。
-	syncRecognizerIssue(issues, RecognizerStatus{Ready: true, Mode: ikkyoku.SutemeSourceEmbed, StripSamples: 10})
+	syncRecognizerIssue(issues, RecognizerStatus{Ready: true, Mode: config.SutemeSourceEmbed, StripSamples: 10})
 	if n := len(issues.Report().Issues); n != 0 {
 		t.Fatalf("直ったのに残っている: %+v", issues.Report().Issues)
 	}

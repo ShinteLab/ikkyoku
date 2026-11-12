@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	ikkyoku "github.com/ShinteLab/ikkyoku"
+	"github.com/ShinteLab/ikkyoku/config"
 	"github.com/ShinteLab/ikkyoku/piecefont"
 )
 
@@ -14,7 +14,7 @@ import (
 func newTestFonts(t *testing.T) *FontService {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.json")
-	if err := ikkyoku.SaveConfig(path, ikkyoku.Config{}); err != nil {
+	if err := config.SaveConfig(path, config.Config{}); err != nil {
 		t.Fatalf("SaveConfig: %v", err)
 	}
 	settings := &SettingsService{path: path}
@@ -201,8 +201,8 @@ func TestFontRename(t *testing.T) {
 // 消えたフォントを指していても、**同梱に落ちるだけで盤は描けること**（設計原則3）。
 func TestFontStateMissingFile(t *testing.T) {
 	s := newTestFonts(t)
-	_, err := s.settings.editConfig(func(cfg *ikkyoku.Config) {
-		cfg.PieceFonts = []ikkyoku.PieceFontEntry{{
+	_, err := s.settings.editConfig(func(cfg *config.Config) {
+		cfg.PieceFonts = []config.PieceFontEntry{{
 			ID: "font-1", Path: filepath.Join(t.TempDir(), "消えた.ttf"), Source: "消えた書体",
 		}}
 		cfg.PieceFont = "font-1"
@@ -234,7 +234,7 @@ func TestFontStateMissingFile(t *testing.T) {
 // 画面が「一覧に無いものを選んでいる」状態になる。
 func TestFontStateDanglingSelection(t *testing.T) {
 	s := newTestFonts(t)
-	if _, err := s.settings.editConfig(func(cfg *ikkyoku.Config) {
+	if _, err := s.settings.editConfig(func(cfg *config.Config) {
 		cfg.PieceFont = "font-9"
 	}); err != nil {
 		t.Fatal(err)
@@ -368,7 +368,7 @@ func TestFontPieceStyle(t *testing.T) {
 
 	// 既定は王のまま。**属性を付けない**（付けると値が何であれ玉になる）。
 	st := s.State()
-	if st.Gyoku != ikkyoku.GyokuNone || st.HidariUma {
+	if st.Gyoku != config.GyokuNone || st.HidariUma {
 		t.Errorf("既定が王/馬でない: %+v", st.Style)
 	}
 	if st.Style.BoardGyokuOn || st.Style.BoardHidariUma {
@@ -384,11 +384,11 @@ func TestFontPieceStyle(t *testing.T) {
 	}
 
 	// 後手だけ玉。**先手には当てない。**
-	st, err := s.SetGyoku(ikkyoku.GyokuWhite)
+	st, err := s.SetGyoku(config.GyokuWhite)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !st.Style.BoardGyokuOn || st.Style.BoardGyoku != ikkyoku.GyokuWhite {
+	if !st.Style.BoardGyokuOn || st.Style.BoardGyoku != config.GyokuWhite {
 		t.Errorf("盤に渡す値が違う: %+v", st.Style)
 	}
 	if st.Style.Black != "normal" {
@@ -399,7 +399,7 @@ func TestFontPieceStyle(t *testing.T) {
 	}
 
 	// 両方とも玉。⚠️ **属性の値は空**（＝値なし。両方を指す決まった書き方）。
-	st, err = s.SetGyoku(ikkyoku.GyokuBoth)
+	st, err = s.SetGyoku(config.GyokuBoth)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -425,7 +425,7 @@ func TestFontPieceStyle(t *testing.T) {
 	}
 
 	// 王に戻しても左馬は残ること（別の設定なので巻き添えにしない）。
-	st, err = s.SetGyoku(ikkyoku.GyokuNone)
+	st, err = s.SetGyoku(config.GyokuNone)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -434,7 +434,7 @@ func TestFontPieceStyle(t *testing.T) {
 	}
 
 	// 保存されていること。
-	if got := s.settings.Config(); got.HidariUma != true || got.Gyoku != ikkyoku.GyokuNone {
+	if got := s.settings.Config(); got.HidariUma != true || got.Gyoku != config.GyokuNone {
 		t.Errorf("保存されていない: gyoku=%q hidariUma=%v", got.Gyoku, got.HidariUma)
 	}
 }
@@ -447,7 +447,7 @@ func TestFontSetGyokuUnknown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("断らずに倒すこと: %v", err)
 	}
-	if st.Gyoku != ikkyoku.GyokuNone || st.Style.BoardGyokuOn {
+	if st.Gyoku != config.GyokuNone || st.Style.BoardGyokuOn {
 		t.Errorf("知らない値が通ってしまった: %+v", st.Style)
 	}
 }
@@ -458,10 +458,10 @@ func TestFontPieceInk(t *testing.T) {
 
 	// 既定。**解決済みで返る**（フロントに既定値を書かせない）。
 	st := s.State()
-	if st.PieceColor != ikkyoku.DefaultPieceColor || st.PieceOpacity != 1 {
+	if st.PieceColor != config.DefaultPieceColor || st.PieceOpacity != 1 {
 		t.Errorf("既定が解決されていない: color=%q opacity=%v", st.PieceColor, st.PieceOpacity)
 	}
-	if st.Style.Ink != ikkyoku.DefaultPieceColor {
+	if st.Style.Ink != config.DefaultPieceColor {
 		t.Errorf("既定の Ink = %q", st.Style.Ink)
 	}
 	if st.DefaultPieceColor == "" || st.MinPieceOpacity <= 0 {
@@ -484,7 +484,7 @@ func TestFontPieceInk(t *testing.T) {
 	}
 
 	// ⚠️ **既定と同じ値は書き残さない**（既定を変えたときに古い値で固まる）。
-	if _, err := s.SetPieceInk(ikkyoku.DefaultPieceColor, 1); err != nil {
+	if _, err := s.SetPieceInk(config.DefaultPieceColor, 1); err != nil {
 		t.Fatal(err)
 	}
 	if got := s.settings.Config(); got.PieceColor != "" || got.PieceOpacity != 0 {
@@ -497,10 +497,10 @@ func TestFontPieceInk(t *testing.T) {
 	if err != nil {
 		t.Fatalf("断らずに丸めること: %v", err)
 	}
-	if st.PieceColor != ikkyoku.DefaultPieceColor {
+	if st.PieceColor != config.DefaultPieceColor {
 		t.Errorf("読めない色が通った: %q", st.PieceColor)
 	}
-	if st.PieceOpacity != ikkyoku.MinPieceOpacity {
+	if st.PieceOpacity != config.MinPieceOpacity {
 		t.Errorf("薄すぎる値が通った: %v", st.PieceOpacity)
 	}
 }
@@ -514,11 +514,11 @@ func TestFontBoardColors(t *testing.T) {
 	s := newTestFonts(t)
 
 	st := s.State()
-	if st.Style.Board != ikkyoku.DefaultBoardColor || st.Style.Line != ikkyoku.DefaultLineColor ||
-		st.Style.Stand != ikkyoku.DefaultStandColor {
+	if st.Style.Board != config.DefaultBoardColor || st.Style.Line != config.DefaultLineColor ||
+		st.Style.Stand != config.DefaultStandColor {
 		t.Errorf("既定が解決されていない: %+v", st.Style)
 	}
-	if st.BoardColor != st.Style.Board || st.DefaultStandColor != ikkyoku.DefaultStandColor {
+	if st.BoardColor != st.Style.Board || st.DefaultStandColor != config.DefaultStandColor {
 		t.Errorf("画面に返す値が違う: %+v", st)
 	}
 
@@ -533,12 +533,12 @@ func TestFontBoardColors(t *testing.T) {
 		t.Errorf("保存されていない: board=%q line=%q stand=%q", got.BoardColor, got.LineColor, got.StandColor)
 	}
 	// ⚠️ **駒の字の色を巻き添えにしないこと。**
-	if st.Style.Ink != ikkyoku.DefaultPieceColor {
+	if st.Style.Ink != config.DefaultPieceColor {
 		t.Errorf("駒の字の色が変わった: %q", st.Style.Ink)
 	}
 
 	// 既定と同じ値は書き残さない。
-	if _, err := s.SetBoardColors(ikkyoku.DefaultBoardColor, ikkyoku.DefaultLineColor, ikkyoku.DefaultStandColor); err != nil {
+	if _, err := s.SetBoardColors(config.DefaultBoardColor, config.DefaultLineColor, config.DefaultStandColor); err != nil {
 		t.Fatal(err)
 	}
 	if got := s.settings.Config(); got.BoardColor != "" || got.LineColor != "" || got.StandColor != "" {
@@ -550,14 +550,14 @@ func TestFontBoardColors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("断らずに丸めること: %v", err)
 	}
-	if st.Style.Board != ikkyoku.DefaultBoardColor || st.Style.Stand != ikkyoku.DefaultStandColor {
+	if st.Style.Board != config.DefaultBoardColor || st.Style.Stand != config.DefaultStandColor {
 		t.Errorf("読めない色が通った: %+v", st.Style)
 	}
 }
 
 func TestFontPieceInkKeepsGlyphStyle(t *testing.T) {
 	s := newTestFonts(t)
-	if _, err := s.SetGyoku(ikkyoku.GyokuWhite); err != nil {
+	if _, err := s.SetGyoku(config.GyokuWhite); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.SetHidariUma(true); err != nil {
@@ -567,7 +567,7 @@ func TestFontPieceInkKeepsGlyphStyle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.Gyoku != ikkyoku.GyokuWhite || !st.HidariUma {
+	if st.Gyoku != config.GyokuWhite || !st.HidariUma {
 		t.Errorf("色を変えたら玉/左馬が消えた: %+v", st.Style)
 	}
 	if st.Style.White != `"ss01", "ss02"` {

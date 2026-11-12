@@ -39,7 +39,7 @@ const studyRecordVersion = 1
 // exe のパスも名乗った名前も option も**設定（`Config.Engines`）にある**ので、
 // **`EngineID` で引けば済む** —— 写すと**同じことが 2 か所に載り、片方だけ古くなる。**
 // それが成り立つ条件が **ID を発行して使い回さないこと**で、
-// `ikkyoku.NextEngineID` がそうしてある。
+// `config.NextEngineID` がそうしてある。
 type StudyEvalSeries struct {
 	// EngineID は設定の登録 ID（`EngineEntry.ID`）。**素性はここから引く。**
 	EngineID string `json:"engineId"`

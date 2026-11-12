@@ -9,8 +9,8 @@ import (
 	"time"
 
 	coreusi "github.com/ShinteLab/core/usi"
-	"github.com/ShinteLab/ikkyoku"
 	"github.com/ShinteLab/ikkyoku/analyze"
+	"github.com/ShinteLab/ikkyoku/config"
 	"github.com/ShinteLab/ikkyoku/log"
 )
 
@@ -169,7 +169,7 @@ const engineShutdownWait = 5 * time.Second
 //
 // ⚠️ **接続を使い回すようになったので、作り直しは「繋ぎ先が変わったとき」だけ**
 // （2026-08-12）。判断は `engineKey` の指紋で行う（`sessionFor`）。
-func newSession(e ikkyoku.EngineEntry) *analyze.Session {
+func newSession(e config.EngineEntry) *analyze.Session {
 	if e.Path == "" {
 		return analyze.NewLocalSession()
 	}
@@ -191,7 +191,7 @@ func newSession(e ikkyoku.EngineEntry) *analyze.Session {
 // 前に送らないと MultiPV が効かない**（実測。後から送っても候補は 1 本のまま）ので、
 // あちらでは指紋に入れて**繋ぎ直させる**。詰将棋エンジンは評価関数を読まないので
 // 起こし直しが安い。
-func engineKey(e ikkyoku.EngineEntry) string {
+func engineKey(e config.EngineEntry) string {
 	names := make([]string, 0, len(e.Options))
 	for k := range e.Options {
 		// ⚠️ **詰将棋エンジンでは MultiPV も指紋に入れる**（2026-09-12 に実測）。
@@ -199,7 +199,7 @@ func engineKey(e ikkyoku.EngineEntry) string {
 		// （後から `setoption` を送っても無視され、候補は 1 本のまま）。
 		// 繋ぎ直しは安い（評価関数を読まないので 1 秒ほど）ので、
 		// **効かないより繋ぎ直すほうがよい。**
-		if k == ikkyoku.MultiPVOption && !e.Mate {
+		if k == config.MultiPVOption && !e.Mate {
 			continue
 		}
 		names = append(names, k)
@@ -217,7 +217,7 @@ func engineKey(e ikkyoku.EngineEntry) string {
 }
 
 // sessionFor は登録 ID ごとに接続を持ち回る。**繋ぎ先が変わっていたら捨てて作り直す。**
-func (s *AnalyzeService) sessionFor(e ikkyoku.EngineEntry) *analyze.Session {
+func (s *AnalyzeService) sessionFor(e config.EngineEntry) *analyze.Session {
 	key := engineKey(e)
 
 	s.mu.Lock()
@@ -357,11 +357,11 @@ func (s *AnalyzeService) CheckEngine(id string) EngineCheck {
 //
 // ⚠️ **写す場所はここ 1 か所。** `core/usi.Option` をそのまま設定ファイルに
 // 埋めると、プロトコルの語彙の変更が**保存形式の変更**になってしまう
-// （`ikkyoku.EngineOption` の注記）。
-func engineOptions(declared []coreusi.Option) []ikkyoku.EngineOption {
-	out := make([]ikkyoku.EngineOption, 0, len(declared))
+// （`config.EngineOption` の注記）。
+func engineOptions(declared []coreusi.Option) []config.EngineOption {
+	out := make([]config.EngineOption, 0, len(declared))
 	for _, o := range declared {
-		out = append(out, ikkyoku.EngineOption{
+		out = append(out, config.EngineOption{
 			Name: o.Name, Type: o.Type, Default: o.Default,
 			Min: o.Min, Max: o.Max, HasMin: o.HasMin, HasMax: o.HasMax, Vars: o.Vars,
 		})
@@ -558,7 +558,7 @@ func (s *AnalyzeService) Start(seconds int) (AnalyzeState, error) {
 	var wg sync.WaitGroup
 	for _, entry := range entries {
 		wg.Add(1)
-		go func(entry ikkyoku.EngineEntry) {
+		go func(entry config.EngineEntry) {
 			defer wg.Done()
 			s.runOne(ctx, seq, entry, target, opt)
 		}(entry)
@@ -580,7 +580,7 @@ func (s *AnalyzeService) Start(seconds int) (AnalyzeState, error) {
 
 // runOne はエンジン 1 つぶんの解析。**他のエンジンの成否に影響しない。**
 func (s *AnalyzeService) runOne(
-	ctx context.Context, seq int, entry ikkyoku.EngineEntry, target analyzeTarget, opt analyze.Options,
+	ctx context.Context, seq int, entry config.EngineEntry, target analyzeTarget, opt analyze.Options,
 ) {
 	label := entry.DisplayName()
 	// ⚠️ **候補手の本数はエンジンごと**（`opt` は値渡しなので、ここで入れてよい）。

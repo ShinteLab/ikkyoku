@@ -298,8 +298,7 @@ suteme 側の課題（確率分布・駒台・速さなど）は `suteme/TODO.md
 | 2 | `_docs/todo/2-follow-camera-verdict.md` —— `FollowCamera` の合図 4 つを見直す | 小 | 1 と同時にやらない。価値が薄ければやめてよい |
 | 3 | `_docs/todo/3-mainscreen-split.md` —— `mainscreen.ts`（6,425 行・関数 1 つ）をタブごとに割る | 大（1 タブずつ） | 設定タブから。実機で見てもらう項目を書く |
 | 4 | `_docs/todo/4-captureservice-split.md` —— `CaptureService` と `main()` を役割ごとのファイルに分ける | 中 | 第 1 段（ファイルを分けるだけ）はいつでも |
-| 5 | `_docs/todo/5-config-package.md` —— ルートパッケージの役割と `config.go` | 小〜中 | **ユーザーの判断待ち**（文書を合わせるか、パッケージを出すか） |
 | 6 | `_docs/todo/6-usi-bundled.md` —— `usi/` は「Step 2 で消える足場」ではなくなっている | 小（文書） | 同梱エンジンを残すのが決定かをユーザーに確かめる |
 | 7 | `_docs/todo/7-gomod-docs-drift.md` —— suteme の版のずれ・Wails の版の記述・`go.mod` のコメント | 小 | スキル `ikkyoku-build` を読む |
 
-互いに独立しているのは 3・4・6・7。5 を「パッケージを出す」にするなら 3 より前。1 と 2 は同じ場所を触る。
+互いに独立しているのは 3・4・6・7。1 と 2 は同じ場所を触る。5（設定を `ikkyoku/config` パッケージへ出す）は済んだ（`_docs/design-capture.md`）。

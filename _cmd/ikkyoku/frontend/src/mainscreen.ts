@@ -103,7 +103,7 @@ import type {
   KifuLoad,
   StudyState,
 } from "../bindings/github.com/ShinteLab/ikkyoku/app/models";
-import type { EngineColorOption } from "../bindings/github.com/ShinteLab/ikkyoku/models";
+import type { EngineColorOption } from "../bindings/github.com/ShinteLab/ikkyoku/config/models";
 import type { Stock } from "../bindings/github.com/ShinteLab/ikkyoku/position/models";
 // 認識の観測情報。**型を手で書き写さない**(Go 側は suteme の型をそのまま通しており、
 // ここで別に定義すると矩形の意味がずれても気づけない)。
@@ -4029,7 +4029,7 @@ ${st.turnLabel}${n}`;
   // 「認識詳細情報」側の警告。**認識した時点のもの**で、訂正しても書き換えない。
   const showWarnings = (list: string[]) => fillWarnings(warnings, list);
 
-  // 設定で指定した学習データの置き場所(ikkyoku.Config の SutemeDataDir)。
+  // 設定で指定した学習データの置き場所(config.Config の SutemeDataDir)。
   // 実際に読まれたファイル(debug.predictor.source)と突き合わせるために覚えておく。
   let configuredDir = "";
   const normalizePath = (s: string) => s.toLowerCase().replace(/\\/g, "/");

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	ikkyoku "github.com/ShinteLab/ikkyoku"
+	"github.com/ShinteLab/ikkyoku/config"
 )
 
 // newTestSettings は保存先を一時ディレクトリに向けた SettingsService を作る。
@@ -16,11 +16,11 @@ import (
 // ⚠️ **ファイルにも書いておくこと。** `save` は**保存の前にファイルを読み直す**ので、
 // メモリ上の cfg だけ用意しても書き換えの土台にならない（登録が空とみなされ、
 // 同梱エンジン 1 件に実体化される）。
-func newTestSettings(t *testing.T, engines []ikkyoku.EngineEntry) *SettingsService {
+func newTestSettings(t *testing.T, engines []config.EngineEntry) *SettingsService {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.json")
-	cfg := ikkyoku.Config{Engines: engines}
-	if err := ikkyoku.SaveConfig(path, cfg); err != nil {
+	cfg := config.Config{Engines: engines}
+	if err := config.SaveConfig(path, cfg); err != nil {
 		t.Fatalf("SaveConfig: %v", err)
 	}
 	return &SettingsService{
@@ -43,14 +43,14 @@ func engineIDs(s AppSettings) []string {
 // 勝率バーが最初に出すエンジン）なので、**動かした結果が保存されること**と、
 // ⚠️ **端で回り込まないこと**（一番上を上げたら一番下へ飛ぶ、では驚く）を見る。
 func TestMoveEngine(t *testing.T) {
-	list := []ikkyoku.EngineEntry{
+	list := []config.EngineEntry{
 		{ID: "a", Enabled: true},
 		{ID: "b", Enabled: false},
 		{ID: "c", Enabled: true},
 	}
 
 	t.Run("下へ動かす", func(t *testing.T) {
-		s := newTestSettings(t, append([]ikkyoku.EngineEntry(nil), list...))
+		s := newTestSettings(t, append([]config.EngineEntry(nil), list...))
 		got, err := s.MoveEngine("a", 1)
 		if err != nil {
 			t.Fatalf("MoveEngine: %v", err)
@@ -60,7 +60,7 @@ func TestMoveEngine(t *testing.T) {
 			t.Errorf("並び = %v, want %v", ids, want)
 		}
 		// 保存されていること（読み直しても同じ順であること）。
-		cfg, err := ikkyoku.LoadConfig(s.path)
+		cfg, err := config.LoadConfig(s.path)
 		if err != nil {
 			t.Fatalf("LoadConfig: %v", err)
 		}
@@ -70,7 +70,7 @@ func TestMoveEngine(t *testing.T) {
 	})
 
 	t.Run("上へ動かす", func(t *testing.T) {
-		s := newTestSettings(t, append([]ikkyoku.EngineEntry(nil), list...))
+		s := newTestSettings(t, append([]config.EngineEntry(nil), list...))
 		got, _ := s.MoveEngine("c", -1)
 		want := []string{"a", "c", "b"}
 		if ids := engineIDs(got); !equalStrings(ids, want) {
@@ -80,7 +80,7 @@ func TestMoveEngine(t *testing.T) {
 
 	// ⚠️ **端では動かない。回り込ませない。**
 	t.Run("端では動かない", func(t *testing.T) {
-		s := newTestSettings(t, append([]ikkyoku.EngineEntry(nil), list...))
+		s := newTestSettings(t, append([]config.EngineEntry(nil), list...))
 		got, _ := s.MoveEngine("a", -1)
 		want := []string{"a", "b", "c"}
 		if ids := engineIDs(got); !equalStrings(ids, want) {
@@ -95,7 +95,7 @@ func TestMoveEngine(t *testing.T) {
 	// ⚠️ **「解析に使う」を外した登録も数に入れる。** 走るものだけを詰めて数えると、
 	// チェックを外した瞬間に見えている順番と食い違う。
 	t.Run("解析に使わない登録も飛ばさない", func(t *testing.T) {
-		s := newTestSettings(t, append([]ikkyoku.EngineEntry(nil), list...))
+		s := newTestSettings(t, append([]config.EngineEntry(nil), list...))
 		got, _ := s.MoveEngine("c", -1) // b（無効）と入れ替わる
 		want := []string{"a", "c", "b"}
 		if ids := engineIDs(got); !equalStrings(ids, want) {
@@ -104,7 +104,7 @@ func TestMoveEngine(t *testing.T) {
 	})
 
 	t.Run("知らない ID では何も変えない", func(t *testing.T) {
-		s := newTestSettings(t, append([]ikkyoku.EngineEntry(nil), list...))
+		s := newTestSettings(t, append([]config.EngineEntry(nil), list...))
 		got, _ := s.MoveEngine("zzz", 1)
 		want := []string{"a", "b", "c"}
 		if ids := engineIDs(got); !equalStrings(ids, want) {
@@ -132,13 +132,13 @@ func equalStrings(a, b []string) bool {
 // ⚠️ **並べ替えたり 1 つ外したりして色が入れ替わると、前に見ていた線と同じ色が
 // 別のエンジンを指す**ことになるので、そこを見ている。
 func TestSetEngineColor(t *testing.T) {
-	list := []ikkyoku.EngineEntry{
+	list := []config.EngineEntry{
 		{ID: "a", Enabled: true},
 		{ID: "b", Enabled: true},
 	}
 
 	t.Run("色が保存され、返る設定にも入る", func(t *testing.T) {
-		s := newTestSettings(t, append([]ikkyoku.EngineEntry(nil), list...))
+		s := newTestSettings(t, append([]config.EngineEntry(nil), list...))
 		got, err := s.SetEngineColor("b", "#FF8FA3") // 大文字でも受ける
 		if err != nil {
 			t.Fatalf("SetEngineColor: %v", err)
@@ -146,7 +146,7 @@ func TestSetEngineColor(t *testing.T) {
 		if got.Engines[1].Color != "#ff8fa3" {
 			t.Errorf("色 = %q, want #ff8fa3", got.Engines[1].Color)
 		}
-		cfg, err := ikkyoku.LoadConfig(s.path)
+		cfg, err := config.LoadConfig(s.path)
 		if err != nil {
 			t.Fatalf("LoadConfig: %v", err)
 		}
@@ -157,10 +157,10 @@ func TestSetEngineColor(t *testing.T) {
 
 	// ⚠️ **未設定なら登録順の既定色**（解決するのは Go 側。フロントに書かない）。
 	t.Run("未設定は登録順の既定色", func(t *testing.T) {
-		s := newTestSettings(t, append([]ikkyoku.EngineEntry(nil), list...))
+		s := newTestSettings(t, append([]config.EngineEntry(nil), list...))
 		got := s.Settings()
 		for i, e := range got.Engines {
-			if want := ikkyoku.DefaultEngineColor(i); e.Color != want {
+			if want := config.DefaultEngineColor(i); e.Color != want {
 				t.Errorf("engines[%d].Color = %q, want %q", i, e.Color, want)
 			}
 		}
@@ -168,7 +168,7 @@ func TestSetEngineColor(t *testing.T) {
 
 	// ⚠️ **並べ替えても、色を付けたエンジンの色は動かない。**
 	t.Run("並べ替えても色は付いてくる", func(t *testing.T) {
-		s := newTestSettings(t, append([]ikkyoku.EngineEntry(nil), list...))
+		s := newTestSettings(t, append([]config.EngineEntry(nil), list...))
 		if _, err := s.SetEngineColor("a", "#6fd3c7"); err != nil {
 			t.Fatalf("SetEngineColor: %v", err)
 		}
@@ -182,7 +182,7 @@ func TestSetEngineColor(t *testing.T) {
 	})
 
 	t.Run("空にすると既定へ戻る", func(t *testing.T) {
-		s := newTestSettings(t, append([]ikkyoku.EngineEntry(nil), list...))
+		s := newTestSettings(t, append([]config.EngineEntry(nil), list...))
 		if _, err := s.SetEngineColor("a", "#6fd3c7"); err != nil {
 			t.Fatalf("SetEngineColor: %v", err)
 		}
@@ -190,29 +190,29 @@ func TestSetEngineColor(t *testing.T) {
 		if err != nil {
 			t.Fatalf("SetEngineColor(空): %v", err)
 		}
-		if want := ikkyoku.DefaultEngineColor(0); got.Engines[0].Color != want {
+		if want := config.DefaultEngineColor(0); got.Engines[0].Color != want {
 			t.Errorf("色 = %q, want %q（既定）", got.Engines[0].Color, want)
 		}
 	})
 
 	// 壊れた値は断る。**そのとき今の設定は変えない**（画面が食い違ったままにならない）。
 	t.Run("色の形が違えば断る", func(t *testing.T) {
-		s := newTestSettings(t, append([]ikkyoku.EngineEntry(nil), list...))
+		s := newTestSettings(t, append([]config.EngineEntry(nil), list...))
 		got, err := s.SetEngineColor("a", "赤")
 		if err == nil {
 			t.Fatal("エラーになるべき")
 		}
-		if want := ikkyoku.DefaultEngineColor(0); got.Engines[0].Color != want {
+		if want := config.DefaultEngineColor(0); got.Engines[0].Color != want {
 			t.Errorf("断ったのに色が変わった: %q", got.Engines[0].Color)
 		}
 	})
 }
 
 // engineWithSpecs は option を宣言済みのエンジン 1 件（「接続を確認」を通った状態）。
-func engineWithSpecs() []ikkyoku.EngineEntry {
-	return []ikkyoku.EngineEntry{{
+func engineWithSpecs() []config.EngineEntry {
+	return []config.EngineEntry{{
 		ID: "a", Path: "C:/shogi/YaneuraOu.exe", Enabled: true,
-		OptionSpecs: []ikkyoku.EngineOption{
+		OptionSpecs: []config.EngineOption{
 			{Name: "USI_Hash", Type: "spin", Default: "256", Min: 1, Max: 4096, HasMin: true, HasMax: true},
 			{Name: "USI_Ponder", Type: "check", Default: "false"},
 			{Name: "EvalDir", Type: "string", Default: "eval"},
@@ -247,7 +247,7 @@ func TestSetEngineOption(t *testing.T) {
 		if !ok || o.Value != "1024" || !o.Custom {
 			t.Errorf("USI_Hash = %+v, want 1024（人が決めた値）", o)
 		}
-		cfg, err := ikkyoku.LoadConfig(s.path)
+		cfg, err := config.LoadConfig(s.path)
 		if err != nil {
 			t.Fatalf("LoadConfig: %v", err)
 		}
@@ -268,7 +268,7 @@ func TestSetEngineOption(t *testing.T) {
 		if o.Value != "256" || o.Custom {
 			t.Errorf("USI_Hash = %+v, want 既定のまま（custom=false）", o)
 		}
-		cfg, _ := ikkyoku.LoadConfig(s.path)
+		cfg, _ := config.LoadConfig(s.path)
 		if _, ok := cfg.Engines[0].Options["USI_Hash"]; ok {
 			t.Errorf("既定と同じ値が書き残された: %+v", cfg.Engines[0].Options)
 		}
@@ -355,7 +355,7 @@ func TestEngineOptionSettings(t *testing.T) {
 	}
 
 	// 繋いでいない登録は「未取得」。**宣言が無いのと同じに見せないこと。**
-	s2 := newTestSettings(t, []ikkyoku.EngineEntry{{ID: "a", Enabled: true}})
+	s2 := newTestSettings(t, []config.EngineEntry{{ID: "a", Enabled: true}})
 	if s2.Settings().Engines[0].OptionsKnown {
 		t.Error("繋いでいない登録が OptionsKnown = true になっている")
 	}
@@ -422,10 +422,10 @@ func TestSetEnginePathDropsOptionSpecs(t *testing.T) {
 // 気づけない）、そして**設定タブの option の一覧には出さないこと**（入口は
 // 解析タブのカード。**同じ値の編集口を 2 つ持たない**）。
 func TestSetEngineMultiPV(t *testing.T) {
-	list := func() []ikkyoku.EngineEntry {
-		return []ikkyoku.EngineEntry{
-			{ID: "a", Enabled: true, OptionSpecs: []ikkyoku.EngineOption{
-				{Name: ikkyoku.MultiPVOption, Type: "spin", Default: "1", Min: 1, Max: 8,
+	list := func() []config.EngineEntry {
+		return []config.EngineEntry{
+			{ID: "a", Enabled: true, OptionSpecs: []config.EngineOption{
+				{Name: config.MultiPVOption, Type: "spin", Default: "1", Min: 1, Max: 8,
 					HasMin: true, HasMax: true},
 			}},
 			{ID: "b", Enabled: true},
@@ -444,11 +444,11 @@ func TestSetEngineMultiPV(t *testing.T) {
 		if got.Engines[0].MultiPV != 5 || got.Engines[1].MultiPV != 1 {
 			t.Errorf("MultiPV = %d, %d, want 5, 1", got.Engines[0].MultiPV, got.Engines[1].MultiPV)
 		}
-		cfg, err := ikkyoku.LoadConfig(s.path)
+		cfg, err := config.LoadConfig(s.path)
 		if err != nil {
 			t.Fatalf("LoadConfig: %v", err)
 		}
-		if cfg.Engines[0].Options[ikkyoku.MultiPVOption] != "5" {
+		if cfg.Engines[0].Options[config.MultiPVOption] != "5" {
 			t.Errorf("保存された値 = %+v", cfg.Engines[0].Options)
 		}
 	})
@@ -460,8 +460,8 @@ func TestSetEngineMultiPV(t *testing.T) {
 		s := newTestSettings(t, list())
 		got := s.Settings()
 		for i, e := range got.Engines {
-			if e.MultiPV != ikkyoku.DefaultMultiPV {
-				t.Errorf("engines[%d].MultiPV = %d, want %d", i, e.MultiPV, ikkyoku.DefaultMultiPV)
+			if e.MultiPV != config.DefaultMultiPV {
+				t.Errorf("engines[%d].MultiPV = %d, want %d", i, e.MultiPV, config.DefaultMultiPV)
 			}
 		}
 	})
@@ -472,7 +472,7 @@ func TestSetEngineMultiPV(t *testing.T) {
 		if err == nil {
 			t.Fatal("エラーになるべき")
 		}
-		if got.Engines[0].MultiPV != ikkyoku.DefaultMultiPV {
+		if got.Engines[0].MultiPV != config.DefaultMultiPV {
 			t.Errorf("断ったのに値が入った: %d", got.Engines[0].MultiPV)
 		}
 		// 宣言していないエンジンには上限が無い（宣言が無いだけで、正当な値）。
@@ -495,7 +495,7 @@ func TestSetEngineMultiPV(t *testing.T) {
 			t.Fatalf("SetEngineMultiPV: %v", err)
 		}
 		got := s.Settings()
-		if _, ok := optionOf(got, 0, ikkyoku.MultiPVOption); ok {
+		if _, ok := optionOf(got, 0, config.MultiPVOption); ok {
 			t.Error("MultiPV が option の一覧に出ている（編集口が 2 つになる）")
 		}
 		// 「n 件を変更中」にも数えない（一覧に出ていないものを数に入れない）。
@@ -548,7 +548,7 @@ func TestSetClickThrough(t *testing.T) {
 	if _, err := s.SetClickThrough(false); err != nil {
 		t.Fatalf("SetClickThrough(false): %v", err)
 	}
-	cfg, err := ikkyoku.LoadConfig(s.path)
+	cfg, err := config.LoadConfig(s.path)
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
@@ -583,7 +583,7 @@ func TestSetEvalGraphDetached(t *testing.T) {
 	if len(got) != 1 || !got[0] {
 		t.Errorf("フックの呼ばれ方 = %v, want [true]", got)
 	}
-	cfg, err := ikkyoku.LoadConfig(s.path)
+	cfg, err := config.LoadConfig(s.path)
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
@@ -595,7 +595,7 @@ func TestSetEvalGraphDetached(t *testing.T) {
 	if _, err := s.SetEvalGraphDetached(false); err != nil {
 		t.Fatalf("SetEvalGraphDetached(false): %v", err)
 	}
-	cfg, err = ikkyoku.LoadConfig(s.path)
+	cfg, err = config.LoadConfig(s.path)
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
@@ -642,7 +642,7 @@ func TestSetStudyPaneDetached(t *testing.T) {
 	if !st.EvalGraphDetached {
 		t.Error("評価値グラフまで戻っています（別の設定であること）")
 	}
-	cfg, err := ikkyoku.LoadConfig(s.path)
+	cfg, err := config.LoadConfig(s.path)
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
@@ -696,7 +696,7 @@ func TestSetMovePaneDetached(t *testing.T) {
 	if !st.StudyPaneDetached {
 		t.Error("候補手まで戻っています（別の設定であること）")
 	}
-	cfg, err := ikkyoku.LoadConfig(s.path)
+	cfg, err := config.LoadConfig(s.path)
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
@@ -718,15 +718,15 @@ func TestSetTheme(t *testing.T) {
 	s := newTestSettings(t, nil)
 
 	st := s.Settings()
-	if st.Theme != ikkyoku.ThemeDark {
+	if st.Theme != config.ThemeDark {
 		t.Errorf("既定の配色 = %q, want %q（触っていないのに色が変わります）",
-			st.Theme, ikkyoku.ThemeDark)
+			st.Theme, config.ThemeDark)
 	}
 	if len(st.Themes) == 0 {
 		t.Error("選べる配色の一覧が空です（設定タブの選択肢が出ません）")
 	}
 
-	for _, theme := range []string{ikkyoku.ThemeLight, ikkyoku.ThemeSystem, ikkyoku.ThemeDark} {
+	for _, theme := range []string{config.ThemeLight, config.ThemeSystem, config.ThemeDark} {
 		st, err := s.SetTheme(theme)
 		if err != nil {
 			t.Fatalf("SetTheme(%q): %v", theme, err)
@@ -734,11 +734,11 @@ func TestSetTheme(t *testing.T) {
 		if st.Theme != theme {
 			t.Errorf("Theme = %q, want %q", st.Theme, theme)
 		}
-		cfg, err := ikkyoku.LoadConfig(s.path)
+		cfg, err := config.LoadConfig(s.path)
 		if err != nil {
 			t.Fatalf("LoadConfig: %v", err)
 		}
-		if ikkyoku.NormalizeTheme(cfg.Theme) != theme {
+		if config.NormalizeTheme(cfg.Theme) != theme {
 			t.Errorf("保存された Theme = %q, want %q（次の起動で戻ってしまう）", cfg.Theme, theme)
 		}
 	}
@@ -748,8 +748,8 @@ func TestSetTheme(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SetTheme(知らない値): %v", err)
 	}
-	if st.Theme != ikkyoku.ThemeDark {
-		t.Errorf("知らない値の配色 = %q, want %q", st.Theme, ikkyoku.ThemeDark)
+	if st.Theme != config.ThemeDark {
+		t.Errorf("知らない値の配色 = %q, want %q", st.Theme, config.ThemeDark)
 	}
 }
 
@@ -764,12 +764,12 @@ func TestSetTheme(t *testing.T) {
 func TestSetEvalGraphAxis(t *testing.T) {
 	s := newTestSettings(t, nil)
 
-	if got := s.Settings().EvalGraphAxis; got != ikkyoku.EvalAxisEval {
+	if got := s.Settings().EvalGraphAxis; got != config.EvalAxisEval {
 		t.Errorf("既定の縦軸 = %q, want %q（触っていないのに軸が変わります）",
-			got, ikkyoku.EvalAxisEval)
+			got, config.EvalAxisEval)
 	}
 
-	for _, axis := range []string{ikkyoku.EvalAxisScaled, ikkyoku.EvalAxisWinRate} {
+	for _, axis := range []string{config.EvalAxisScaled, config.EvalAxisWinRate} {
 		st, err := s.SetEvalGraphAxis(axis)
 		if err != nil {
 			t.Fatalf("SetEvalGraphAxis(%q): %v", axis, err)
@@ -781,7 +781,7 @@ func TestSetEvalGraphAxis(t *testing.T) {
 		if st.HideWinRateBar {
 			t.Error("勝率バーまで隠れました（縦軸と帯は別の設定）")
 		}
-		cfg, err := ikkyoku.LoadConfig(s.path)
+		cfg, err := config.LoadConfig(s.path)
 		if err != nil {
 			t.Fatalf("LoadConfig: %v", err)
 		}
@@ -796,8 +796,8 @@ func TestSetEvalGraphAxis(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SetEvalGraphAxis(知らない値): %v", err)
 	}
-	if st.EvalGraphAxis != ikkyoku.EvalAxisEval {
-		t.Errorf("知らない値の縦軸 = %q, want %q", st.EvalGraphAxis, ikkyoku.EvalAxisEval)
+	if st.EvalGraphAxis != config.EvalAxisEval {
+		t.Errorf("知らない値の縦軸 = %q, want %q", st.EvalGraphAxis, config.EvalAxisEval)
 	}
 }
 
@@ -824,7 +824,7 @@ func TestSetHideWinRateBar(t *testing.T) {
 	if !st.HideWinRateBar {
 		t.Errorf("HideWinRateBar = false, want true")
 	}
-	cfg, err := ikkyoku.LoadConfig(s.path)
+	cfg, err := config.LoadConfig(s.path)
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
@@ -840,7 +840,7 @@ func TestSetHideWinRateBar(t *testing.T) {
 	if st.HideWinRateBar {
 		t.Error("戻っていません")
 	}
-	cfg, err = ikkyoku.LoadConfig(s.path)
+	cfg, err = config.LoadConfig(s.path)
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
@@ -884,7 +884,7 @@ func TestSetHidePlayerNames(t *testing.T) {
 	if !st.HideWinRateBar {
 		t.Error("勝率バーまで戻っています（別の設定であること）")
 	}
-	cfg, err := ikkyoku.LoadConfig(s.path)
+	cfg, err := config.LoadConfig(s.path)
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
@@ -916,7 +916,7 @@ func TestSetFlipWinRateBar(t *testing.T) {
 	if !st.FlipWinRateBar || !st.HideWinRateBar {
 		t.Errorf("両方立っているはずです: flip=%v hide=%v", st.FlipWinRateBar, st.HideWinRateBar)
 	}
-	cfg, err := ikkyoku.LoadConfig(s.path)
+	cfg, err := config.LoadConfig(s.path)
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
@@ -935,7 +935,7 @@ func TestSetFlipWinRateBar(t *testing.T) {
 	if !st.HideWinRateBar {
 		t.Error("隠す設定まで戻っています（別の設定であること）")
 	}
-	cfg, err = ikkyoku.LoadConfig(s.path)
+	cfg, err = config.LoadConfig(s.path)
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
@@ -953,7 +953,7 @@ func TestSetFlipWinRateBar(t *testing.T) {
 // 名乗りは同じになるので、潰すと見分けが付かなくなる）。
 func TestRememberEngineName(t *testing.T) {
 	exe := testEnginePath(t)
-	s := newTestSettings(t, []ikkyoku.EngineEntry{
+	s := newTestSettings(t, []config.EngineEntry{
 		{ID: "engine-1", Path: exe, Enabled: true},
 		{ID: "engine-2", Path: exe, Name: "水匠5(D12)", Enabled: true},
 	})
@@ -971,7 +971,7 @@ func TestRememberEngineName(t *testing.T) {
 	}
 
 	// ⚠️ **ファイルに残ること**（メモリだけでは次の起動で消える）。
-	reloaded, err := ikkyoku.LoadConfig(s.path)
+	reloaded, err := config.LoadConfig(s.path)
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
@@ -984,11 +984,11 @@ func TestRememberEngineName(t *testing.T) {
 	// ファイルに目印を入れて、同じ名前で呼んでも残ることで確かめる。
 	marked := reloaded
 	marked.SutemeDataDir = "書き換えられたら消える目印"
-	if err := ikkyoku.SaveConfig(s.path, marked); err != nil {
+	if err := config.SaveConfig(s.path, marked); err != nil {
 		t.Fatalf("SaveConfig: %v", err)
 	}
 	s.rememberEngineName("engine-1", "Suisho5")
-	after, err := ikkyoku.LoadConfig(s.path)
+	after, err := config.LoadConfig(s.path)
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
@@ -1000,7 +1000,7 @@ func TestRememberEngineName(t *testing.T) {
 // ⚠️ **実行ファイルを差し替えたら名乗りは捨てること**（別のエンジンの名乗りなので、
 // 残すと違うエンジンの名前を出す）。**人が付けた名前は捨てない。**
 func TestSetEnginePathDropsReportedName(t *testing.T) {
-	s := newTestSettings(t, []ikkyoku.EngineEntry{
+	s := newTestSettings(t, []config.EngineEntry{
 		{ID: "engine-1", Path: testEnginePath(t), Name: "手で付けた", EngineName: "Suisho5", Enabled: true},
 	})
 
@@ -1047,7 +1047,7 @@ func TestSetShowMoveComment(t *testing.T) {
 	if !st.ShowMoveComment {
 		t.Error("立っていません")
 	}
-	cfg, err := ikkyoku.LoadConfig(s.path)
+	cfg, err := config.LoadConfig(s.path)
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}

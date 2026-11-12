@@ -280,7 +280,7 @@ Claude Code でスキルとして使いたい人は、各自の `.claude/skills/
 | `capture.go` / `region.go` / `save.go` / `hotkey.go` | キャプチャの中核・`ParseRegion`・PNG 保存・`ParseHotkey` |
 | `diff.go` | **撮った 2 枚がどれくらい違うか**（`FrameDiff`。追従のふるい）と、**マスごとにどれくらい違うか**（`CellDiff`。追従の速い経路。露出の揺れを打ち消す）。**測るだけ**で、しきい値は呼ぶ側（`_cmd/ikkyoku` の `gate`）。⚠️ **盤の矩形を渡すこと**（画面全体だと秒読みで毎周「変化あり」になる） |
 | `piecesim.go` | **2 つのマスに写った駒の見た目の近さ**（`PieceSimilarity`。明るさの正規化相互相関。成・不成の証拠。2026-10-07）。**測るだけ**で、しきい値と将棋の知識は `app`。⚠️ **測れないとき（一様なマス・はみ出し）は false**（「似ていない」にしない） |
-| `config.go` | **設定はすべてここ**（標準ライブラリのみ）。⚠️ **各項目の約束はフィールドのコメント**。共通の型は 3 つ —— **bool はゼロ値が既定になる向きで持つ**（`Hide...`）・**既定の解決は関数 1 か所**（`ThinkSeconds` / `KifuDB` / `PonanzaConstantOr` など）・**知らない値は読める値に丸めて安全側に倒す**（`NormalizeEvalAxis` / `NormalizeGyoku` / `PieceInk`）。⚠️ **棚の既定は `ikkyoku/kicho.db`**（kicho アプリと同じ SQLite を 2 プロセスから開かない） |
+| `config/` | **設定はすべてここ**（`config/config.go`。2026-11-13 にルートパッケージから移した。標準ライブラリとルートの `Region` のみ。⚠️ **ルートパッケージからは参照しない**・⚠️ **JSON のキーは変えない**）。⚠️ **各項目の約束はフィールドのコメント**。共通の型は 3 つ —— **bool はゼロ値が既定になる向きで持つ**（`Hide...`）・**既定の解決は関数 1 か所**（`ThinkSeconds` / `KifuDB` / `PonanzaConstantOr` など）・**知らない値は読める値に丸めて安全側に倒す**（`NormalizeEvalAxis` / `NormalizeGyoku` / `PieceInk`）。⚠️ **棚の既定は `ikkyoku/kicho.db`**（kicho アプリと同じ SQLite を 2 プロセスから開かない） |
 | `dialog.go` | ファイル選択ダイアログ（`app` へ `FilePicker` として差し込む。Wails の口なのでここ） |
 | `log/` | **ログ**（`log.Info` など。ikkyoku のコードはここで出す）。出口は一時ディレクトリの `ikkyoku`（`%TEMP%\ikkyoku`）の `ikkyoku_<日付>.log`（2 日前より前は `.log.gz` にし、90 日で消す。dev のときはターミナルにも）。全体の既定のレベルは dev で INFO・配る exe で NOTICE（INFO は開発中の参考、NOTICE は常に残すもの）で、設定「ログの細かさ」で変えられる。中継の追従は `log.Follow` で `ikkyoku-follow_<日付>.log` へ、エンジンとの USI は `log.USI` で `ikkyoku-usi_<日付>.log` へ分ける・レベルはパッケージごと。⚠️ **Logger を引数で配らない**（`log/AGENTS.md`） |
 | `recognize/` | 画像 → 盤面（`suteme` を呼ぶだけ）・盤の矩形を探す `DetectRegion`・マスごとの読みの確かさ `CellConfidence` |
@@ -298,7 +298,7 @@ Claude Code でスキルとして使いたい人は、各自の `.claude/skills/
 ## ビルドと実機確認 — スキル `ikkyoku-build`
 
 ```powershell
-go build ./...      # app / guide / position / analyze / recognize / legal / piecefont / training / usi / followcam
+go build ./...      # app / guide / position / analyze / recognize / legal / piecefont / training / usi / followcam / config
 go vet ./...
 go test ./...
 ```
@@ -318,7 +318,7 @@ go test ./...
 
 画面キャプチャそのもの（`Capture`）はテストしない（実行環境の画面に依存するため）。
 ルートパッケージのテストは環境に依存しない部分だけ（`region_test.go` / `save_test.go` /
-`hotkey_test.go` / `config_test.go`）。⚠️ **`config_test.go` が一番の歯止め** ——
+`hotkey_test.go`）。設定のテストは `config/config_test.go`。⚠️ **`config/config_test.go` が一番の歯止め** ——
 設定の読み違いは**画面に何も出ないまま**振る舞いが変わる（外部エンジンが黙って同梱に戻る・
 「無制限（0）」が次の起動で既定に戻る・エンジンの ID を使い回して評価値が別のエンジンの
 ものとして読まれる・TTC の書体番号が落ちて別の書体で焼く）。何を見ているかは各テストのコメント。

@@ -18,6 +18,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 
 	"github.com/ShinteLab/ikkyoku"
+	"github.com/ShinteLab/ikkyoku/config"
 	"github.com/ShinteLab/ikkyoku/followcam"
 	"github.com/ShinteLab/ikkyoku/guide"
 	"github.com/ShinteLab/ikkyoku/log"
@@ -51,7 +52,7 @@ type RecognizerStatus struct {
 	// Error は**どの段も読めなかった**ときの理由(このとき盤面は読めない)。
 	Error string `json:"error"`
 
-	// Mode は実際にどの段から読んだか(`ikkyoku.SutemeSourceDir` / `SutemeSourceModel` /
+	// Mode は実際にどの段から読んだか(`config.SutemeSourceDir` / `SutemeSourceModel` /
 	// `SutemeSourceEmbed` / 空＝どれも読めていない)。**設定の値そのものではない** ——
 	// 設定は「どの段から見始めるか」で、読めなかった段は飛ばされる。**画面にはこちらを出すこと。**
 	Mode string `json:"mode"`
@@ -88,13 +89,13 @@ type CaptureService struct {
 	// メイン画面を閉じる経路と同じものを main.go で 1 本にしてある。
 	beforeQuit func()
 
-	// recognizerDir は学習データの置き場所(ikkyoku.Config の SutemeDataDir)。
+	// recognizerDir は学習データの置き場所(config.Config の SutemeDataDir)。
 	// 空ならこの段は無い(suteme 既定の探索には任せない。loadRecognizer)。
 	recognizerDir string
-	// recognizerModelDir は配布モデルの置き場所の設定(ikkyoku.Config の SutemeModelDir)。
-	// **空なら既定の置き場所**(解決は loadRecognizer が ikkyoku.Config.ModelDir で毎回する)。
+	// recognizerModelDir は配布モデルの置き場所の設定(config.Config の SutemeModelDir)。
+	// **空なら既定の置き場所**(解決は loadRecognizer が config.Config.ModelDir で毎回する)。
 	recognizerModelDir string
-	// recognizerSource は読み込み元の設定(ikkyoku.Config の SutemeSource)。
+	// recognizerSource は読み込み元の設定(config.Config の SutemeSource)。
 	// **設定タブから変えられる**ので、mu で守る(applyRecognizerSource)。
 	recognizerSource string
 
@@ -140,7 +141,7 @@ type CaptureService struct {
 	// engineNames は登録してある外部エンジンの実行ファイルのパス（`main` が差し込む。設定から読む）。
 	engineNames func() []string
 
-	// clickThrough は設定「枠の内側で後ろの画面を操作する」（`ikkyoku.Config.ClickThrough`）。
+	// clickThrough は設定「枠の内側で後ろの画面を操作する」（`config.Config.ClickThrough`）。
 	clickThrough bool
 	// clickStop は素通しの見張り（watchCursor）を止めるチャネル。
 	// **入のあいだだけ goroutine が居る。**
@@ -294,7 +295,7 @@ func (s *CaptureService) loadRecognizer() RecognizerStatus {
 	dir, modelSetting, pref := s.recognizerDir, s.recognizerModelDir, s.recognizerSource
 	s.mu.Unlock()
 
-	modelDir, err := ikkyoku.Config{SutemeModelDir: modelSetting}.ModelDir()
+	modelDir, err := config.Config{SutemeModelDir: modelSetting}.ModelDir()
 	if err != nil {
 		log.Warn("配布モデルの置き場所を決められませんでした", "error", err)
 	}
@@ -315,7 +316,7 @@ func (s *CaptureService) loadRecognizer() RecognizerStatus {
 	for _, mode := range recognizerOrder(pref) {
 		var set *recognize.Set
 		switch mode {
-		case ikkyoku.SutemeSourceDir:
+		case config.SutemeSourceDir:
 			if dir == "" {
 				continue
 			}
@@ -324,7 +325,7 @@ func (s *CaptureService) loadRecognizer() RecognizerStatus {
 				log.Warn("学習データを読めませんでした", "dir", dir, "error", err)
 				continue
 			}
-		case ikkyoku.SutemeSourceModel:
+		case config.SutemeSourceModel:
 			if modelDir == "" {
 				continue
 			}
@@ -341,7 +342,7 @@ func (s *CaptureService) loadRecognizer() RecognizerStatus {
 				log.Warn("配布モデルを読めませんでした", "dir", modelDir, "error", err)
 				continue
 			}
-			if pref != ikkyoku.SutemeSourceModel && recognize.EmbeddedAvailable() {
+			if pref != config.SutemeSourceModel && recognize.EmbeddedAvailable() {
 				if emb, err := loadEmbedded(); err == nil && set.OlderThan(emb) {
 					st.Skipped = append(st.Skipped, fmt.Sprintf("配布モデル（%s）は焼き込み（%s）より古いので使っていません",
 						set.Date.Format("2006-01-02"), emb.Date.Format("2006-01-02")))
@@ -349,7 +350,7 @@ func (s *CaptureService) loadRecognizer() RecognizerStatus {
 					continue
 				}
 			}
-		case ikkyoku.SutemeSourceEmbed:
+		case config.SutemeSourceEmbed:
 			if !recognize.EmbeddedAvailable() {
 				continue
 			}
@@ -390,12 +391,12 @@ func (s *CaptureService) loadRecognizer() RecognizerStatus {
 // 倒れると、**学習データを更新しても反映されない**という最も気づきにくい事故になる。
 // 置いたもの・指定したもののほうがユーザーの意思表示なので、上の段を先に見る。
 func recognizerOrder(pref string) []string {
-	all := []string{ikkyoku.SutemeSourceDir, ikkyoku.SutemeSourceModel, ikkyoku.SutemeSourceEmbed}
+	all := []string{config.SutemeSourceDir, config.SutemeSourceModel, config.SutemeSourceEmbed}
 	start := 0
 	switch pref {
-	case ikkyoku.SutemeSourceModel:
+	case config.SutemeSourceModel:
 		start = 1
-	case ikkyoku.SutemeSourceEmbed:
+	case config.SutemeSourceEmbed:
 		start = 2
 	}
 	order := make([]string, 0, len(all))

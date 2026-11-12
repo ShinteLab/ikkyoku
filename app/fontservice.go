@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ShinteLab/ikkyoku"
+	"github.com/ShinteLab/ikkyoku/config"
 	"github.com/ShinteLab/ikkyoku/log"
 	"github.com/ShinteLab/ikkyoku/piecefont"
 )
@@ -47,7 +47,7 @@ func NewFontService(settings *SettingsService) *FontService {
 type FontFace struct {
 	// Family は CSS の font-family に入れる名前。
 	//
-	// ⚠️ **登録ごとに違う名前であること**（`ikkyoku.PieceFontFamily`）。
+	// ⚠️ **登録ごとに違う名前であること**（`config.PieceFontFamily`）。
 	// 同名で複数登録すると、どれが当たるかがブラウザ任せになる。
 	Family string `json:"family"`
 	// DataURL は焼いた TTF（`data:font/ttf;base64,...`）。19 グリフで約 10KB。
@@ -74,7 +74,7 @@ type FontState struct {
 	// が「属性を付けるかどうか」まで解決して返す）。
 	Gyoku string `json:"gyoku"`
 	// GyokuOptions は選べる書き方の一覧（**フロントに表を書かせない**）。
-	GyokuOptions []ikkyoku.GyokuOption `json:"gyokuOptions"`
+	GyokuOptions []config.GyokuOption `json:"gyokuOptions"`
 	// HidariUma は馬を左馬で書くか。⚠️ **先後の区別は無い**（盤全体）。
 	HidariUma bool `json:"hidariUma"`
 
@@ -89,7 +89,7 @@ type FontState struct {
 	MinPieceOpacity float64 `json:"minPieceOpacity"`
 
 	// BoardColor / LineColor / StandColor は盤面・線・駒台の色（2026-10-02）。
-	// **既定は解決済みで返る**（`ikkyoku.ColorOr`）。⚠️ **フロントに既定値を書かないこと。**
+	// **既定は解決済みで返る**（`config.ColorOr`）。⚠️ **フロントに既定値を書かないこと。**
 	BoardColor string `json:"boardColor"`
 	LineColor  string `json:"lineColor"`
 	StandColor string `json:"standColor"`
@@ -155,21 +155,21 @@ type PieceStyle struct {
 }
 
 // pieceStyle は設定から画面に当てる形を組み立てる。
-func pieceStyle(cfg ikkyoku.Config) PieceStyle {
-	st := pieceGlyphStyle(ikkyoku.NormalizeGyoku(cfg.Gyoku), cfg.HidariUma)
-	st.Ink = ikkyoku.PieceInk(cfg.PieceColor, cfg.PieceOpacity)
-	st.Board = ikkyoku.ColorOr(cfg.BoardColor, ikkyoku.DefaultBoardColor)
-	st.Line = ikkyoku.ColorOr(cfg.LineColor, ikkyoku.DefaultLineColor)
-	st.Stand = ikkyoku.ColorOr(cfg.StandColor, ikkyoku.DefaultStandColor)
+func pieceStyle(cfg config.Config) PieceStyle {
+	st := pieceGlyphStyle(config.NormalizeGyoku(cfg.Gyoku), cfg.HidariUma)
+	st.Ink = config.PieceInk(cfg.PieceColor, cfg.PieceOpacity)
+	st.Board = config.ColorOr(cfg.BoardColor, config.DefaultBoardColor)
+	st.Line = config.ColorOr(cfg.LineColor, config.DefaultLineColor)
+	st.Stand = config.ColorOr(cfg.StandColor, config.DefaultStandColor)
 	return st
 }
 
 // pieceGlyphStyle は玉・左馬のぶんだけを組み立てる。
 func pieceGlyphStyle(gyoku string, hidariUma bool) PieceStyle {
-	g := ikkyoku.NormalizeGyoku(gyoku)
+	g := config.NormalizeGyoku(gyoku)
 	features := func(black bool) string {
 		var f []string
-		if ikkyoku.GyokuFor(g, black) {
+		if config.GyokuFor(g, black) {
 			f = append(f, `"ss01"`)
 		}
 		if hidariUma {
@@ -182,12 +182,12 @@ func pieceGlyphStyle(gyoku string, hidariUma bool) PieceStyle {
 	}
 	// 両方のときは値なし（＝空文字）で渡す。上の ⚠️ を読むこと。
 	attr := g
-	if g == ikkyoku.GyokuBoth {
+	if g == config.GyokuBoth {
 		attr = ""
 	}
 	return PieceStyle{
 		BoardGyoku:     attr,
-		BoardGyokuOn:   g != ikkyoku.GyokuNone,
+		BoardGyokuOn:   g != config.GyokuNone,
 		BoardHidariUma: hidariUma,
 		Black:          features(true),
 		White:          features(false),
@@ -257,34 +257,34 @@ func (s *FontService) State() FontState {
 	return s.state(cfg)
 }
 
-func (s *FontService) state(cfg ikkyoku.Config) FontState {
+func (s *FontService) state(cfg config.Config) FontState {
 	list := cfg.PieceFontList()
 	rows := make([]PieceFontSettings, 0, len(list))
 	for _, e := range list {
 		rows = append(rows, s.row(e))
 	}
-	color := ikkyoku.NormalizePieceColor(cfg.PieceColor)
+	color := config.NormalizePieceColor(cfg.PieceColor)
 	if color == "" {
-		color = ikkyoku.DefaultPieceColor
+		color = config.DefaultPieceColor
 	}
 	st := FontState{
 		Fonts:             rows,
 		Current:           cfg.PieceFont,
-		BuiltinName:       ikkyoku.BuiltinPieceFontName,
+		BuiltinName:       config.BuiltinPieceFontName,
 		Required:          piecefont.Required(),
-		Gyoku:             ikkyoku.NormalizeGyoku(cfg.Gyoku),
-		GyokuOptions:      ikkyoku.GyokuOptions,
+		Gyoku:             config.NormalizeGyoku(cfg.Gyoku),
+		GyokuOptions:      config.GyokuOptions,
 		HidariUma:         cfg.HidariUma,
 		PieceColor:        color,
-		PieceOpacity:      ikkyoku.NormalizePieceOpacity(cfg.PieceOpacity),
-		DefaultPieceColor: ikkyoku.DefaultPieceColor,
-		MinPieceOpacity:   ikkyoku.MinPieceOpacity,
-		BoardColor:        ikkyoku.ColorOr(cfg.BoardColor, ikkyoku.DefaultBoardColor),
-		LineColor:         ikkyoku.ColorOr(cfg.LineColor, ikkyoku.DefaultLineColor),
-		StandColor:        ikkyoku.ColorOr(cfg.StandColor, ikkyoku.DefaultStandColor),
-		DefaultBoardColor: ikkyoku.DefaultBoardColor,
-		DefaultLineColor:  ikkyoku.DefaultLineColor,
-		DefaultStandColor: ikkyoku.DefaultStandColor,
+		PieceOpacity:      config.NormalizePieceOpacity(cfg.PieceOpacity),
+		DefaultPieceColor: config.DefaultPieceColor,
+		MinPieceOpacity:   config.MinPieceOpacity,
+		BoardColor:        config.ColorOr(cfg.BoardColor, config.DefaultBoardColor),
+		LineColor:         config.ColorOr(cfg.LineColor, config.DefaultLineColor),
+		StandColor:        config.ColorOr(cfg.StandColor, config.DefaultStandColor),
+		DefaultBoardColor: config.DefaultBoardColor,
+		DefaultLineColor:  config.DefaultLineColor,
+		DefaultStandColor: config.DefaultStandColor,
 		Style:             pieceStyle(cfg),
 	}
 	entry, ok := cfg.CurrentPieceFont()
@@ -308,7 +308,7 @@ func (s *FontService) state(cfg ikkyoku.Config) FontState {
 
 // row は登録 1 つを画面に出す形にする。**元フォントを読み直す**ので、
 // アンインストールされていれば理由が出る。
-func (s *FontService) row(e ikkyoku.PieceFontEntry) PieceFontSettings {
+func (s *FontService) row(e config.PieceFontEntry) PieceFontSettings {
 	row := PieceFontSettings{
 		ID:     e.ID,
 		Name:   e.DisplayName(),
@@ -339,8 +339,8 @@ func (s *FontService) row(e ikkyoku.PieceFontEntry) PieceFontSettings {
 // ⚠️ **ディスクには残さない。** 残すと**元フォントを入れ替えたのに古い字で描く**
 // という、画面からは気づけない事故が起きる。使い回しの鍵に更新時刻を入れて
 // あるのも同じ理由で、**入れ替えたら焼き直しになる。**
-func (s *FontService) bake(e ikkyoku.PieceFontEntry) (*FontFace, error) {
-	family := ikkyoku.PieceFontFamily(e.ID)
+func (s *FontService) bake(e config.PieceFontEntry) (*FontFace, error) {
+	family := config.PieceFontFamily(e.ID)
 	key := fmt.Sprintf("%s|%d|%s|%s", e.Path, e.Index, family, modStamp(e.Path))
 
 	s.mu.Lock()
@@ -465,7 +465,7 @@ func (s *FontService) Add(path string, index int) (FontState, error) {
 	}
 
 	var id string
-	cfg, err := s.settings.editConfig(func(cfg *ikkyoku.Config) {
+	cfg, err := s.settings.editConfig(func(cfg *config.Config) {
 		// 同じ書体が既にあれば足さずにそれを選ぶ（**同じ字を 2 つ登録しても意味が無い**）。
 		for _, e := range cfg.PieceFonts {
 			if choiceKey(e.Path, e.Index) == choiceKey(f.Path, f.Index) {
@@ -474,8 +474,8 @@ func (s *FontService) Add(path string, index int) (FontState, error) {
 				return
 			}
 		}
-		id = ikkyoku.NextPieceFontID(cfg.PieceFonts)
-		cfg.PieceFonts = append(cfg.PieceFonts, ikkyoku.PieceFontEntry{
+		id = config.NextPieceFontID(cfg.PieceFonts)
+		cfg.PieceFonts = append(cfg.PieceFonts, config.PieceFontEntry{
 			ID: id, Path: f.Path, Index: f.Index, Source: f.Name,
 		})
 		cfg.PieceFont = id
@@ -492,7 +492,7 @@ func (s *FontService) Use(id string) (FontState, error) {
 	if id != "" && !s.has(id) {
 		return s.State(), fmt.Errorf("その駒フォントの登録が見つかりません")
 	}
-	cfg, err := s.settings.editConfig(func(cfg *ikkyoku.Config) {
+	cfg, err := s.settings.editConfig(func(cfg *config.Config) {
 		cfg.PieceFont = id
 	})
 	return s.state(cfg), err
@@ -506,8 +506,8 @@ func (s *FontService) Remove(id string) (FontState, error) {
 	if !s.has(id) {
 		return s.State(), fmt.Errorf("その駒フォントの登録が見つかりません")
 	}
-	cfg, err := s.settings.editConfig(func(cfg *ikkyoku.Config) {
-		out := make([]ikkyoku.PieceFontEntry, 0, len(cfg.PieceFonts))
+	cfg, err := s.settings.editConfig(func(cfg *config.Config) {
+		out := make([]config.PieceFontEntry, 0, len(cfg.PieceFonts))
 		for _, e := range cfg.PieceFonts {
 			if e.ID != id {
 				out = append(out, e)
@@ -526,7 +526,7 @@ func (s *FontService) Rename(id, name string) (FontState, error) {
 	if !s.has(id) {
 		return s.State(), fmt.Errorf("その駒フォントの登録が見つかりません")
 	}
-	cfg, err := s.settings.editConfig(func(cfg *ikkyoku.Config) {
+	cfg, err := s.settings.editConfig(func(cfg *config.Config) {
 		for i := range cfg.PieceFonts {
 			if cfg.PieceFonts[i].ID == id {
 				cfg.PieceFonts[i].Name = strings.TrimSpace(name)
@@ -542,8 +542,8 @@ func (s *FontService) Rename(id, name string) (FontState, error) {
 // **どう倒したかが画面にそのまま出る**から（返した `FontState` を描くだけで、
 // 選び直されたことが見える）。
 func (s *FontService) SetGyoku(v string) (FontState, error) {
-	cfg, err := s.settings.editConfig(func(cfg *ikkyoku.Config) {
-		cfg.Gyoku = ikkyoku.NormalizeGyoku(v)
+	cfg, err := s.settings.editConfig(func(cfg *config.Config) {
+		cfg.Gyoku = config.NormalizeGyoku(v)
 	})
 	return s.state(cfg), err
 }
@@ -558,16 +558,16 @@ func (s *FontService) SetGyoku(v string) (FontState, error) {
 // 読めない色は既定に戻す。**打ち間違いで駒が消えるより、読める値に丸めるほうがまし**
 // （設計原則3）。丸めた結果はそのまま返るので、**画面に何が起きたかが出る。**
 func (s *FontService) SetPieceInk(color string, opacity float64) (FontState, error) {
-	cfg, err := s.settings.editConfig(func(cfg *ikkyoku.Config) {
-		c := ikkyoku.NormalizePieceColor(color)
+	cfg, err := s.settings.editConfig(func(cfg *config.Config) {
+		c := config.NormalizePieceColor(color)
 		// ⚠️ **既定と同じ色は書き残さない**（エンジンの option と同じ）。
 		// 書き残すと、既定を変えたときに古い値で固まる。
-		if c == ikkyoku.DefaultPieceColor {
+		if c == config.DefaultPieceColor {
 			c = ""
 		}
 		cfg.PieceColor = c
-		o := ikkyoku.NormalizePieceOpacity(opacity)
-		if o >= ikkyoku.DefaultPieceOpacity {
+		o := config.NormalizePieceOpacity(opacity)
+		if o >= config.DefaultPieceOpacity {
 			o = 0 // 0 が「未設定」
 		}
 		cfg.PieceOpacity = o
@@ -582,23 +582,23 @@ func (s *FontService) SetPieceInk(color string, opacity float64) (FontState, err
 // （書き残すと、既定を変えたときに古い値で固まる）。
 func (s *FontService) SetBoardColors(board, line, stand string) (FontState, error) {
 	keep := func(v, def string) string {
-		c := ikkyoku.NormalizePieceColor(v)
+		c := config.NormalizePieceColor(v)
 		if c == def {
 			return ""
 		}
 		return c
 	}
-	cfg, err := s.settings.editConfig(func(cfg *ikkyoku.Config) {
-		cfg.BoardColor = keep(board, ikkyoku.DefaultBoardColor)
-		cfg.LineColor = keep(line, ikkyoku.DefaultLineColor)
-		cfg.StandColor = keep(stand, ikkyoku.DefaultStandColor)
+	cfg, err := s.settings.editConfig(func(cfg *config.Config) {
+		cfg.BoardColor = keep(board, config.DefaultBoardColor)
+		cfg.LineColor = keep(line, config.DefaultLineColor)
+		cfg.StandColor = keep(stand, config.DefaultStandColor)
 	})
 	return s.state(cfg), err
 }
 
 // SetHidariUma は馬を左馬で書くかを変える。⚠️ **先後の区別は無い**（盤全体）。
 func (s *FontService) SetHidariUma(on bool) (FontState, error) {
-	cfg, err := s.settings.editConfig(func(cfg *ikkyoku.Config) {
+	cfg, err := s.settings.editConfig(func(cfg *config.Config) {
 		cfg.HidariUma = on
 	})
 	return s.state(cfg), err

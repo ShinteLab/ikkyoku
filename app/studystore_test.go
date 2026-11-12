@@ -101,7 +101,7 @@ func TestStudySessionKeepsBranchPoints(t *testing.T) {
 // ⚠️ **残すのは ID と凡例の名前だけ。** exe のパスも option も設定
 // （`Config.Engines`）にあるので、**`EngineID` で引けば済む** —— 写すと
 // 同じことが 2 か所に載って片方だけ古くなる。**それが成り立つ条件が
-// 「ID を使い回さない」**で、`ikkyoku.NextEngineID` がそうしてある。
+// 「ID を使い回さない」**で、`config.NextEngineID` がそうしてある。
 func TestStudySessionKeepsEngineID(t *testing.T) {
 	s := analyzed(t)
 	rec, ok := s.sessionRecord()
