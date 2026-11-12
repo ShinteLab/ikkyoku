@@ -52,7 +52,7 @@ type FollowCamera interface {
 
 // FollowUpdate は中継セッションの様子（イベント `follow:update`。画面はこれを描くだけ）。
 //
-// ⚠️ **イベントのペイロードの型は bindings に出ない**ので、変えたら `mainscreen.ts` の受け手も直すこと。
+// ⚠️ **イベントのペイロードの型は bindings に出ない**ので、変えたら `followcontrol.ts` の受け手も直すこと。
 type FollowUpdate struct {
 	// On は追っているか。
 	On bool `json:"on"`

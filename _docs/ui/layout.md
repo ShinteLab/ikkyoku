@@ -1,7 +1,7 @@
-# 盤の寸法とスプリットバー（`style.css` / `studylayout.ts` / `mainscreen.ts`）
+# 盤の寸法とスプリットバー（`style.css` / `studylayout.ts` / `studytab.ts`）
 
 ⚠️ **スプリットバー・折り畳み・切り離しの JS は `studylayout.ts`**（2026-11-13 に `mainscreen.ts` から切り出した）。
-盤の上の 1 行（`applyStudyTopRow`）・投了のボタン・黒地の右クリックは `mainscreen.ts` に残っている。
+盤の上の 1 行（`applyStudyTopRow`）・投了のボタン・黒地の右クリック・盤と駒台は `studytab.ts`（同じ日に切り出した解析タブ）。
 
 **盤の大きさは式で決まる。DOM から自動では決まらない。**
 行を増やしたら `--board-size` の引き算からも引くこと —— さもないと盤がはみ出す。
@@ -295,7 +295,7 @@ auto マージンは `justify-content` より**先に**余りを取るので、�
   `--board-size` の式は**触っていない**
 - ⚠️ **1 行に収めること**（グリッドの 4 行目 + `gap` 6px で 23px ほど）。
   折り返させたり `border` / `padding` を足したりすると、**空きを食い潰したぶんだけ
-  盤が押し出される**。溢れたぶんは省略して `title` に出す（`mainscreen.ts` が
+  盤が押し出される**。溢れたぶんは省略して `title` に出す（`studytab.ts` が
   **SFEN そのものを `title` に入れている** —— 切れた末尾を読む手段がそれしかない）
 - ⚠️ **幅を `--board-size` に固定すること。** grid の `auto` の列なので、
   **指定しないと SFEN の長さで列が広がって盤ごと押し出される**（折り返さないので
@@ -330,7 +330,7 @@ auto マージンは `justify-content` より**先に**余りを取るので、�
 - **`.analyze-lines` は `max-height` ではなく `height`。** 空でも畳まない
 - ⚠️ **候補の本数ぶん全部を確保しないこと。** MultiPV を上げると候補は何本にもなるので、
   そのぶん盤の下が伸びる。**4 本ぶんで頭打ち**にして、溢れたら中でスクロールさせる
-  （実際の値は `mainscreen.ts` の `reserveLines` が入れる）
+  （実際の値は `sidepane.ts` の `reserveLines` が入れる）
 - ⚠️ **枠全体（`.analyze-engines`）の頭打ちを定数にしないこと**（2026-08-12 に
   220px から直した）。候補手の本数でカードの高さが変わるので、定数だと
   **本数を増やしたとたんにエンジン 2 つでもスクロールバーが出る**
@@ -397,7 +397,7 @@ auto マージンは `justify-content` より**先に**余りを取るので、�
 
 **解析タブの黒地（盤・駒台・帯・右の列のどれでもないところ）を右クリックすると
 「評価値バー」「対局者名」の 2 つのチェックが出て、外したほうが消える**
-（`mainscreen.ts` の `isStudyBackdrop` → `openBoardMenu` → `applyStudyTopRow`）。
+（`studytab.ts` の `isStudyBackdrop` → `openBoardMenu` → `applyStudyTopRow`）。
 **中継を観ながら使うので「評価値を見たくない」場面がある**のに、盤の真上の帯は
 目に入るのを避けようが無い、というのが理由。
 
@@ -596,7 +596,7 @@ auto マージンは `justify-content` より**先に**余りを取るので、�
 ⚠️ **「押すと指す」を戻すなら、先に本譜と枝の区別を決めること。**
 MultiPV を増やす目的は**候補を並べて読むこと**であって、その場で指せることではない。
 
-#### 投了のボタン（**2026-10-09**。`mainscreen.ts` の `studyResignBtns`）
+#### 投了のボタン（**2026-10-09**。`studytab.ts` の `studyResignBtns`）
 
 **駒台の外側の縁、手番のマークの横の角に「投了」**（奥の駒台なら上の縁、手前の駒台なら下の縁。
 盤から遠い側の角）。投了は**手番の側の操作**なので、その側の駒台に付ける。

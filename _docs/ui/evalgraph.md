@@ -38,7 +38,7 @@ AnalyzeService.runOne ──record──> StudyService.recordEval ──> evalSt
   - ⚠️ **設定ファイルは一覧の外の色も受ける**（`#rrggbb` なら通る）。画面から
     選べる範囲と、受け付ける範囲は別物
   - **凡例・折れ線・分岐前の薄い線・見出しの色見本は全部同じ 1 か所から引く**
-    （`mainscreen.ts` の `colorOf`）
+    （`studytab.ts` の `colorOf`）
 - ⚠️ **点の置き場所は `StudyService`。フロントに溜めないこと。**
   記録は**局面ではなく手順に紐づく**ので、**戻って別の手を指したときにどこまで
   捨てるかを知っているのは手順を持っている側だけ**。2 か所に持つと、片方だけ

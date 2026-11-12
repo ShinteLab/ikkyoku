@@ -20,9 +20,9 @@ export interface FollowControlOptions {
   // setSideStatus は知らせの逃げ場（枠が出ていないときは手順の下に出す。`sidePane.setStatus`）。
   // ⚠️ **関数で渡す** —— 側の列はこれより後で組む（呼ばれるのはいつも組み終わったあと）。
   setSideStatus(text: string): void;
-  // frameVisible は枠が出ているか（`frame:visible` の写し。持ち主は `mainscreen.ts`）。
+  // frameVisible は枠が出ているか（`frame:visible` の写し。持ち主は `mainscreen.ts` の `frame:visible`）。
   frameVisible(): boolean;
-  // kifuFollowOn は棋譜の自動更新が入っているか（`StudyState.kifuFollow` の写し。持ち主は `mainscreen.ts` の `showStudy`）。
+  // kifuFollowOn は棋譜の自動更新が入っているか（`StudyState.kifuFollow` の写し。持ち主は `studytab.ts` の `showStudy`）。
   kifuFollowOn(): boolean;
 }
 

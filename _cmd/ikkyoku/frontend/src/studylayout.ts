@@ -7,7 +7,7 @@
 // ⚠️ **盤の大きさは式で決まる**（`style.css` の `--board-size`）。ここが書き換えるのは
 // CSS 変数（`--eval-graph-h` / `--eval-graph-pad` / `--study-side-min` / `--study-side-max`）と
 // `#panel-study` の class（`is-side-collapsed` / `is-side-detached` / `is-animating`）だけで、
-// 大きさはその式から付いてくる。⚠️ **`is-toprow-empty` は `mainscreen.ts` の `applyStudyTopRow`** が持つ。
+// 大きさはその式から付いてくる。⚠️ **`is-toprow-empty` は `studytab.ts` の `applyStudyTopRow`** が持つ。
 //
 // ⚠️ **受け渡しは `StudyLayoutOptions` / `StudyLayoutHandle` だけ**（`sidepane.ts` と同じ型）。
 // 盤と側の列とグラフには**測り直し（`relayout`）と出す面（`setParts` / `setActive`）しか頼まない。**
@@ -36,14 +36,14 @@ export interface StudyLayoutOptions {
   studySide: HTMLElement;
   // evalGraphRow は評価値グラフの行（`#eval-graph-row`）。
   evalGraphRow: HTMLElement;
-  // studyLoaded は解析タブに局面があるか。⚠️ **他の要素の `hidden` から読まないこと**（持ち主は `mainscreen.ts`）。
+  // studyLoaded は解析タブに局面があるか。⚠️ **他の要素の `hidden` から読まないこと**（持ち主は `studytab.ts`）。
   studyLoaded(): boolean;
   // 大きさが変わったら測り直させる相手（盤に重ねたグリッドとグラフ）。
   studyBoardUI: StudyBoardHandle;
   evalGraphUI: EvalPaneHandle;
   // sidePane はドック側の右の列（切り離したとき出す面と、自動解析の持ち主を切り替える）。
   sidePane: SidePaneHandle;
-  // 候補手の面 / 手順の面の「切り離す」ボタン（置き場所は側の列。`mainscreen.ts` が作って渡す）。
+  // 候補手の面 / 手順の面の「切り離す」ボタン（置き場所は側の列。`studytab.ts` が作って渡す）。
   studySplitDetach: HTMLElement;
   studyMovesDetach: HTMLElement;
 }

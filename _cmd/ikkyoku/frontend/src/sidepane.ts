@@ -619,7 +619,7 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
 
   // 勝率バーに出しているエンジン（2026-10-02。**空なら印を付けない**）。
   //
-  // ⚠️ **ここで選ばないこと** —— どれをバーに出すかは盤の側（`mainscreen.ts` の
+  // ⚠️ **ここで選ばないこと** —— どれをバーに出すかは盤の側（`studytab.ts` の
   // `winrateEngineId`）が持っていて、ここは**言われた id のカードに薄い枠を付けるだけ**。
   // 盤は別の窓にありうるので、選択を 2 か所に持つと食い違う。
   // ⚠️ **id で覚えること**（要素を覚えない）。カードは解析のたびに作り直される。
@@ -2427,7 +2427,7 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
     void (async () => {
       try {
         // ⚠️ **入れるときは中継を追うを止める**（2026-10-10。同じ対局を両方で追う意味はほぼ無いので、
-        // 後から押したほうが勝つ。聞かない）。逆向き（中継を追うを押したら自動更新を止める）は `mainscreen.ts`。
+        // 後から押したほうが勝つ。聞かない）。逆向き（中継を追うを押したら自動更新を止める）は `followcontrol.ts`。
         // 理由は `_docs/app-kifu-load.md` の「自動更新」。
         const stopped = !followOn && isFollowingNow();
         if (stopped) {

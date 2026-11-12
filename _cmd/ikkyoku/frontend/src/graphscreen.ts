@@ -20,7 +20,7 @@ import { mountEvalPane } from "./evalgraphpane";
 import { enableVeilDrag } from "./veildrag";
 import type { EvalMode } from "./evalgraph";
 
-// 設定に無いエンジンの色（`mainscreen.ts` と同じ値にすること）。
+// 設定に無いエンジンの色（`studytab.ts` と同じ値にすること）。
 const UNKNOWN_ENGINE_COLOR = "#b8c0d0";
 
 export function mountGraphScreen(root: HTMLElement) {
