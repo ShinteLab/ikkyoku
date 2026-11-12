@@ -61,7 +61,7 @@ if (problems.length > 0) {
 // ⚠️ **見るのは `root.innerHTML = \`` から始まって、行頭 2 つ空けの \`; で
 // 終わるところまで**（その 2 行自体は当然バッククォートを含むので飛ばす）。
 // 中に `${...}` は普通に出てくるが、**あれはバッククォートを含まない**。
-const files = ["./src/mainscreen.ts", "./src/frame.ts"];
+const files = ["./src/mainscreen.ts", "./src/settingstab.ts", "./src/frame.ts"];
 const badTicks = [];
 for (const file of files) {
   const lines = readFileSync(new URL(file, import.meta.url), "utf8").split("\n");
