@@ -66,7 +66,6 @@ import {
   AnalyzeService,
   SettingsService,
   StudyService,
-  TrainingService,
 } from "../bindings/github.com/ShinteLab/ikkyoku/app";
 import { iconMarkup } from "./icon";
 import { mountEditor } from "./editor";
@@ -81,6 +80,7 @@ import { openPopup } from "./popup";
 import { hideHint } from "./hint";
 import { mountStudyBoard } from "./study";
 import { mountSettingsTab } from "./settingstab";
+import { mountTrainSend, type ShotRegion } from "./trainsend";
 import type { RecognizerStatus } from "../bindings/ikkyoku/models";
 import type {
   AppSettings,
@@ -137,10 +137,6 @@ const LOW_CONFIDENCE = 0.75;
 // 「似た候補が競っている」＝訂正の候補、という読み方になる。
 const LOW_CELL_CONFIDENCE = 0.8;
 
-// 撮った PNG の座標系での盤面矩形（`Debug.Region` から `ImageBounds.Min` を引いたもの）。
-// **使い道は 2 つ**——suteme へ送る学習サンプルの切り出し位置と、訂正タブの参照画像の
-// 切り取り。**同じ 1 つの値から両方を出すこと**（別々に持つと片方だけずれる）。
-type ShotRegion = { x1: number; y1: number; x2: number; y2: number };
 
 // 盤面領域の決め方の表示名。**どれも異常ではない。**
 // ikkyoku はガイド枠を盤に合わせて撮るので、盤の縁が画像端に来る whole は
@@ -1267,19 +1263,10 @@ export function mountMainScreen(root: HTMLElement): void {
     renderCaptureRef();
   };
 
-  // ---- 訂正データの送信（suteme への還元） --------------------------------
+  // ---- 訂正データの送信（suteme への還元。trainsend.ts）--------------------
   //
-  // **確定してから出す。** 訂正の途中の盤面を送る意味が無いので、訂正モードを
-  // 抜けたときだけボタンが現れる。設定で有効にしていなければ行ごと出さない。
-  //
-  // 送るのに要るのは 3 点組（撮った PNG のパス・正解 SFEN・**画像の中での盤面の矩形**）。
-  // 矩形は認識結果の `Debug.Region` そのもの。**認識に失敗した画像は送れない**
-  // （盤の位置が分からないと suteme が学習サンプルを切り出せない）。
-  const trainRow = root.querySelector<HTMLDivElement>("#train-row")!;
-  const trainSend = root.querySelector<HTMLButtonElement>("#train-send")!;
-  const trainNote = root.querySelector<HTMLElement>("#train-note")!;
-  const trainSendStatus = root.querySelector<HTMLElement>("#train-send-status")!;
-  let trainEnabled = false;
+  // ⚠️ **送るもの（訂正タブの局面と撮った 1 枚）の持ち主はここ。** 送信の行は
+  // `current()` で読むだけ（写しを持たせない）。
   // 今の局面（EditState 由来）と、撮ったときの盤面矩形（CaptureResult 由来）。
   // **出所が違うので別々に持つ**（訂正しても矩形は変わらない。画像は同じ 1 枚）。
   let editSfen = "";
@@ -1293,49 +1280,15 @@ export function mountMainScreen(root: HTMLElement): void {
   let editNearWhite = false;
   let lastRegion: ShotRegion | null = null;
 
-  const syncTrain = () => {
-    const ready = editLoaded && !!shotFullPath && !!lastRegion;
-    trainRow.hidden = !trainEnabled || !ready;
-    if (trainRow.hidden) {
-      return;
-    }
-    // 送れる状態でも、手番や駒台の先後が未決のことはある。**止めない**
-    // （学習に使うのは盤面部分なので、それでも価値がある。設計原則3）。
-    // ただし**何が落ちるかは先に出す**（持ち駒が黙って落ちるのを一度やっている）。
-    trainSend.disabled = false;
-    trainNote.textContent = editNotes.join(" / ");
-  };
-
-  const sendTraining = async () => {
-    if (!lastRegion) {
-      return;
-    }
-    trainSend.disabled = true;
-    trainSendStatus.classList.remove("is-error");
-    trainSendStatus.textContent = "送信しています…";
-    try {
-      const r = await TrainingService.Send(
-        shotFullPath,
-        editSfen,
-        lastRegion.x1,
-        lastRegion.y1,
-        lastRegion.x2,
-        lastRegion.y2,
-      );
-      // **重複は失敗ではない**（suteme は画像のハッシュで再送を弾き、既存の ID を返す）。
-      trainSendStatus.textContent = r.duplicate
-        ? `この画像は登録済みです (${r.id})`
-        : `登録しました (${r.id})。suteme の解析タブで確認すると学習に使われます`;
-    } catch (err) {
-      trainSendStatus.textContent = `登録できませんでした: ${String(err instanceof Error ? err.message : err)}`;
-      trainSendStatus.classList.add("is-error");
-    } finally {
-      trainSend.disabled = false;
-    }
-  };
-
-  trainSend.addEventListener("click", () => {
-    void sendTraining();
+  const trainUI = mountTrainSend({
+    root: root.querySelector<HTMLElement>("#train-row")!,
+    current: () => ({
+      loaded: editLoaded,
+      path: shotFullPath,
+      sfen: editSfen,
+      notes: editNotes,
+      region: lastRegion,
+    }),
   });
 
   // ---- エンジン解析（Phase 4）。**解析タブの中身。** --------------------------
@@ -3072,7 +3025,7 @@ ${st.turnLabel}${n}`;
       // 撮った盤の目線。**採るときに解析タブの見え方を決めるのに使う**
       // （局面そのものを回すのは Go 側の `adoptPosition`）。
       editNearWhite = !!st?.nearWhite;
-      syncTrain();
+      trainUI.sync();
       // ⚠️ **ここから解析の状態を触らないこと。** 訂正タブの局面と解析タブの局面は
       // 別物で、繋ぐのは「この局面を解析する」を押したときの 1 回だけ。
       if (!st?.loaded) {
@@ -3455,8 +3408,7 @@ ${st.turnLabel}${n}`;
     showWarnings([]);
     drawOverlay(null);
     markDebug("");
-    trainSendStatus.textContent = "";
-    trainSendStatus.classList.remove("is-error");
+    trainUI.clearStatus();
 
     // 撮った画像。**まだ盤面領域が分からないので切り取らずに全体を出す**
     // （領域は認識が出すもの。届いたら showResult が同じ画像を切り取って出し直す）。
@@ -3474,7 +3426,7 @@ ${st.turnLabel}${n}`;
       height: taken.height,
       debug: null,
     });
-    syncTrain();
+    trainUI.sync();
 
     // **撮ったら訂正タブへ移る。** 行き先は認識の成否に依らないので、
     // 待たせるならその面で待たせる（結果が出てから移ると、待っているあいだ
@@ -3550,7 +3502,7 @@ ${st.turnLabel}${n}`;
       height: result.height,
       debug: result.debug,
     });
-    syncTrain();
+    trainUI.sync();
     drawOverlay(result.debug);
 
     // 信頼度が低いのも「見に行くべきもの」に含める。盤が映っていない画面を撮ったときは
@@ -3651,11 +3603,10 @@ ${st.turnLabel}${n}`;
     showWarnings([]);
     drawOverlay(null);
     markDebug("");
-    trainSendStatus.textContent = "";
-    trainSendStatus.classList.remove("is-error");
+    trainUI.clearStatus();
     // ⚠️ **最後に呼ぶこと** —— `shotFullPath` と盤面領域を見て
     // 「訂正データを送信」の行を畳むので、先に呼ぶと出たままになる。
-    syncTrain();
+    trainUI.sync();
   };
 
   // 学習データを育てながら使うための入口。suteme は一度読んだ推論器をキャッシュするので、
@@ -3757,8 +3708,8 @@ ${st.turnLabel}${n}`;
     // 手順の下のコメント欄（2026-10-04）。**起動直後にどちらで始まるかはここで決まる。**
     sidePane.setShowComment(!!s.showMoveComment);
     // 送信ボタンを出すかどうかはこの設定で決まる。
-    trainEnabled = s.training.enabled;
-    syncTrain();
+    trainUI.setEnabled(s.training.enabled);
+    trainUI.sync();
   };
   const settingsUI = mountSettingsTab(tabs[4].panel, {
     pieceBoards: [board, studyBoard],
