@@ -439,7 +439,7 @@ followProbe ─> Rank（候補から選ぶ。29µs）─┬─ 読めていな�
 - ⚠️ **1 周の中のエラーと panic は止めて理由を出す**（設計原則3 は「落ちない」であって「黙る」ではない）
 - **見張り（1 周が返ってこなければ立て直す）は無くした**。画面の setTimeout は予約を取りこぼしたが、Go のループは
   取りこぼさない。⚠️ **撮る側が固まると、その回はそこで止まったまま**になる（`StopFollow` は `followStopWait` で諦めて返る）
-- ⚠️ **`follow:update` の型は bindings に出ない**（`mainscreen.ts` の `FollowUpdate` を手で合わせる）
+- ⚠️ **`follow:update` の型は bindings に出ない**（`followcontrol.ts` の `FollowUpdate` を手で合わせる）
 - 枠を隠すのを断ったこと（`HideFrame`）は `FollowHideRefused` で受けて帯に出す（打った駒の候補は次の 1 周で出し直す）
 - **追従の状態も 1 回の持ち物**（第 2 段。2026-10-11）。解析タブ側の答えの控え（`pending` / `rewind` / `dropOffer` / `base` /
   `lastFrame`）は `followSession` の下半分、撮る側（マスタ・録画・比べる相手の 1 枚・ふるい）は `followcam.Camera` の持ち物
