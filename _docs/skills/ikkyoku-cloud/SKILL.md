@@ -52,7 +52,7 @@ bash _docs/skills/ikkyoku-cloud/cloud.sh setup   # wails3・bindings・npm だ�
 | ルートパッケージのテストが落ちる | `hotkey_test`（キーコード）と `config_test`（`C:\` のパス区切り）が **Windows 前提** | ⚠️ **`test` から外している**（不具合ではない）。build/vet は Windows 向けに見る |
 | `go build ./...` が Linux で落ちる | 上の hotkey | `GOOS=windows` で組む（PureGo なのでクロスで組める） |
 | Wails アプリ（`_cmd/ikkyoku`）が embed で止まる | `frontend/dist` が無い | 無ければ空のフォルダを一時的に作る |
-| `wails3` が入らない | 普通に入れると Linux の GTK / WebKit（cgo）を探す | `CGO_ENABLED=0 go install …@v3.0.0-beta.26`（bindings の生成には要らない） |
+| `wails3` が入らない | 普通に入れると Linux の GTK / WebKit（cgo）を探す | `CGO_ENABLED=0 go install …@v3.0.0`（bindings の生成には要らない） |
 | bindings の生成 | — | `GOOS=windows wails3 generate bindings -ts -i` |
 
 ## クラウドではできないこと

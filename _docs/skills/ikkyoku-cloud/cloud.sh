@@ -51,7 +51,7 @@ overlay() {
 setup() {
   if [ ! -x "$wails3" ]; then
     # ⚠️ **CGO_ENABLED=0**。付けないと Linux の GTK / WebKit を探して落ちる（bindings の生成には要らない）。
-    step wails3 env CGO_ENABLED=0 go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.26
+    step wails3 env CGO_ENABLED=0 go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0
   fi
   step bindings sh -c "cd '$root/_cmd/ikkyoku' && GOOS=windows '$wails3' generate bindings -ts -i"
   if [ ! -d "$root/_cmd/ikkyoku/frontend/node_modules" ]; then
