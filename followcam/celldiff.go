@@ -44,6 +44,38 @@ const (
 	cellSkipSame = "same"
 )
 
+// Verdict は**直前に撮った 1 枚を、局面を知っている側（`app` の中継セッション）がどう判定したか**（2026-11-13。`Judge`）。
+// 撮る側は言われたとおり覚えるだけで、⚠️ **ここで「合っているか」「動いたか」を判断しないこと**（局面を知らない層なので）。
+type Verdict struct {
+	// Unmoved は駒が動いていない（光っているだけ・81 マスで「何も指していない」）。→ この組を「変わっていない」に数える（`CellsUnmoved`）
+	Unmoved bool
+	// Unclear は変わったマスを説明できる手が無い（`NoMoves`）。→ 組が変わるのを待たせる（`CellsUnclear`）
+	Unclear bool
+	// Found は手が見つかった（控えた・足した）。→ 「動いていない」と覚えた組を忘れる（`ForgetUnmoved`）
+	Found bool
+	// AtFrame は本譜の先端とこの 1 枚が合っている。→ 比べる相手にする（`SetCellBase`）
+	AtFrame bool
+}
+
+// Judge は**局面を知っている側の判定を受け取り、覚え書きを書き換える**（2026-11-13。`app.FollowCamera` の口は 4 つからこれ 1 つにした）。
+//
+// 順番は中継セッションが 4 つを呼んでいたときと同じ（覚える・忘れる → 比べる相手を替える）。⚠️ **比べる相手を替える判定が
+// 並んだら、覚えた組は残らないこと**（替えると捨てる。`setCellBaseLocked`）。
+func (s *Camera) Judge(v Verdict) {
+	if v.Unmoved {
+		s.CellsUnmoved()
+	}
+	if v.Unclear {
+		s.CellsUnclear()
+	}
+	if v.Found {
+		s.ForgetUnmoved()
+	}
+	if v.AtFrame {
+		s.SetCellBase()
+	}
+}
+
 // SetCellBase は**直前に撮った 1 枚を、速い経路の比べる相手にする**（2026-10-07）。
 //
 // 呼ぶのは中継セッション（`app` の `followsession.go`）で、解析タブ側が `FollowAuto.AtFrame`（本譜の先端がこの 1 枚とぴったり合う）を

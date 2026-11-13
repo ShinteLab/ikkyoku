@@ -56,10 +56,7 @@ func (c *fakeCamera) ReadCells([]int) ([]followcam.CellPiece, error) { return ni
 func (c *fakeCamera) ComparePieces(pairs []followcam.CellPair) []float64 {
 	return make([]float64, len(pairs))
 }
-func (c *fakeCamera) CellsUnmoved()                       {}
-func (c *fakeCamera) CellsUnclear()                       {}
-func (c *fakeCamera) ForgetUnmoved()                      {}
-func (c *fakeCamera) SetCellBase()                        {}
+func (c *fakeCamera) Judge(followcam.Verdict)             {}
 func (c *fakeCamera) SaveFollowFrame(int, []string, bool) { c.mu.Lock(); c.frames++; c.mu.Unlock() }
 func (c *fakeCamera) SaveFollowMiss(_ int, kind string) {
 	c.mu.Lock()
@@ -239,7 +236,7 @@ func TestFollowSessionNeedsCamera(t *testing.T) {
 	}
 }
 
-// ⚠️ **答えの控えは追い始めと止めたときに捨てること**（2026-10-11。`followSession.resetLocked`）。前の回の控えを、次の回の
+// ⚠️ **答えの控えは追い始めと止めたときに捨てること**（2026-10-11。`follower.resetLocked`）。前の回の控えを、次の回の
 // 最初の「変わっていない」1 枚で足さない。
 func TestFollowSessionDropsHoldsAtStartAndStop(t *testing.T) {
 	board := boardAfter(t, "7g7f")

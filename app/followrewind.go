@@ -58,35 +58,35 @@ func (r *followRewind) same(o *followRewind) bool {
 //
 // ⚠️ **手や頭が被った 1 枚では試さない**（読みが崩れていて、正しい末尾を壊す）。控えた差し替えも捨てずに
 // 次の 1 枚を待つ。⚠️ **費用表が無ければ試さない**（どのマスの食い違いが確かかの根拠が無い）。
-func (s *StudyService) followRewindCheck(board *position.Board, cost *position.CellCost, unseen *position.CellMask, p FollowProbe) (FollowAuto, bool, error) {
+func (f *follower) followRewindCheck(board *position.Board, cost *position.CellCost, unseen *position.CellMask, p FollowProbe) (FollowAuto, bool, error) {
 	if board == nil || cost == nil || unseen.Count() > 0 || p.Kind == FollowUnreadable {
 		return FollowAuto{}, false, nil
 	}
-	rw := s.followRewindProbe(board, cost, p)
+	rw := f.followRewindProbe(board, cost, p)
 	if rw == nil {
-		s.dropRewindUnlessFits(board, cost)
+		f.dropRewindUnlessFits(board, cost)
 		return FollowAuto{}, false, nil
 	}
-	a, err := s.followRewindHold(rw, p.Fit)
+	a, err := f.followRewindHold(rw, p.Fit)
 	return a, true, err
 }
 
 // followRewindHold は見つけた差し替え rw を控える。前の 1 枚と同じ差し替えなら据える（2 枚目で確かめた）。
 //
 // ⚠️ **控えたら先端から足す手の控えは捨てる**（次の確かめ（`FollowConfirm`）でどちらを据えるのか分からなくなる）。
-func (s *StudyService) followRewindHold(rw *followRewind, fit float64) (FollowAuto, error) {
-	s.mu.Lock()
-	prev := s.follow.rewind
-	s.follow.rewind = rw
-	s.mu.Unlock()
+func (f *follower) followRewindHold(rw *followRewind, fit float64) (FollowAuto, error) {
+	f.smu.Lock()
+	prev := f.rewind
+	f.rewind = rw
+	f.smu.Unlock()
 	if rw.same(prev) {
-		return s.followRewindApply(rw)
+		return f.followRewindApply(rw)
 	}
-	s.setPending(nil)
+	f.setPending(nil)
 	log.Follow.Info("推測で足した手を差し替えられそうです（次の 1 枚で確かめます）",
 		"戻す手数", len(rw.line)-rw.keep, "元の手", rw.line[rw.keep:], "新しい手", rw.moves, "根拠", rw.why)
 	return FollowAuto{Kind: FollowUnique, Pending: true, Reason: "確かめています",
-		Guess: true, Fit: fit, State: s.State()}, nil
+		Guess: true, Fit: fit, State: f.State()}, nil
 }
 
 // dropRewindUnlessFits は、差し替えを言わなかった 1 枚で**控えた差し替えを捨てるか**を決める（2026-10-09）。
@@ -97,15 +97,15 @@ func (s *StudyService) followRewindHold(rw *followRewind, fit float64) (FollowAu
 // —— 6一 が空いて見えるぶん、むしろ差し替えた側に合っていた。
 // 捨てるのは、**差し替えた盤より先端の盤のほうがよく合う**（先後と駒の有無の食い違いが少ない。`followSideCost`）1 枚。
 // 残すときは `held` を立てる（変わっていない 1 枚では据えず、同じ差し替えを言う 1 枚を待つ）。
-func (s *StudyService) dropRewindUnlessFits(board *position.Board, cost *position.CellCost) {
-	s.mu.Lock()
-	prev := s.follow.rewind
+func (f *follower) dropRewindUnlessFits(board *position.Board, cost *position.CellCost) {
+	f.smu.Lock()
+	prev := f.rewind
 	var root *position.Position
 	var line []string
-	if s.study != nil {
-		root, line = s.study.Root(), s.study.MainLine()
+	if f.tree() != nil {
+		root, line = f.tree().Root(), f.tree().MainLine()
 	}
-	s.mu.Unlock()
+	f.smu.Unlock()
 	if prev == nil {
 		return
 	}
@@ -120,29 +120,29 @@ func (s *StudyService) dropRewindUnlessFits(board *position.Board, cost *positio
 			}
 		}
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.follow.rewind != prev {
+	f.smu.Lock()
+	defer f.smu.Unlock()
+	if f.rewind != prev {
 		return
 	}
 	if !keep {
-		s.follow.rewind = nil
+		f.rewind = nil
 		return
 	}
 	held := *prev
 	held.held = true
-	s.follow.rewind = &held
+	f.rewind = &held
 	log.Follow.Info("控えた差し替えは、この 1 枚では打ち消されないので残します", "元の手", prev.line[prev.keep:], "新しい手", prev.moves)
 }
 
 // holdRewind は控えた差し替えに `held` を立てる（新しい 1 枚を見始めたとき。`FollowCells`）。
-func (s *StudyService) holdRewind() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.follow.rewind != nil && !s.follow.rewind.held {
-		held := *s.follow.rewind
+func (f *follower) holdRewind() {
+	f.smu.Lock()
+	defer f.smu.Unlock()
+	if f.rewind != nil && !f.rewind.held {
+		held := *f.rewind
 		held.held = true
-		s.follow.rewind = &held
+		f.rewind = &held
 	}
 }
 
@@ -161,16 +161,16 @@ func (s *StudyService) holdRewind() {
 // ⚠️ **先端そのものが（先後と駒の有無で）合うなら戻さない**。
 // ⚠️ **行き先に指した側の駒が読めてから控える**（`followBackedByRead`。読んでいなければ行き先を読むよう頼む）。
 // ⚠️ **2 枚続けて同じ差し替えで据える**のは 81 マスの読みの差し替えと同じ（控えは共通。`followRewindHold`）。
-func (s *StudyService) followCellsRewind(base *position.Position, since []string, mask, extra *position.CellMask, read []followcam.CellPiece, rotated bool) (FollowAuto, bool, error) {
-	s.mu.Lock()
-	if s.study == nil {
-		s.mu.Unlock()
+func (f *follower) followCellsRewind(base *position.Position, since []string, mask, extra *position.CellMask, read []followcam.CellPiece, rotated bool) (FollowAuto, bool, error) {
+	f.smu.Lock()
+	if f.tree() == nil {
+		f.smu.Unlock()
 		return FollowAuto{}, false, nil
 	}
-	tail := s.study.MainGuessTail()
-	line := s.study.MainLine()
-	root := s.study.Root()
-	s.mu.Unlock()
+	tail := f.tree().MainGuessTail()
+	line := f.tree().MainLine()
+	root := f.tree().Root()
+	f.smu.Unlock()
 	if len(tail) == 0 {
 		return FollowAuto{}, false, nil
 	}
@@ -226,7 +226,7 @@ func (s *StudyService) followCellsRewind(base *position.Position, since []string
 			log.Follow.Info("変わったマスなら推測で足した手を差し替えられそうです（行き先を読んで確かめます）",
 				"元の手", old, "新しい手", moves)
 			return FollowAuto{Kind: FollowChoices, Reason: "行き先のマスを読みます",
-				ReadCells: followImageCells(need, rotated), State: s.State()}, true, nil
+				ReadCells: followImageCells(need, rotated), State: f.State()}, true, nil
 		}
 		if ok, bad, got := followBackedByRead(anc, nil, moves, read, rotated); !ok {
 			log.Follow.Info("差し替える手の行き先に指した側の駒が読めません", "新しい手", moves, "マス", bad, "読んだ駒", got)
@@ -244,7 +244,7 @@ func (s *StudyService) followCellsRewind(base *position.Position, since []string
 		}
 		rw := &followRewind{line: line, keep: keep, moves: slices.Clone(moves),
 			why: "変わったマス（先後と駒の有無）を説明できる・行き先を読んだ"}
-		a, err := s.followRewindHold(rw, 0)
+		a, err := f.followRewindHold(rw, 0)
 		return a, true, err
 	}
 	return FollowAuto{}, false, nil
@@ -266,16 +266,16 @@ func (s *StudyService) followCellsRewind(base *position.Position, since []string
 // 戻る候補は**比べる相手の局面からの答え**（`followExplainFromBase`。2026-10-11）と、**末尾から 1〜3 手**の 2 つの道から
 // 来るが、⚠️ **関門（上の 2 つの条件）は 1 つ**（`accept`）。末尾から戻すのは、比べる相手の局面より前へ戻るときと、
 // 比べる相手の局面を使わない 1 枚のときだけ。
-func (s *StudyService) followRewindProbe(board *position.Board, cost *position.CellCost, p FollowProbe) *followRewind {
-	s.mu.Lock()
-	if s.study == nil {
-		s.mu.Unlock()
+func (f *follower) followRewindProbe(board *position.Board, cost *position.CellCost, p FollowProbe) *followRewind {
+	f.smu.Lock()
+	if f.tree() == nil {
+		f.smu.Unlock()
 		return nil
 	}
-	tail := s.study.MainGuessTail()
-	line := s.study.MainLine()
-	root := s.study.Root()
-	s.mu.Unlock()
+	tail := f.tree().MainGuessTail()
+	line := f.tree().MainLine()
+	root := f.tree().Root()
+	f.smu.Unlock()
 	if len(tail) == 0 {
 		return nil
 	}
@@ -292,7 +292,7 @@ func (s *StudyService) followRewindProbe(board *position.Board, cost *position.C
 	//     足し済みの手で始まる答えがぴったり合わないときの控え**（速い経路の `followCellsRewind` と同じ形。`fits`）。
 	//     比べる相手の局面を使わない 1 枚（足し済みの手が無い・覚えていない）では、今までどおりこちらだけ
 	// ⚠️ **推測の手の外へは戻らない**。
-	bpos, since, bline, useBase := s.followBaseFrom()
+	bpos, since, bline, useBase := f.followBaseFrom()
 	if useBase && !slices.Equal(bline, line) {
 		useBase = false
 	}
@@ -487,46 +487,44 @@ func (s *StudyService) followRewindProbe(board *position.Board, cost *position.C
 // ⚠️ **本譜が見つけたときから変わっていたら何もしない**（違う局面の先を差し替えない）。
 // ⚠️ **先端を見ていたときだけ新しい先端へ移る**（`followApply` と同じ）。
 // ⚠️ **控えと速い経路の比べる相手は捨てる**（どちらも元の先端の話）。
-func (s *StudyService) followRewindApply(rw *followRewind) (a FollowAuto, err error) {
+func (f *follower) followRewindApply(rw *followRewind) (a FollowAuto, err error) {
 	// ⚠️ **`publish` はロックの外で走らせること**（`defer` は LIFO）。
 	defer func() {
 		if a.Rewound {
-			s.publish(a.State, err)
+			f.host.publish(a.State, err)
 		}
 	}()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.follow.rewind = nil
-	if s.study == nil || !slices.Equal(s.study.MainLine(), rw.line) {
-		return FollowAuto{Kind: FollowSame, Reason: "盤面は変わっていません", State: s.state()}, nil
+	f.smu.Lock()
+	defer f.smu.Unlock()
+	f.rewind = nil
+	if f.tree() == nil || !slices.Equal(f.tree().MainLine(), rw.line) {
+		return FollowAuto{Kind: FollowSame, Reason: "盤面は変わっていません", State: f.host.state()}, nil
 	}
-	tail := s.study.MainGuessTail()
+	tail := f.tree().MainGuessTail()
 	k := len(rw.line) - rw.keep
 	if k < 1 || k > len(tail) {
-		return FollowAuto{Kind: FollowSame, Reason: "盤面は変わっていません", State: s.state()}, nil
+		return FollowAuto{Kind: FollowSame, Reason: "盤面は変わっていません", State: f.host.state()}, nil
 	}
-	atTip := s.study.CurrentID() == mainTipID(s.study)
-	rootSfen := rootSFEN(s.study)
+	atTip := f.tree().CurrentID() == mainTipID(f.tree())
+	rootSfen := rootSFEN(f.tree())
 	oldText := followText(rootSfen, rw.line[:rw.keep], rw.line[rw.keep:])
 	newText := followText(rootSfen, rw.line[:rw.keep], rw.moves)
 
 	added := 0
 	if len(rw.moves) > 0 {
-		g := s.study.GraftGuess(append(slices.Clone(rw.line[:rw.keep]), rw.moves...), len(rw.moves))
+		g := f.host.hostGraft(append(slices.Clone(rw.line[:rw.keep]), rw.moves...), len(rw.moves))
 		if g.Note != "" && g.Added == 0 {
 			return FollowAuto{}, fmt.Errorf("%s", g.Note)
 		}
 		added = g.Added
-	} else if err := s.study.Branch(tail[len(tail)-k]); err != nil {
+	} else if err := f.host.hostBranch(tail[len(tail)-k]); err != nil {
 		return FollowAuto{}, err
 	}
 	if atTip {
-		if id, _, err := s.study.MainTip(); err == nil {
-			_ = s.study.GoTo(id)
-		}
+		f.host.hostGoTip()
 	}
-	s.follow.pending = nil
-	s.follow.base = nil
+	f.pending = nil
+	f.base = nil
 
 	note := fmt.Sprintf("%s を %s に差し替えました（元の手は枝に残っています）",
 		strings.Join(oldText, " "), strings.Join(newText, " "))
@@ -537,20 +535,20 @@ func (s *StudyService) followRewindApply(rw *followRewind) (a FollowAuto, err er
 		"元の手", strings.Join(oldText, " "), "新しい手", strings.Join(newText, " "),
 		"usi", strings.Join(rw.moves, " "), "根拠", rw.why)
 	return FollowAuto{Kind: FollowUnique, Applied: true, Rewound: true, Guess: true,
-		Moves: slices.Clone(rw.moves), Text: newText, Added: added, Note: note, State: s.changed()}, nil
+		Moves: slices.Clone(rw.moves), Text: newText, Added: added, Note: note, State: f.host.changed()}, nil
 }
 
 // takeRewind は控えた差し替えを取り出す（`FollowConfirm` 用。本譜が変わっていたら捨てる）。
-func (s *StudyService) takeRewind() *followRewind {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	rw := s.follow.rewind
+func (f *follower) takeRewind() *followRewind {
+	f.smu.Lock()
+	defer f.smu.Unlock()
+	rw := f.rewind
 	if rw != nil && rw.held {
 		// ⚠️ **前の 1 枚から残している差し替えは、変わっていない 1 枚では据えない**（2026-10-09。`dropRewindUnlessFits`）。
 		return nil
 	}
-	s.follow.rewind = nil
-	if rw == nil || s.study == nil || !slices.Equal(s.study.MainLine(), rw.line) {
+	f.rewind = nil
+	if rw == nil || f.tree() == nil || !slices.Equal(f.tree().MainLine(), rw.line) {
 		return nil
 	}
 	return rw

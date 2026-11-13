@@ -5,7 +5,9 @@
 追う 1 回の持ち物（`captureFollow`）。`app` の中継セッションが `app.FollowCamera` として使う。
 
 - ⚠️ **局面を知らない層**。「先端と合っているか」「駒が動いたか」をここで判断しない（決めるのは `app`。
-  `SetCellBase` / `CellsUnmoved` / `CellsUnclear` / `ForgetUnmoved` は言われたとおり覚えるだけ）
+  `SetCellBase` / `CellsUnmoved` / `CellsUnclear` / `ForgetUnmoved` は言われたとおり覚えるだけ）。
+  `app` から呼ぶ口は `Judge`（判定 `Verdict` を 1 つ受けて、この 4 つを決まった順に呼ぶ。2026-11-13）。
+  ⚠️ **`app.FollowCamera` に 4 つを戻さないこと**（呼ぶ順と組み合わせを中継セッションが手で守ることになる）
 - ⚠️ **Wails も `app` も import しない**（依存はルート・`recognize`・`log`）。ウィンドウが要るものは
   差し込み口（`Camera.Region` / `Corrected` / `Session` / `BeforeRead` / `AfterAnchor` / `AfterEnd`）で受ける。
   ⚠️ **差し込み口は `Camera.mu` を持たずに呼ぶ**（先で `CaptureService` のロックを取る）・⚠️ **どれも nil で動くこと**

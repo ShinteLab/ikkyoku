@@ -94,14 +94,14 @@ func followDropOnly(p FollowProbe) *followDropSplit {
 // 比べる駒は、打つ直前の局面（本譜の先端から候補の手順の打つ手の前まで）で**指した側の成っていない同じ種類の駒**で、
 // 打つ手のあとの手が動かしていないもの（今の 1 枚のそのマスに写っている）。
 // ⚠️ **比べる駒が無い種類が 1 つでもあれば ok は偽**（その種類を外せないので見た目では決められない。人に聞く）。
-func (s *StudyService) followDropPairs(ds *followDropSplit, rotated bool) (pairs []followcam.CellPair, letters []byte, ok bool) {
-	s.mu.Lock()
-	if s.study == nil {
-		s.mu.Unlock()
+func (f *follower) followDropPairs(ds *followDropSplit, rotated bool) (pairs []followcam.CellPair, letters []byte, ok bool) {
+	f.smu.Lock()
+	if f.tree() == nil {
+		f.smu.Unlock()
 		return nil, nil, false
 	}
-	_, tip, err := s.study.MainTip()
-	s.mu.Unlock()
+	_, tip, err := f.tree().MainTip()
+	f.smu.Unlock()
 	if err != nil {
 		return nil, nil, false
 	}
@@ -206,23 +206,23 @@ type followDropOffer struct {
 
 // offerDrop は打った駒の候補を人に聞く形で返す（`FollowAuto.DropChoices`）。
 // ⚠️ **控えは捨てる**（どれを打ったかが決まるまで、先へ足す手は無い）。
-func (s *StudyService) offerDrop(ds *followDropSplit, p FollowProbe, unseen *position.CellMask) FollowAuto {
-	s.setPending(nil)
-	s.mu.Lock()
+func (f *follower) offerDrop(ds *followDropSplit, p FollowProbe, unseen *position.CellMask) FollowAuto {
+	f.setPending(nil)
+	f.smu.Lock()
 	var choices []FollowChoice
-	if s.study != nil {
-		root, main := rootSFEN(s.study), s.study.MainLine()
+	if f.tree() != nil {
+		root, main := rootSFEN(f.tree()), f.tree().MainLine()
 		for _, c := range ds.cands {
 			choices = append(choices, FollowChoice{Moves: slices.Clone(c), Text: followText(root, main, c)})
 		}
 	}
-	prev := s.follow.dropOffer
-	s.follow.dropOffer = &followDropOffer{tip: -1, cands: ds.cands}
-	if s.study != nil {
-		s.follow.dropOffer.tip = mainTipID(s.study)
+	prev := f.dropOffer
+	f.dropOffer = &followDropOffer{tip: -1, cands: ds.cands}
+	if f.tree() != nil {
+		f.dropOffer.tip = mainTipID(f.tree())
 	}
-	same := prev != nil && prev.tip == s.follow.dropOffer.tip && slices.EqualFunc(prev.cands, ds.cands, slices.Equal[[]string])
-	s.mu.Unlock()
+	same := prev != nil && prev.tip == f.dropOffer.tip && slices.EqualFunc(prev.cands, ds.cands, slices.Equal[[]string])
+	f.smu.Unlock()
 	if !same {
 		var texts []string
 		for _, c := range choices {
@@ -231,7 +231,7 @@ func (s *StudyService) offerDrop(ds *followDropSplit, p FollowProbe, unseen *pos
 		log.Follow.Info("打った駒が決まりません（人に聞きます）", "候補", strings.Join(texts, " / "))
 	}
 	return FollowAuto{Kind: FollowChoices, Reason: "打った駒が決まりません", DropChoices: choices,
-		Fit: p.Fit, Unseen: unseen.Count(), State: s.State()}
+		Fit: p.Fit, Unseen: unseen.Count(), State: f.State()}
 }
 
 // FollowChoose は**人が選んだ、打った駒の候補**を本譜の先に足す（2026-10-09。枠の下の帯で選ぶ）。
@@ -239,33 +239,31 @@ func (s *StudyService) offerDrop(ds *followDropSplit, p FollowProbe, unseen *pos
 // moves は `FollowAuto.DropChoices` のどれか 1 つの `Moves`。⚠️ **聞いたときから本譜の先端が動いていたら断る**
 // （違う局面の先に足さない）。⚠️ **1 手なら推測の印を付けない**（人が決めた手。差し替えで戻さない）。
 // 2 手以上なら、打つ手のほかは追従が割り出した手なので全部に印を付ける。
-//
-//wails:ignore
-func (s *StudyService) FollowChoose(moves []string) (FollowAuto, error) {
-	s.mu.Lock()
-	off := s.follow.dropOffer
-	s.follow.dropOffer = nil
+func (f *follower) FollowChoose(moves []string) (FollowAuto, error) {
+	f.smu.Lock()
+	off := f.dropOffer
+	f.dropOffer = nil
 	var tip, rev int
 	atTip := false
-	if s.study != nil {
-		tip, rev = mainTipID(s.study), s.rev
-		atTip = s.study.CurrentID() == tip
+	if f.tree() != nil {
+		tip, rev = mainTipID(f.tree()), f.host.hostRev()
+		atTip = f.tree().CurrentID() == tip
 	}
 	var root string
 	var main []string
-	if s.study != nil {
-		root, main = rootSFEN(s.study), s.study.MainLine()
+	if f.tree() != nil {
+		root, main = rootSFEN(f.tree()), f.tree().MainLine()
 	}
-	s.mu.Unlock()
+	f.smu.Unlock()
 	if off == nil || off.tip != tip || !slices.ContainsFunc(off.cands, func(c []string) bool { return slices.Equal(c, moves) }) {
 		return FollowAuto{}, fmt.Errorf("選べる手が変わりました。追従が次の 1 枚でもう一度聞きます")
 	}
 	guess := len(moves) > 1
-	applied, err := s.followGraft(moves, rev, atTip, guess)
+	applied, err := f.followGraft(moves, rev, atTip, guess)
 	if err != nil {
 		return FollowAuto{}, err
 	}
-	s.setPending(nil)
+	f.setPending(nil)
 	text := followText(root, main, moves)
 	logAdded("人が選んだ（打った駒）", len(main)+1, moves, text, guess, "枠の下の帯で選んだ")
 	return FollowAuto{Kind: FollowUnique, Applied: true, Moves: slices.Clone(moves), Text: text,
@@ -276,48 +274,48 @@ func (s *StudyService) FollowChoose(moves []string) (FollowAuto, error) {
 //
 // done が真なら、この周の答えはそれで終わり（見た目を比べるよう頼んだ／人に聞いた）。偽で p2 が返れば、見た目で
 // 決めた種類を盤に書き込んで下見し直したもの（以降は今までどおり。2 枚続けて同じ答えで足す）。
-func (s *StudyService) followDropLooks(p FollowProbe, board *position.Board, cost *position.CellCost,
+func (f *follower) followDropLooks(p FollowProbe, board *position.Board, cost *position.CellCost,
 	unseen *position.CellMask, promo []PromoEvidence, rotated bool) (a FollowAuto, p2 *FollowProbe, done bool, err error) {
 	ds := followDropOnly(p)
 	if ds == nil {
 		return FollowAuto{}, nil, false, nil
 	}
-	pairs, letters, ok := s.followDropPairs(ds, rotated)
+	pairs, letters, ok := f.followDropPairs(ds, rotated)
 	if !ok {
 		// 比べる駒が盤上に無い種類がある。見た目では決められないので人に聞く。
-		return s.offerDrop(ds, p, unseen), nil, true, nil
+		return f.offerDrop(ds, p, unseen), nil, true, nil
 	}
 	if promo == nil {
 		log.Follow.Info("打った駒の種類で分かれたので、盤上の駒と見た目を比べます", "候補", len(ds.cands), "組", len(pairs))
 		return FollowAuto{Kind: FollowChoices, Reason: "打った駒を見た目で確かめます", Compare: pairs,
-			Fit: p.Fit, Unseen: unseen.Count(), State: s.State()}, nil, true, nil
+			Fit: p.Fit, Unseen: unseen.Count(), State: f.State()}, nil, true, nil
 	}
 	letter, sims, decided := followPickDrop(pairs, letters, promo)
 	if !decided {
 		log.Follow.Info("打った駒を見た目で決められません", "近さ", sims)
-		return s.offerDrop(ds, p, unseen), nil, true, nil
+		return f.offerDrop(ds, p, unseen), nil, true, nil
 	}
-	s.mu.Lock()
+	f.smu.Lock()
 	var black bool
-	if s.study != nil {
-		if _, tip, e := s.study.MainTip(); e == nil {
+	if f.tree() != nil {
+		if _, tip, e := f.tree().MainTip(); e == nil {
 			if pos, ok := followReplay(tip, ds.cands[0][:ds.idx]); ok {
 				black = pos.Turn == position.TurnBlack
 			}
 		}
 	}
-	s.mu.Unlock()
+	f.smu.Unlock()
 	if !followSetDrop(board, cost, ds, letter, black) {
-		return s.offerDrop(ds, p, unseen), nil, true, nil
+		return f.offerDrop(ds, p, unseen), nil, true, nil
 	}
 	log.Follow.Info("見た目を比べて打った駒を決めました", "マス", squareText(ds.to/9, ds.to%9), "駒", string(letter), "近さ", sims)
-	np, e := s.followProbe(board, cost, unseen, cost != nil, rotated)
+	np, e := f.followProbe(board, cost, unseen, cost != nil, rotated)
 	if e != nil {
 		return FollowAuto{}, nil, true, e
 	}
 	if followDropOnly(np) != nil {
 		// 書き込んでもまだ分かれる（ほかのマスの読みの事情）。人に聞く。
-		return s.offerDrop(ds, np, unseen), nil, true, nil
+		return f.offerDrop(ds, np, unseen), nil, true, nil
 	}
 	return FollowAuto{}, &np, false, nil
 }

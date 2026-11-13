@@ -326,6 +326,21 @@ func TestSetCellBaseForgetsUnmovedCells(t *testing.T) {
 	}
 }
 
+// ⚠️ **1 つの判定に「動いていない」と「先端と合っている」が並んだら、組を覚えたまま残さないこと**（2026-11-13。`Judge`）。
+// 中継セッションが `CellsUnmoved` → `SetCellBase` を続けて呼んでいたときと同じ結果（上のテスト）。
+func TestJudgeForgetsWhenBaseChanges(t *testing.T) {
+	s := gameService(t)
+	s.fol.lastQuiet = gameFrame(0, 10)
+	s.Judge(Verdict{Unmoved: true})
+	if !s.fol.cellsUnmoved.ok {
+		t.Fatal("前提: 組を覚えていません")
+	}
+	s.Judge(Verdict{Unmoved: true, AtFrame: true})
+	if s.fol.cellsUnmoved.ok {
+		t.Fatalf("比べる相手を替えたのに組が残っています: %+v", s.fol.cellsUnmoved)
+	}
+}
+
 // ⚠️ **81 マスの読みで手が見つかったら、「駒は動いていない」組を忘れること**（`ForgetUnmoved`。2026-10-08）。
 // 覚えたままだと次の 1 枚が `same` で省かれ、控えが捨てられて確かめが次の保険（10 秒後）まで延びた。
 func TestForgetUnmovedReadsTheSetAgain(t *testing.T) {

@@ -285,16 +285,3 @@ suteme 側の課題（確率分布・駒台・速さなど）は `suteme/TODO.md
 録画した動画を盤が変わった前後だけに詰めるコマンド（`_cmd/ikkyoku-trim`）は入れたが、**本物の録画ではまだ通していない**
 （ffmpeg で作った動画と、盤の画像から作った動画でだけ確かめた）。使い方・仕組み・確かめたこと・**決まっていないこと**は
 `_cmd/ikkyoku-trim/README.md`。実際に録画を詰めるときに、その「決まっていないこと」から片付ける。
-
-## 7. 全体の見直しで出た構造の改善点（2026-11-13）
-
-コードの形の話で、機能は変えないもの。**1 つずつ、どのセッションでも始められるように `_docs/todo/` に 1 枚ずつ書いてある**
-（何が問題か・確かめてある事実・進め方・崩さないこと・確かめ）。⚠️ **終わったらその 1 枚とここの行を消す**（理由は `_docs/design-*.md` へ）。
-撮る側を Wails の外（`followcam`）へ出すのは済んだ（`_docs/design-follow.md` の「第 3 段」）。
-
-| | 文書 | 大きさ | 始める前に |
-|---|---|---|---|
-| 1 | `_docs/todo/1-follow-session-type.md` —— 追従の段取りを `StudyService` から別の型に分ける | 大 | 追従の作り直し（4）を実機で通したかをユーザーに聞く |
-| 2 | `_docs/todo/2-follow-camera-verdict.md` —— `FollowCamera` の合図 4 つを見直す | 小 | 1 と同時にやらない。価値が薄ければやめてよい |
-
-1 と 2 は同じ場所を触る。3（`mainscreen.ts` をタブごとに割る。`_docs/design-position.md`）・4（`CaptureService` と `main()` を分ける）・5（設定を `ikkyoku/config` パッケージへ出す）・6（`usi/` の位置づけ。同梱エンジンは今は残し、消せる条件を書いた）・7（`go.mod` と文書の食い違い。suteme を 2 つの `go.mod` で揃えて v0.3.0 に上げ、Wails の版の記述を v3.0.0 に直した）は済んだ（4・5 は `_docs/design-capture.md`、6 は `_docs/design-engine.md`）。
