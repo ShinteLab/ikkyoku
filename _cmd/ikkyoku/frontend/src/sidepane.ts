@@ -474,7 +474,7 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
     })();
   });
 
-  // fillWarnings は警告のリストを書き換える（`mainscreen.ts` にも同じものがある）。
+  // fillWarnings は警告のリストを書き換える（`edittab.ts` にも同じものがある）。
   // ⚠️ **件数で高さを変えないこと**（出たり消えたりするたびに下が動く）。
   const fillWarnings = (ul: HTMLUListElement, list: string[]) => {
     ul.replaceChildren();

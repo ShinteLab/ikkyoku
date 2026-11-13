@@ -10,7 +10,7 @@
 //
 // ⚠️ **受け渡しは `InputTabOptions`（もらうもの）と `InputTabHandle`（返すもの）だけ**
 // （`sidepane.ts` と同じ型）。**訂正タブにも解析タブにも直には触れない** —— 局面を出すのも、
-// 訂正タブを置き換えるのも呼び出し側（撮った画像に紐づくものの片付けも、あちらの `clearShotContext`）。
+// 訂正タブを置き換えるのも呼び出し側（撮った画像に紐づくものの片付けは `edittab.ts` の `clearShotContext`）。
 // ⚠️ **局面の写しを持たない**（frontend/src/AGENTS.md の 5）。
 import { CaptureService } from "../bindings/ikkyoku";
 import { KifuService, StudyService } from "../bindings/github.com/ShinteLab/ikkyoku/app";
@@ -43,7 +43,7 @@ export interface InputTabOptions {
 export interface InputTabHandle {
   // captureStatus は撮った／読み込んだ結果の 1 行（`#status`）。
   // ⚠️ **撮る経路と共用する**（撮ったのか読み込んだのかで別の面を作らない）。
-  // 書くのは `mainscreen.ts` の showShot / showResult / showError と、ここの画像ファイルの読み込みの失敗だけ。
+  // 書くのは `edittab.ts` の showShot / showResult / showError と、ここの画像ファイルの読み込みの失敗だけ。
   captureStatus: HTMLParagraphElement;
 }
 
@@ -281,7 +281,7 @@ export function mountInputTab(root: HTMLElement, opts: InputTabOptions): InputTa
   // （中身を描き直さないので付け直しは要らない）。
   attachHints(root);
 
-  // 撮った／読み込んだ結果の 1 行。⚠️ **撮る経路（mainscreen.ts）と共用する**（下の画像ファイルの注記）。
+  // 撮った／読み込んだ結果の 1 行。⚠️ **撮る経路（edittab.ts）と共用する**（下の画像ファイルの注記）。
   const status = root.querySelector<HTMLParagraphElement>("#status")!;
 
   // 画像ファイルを読み込む（2026-09-12）。**撮るのと同じ経路に載る**ので、

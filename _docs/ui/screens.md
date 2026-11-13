@@ -1,6 +1,6 @@
 # 画面の構成（ウィンドウ・タブ・イベント）
 
-`main.ts` / `frame.ts` / `mainscreen.ts`。**どの面に何を出すか**と、
+`main.ts` / `frame.ts` / `mainscreen.ts`（タブの中身は `inputtab.ts` / `edittab.ts` / `studytab.ts` / `settingstab.ts`）。**どの面に何を出すか**と、
 **撮ってから認識までの 2 段**の話。
 
 ⚠️ **ここは画面の話。** Go 側の制約は `AGENTS.md` と各パッケージの AGENTS.md にある。
@@ -37,7 +37,7 @@
   解析タブ）。**認識を待つあいだ古い結果が残っていると、撮った 1 枚のものに見える**
 - **`CaptureShot` に認識結果は載せない**（まだ無い）。続きは `capture:done` が
   丸ごと持ってくる。⚠️ **どちらのペイロードも bindings に出ない**ので、
-  **Go 側を変えたら `mainscreen.ts` / `frame.ts` の手書きの型も直すこと**
+  **Go 側を変えたら `edittab.ts` / `frame.ts` の手書きの型も直すこと**
 
 - メイン画面は **4 タブ**（入力 / 訂正 / 解析 / 設定。下記「タブの分け方」）。
   認識の記録は**訂正タブの盤の下・「この局面を解析する」の上**の折りたたみ
@@ -295,7 +295,7 @@ suteme の学習用サーバと同じパス・同じ方式。フロントは実�
 `<shogi-board>` は `@font-face`(ShogiSFEN) を **Shadow DOM 内の style にしか持っていない**が、
 **Chromium は shadow root 内の `@font-face` を無視する**（フォントはドキュメント単位で解決される）。
 そのままだと駒がラテン文字（`l`/`n`/`s`/`g`/`k`…、後手は 180 度回転）で描画される。
-`mainscreen.ts` の `registerBoardFont()` が `font.js` の `FONT_DATA_URL` を
+`edittab.ts` の `registerBoardFont()` が `font.js` の `FONT_DATA_URL` を
 ドキュメントの `<style>` に登録し直して回避している（**フォントの実体は core のまま**）。
 **本来は `core/web` 側で登録するのが筋なので、直ったらこの関数は消せる。**
 

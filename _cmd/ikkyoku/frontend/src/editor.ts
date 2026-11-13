@@ -125,12 +125,12 @@ export interface EditorOptions {
   // resetButton は「認識結果に戻す」。**訂正した内容を捨てる操作**なので、盤の近くの
   // ツールバーではなく右上に離してある(押し間違い対策)。置き場所は呼び出し側が持つ。
   resetButton: HTMLButtonElement;
-  // onState は操作のたびに呼ばれる。盤・SFEN・警告の表示は呼び出し側（mainscreen）が持つ。
+  // onState は操作のたびに呼ばれる。盤・SFEN・警告の表示は呼び出し側（edittab）が持つ。
   onState(state: EditState | null): void;
   // onConfirm は「この局面を解析する」が押されたときに呼ばれる。
   //
   // **訂正タブの唯一の出口。** ここから先（確定した局面を解析タブへ渡す・タブを
-  // 移る）は呼び出し側（mainscreen）の仕事で、**この UI は確定の可否を判定しない**
+  // 移る）は呼び出し側（edittab と mainscreen の adoptToStudy）の仕事で、**この UI は確定の可否を判定しない**
   // （手番や駒台の先後が未決かどうかは Go 側の StudyService.Adopt が言う。
   // フロントで同じ判定を書くと 2 か所に散る）。
   //
@@ -327,7 +327,7 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
   //
   // ⚠️ **ボタンの横に注記を出さないこと**（2026-08-18 に外した）。後手目線のときだけ
   // 文字が増えると、**出たり消えたりするたびにボタンの位置がずれて押しづらい**。
-  // 「解析へは反転して送信」は**SFEN の後ろ**に添えてある（mainscreen の #sfen-note）。
+  // 「解析へは反転して送信」は**SFEN の後ろ**に添えてある（edittab の #sfen-note）。
   //
   // ⚠️ **「手合割か」はここに置かない**（2026-09-12 に一度ここへ置いて外した）。
   // あれは**「足りない駒」の枠の意味そのもの**を変えるので、枠の中に置く
@@ -1322,7 +1322,7 @@ export function mountEditor(opts: EditorOptions): EditorHandle {
     },
     // 手合割の初期局面から並べ始める（入力タブの「訂正タブで調整」。2026-09-12）。
     //
-    // ⚠️ **撮った画像の後片付けは呼び出し側**（`mainscreen.ts`）。こちらには
+    // ⚠️ **撮った画像の後片付けは呼び出し側**（`edittab.ts`）。こちらには
     // 画像に関する状態が無く（盤の左の画像も認識の情報も学習への送信も
     // あちらが持っている）、**残っていると別の画像のラベルとして送れてしまう。**
     async loadHandicap(handicap: string) {
