@@ -474,6 +474,12 @@
     早期リターン・ロックの取り方（2 つのまま。`s.mu` は `follower.smu` として同じ所で取る）は変えていない。bindings は移す前と後で 1 バイトも変わらない。
     パッケージは割らない（9 つの Service が非公開メソッドで繋がっている）。メソッドは 1 ファイルずつではなく 1 回で移した ——
     `followbase` と `followstudy` が互いに呼び合っていて、途中の段に `follower` から `StudyService` へ戻る仮の取り次ぎが要るため
+  - **撮る側への合図 4 つを 1 つの口にした**（2026-11-13。全体の見直し）。`app.FollowCamera` には、局面を知っている側が撮る側の覚え書きを
+    書き換える合図が 4 つ（`SetCellBase` / `CellsUnmoved` / `CellsUnclear` / `ForgetUnmoved`）あり、呼ぶ順と組み合わせを `followOnce` が手で
+    守っていた。判定を 1 つの値（`followcam.Verdict`）にして `Judge` で渡す（口は 13 → 10）。⚠️ **呼ぶ時点は変えていない** ——
+    「光っているだけ」「説明できる手が無い」の 2 つはその場で、残りは周の終わりの 1 回。どれもその後の同じ 1 周で
+    `RecognizeQuiet` に進まない（直後に返る）ので、1 回にまとめても読み直しとの前後は変わらない。撮る側の 4 つのメソッドは
+    `followcam` の中に残した（テストと文書がその名前で約束を書いている）
 
 **制約は `_docs/position-connect.md`（`Connect`）・`_docs/app-follow.md`（`followProbe` / `FollowAuto`）・
 `_docs/cmd-capture.md`（ふるい・録画・枠の札）。実機での調整とデバッグ（症状から引く表・

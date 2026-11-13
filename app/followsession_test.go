@@ -56,10 +56,7 @@ func (c *fakeCamera) ReadCells([]int) ([]followcam.CellPiece, error) { return ni
 func (c *fakeCamera) ComparePieces(pairs []followcam.CellPair) []float64 {
 	return make([]float64, len(pairs))
 }
-func (c *fakeCamera) CellsUnmoved()                       {}
-func (c *fakeCamera) CellsUnclear()                       {}
-func (c *fakeCamera) ForgetUnmoved()                      {}
-func (c *fakeCamera) SetCellBase()                        {}
+func (c *fakeCamera) Judge(followcam.Verdict)             {}
 func (c *fakeCamera) SaveFollowFrame(int, []string, bool) { c.mu.Lock(); c.frames++; c.mu.Unlock() }
 func (c *fakeCamera) SaveFollowMiss(_ int, kind string) {
 	c.mu.Lock()

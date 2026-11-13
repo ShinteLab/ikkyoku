@@ -37,10 +37,8 @@ type FollowCamera interface {
 	RecognizeQuiet() (followcam.Shot, error)
 	ReadCells(cells []int) ([]followcam.CellPiece, error)
 	ComparePieces(pairs []followcam.CellPair) []float64
-	CellsUnmoved()
-	CellsUnclear()
-	ForgetUnmoved()
-	SetCellBase()
+	// Judge は直前に撮った 1 枚の判定を渡す（撮る側は覚え書きを書き換えるだけ。`followcam.Verdict`）。
+	Judge(v followcam.Verdict)
 	SaveFollowFrame(number int, moves []string, guess bool)
 	SaveFollowMiss(number int, kind string)
 	// BeginFollow は撮る側の持ち物を作り直す（追い始め。追っているあいだは枠を隠させない）。
@@ -363,7 +361,7 @@ func (f *follower) followOnce(gen int, given *followcam.Shot) (bool, error) {
 		}
 		if fast.LooksOnly {
 			// **変わったのは空きのマスだけで、駒は動いていない**（2026-10-08）。⚠️ **81 マスを読まない**・見送りに数えない。
-			cam.CellsUnmoved()
+			cam.Judge(followcam.Verdict{Unmoved: true})
 			f.followSetPending(false, nil)
 			f.followPublish(gen, followOk, "", nil)
 			return false, nil
@@ -371,7 +369,7 @@ func (f *follower) followOnce(gen int, given *followcam.Shot) (bool, error) {
 		if fast.NoMoves {
 			// **変わったマスを説明できる手順が 1 つも無い**（2026-10-08）。⚠️ **すぐ 81 マスを読まない**（組が変わるのを待つ）・
 			// 見送りに数えない・⚠️ **控えは捨てる**（説明の付かない盤のまま、変わっていない次の 1 枚で控えた手を足さない）。
-			cam.CellsUnclear()
+			cam.Judge(followcam.Verdict{Unclear: true})
 			f.followSetPending(false, nil)
 			f.followPublish(gen, "", "", nil)
 			return false, nil
@@ -404,15 +402,15 @@ func (f *follower) followOnce(gen int, given *followcam.Shot) (bool, error) {
 	} else {
 		f.followSetPending(false, nil)
 	}
+	// 撮る側へ返す判定（`Judge`。撮る側の覚え書きを書き換えるのは周の終わりの 1 回だけ）。
+	var verdict followcam.Verdict
 	if got.Kind == FollowSame && !got.AtFrame && len(cells) > 0 {
 		// **81 マスを読んだら何も指していなかったのに、変わったマスがある**（駒を掴んで行き先が光っている。2026-10-08）。
 		// その組を覚えさせる。⚠️ **駒が空いて見えるマスがあれば覚えさせない**（`CellsLookUnmoved`）。
-		if f.CellsLookUnmoved(cells) {
-			cam.CellsUnmoved()
-		}
+		verdict.Unmoved = f.CellsLookUnmoved(cells)
 	} else if got.Pending || got.Applied {
 		// **手が見つかった**。「動いていない」と覚えた組なら忘れさせる。
-		cam.ForgetUnmoved()
+		verdict.Found = true
 	}
 	// ⚠️ **先端と合った 1 枚だけを、速い経路の比べる相手にする**。81 マスの読みでぴったり合った（`AtFrame`）か、
 	// 比べる相手から変わったマスが足した手で説明できた（`FrameFits`。測った 1 枚なら空でも）とき。
@@ -421,9 +419,8 @@ func (f *follower) followOnce(gen int, given *followcam.Shot) (bool, error) {
 	if !atFrame && !got.Pending && cells != nil {
 		atFrame = f.FrameFits(cells)
 	}
-	if atFrame {
-		cam.SetCellBase()
-	}
+	verdict.AtFrame = atFrame
+	cam.Judge(verdict)
 	// ⚠️ **足したうえで残りを控えた周（`Applied` かつ `Pending`）は足した側として出す**（2026-10-06）。
 	if got.Pending && !got.Applied {
 		// ⚠️ **見送りとして数えない**（足せる手は見つかっている）。間を置かずに次の 1 枚で確かめる。
