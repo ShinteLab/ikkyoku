@@ -104,7 +104,7 @@ kicho の UI が持っていた機能（取得 / 登録 / 蔵書）を ikkyoku �
 | 段 | 何か | 置き場所 | 設定 |
 |---|---|---|---|
 | 1. 学習データ | suteme で**自分で育てた**もの（生の `training_data_v*.bin` / `strip_data_v1.bin`） | suteme の学習ディレクトリ | `sutemeDataDir` |
-| 2. 配布モデル | **ダウンロードして置いた**配布セット（suteme の配布用の書き出しそのもの: `training_data_v8.bin(.gz)` / `strip_data_v1.bin(.gz)` / `export.json`） | 既定は `%LOCALAPPDATA%\ikkyoku\model` | `sutemeModelDir`（空なら既定） |
+| 2. 配布モデル | **ダウンロードして置いた**配布セット（suteme の配布用の書き出しそのもの: `training_data_v10.bin(.gz)` / `strip_data_v1.bin(.gz)` / `export.json`） | 既定は `%LOCALAPPDATA%\ikkyoku\model` | `sutemeModelDir`（空なら既定） |
 | 3. 焼き込み | **exe に最初から入っている**配布セット（`-tags embedmodel`。手元の `_cmd/ikkyoku/model/` を埋め込む） | exe の中 | — |
 
 設定 `sutemeSource` は「どの段から見始めるか」（`auto` / `dir` / `model` / `embed`）。

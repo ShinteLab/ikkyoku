@@ -104,7 +104,7 @@ wails3 task local:deploy MODEL_DIR=D:/models/x      # local:deploy にも同じ�
   `local:deploy` の出力で何を配ったか分かる。作り直すコマンドも一緒に出る
 - ⚠️ **手元はフォルダごと git に入れない**（`_cmd/ikkyoku/.gitignore` の `model/`）。
   手元が空なら `build:embed` が suteme の書き出し方を出して止まる
-- 手元の形は **suteme の配布用の書き出しそのもの**（`training_data_v8.bin.gz` / `strip_data_v1.bin.gz` /
+- 手元の形は **suteme の配布用の書き出しそのもの**（`training_data_v10.bin.gz` / `strip_data_v1.bin.gz` /
   `export.json`）。ikkyoku 側で形を変える手順は無い
 - **`MODEL_DIR` は同じ形のフォルダ**（suteme の書き出し。圧縮しない `dist/` でもよい）。`go:embed` は
   パッケージの外を指せないので、**手元を空にしてから写して**焼き込む（＝以後の `build:embed` も

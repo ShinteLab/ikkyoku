@@ -117,7 +117,7 @@
 | 段 | 読む口 | 設定 |
 |---|---|---|
 | 1. 学習データ（生の .bin） | `LoadDir` | `sutemeDataDir` |
-| 2. 配布モデル（suteme の配布用の書き出し: `training_data_v8.bin(.gz)` / `strip_data_v1.bin(.gz)` / `export.json`） | `LoadPack`（置かれていなければ `ErrNoPack`） | `sutemeModelDir`（空なら `%LOCALAPPDATA%\ikkyoku\model`） |
+| 2. 配布モデル（suteme の配布用の書き出し: `training_data_v10.bin(.gz)` / `strip_data_v1.bin(.gz)` / `export.json`） | `LoadPack`（置かれていなければ `ErrNoPack`） | `sutemeModelDir`（空なら `%LOCALAPPDATA%\ikkyoku\model`） |
 | 3. 焼き込み（2 と同じ形。`_cmd/ikkyoku/model/` を埋め込んで `SetEmbedded` で渡す） | `LoadEmbedded` | — |
 
 どれも**読んで 1 組（`Set`）を返すだけ**で、差し替えるのは `Set.Use`。どの段を使うかは
@@ -185,7 +185,7 @@ wails3 task build:embed MODEL_DIR=<フォルダ>     # 置いてある配布モ�
   suteme で書き出したときと `MODEL_DIR` だけ**（手順はスキル `ikkyoku-build`）
 - ⚠️ **手元（`_cmd/ikkyoku/model/`）はフォルダごと git に入れない**（`_cmd/ikkyoku/.gitignore`）。
   名前で無視すると、ファイル名が変わったときに git に入る（以前の `*.gz` / `source.txt` がそうだった）
-- **手元の形は配布モデルと同じ**（suteme の配布用の書き出しそのもの: `training_data_v8.bin.gz` /
+- **手元の形は配布モデルと同じ**（suteme の配布用の書き出しそのもの: `training_data_v10.bin.gz` /
   `strip_data_v1.bin.gz` / `export.json`）。zip にして配れば、受け取った人は既定の置き場所に
   展開するだけで使える
 - **gzip で持つ**（suteme の `-gzip`）。実測 生 24.8MB → 10.6MB。`suteme` 側の口が `io.Reader` を

@@ -32,7 +32,7 @@ $appDir = Split-Path -Parent $PSScriptRoot
 $root = Split-Path -Parent (Split-Path -Parent $appDir)
 $modelDir = Join-Path $appDir 'model'
 
-# 配布モデルのファイル(suteme の配布用の書き出し)。版は名前に入っている(training_data_v8 など)。
+# 配布モデルのファイル(suteme の配布用の書き出し)。版は名前に入っている(training_data_v10 など)。
 $packPatterns = @('training_data_v*.bin', 'training_data_v*.bin.gz', 'strip_data_v*.bin', 'strip_data_v*.bin.gz', 'export.json')
 
 function Write-Lines([string[]]$lines) {

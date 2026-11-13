@@ -38,9 +38,9 @@ import (
 
 // 配布セット（2 段目と 3 段目）は **suteme の配布用の書き出しそのもの**（2026-10-04）:
 //
-//	training_data_v8.bin(.gz)   駒種の推論器（suteme.DefaultDataFile。版は exe に入っている suteme が決める）
-//	strip_data_v1.bin(.gz)      盤の縁の判定器（suteme.DefaultStripFile）
-//	export.json                 書き出しの記録（日時・件数。suteme の training.ExportInfo）
+//	training_data_v10.bin(.gz)   駒種の推論器（suteme.DefaultDataFile。版は exe に入っている suteme が決める）
+//	strip_data_v1.bin(.gz)       盤の縁の判定器（suteme.DefaultStripFile）
+//	export.json                  書き出しの記録（日時・件数。suteme の training.ExportInfo）
 //
 // `go run ./_cmd/suteme-training -export -gzip -out <場所>` が作る。**ikkyoku 独自の名前や形を
 // 持たない** —— 持つと、suteme の書き出しを ikkyoku の形へ変える手順が要る（以前はそうだった）。
