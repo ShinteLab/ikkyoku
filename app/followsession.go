@@ -8,7 +8,7 @@ package app
 // 画面は「追う / 止める / 打った駒を選ぶ」を呼び、`follow:update` で来た様子を描くだけにした。
 //
 // **追従の状態もここが持つ**（第 2 段。2026-10-11）。解析タブ側の答えの控え（控え・差し替えの控え・聞いている候補・比べる相手の
-// 局面・最後に読んだ盤）は `followSession` の下半分、撮る側（マスタ・比べる相手の 1 枚・ふるい・録画）は `followcam.Camera` の
+// 局面・最後に読んだ盤）は `follower` の下半分、撮る側（マスタ・比べる相手の 1 枚・ふるい・録画）は `followcam.Camera` の
 // `captureFollow`。どちらも**追い始めで作り直し、止めたときに捨てる**（`StartFollow` / `followStop` の 1 か所から）。
 //
 // ⚠️ **撮る側は `FollowCamera` として差し込む**（`StudyService.Camera`。実体は `ikkyoku/followcam` の `Camera`。2026-11-13 に `_cmd/ikkyoku` の `CaptureService` から移した）。
@@ -97,14 +97,21 @@ const (
 	followOk = "正常に盤面を認識しています"
 )
 
-// followSession は**中継を追う 1 回の解析タブ側の持ち物**（`StudyService.follow`）。撮る側の持ち物は `followcam.Camera` の
+// follower は**中継の追従**（段取りと判断。`follower.go`）と、**中継を追う 1 回の解析タブ側の持ち物**（`StudyService.follow`）。撮る側の持ち物は `followcam.Camera` の
 // `captureFollow`（`FollowCamera.BeginFollow` / `EndFollow` で作り直す・捨てる）。
 //
 // **守る mu が 2 つある**: ループの状態（上半分）は自分の mu、答えの控え（下半分）は `StudyService.mu`
 // （控えは `FollowAuto` などが局面と一緒に読み書きするため）。⚠️ **こちらの mu を持ったまま StudyService のメソッドを呼ばないこと**。
 // ⚠️ **追い始め（`StartFollow`）と止めたとき（`followStop`）に、下半分も捨てる**（`resetLocked`）。前の回の控えを次の回の
 // 最初の 1 枚で足さない。
-type followSession struct {
+type follower struct {
+	// ---- 繋ぎ先（`initFollower` が 1 度だけ入れる。追い始めでも止めたときでも変えない）----
+	// host は手の木・版・イベント・撮る側への口（実体は StudyService）。smu はその mu（答えの控えと手の木を守る）。
+	host followHost
+	smu  *sync.Mutex
+	// src は訂正タブ（撮った 1 枚の向きと費用表を作る `followFrame` / `followRotated`）。
+	src *PositionService
+
 	// ---- ループの状態（mu で守る）----
 	mu sync.Mutex
 	// on は追っているか。gen は回の番号（止めるたびに進める。古い回のループの結果を捨てる）。
@@ -141,7 +148,7 @@ type followSession struct {
 }
 
 // resetLocked は答えの控えを捨てる（`StudyService.mu` を持って呼ぶ）。
-func (fs *followSession) resetLocked() {
+func (fs *follower) resetLocked() {
 	fs.pending, fs.rewind, fs.dropOffer, fs.base, fs.lastFrame = nil, nil, nil, nil, nil
 }
 

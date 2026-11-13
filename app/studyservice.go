@@ -56,8 +56,8 @@ type StudyService struct {
 	// 起動時に 1 度だけ入れる。⚠️ **nil なら中継は追えない**（`StartFollow` が断る。ほかは今までどおり動く）。
 	// ⚠️ **公開フィールドで差し込む**（メソッドにすると bindings に出る。`app/AGENTS.md`）。
 	Camera FollowCamera
-	// follow は中継を追う 1 回の持ち物（`followSession`。自分の mu で守る）。
-	follow followSession
+	// follow は中継の追従（`follower`。段取りと判断と、中継を追う 1 回の持ち物。`follower.go`）。
+	follow follower
 
 	mu sync.Mutex
 	// study は確定した局面を根にした検討（手順を含む）。まだ採っていなければ nil。
@@ -154,7 +154,9 @@ type StudyService struct {
 }
 
 func NewStudyService(src *PositionService) *StudyService {
-	return &StudyService{src: src}
+	s := &StudyService{src: src}
+	s.initFollower()
+	return s
 }
 
 // StudyState は解析タブが描くのに要るもの一式。
