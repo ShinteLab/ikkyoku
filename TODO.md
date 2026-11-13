@@ -298,4 +298,4 @@ suteme 側の課題（確率分布・駒台・速さなど）は `suteme/TODO.md
 | 2 | `_docs/todo/2-follow-camera-verdict.md` —— `FollowCamera` の合図 4 つを見直す | 小 | 1 と同時にやらない。価値が薄ければやめてよい |
 | 6 | `_docs/todo/6-usi-bundled.md` —— `usi/` は「Step 2 で消える足場」ではなくなっている | 小（文書） | 同梱エンジンを残すのが決定かをユーザーに確かめる |
 
-6 はほかと独立している。1 と 2 は同じ場所を触る。3（`mainscreen.ts` をタブごとに割る。`_docs/design-position.md`）・4（`CaptureService` と `main()` を分ける）・5（設定を `ikkyoku/config` パッケージへ出す）・7（`go.mod` と文書の食い違い。suteme を 2 つの `go.mod` で v0.2.8 に揃え、Wails の版の記述を v3.0.0 に直した）は済んだ（4・5 は `_docs/design-capture.md`）。
+6 はほかと独立している。1 と 2 は同じ場所を触る。3（`mainscreen.ts` をタブごとに割る。`_docs/design-position.md`）・4（`CaptureService` と `main()` を分ける）・5（設定を `ikkyoku/config` パッケージへ出す）・7（`go.mod` と文書の食い違い。suteme を 2 つの `go.mod` で揃えて v0.3.0 に上げ、Wails の版の記述を v3.0.0 に直した）は済んだ（4・5 は `_docs/design-capture.md`）。
