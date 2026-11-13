@@ -175,7 +175,7 @@ description: ikkyoku（一局）の「中継を追う」（Phase 6 の追従）�
 
 | 定数 | 値 | 場所 | 意味 |
 |---|---|---|---|
-| `gateChangedRatio` | 0.0015 | `_cmd/ikkyoku/captureservice.go` | 「変化した」と見なす点の割合（1 マス ≈ 1.2%） |
+| `gateChangedRatio` | 0.0015 | `followcam/gate.go` | 「変化した」と見なす点の割合（1 マス ≈ 1.2%） |
 | `gateMovingMax` | 8 周 | 同 | 静止を待つ上限 |
 | `gateSkipMax` | 40 周（約 10 秒） | 同 | 省き続けてよい上限 |
 | `detectMissMax` | 8 | 同 | 盤が見つからない周が続いたら 1 枚は読む |
