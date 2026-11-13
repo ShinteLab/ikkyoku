@@ -248,7 +248,7 @@ func newSession(open func(context.Context, *usiTap) (*client.Session, error)) *S
 }
 
 // NewLocalSession は同梱の `engine` を USI で話す相手として使うセッションを作る
-// （Step 1 の足場）。
+// （エンジンのパスが空のとき。今は残す。消せる条件は `usi/AGENTS.md`）。
 func NewLocalSession() *Session {
 	// ⚠️ **同梱エンジンのやり取りは写さない**（Transport を組むのが `usi` パッケージの中で、
 	// 外部のプロセスと違って「止まらない」ときに落とす手段も同じではない）。
