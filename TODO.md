@@ -296,6 +296,5 @@ suteme 側の課題（確率分布・駒台・速さなど）は `suteme/TODO.md
 |---|---|---|---|
 | 1 | `_docs/todo/1-follow-session-type.md` —— 追従の段取りを `StudyService` から別の型に分ける | 大 | 追従の作り直し（4）を実機で通したかをユーザーに聞く |
 | 2 | `_docs/todo/2-follow-camera-verdict.md` —— `FollowCamera` の合図 4 つを見直す | 小 | 1 と同時にやらない。価値が薄ければやめてよい |
-| 6 | `_docs/todo/6-usi-bundled.md` —— `usi/` は「Step 2 で消える足場」ではなくなっている | 小（文書） | 同梱エンジンを残すのが決定かをユーザーに確かめる |
 
-6 はほかと独立している。1 と 2 は同じ場所を触る。3（`mainscreen.ts` をタブごとに割る。`_docs/design-position.md`）・4（`CaptureService` と `main()` を分ける）・5（設定を `ikkyoku/config` パッケージへ出す）・7（`go.mod` と文書の食い違い。suteme を 2 つの `go.mod` で揃えて v0.3.0 に上げ、Wails の版の記述を v3.0.0 に直した）は済んだ（4・5 は `_docs/design-capture.md`）。
+1 と 2 は同じ場所を触る。3（`mainscreen.ts` をタブごとに割る。`_docs/design-position.md`）・4（`CaptureService` と `main()` を分ける）・5（設定を `ikkyoku/config` パッケージへ出す）・6（`usi/` の位置づけ。同梱エンジンは今は残し、消せる条件を書いた）・7（`go.mod` と文書の食い違い。suteme を 2 つの `go.mod` で揃えて v0.3.0 に上げ、Wails の版の記述を v3.0.0 に直した）は済んだ（4・5 は `_docs/design-capture.md`、6 は `_docs/design-engine.md`）。

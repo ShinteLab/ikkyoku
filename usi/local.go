@@ -1,18 +1,21 @@
-// Package usi は同梱の `engine` を USI で話す相手として立ち上げる（Phase 4 の Step 1）。
+// Package usi は同梱の `engine` を USI で話す相手として立ち上げる（同梱エンジンの口）。
 //
-// ⚠️ **このパッケージは Step 2 で消える足場。**
+// 外部エンジン（Step 2）が入った今も、**エンジンのパスが空のときはここを通る**。
+// ⚠️ **今は残す。いつか消す** —— 消せる条件（`engine` の exe を一緒に配る・その exe にだけ
+// 攻方の玉が無い局面を渡せる見分け方）は `usi/AGENTS.md`。
 //
 // USI クライアントの本体は **`core/usi/client`** にある（セッション管理・`os/exec` での
 // エンジン起動）。ここに残っているのは「同一プロセスの `engine` を `io.Pipe` で繋ぐ」
 // 部分だけで、**これは core には置けない**（`core → engine` の依存になってしまう。
 // 依存の向きは `engine → core`）。
 //
-//	Step 1  ikkyoku ──io.Pipe──> engine.NewUSI(...).Start()   ※同一プロセス（ここ）
-//	Step 2  ikkyoku ──os/exec──> 外部エンジン .exe            ※client.Exec に差し替え
+//	Step 1  ikkyoku ──io.Pipe──> engine.NewUSI(...).Start()   ※同一プロセス（ここ。パスが空のとき）
+//	Step 2  ikkyoku ──os/exec──> 外部エンジン .exe            ※client.Exec
 //	Step 3  ikkyoku ──os/exec──> prokishi.exe                 ※設定でパスを変えるだけ
 //
-// **`ikkyoku → engine` の Go 依存はこのパッケージだけ。** Step 2 で消せば依存も切れ、
-// `engine` は「USI を話す exe」として繋がる相手の 1 つになる（engine/TODO.md）。
+// **解析のための `ikkyoku → engine` の Go 依存はこのパッケージだけ**（合法手生成の `legal/` は別）。
+// 消せば `engine/search` への依存も切れ、`engine` は「USI を話す exe」として繋がる相手の
+// 1 つになる（engine/TODO.md）。
 package usi
 
 import (
@@ -74,7 +77,7 @@ func Local(ctx context.Context) (*client.Session, error) {
 //
 // **`engine/_samples` を import しない。** あちらは `_` 始まりのサンプルで、
 // 深さ 4 固定・オプション無し。ここは検討用途の設定を自分で持ちたいので、
-// 30 行ほどを自前で持つほうが素直（どのみち Step 2 で消える）。
+// 30 行ほどを自前で持つほうが素直。
 type localEngine struct{}
 
 func (e *localEngine) GetName() string    { return "ikkyoku (engine 同梱)" }

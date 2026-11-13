@@ -35,7 +35,7 @@
 |---|---|
 | `core/usi` | **プロトコルの語彙。** `info` 行 / `bestmove` 行の読み取り（`protocol.go`）と手表記 |
 | `core/usi/client` | **USI クライアント本体。** ハンドシェイク・`position`/`go`/`stop`・`os/exec` での起動 |
-| `ikkyoku/usi` | **Step 1 の足場だけ。** 同一プロセスの `engine` を `io.Pipe` で繋ぐ |
+| `ikkyoku/usi` | **同梱エンジンの口。** 同一プロセスの `engine` を `io.Pipe` で繋ぐ（今は残す・いつか消す。条件は `usi/AGENTS.md`） |
 | `ikkyoku/analyze` | **評価値の意味づけ。** 先手視点への符号変換・候補手の畳み込み・接続の持ち回り |
 
 - **クライアントは `core` に置いた**（2026-08-08 決定）。`engine` に置くと、

@@ -175,7 +175,8 @@ Claude Code でスキルとして使いたい人は、各自の `.claude/skills/
 
 ### エンジンと手を進める UI（Phase 4/5）— `_docs/design-engine.md`
 
-- ⚠️ **ikkyoku は USI クライアント。解析を `engine` の直呼びに戻さない**（`engine` への依存は合法手生成の `legal` だけ）
+- ⚠️ **ikkyoku は USI クライアント。解析を `engine` の直呼びに戻さない**（`engine` への依存は同梱エンジンの `usi/` と合法手生成の `legal/`）
+- **同梱エンジン（`usi/`）は今は残す**（2026-11-13。外部エンジンを入れていない人でも解析が動く）。⚠️ **消すのは `usi/AGENTS.md` の 2 条件が揃ってから**
 - ⚠️ **解析には「根 + 手順」を渡す**（1 つの SFEN に組み直すと千日手と連続王手が判定できない）
 - ⚠️ **合法性の判定は `ikkyoku/legal` だけ**・⚠️ **局面が変わったら `study:changed` を出す**
 - ⚠️ **エンジンをまたいで結果を合成しない**（平均も多数決も取らない。食い違いこそ見たいもの）
@@ -241,7 +242,7 @@ Claude Code でスキルとして使いたい人は、各自の `.claude/skills/
 | `github.com/kbinani/screenshot` | 画面キャプチャ（Windows は GDI 直呼び） |
 | `golang.design/x/hotkey` | グローバルホットキー（Windows は `RegisterHotKey` 直呼び。cgo が要るのは macOS だけ） |
 | `github.com/ShinteLab/suteme` | 盤面認識（`recognize` が使う） |
-| `github.com/ShinteLab/engine`（`/search`） | ①Step 1 の足場（`usi/local.go`。Step 2 で消える）②**合法手生成**（`legal/`。消えない）。⚠️ **解析を engine の直呼びに戻さないこと** |
+| `github.com/ShinteLab/engine`（`/search`） | ①**同梱エンジン**（`usi/local.go`。今は残す・いつか消す。条件は `usi/AGENTS.md`）②**合法手生成**（`legal/`。消えない）。⚠️ **解析を engine の直呼びに戻さないこと** |
 | `github.com/ShinteLab/core` | `<shogi-board>` の配信・`core/sfen` / `core/usi` / `core/kifu` / `core/shogifont` |
 | `github.com/ShinteLab/kicho` | **棋譜データベース**（棚・取得・KIF の文字コード判別）。`goja` / `modernc.org/sqlite` などを持ち込む（全部 PureGo。そのぶん exe が膨らむ） |
 | `github.com/wenteasy/log` | **ログの土台**（`log/` が使う。ハンドラ・日ごとのファイル・パッケージごとのレベル）。タグで引く（replace ではない） |
@@ -287,7 +288,7 @@ Claude Code でスキルとして使いたい人は、各自の `.claude/skills/
 | `position/` | **「とある局面」**（訂正の操作・手番・駒台・SFEN・`Rotate180`・手の木 `Study`・棋譜の取り込み・新規対局・`Connect`）。画像を知らない |
 | `legal/` | 合法手生成のラッパ（`engine` を呼ぶのはここだけ） |
 | `analyze/` | 確定した局面 → 評価値（同梱 / 外部エンジン・先手視点・勝率の式）。**正式な SFEN を要求するのはここだけ** |
-| `usi/` | Step 1 の足場（同一プロセスの `engine` を `io.Pipe` で USI として繋ぐ。Step 2 で消える） |
+| `usi/` | **同梱エンジンの口**（同一プロセスの `engine` を `io.Pipe` で USI として繋ぐ。エンジンのパスが空のときに通る。今は残す・いつか消す） |
 | `app/` | **フロントに公開する Service 9 つ**（設定・訂正・解析・棋譜・駒の字・学習送信・計測・**問題の一覧**）。`app/AGENTS.md` は索引で、制約は `_docs/app-*.md` |
 | `guide/` | ガイド枠の寸法と幾何（自動フィット。ウィンドウにも Wails にも依存しない） |
 | `followcam/` | **中継を追うときの撮る側**（2026-11-13 に `_cmd/ikkyoku` から移した。ふるい・速い経路の変わったマス・81 マスの読み・録画・追う 1 回の持ち物）。局面を知らない・Wails に依存しない。`app` の中継セッションが `FollowCamera` として使う |
