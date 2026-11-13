@@ -12,6 +12,7 @@ package app
 // ⚠️ **ロックは今までどおり 2 つ**（ループの状態は `follower.mu`、答えの控えと手の木は `StudyService.mu` ＝ `follower.smu`）。
 
 import (
+	"github.com/ShinteLab/ikkyoku/followcam"
 	"github.com/ShinteLab/ikkyoku/position"
 )
 
@@ -100,3 +101,66 @@ func (s *StudyService) hostEmit(u FollowUpdate) {
 }
 
 func (s *StudyService) hostCamera() FollowCamera { return s.Camera }
+
+// ---- StudyService の公開メソッド（フロントと撮る側の口。名前とシグネチャを変えないこと）----
+//
+// ⚠️ **中身を書かないこと**（取り次ぐだけ。段取りと判断は follower）。⚠️ **`//wails:ignore` を落とさないこと**（付いていないものは
+// bindings に出てフロントの API になる）。
+
+// StartFollow は**中継を追い始める**（「中継を追う」・枠のボタン・訂正タブの「そのまま追跡」）。追っていれば何もしない。
+//
+// 押した瞬間の盤を追う盤として覚え（訂正してから追うなら訂正した 1 枚。撮る側の `AnchorBoard`）、そのとき読んだ 1 枚を
+// 最初の 1 周として流す（捨てると速い経路の比べる相手が決まるまで 81 マスの読みを待つ。2026-10-07）。決まらなければ
+// 理由を帯に出して止まる。⚠️ **戻るのは始めたところまで**（追う盤を決めるのはループの中）。
+func (s *StudyService) StartFollow() error { return s.follow.StartFollow() }
+
+// StopFollow は**人が中継の追跡を止める**（「追跡を止める」・枠のボタン・追従を壊す操作の確認で「はい」）。
+//
+// ⚠️ **走っている 1 周が終わるまで待ってから返す**（`followStopWait` まで）。画面はこれを待ってから根を入れ替える操作を
+// 通す —— 待たないと、走っている 1 周が入れ替えた局面へ手を足す（`followguard.ts`）。
+func (s *StudyService) StopFollow() { s.follow.StopFollow() }
+
+// ChooseFollow は**帯に並べた打った駒の候補から、人が選んだ手を足す**（2026-10-09。`FollowChoose`）。
+// ⚠️ **選べなくなっていたら理由を帯に出すだけ**（追跡は止めない。次の 1 枚でまた聞く）。
+func (s *StudyService) ChooseFollow(moves []string) { s.follow.ChooseFollow(moves) }
+
+// FollowChoose は `follower.FollowChoose` の取り次ぎ（中身と約束はあちら）。
+//
+//wails:ignore
+func (s *StudyService) FollowChoose(moves []string) (FollowAuto, error) {
+	return s.follow.FollowChoose(moves)
+}
+
+// FollowHideRefused は `follower.FollowHideRefused` の取り次ぎ（中身と約束はあちら）。
+//
+//wails:ignore
+func (s *StudyService) FollowHideRefused(message string) { s.follow.FollowHideRefused(message) }
+
+// FollowAuto は `follower.FollowAuto` の取り次ぎ（中身と約束はあちら）。
+//
+//wails:ignore
+func (s *StudyService) FollowAuto(boardSFEN string, cellConfidence []float64, cellHidden []bool, promo []PromoEvidence) (FollowAuto, error) {
+	return s.follow.FollowAuto(boardSFEN, cellConfidence, cellHidden, promo)
+}
+
+// FollowConfirm は `follower.FollowConfirm` の取り次ぎ（中身と約束はあちら）。
+//
+//wails:ignore
+func (s *StudyService) FollowConfirm() (FollowAuto, error) { return s.follow.FollowConfirm() }
+
+// FollowCells は `follower.FollowCells` の取り次ぎ（中身と約束はあちら）。
+//
+//wails:ignore
+func (s *StudyService) FollowCells(changed []int, read []followcam.CellPiece, promo []PromoEvidence) (FollowAuto, error) {
+	return s.follow.FollowCells(changed, read, promo)
+}
+
+// CellsLookUnmoved は `follower.CellsLookUnmoved` の取り次ぎ（中身と約束はあちら）。
+//
+//wails:ignore
+func (s *StudyService) CellsLookUnmoved(cells []int) bool { return s.follow.CellsLookUnmoved(cells) }
+
+// FrameFits は `follower.FrameFits` の取り次ぎ（中身と約束はあちら）。
+//
+//wails:ignore
+func (s *StudyService) FrameFits(cells []int) bool { return s.follow.FrameFits(cells) }

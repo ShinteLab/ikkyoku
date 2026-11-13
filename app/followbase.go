@@ -36,17 +36,17 @@ type followBaseAnswer struct {
 //
 // 使うのは、比べる相手の局面を覚えていて、そこから先端までに足し済みの手があり、それが**全部推測の手**のときだけ
 // （印の無い手まで差し替えの候補にしない。`position.Study.MainGuessTail`）。
-func (s *StudyService) followBaseFrom() (base *position.Position, since, line []string, ok bool) {
-	base, since, _, ok = s.followFromBase()
+func (f *follower) followBaseFrom() (base *position.Position, since, line []string, ok bool) {
+	base, since, _, ok = f.followFromBase()
 	if !ok || len(since) == 0 {
 		return nil, nil, nil, false
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.study == nil || len(since) > len(s.study.MainGuessTail()) {
+	f.smu.Lock()
+	defer f.smu.Unlock()
+	if f.tree() == nil || len(since) > len(f.tree().MainGuessTail()) {
 		return nil, nil, nil, false
 	}
-	return base, since, s.study.MainLine(), true
+	return base, since, f.tree().MainLine(), true
 }
 
 // followExplainFromBase は撮った盤 board を**比べる相手の局面 base から**説明する（`Connect` は 1 回だけ）。

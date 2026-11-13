@@ -181,23 +181,23 @@ type FollowApplied struct {
 // unseen は**手や頭が被って見えないマス**（nil なら全部見えている。2026-10-06）。
 // ⚠️ **推測するかどうか（fromImage）とは別に効かせること** —— 見えないマスは
 // 「覆す」話ではなく、そもそも根拠にも減点にもしないマス（`position.CellMask`）。
-func (s *StudyService) followProbe(board *position.Board, cost *position.CellCost, unseen *position.CellMask, fromImage, rotated bool) (FollowProbe, error) {
+func (f *follower) followProbe(board *position.Board, cost *position.CellCost, unseen *position.CellMask, fromImage, rotated bool) (FollowProbe, error) {
 	if board == nil {
 		return FollowProbe{}, fmt.Errorf("まだ局面がありません")
 	}
 
-	s.mu.Lock()
-	if s.study == nil {
-		s.mu.Unlock()
+	f.smu.Lock()
+	if f.tree() == nil {
+		f.smu.Unlock()
 		return FollowProbe{}, fmt.Errorf("解析タブにまだ局面がありません（先に「この局面を解析する」で始めてください）")
 	}
-	tipID, from, err := s.study.MainTip()
+	tipID, from, err := f.tree().MainTip()
 	if err != nil {
-		s.mu.Unlock()
+		f.smu.Unlock()
 		return FollowProbe{}, err
 	}
-	rev, main, rootSfen := s.rev, s.study.MainLine(), rootSFEN(s.study)
-	s.mu.Unlock()
+	rev, main, rootSfen := f.host.hostRev(), f.tree().MainLine(), rootSFEN(f.tree())
+	f.smu.Unlock()
 
 	// ⚠️ **`fromImage` が「推測してよいか」の唯一の判断。**
 	opt := position.ConnectOptions{Unseen: unseen, DeepDepth: followDeepDepth}
@@ -309,7 +309,7 @@ func (s *StudyService) followProbe(board *position.Board, cost *position.CellCos
 	// ⚠️ **手や頭が被った 1 枚・費用表の無い 1 枚では使わない**（差し替えを試さない 1 枚。今までどおり先端から）。
 	var r position.ConnectResult
 	fromBase := false
-	if bpos, since, line, bok := s.followBaseFrom(); bok && fromImage && unseen.Count() == 0 {
+	if bpos, since, line, bok := f.followBaseFrom(); bok && fromImage && unseen.Count() == 0 {
 		ans, err := followExplainFromBase(ctx, bpos, since, line, board, copt)
 		if err != nil {
 			return FollowProbe{}, err
@@ -360,7 +360,7 @@ func (s *StudyService) followProbe(board *position.Board, cost *position.CellCos
 		// ⚠️ **ここで行き止まりにしないこと**（2026-09-15 に実機で踏んだ）。
 		// 打ち切り（`StopBudget`）でも**先に並べた候補は残っている**ので、それを出す。
 		// **黙って無反応になるのが一番たちが悪い。**
-		return s.fallbackFollow(ranked, r, rootSfen, main, fromImage, out), nil
+		return f.fallbackFollow(ranked, r, rootSfen, main, fromImage, out), nil
 	}
 
 	// ⚠️ **並べきれないなら選ばせない。** 候補として出せない以上、決めようが無い。
@@ -488,46 +488,44 @@ func followArrived(fixed []position.Fix, cost *position.CellCost) bool {
 //
 // ⚠️ **公開しないこと**（2026-10-07 に外した）。公開するとフロントの API になり、
 // 下見を通さない手順を本譜へ足せる口が残る。
-func (s *StudyService) followApply(moves []string, rev int, goTo bool) (a FollowApplied, err error) {
-	return s.followGraft(moves, rev, goTo, true)
+func (f *follower) followApply(moves []string, rev int, goTo bool) (a FollowApplied, err error) {
+	return f.followGraft(moves, rev, goTo, true)
 }
 
 // followGraft は `followApply` の本体。guess が偽なら推測の印を付けない（人が選んだ手。`FollowChoose`）。
-func (s *StudyService) followGraft(moves []string, rev int, goTo, guess bool) (a FollowApplied, err error) {
+func (f *follower) followGraft(moves []string, rev int, goTo, guess bool) (a FollowApplied, err error) {
 	// ⚠️ **`publish` はロックの外で走らせること**（`defer` は LIFO）。
-	defer func() { s.publish(a.State, err) }()
+	defer func() { f.host.publish(a.State, err) }()
 	if len(moves) == 0 {
 		return FollowApplied{}, fmt.Errorf("繋ぐ手順がありません")
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.study == nil {
+	f.smu.Lock()
+	defer f.smu.Unlock()
+	if f.tree() == nil {
 		return FollowApplied{}, fmt.Errorf("解析タブにまだ局面がありません")
 	}
 	// ⚠️ **下見のあいだに局面が変わっていたら断る。** 別の窓が手を指したかもしれず、
 	// そのまま据えると**違う局面の先に繋がる**。
-	if rev != s.rev {
+	if rev != f.host.hostRev() {
 		return FollowApplied{}, fmt.Errorf("局面が変わりました。もう一度お試しください")
 	}
 
-	line := append(s.study.MainLine(), moves...)
+	line := append(f.tree().MainLine(), moves...)
 	var g position.GraftResult
 	if guess {
-		g = s.study.GraftGuess(line, len(moves))
+		g = f.host.hostGraft(line, len(moves))
 	} else {
-		g = s.study.Graft(line)
+		g = f.host.hostGraft(line, 0)
 	}
 	if g.Note != "" && g.Added == 0 {
 		return FollowApplied{}, fmt.Errorf("%s", g.Note)
 	}
 	if goTo {
 		// **先端を見ていたので付いていく。**
-		if id, _, err := s.study.MainTip(); err == nil {
-			_ = s.study.GoTo(id)
-		}
+		f.host.hostGoTip()
 	}
-	a = FollowApplied{State: s.changed(), Added: g.Added, Note: reloadNote(g)}
+	a = FollowApplied{State: f.host.changed(), Added: g.Added, Note: reloadNote(g)}
 	log.Follow.Info("撮った盤面を本譜の先に繋ぎました",
 		"moves", len(moves), "added", g.Added, "movedAt", g.MovedAt, "goTo", goTo)
 	return a, nil
@@ -628,7 +626,7 @@ func squareText(rank, file int) string {
 //
 // ⚠️ **黙って無反応にしないこと**（2026-09-15 に実機で踏んだ）。打ち切りでも
 // **先に並べた候補は残っている**ので、それを出す。「何も起きない」が一番たちが悪い。
-func (s *StudyService) fallbackFollow(ranked position.RankResult, r position.ConnectResult,
+func (f *follower) fallbackFollow(ranked position.RankResult, r position.ConnectResult,
 	rootSfen string, main []string, fromImage bool, out FollowProbe) FollowProbe {
 	// 人が並べた盤（手合割・詰将棋）は推測しない。食い違いだけ出す。
 	if !fromImage || len(ranked.Candidates) == 0 {
@@ -693,26 +691,24 @@ func (s *StudyService) fallbackFollow(ranked position.RankResult, r position.Con
 // promo は**成・不成の見た目の証拠**（2026-10-07。`PromoEvidence`）。nil で呼ばれ、足そうとしている手に
 // 成りも不成も指せる手があれば、何も動かさずに `Compare` を返す（中継セッションが `followcam.Camera.ComparePieces` で
 // 測って、同じ盤と証拠でもう一度呼ぶ）。⚠️ **nil でない（空でも）ときは、もう頼まない**（今までどおり決める）。
-//
-//wails:ignore
-func (s *StudyService) FollowAuto(boardSFEN string, cellConfidence []float64, cellHidden []bool, promo []PromoEvidence) (FollowAuto, error) {
+func (f *follower) FollowAuto(boardSFEN string, cellConfidence []float64, cellHidden []bool, promo []PromoEvidence) (FollowAuto, error) {
 	// ⚠️ **訂正タブを通さないこと**（2026-09-15 に実機で踏んだ）。
 	// 以前は呼び出し側が毎周 `PositionService.Load` を呼んでいたので、
 	// **人が訂正タブで作業していると 1 秒ごとに中継の盤で上書きされた**
 	// （学習データを登録しようとして消えた）。**訂正タブは人の作業場。**
-	board, cost, unseen, rotated, e := s.src.followFrame(boardSFEN, cellConfidence, cellHidden)
+	board, cost, unseen, rotated, e := f.src.followFrame(boardSFEN, cellConfidence, cellHidden)
 	if e != nil {
 		return FollowAuto{}, e
 	}
 	// ⚠️ **成・不成の見た目の証拠は、下見の前に盤へ書き込むこと**（2026-10-07。`followApplyPromo`）。
 	// 下見・控え・確かめが同じ盤を見るので、2 枚目でも同じ答えになる。
-	s.followApplyPromo(board, cost, promo, rotated)
-	s.mu.Lock()
-	s.follow.lastFrame = board
-	s.mu.Unlock()
+	f.followApplyPromo(board, cost, promo, rotated)
+	f.smu.Lock()
+	f.lastFrame = board
+	f.smu.Unlock()
 	// ⚠️ **修復してよいのは費用表があるときだけ**。
 	// 確信度が無ければ**どのマスを覆してよいかの根拠が無い**ので、厳密一致に倒す。
-	p, e := s.followProbe(board, cost, unseen, cost != nil, rotated)
+	p, e := f.followProbe(board, cost, unseen, cost != nil, rotated)
 	if e != nil {
 		return FollowAuto{}, e
 	}
@@ -723,11 +719,11 @@ func (s *StudyService) FollowAuto(boardSFEN string, cellConfidence []float64, ce
 		// 不成になる（ゲーム画面で ▲2三飛成 を 2f2c、△8七飛成 を 8f8g と記録した）。
 		// ⚠️ **ここでは何も動かさない**（控えも足しもしない）。証拠を添えてもう一度呼ばれてから決める。
 		// 証拠が空（測れなかった）でも nil でなければ、もう頼まずに今までどおり決める。
-		if base, since, _, bok := s.followFromBase(); bok {
+		if base, since, _, bok := f.followFromBase(); bok {
 			if pairs := followPromoPairs(base, since, moves, rotated); len(pairs) > 0 {
 				log.Follow.Info("成りも不成も指せる手があるので、見た目を比べます", "moves", moves, "組", len(pairs))
 				return FollowAuto{Kind: FollowChoices, Reason: "成・不成を見た目で確かめます", Compare: pairs,
-					Fit: p.Fit, Unseen: unseen.Count(), State: s.State()}, nil
+					Fit: p.Fit, Unseen: unseen.Count(), State: f.State()}, nil
 			}
 		}
 	}
@@ -735,11 +731,11 @@ func (s *StudyService) FollowAuto(boardSFEN string, cellConfidence []float64, ce
 		// ⚠️ **成る手と成らない手だけで分かれて決まらないときも、見た目を比べてもらう**（2026-10-08。`followPromoOnly`）。
 		// ゲーム画面の ▲6四銀成 で、行き先を成銀とも銀とも読めず 2 通りのまま、4 秒ごとに 81 マスを読み直して 110 秒かかった。
 		if pm := followPromoOnly(p); pm != nil {
-			if base, since, _, bok := s.followFromBase(); bok {
+			if base, since, _, bok := f.followFromBase(); bok {
 				if pairs := followPromoPairs(base, since, pm, rotated); len(pairs) > 0 {
 					log.Follow.Info("成りと不成で分かれたので、見た目を比べます", "moves", pm, "組", len(pairs))
 					return FollowAuto{Kind: FollowChoices, Reason: "成・不成を見た目で確かめます", Compare: pairs,
-						Fit: p.Fit, Unseen: unseen.Count(), State: s.State()}, nil
+						Fit: p.Fit, Unseen: unseen.Count(), State: f.State()}, nil
 				}
 			}
 		}
@@ -747,7 +743,7 @@ func (s *StudyService) FollowAuto(boardSFEN string, cellConfidence []float64, ce
 	// ⚠️ **打つ駒の種類だけで分かれたら、盤上の駒と見た目を比べ、それでも決まらなければ人に聞く**（2026-10-09。
 	// `followDropLooks`）。決まらないまま 1 本選ばない —— 打った駒の誤りはその駒が動くまで盤に表れない。
 	if !ok {
-		a, np, done, err := s.followDropLooks(p, board, cost, unseen, promo, rotated)
+		a, np, done, err := f.followDropLooks(p, board, cost, unseen, promo, rotated)
 		if done || err != nil {
 			return a, err
 		}
@@ -758,36 +754,36 @@ func (s *StudyService) FollowAuto(boardSFEN string, cellConfidence []float64, ce
 	}
 	// ⚠️ **推測で足した末尾の手を差し替えるかを先に見る**（2026-10-08。`followRewindCheck`）。
 	// 先端がずれたままでは、ここから先の 1 枚はどれも繋がらない。
-	if a, done, err := s.followRewindCheck(board, cost, unseen, p); done {
+	if a, done, err := f.followRewindCheck(board, cost, unseen, p); done {
 		return a, err
 	}
 	if !ok {
 		// ⚠️ **控えと矛盾しない 1 枚なら、控えは捨てない**（2026-10-06 に実機で踏んだ。`pendingStillFits`）。
-		if s.pendingStillFits(board, cost, unseen) {
+		if f.pendingStillFits(board, cost, unseen) {
 			return FollowAuto{Kind: p.Kind, Pending: true, Reason: "確かめています",
-				Fit: p.Fit, Unseen: unseen.Count(), State: s.State()}, nil
+				Fit: p.Fit, Unseen: unseen.Count(), State: f.State()}, nil
 		}
 		// **足せる手が無い 1 枚が来たら、控えは捨てる**（手が映った 1 枚の答えは
 		// 次の 1 枚で消えるのが普通で、それがこの形）。
-		s.setPending(nil)
-		return s.baseIf(s.followFrom(board, cost, unseen, rotated))
+		f.setPending(nil)
+		return f.baseIf(f.followFrom(board, cost, unseen, rotated))
 	}
-	k := s.takePendingPrefix(moves)
+	k := f.takePendingPrefix(moves)
 	if k == 0 {
 		// **初めて出た答え。** 控えて、次の 1 枚を待つ。
-		s.setPending(&followPending{tip: s.mainTip(), moves: moves, board: board, cost: cost,
+		f.setPending(&followPending{tip: f.mainTip(), moves: moves, board: board, cost: cost,
 			unseen: unseen, rotated: rotated})
 		return FollowAuto{Kind: p.Kind, Pending: true, Reason: "確かめています",
-			Guess: p.Guess, Fit: p.Fit, Unseen: unseen.Count(), State: s.State()}, nil
+			Guess: p.Guess, Fit: p.Fit, Unseen: unseen.Count(), State: f.State()}, nil
 	}
 	if k == len(moves) {
 		// **2 枚続けて同じ答え**（控えのほうが長ければ、その先は 2 枚目で消えた）。
 		// ここから先は今までどおり（1 枚から取れるだけ取る）。
-		return s.baseIf(s.followFrom(board, cost, unseen, rotated))
+		return f.baseIf(f.followFrom(board, cost, unseen, rotated))
 	}
 	// **2 枚目のほうが先へ進んでいる**（2026-10-06）。2 枚で揃った頭の k 手だけ足し、
 	// 残りは控え直して次の 1 枚で確かめる。
-	return s.followConfirmed(p, k, board, cost, unseen, rotated)
+	return f.followConfirmed(p, k, board, cost, unseen, rotated)
 }
 
 // followConfirmed は**2 枚で揃った頭の k 手だけ**足し、残りを控え直す（2026-10-06）。
@@ -799,17 +795,17 @@ func (s *StudyService) FollowAuto(boardSFEN string, cellConfidence []float64, ce
 //
 // ⚠️ **足すのは 2 枚が揃って言っている手だけ**（1 枚だけの読み違いを足さない、は崩さない）。
 // 2 枚目にしか無い手は控え直すので、それも次の 1 枚で確かめてから入る。
-func (s *StudyService) followConfirmed(p FollowProbe, k int, board *position.Board, cost *position.CellCost, unseen *position.CellMask, rotated bool) (FollowAuto, error) {
-	s.mu.Lock()
-	atTip := s.study != nil && s.study.CurrentID() == mainTipID(s.study)
-	s.mu.Unlock()
+func (f *follower) followConfirmed(p FollowProbe, k int, board *position.Board, cost *position.CellCost, unseen *position.CellMask, rotated bool) (FollowAuto, error) {
+	f.smu.Lock()
+	atTip := f.tree() != nil && f.tree().CurrentID() == mainTipID(f.tree())
+	f.smu.Unlock()
 
 	top := p.Candidates[0]
-	applied, err := s.followApply(top.Moves[:k], p.Rev, atTip)
+	applied, err := f.followApply(top.Moves[:k], p.Rev, atTip)
 	if err != nil {
 		return FollowAuto{}, err
 	}
-	s.setPending(&followPending{tip: s.mainTip(), moves: slices.Clone(top.Moves[k:]), board: board,
+	f.setPending(&followPending{tip: f.mainTip(), moves: slices.Clone(top.Moves[k:]), board: board,
 		cost: cost, unseen: unseen, rotated: rotated})
 	a := FollowAuto{Kind: p.Kind, Applied: true, Pending: true, Reason: "確かめています",
 		Moves: slices.Clone(top.Moves[:k]), Added: applied.Added,
@@ -833,25 +829,23 @@ func (s *StudyService) followConfirmed(p FollowProbe, k int, board *position.Boa
 //
 // 控えが無ければ何もしない（`FollowSame`）。⚠️ **本譜の先端が控えたときから動いていたら捨てる**
 // （手で指した・戻したなど。違う局面の先に繋がないため）。
-//
-//wails:ignore
-func (s *StudyService) FollowConfirm() (FollowAuto, error) {
+func (f *follower) FollowConfirm() (FollowAuto, error) {
 	// **控えた差し替え**（`followRewindCheck`）なら、そちらを据える（2 枚目で確かめた）。
-	if rw := s.takeRewind(); rw != nil {
-		return s.followRewindApply(rw)
+	if rw := f.takeRewind(); rw != nil {
+		return f.followRewindApply(rw)
 	}
-	s.mu.Lock()
-	pend := s.follow.pending
-	s.follow.pending = nil
-	s.mu.Unlock()
-	if pend == nil || pend.tip != s.mainTip() {
-		return FollowAuto{Kind: FollowSame, Reason: "盤面は変わっていません", State: s.State()}, nil
+	f.smu.Lock()
+	pend := f.pending
+	f.pending = nil
+	f.smu.Unlock()
+	if pend == nil || pend.tip != f.mainTip() {
+		return FollowAuto{Kind: FollowSame, Reason: "盤面は変わっていません", State: f.State()}, nil
 	}
 	if pend.board == nil {
 		// **速い経路で控えた手**（`FollowCells`）。読んだ盤は無いので、手順をそのまま足す。
-		return s.fastApply(pend.moves, true, "速い経路（次の 1 枚が変わらず確かめた）", pend.why)
+		return f.fastApply(pend.moves, true, "速い経路（次の 1 枚が変わらず確かめた）", pend.why)
 	}
-	return s.baseIf(s.followFrom(pend.board, pend.cost, pend.unseen, pend.rotated))
+	return f.baseIf(f.followFrom(pend.board, pend.cost, pend.unseen, pend.rotated))
 }
 
 // followCellsDepth は速い経路で**新しく**探す手数の上限。
@@ -873,38 +867,38 @@ type followBase struct {
 }
 
 // markBase は**今の本譜の先端を、比べる相手の局面として覚える**（`AtFrame` を返すときに呼ぶ）。
-func (s *StudyService) markBase() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.study == nil {
-		s.follow.base = nil
+func (f *follower) markBase() {
+	f.smu.Lock()
+	defer f.smu.Unlock()
+	if f.tree() == nil {
+		f.base = nil
 		return
 	}
-	s.follow.base = &followBase{root: rootSFEN(s.study), line: slices.Clone(s.study.MainLine())}
+	f.base = &followBase{root: rootSFEN(f.tree()), line: slices.Clone(f.tree().MainLine())}
 }
 
 // baseIf は a が `AtFrame` なら比べる相手の局面を覚えて、a をそのまま返す。
-func (s *StudyService) baseIf(a FollowAuto, err error) (FollowAuto, error) {
+func (f *follower) baseIf(a FollowAuto, err error) (FollowAuto, error) {
 	if err == nil && a.AtFrame {
-		s.markBase()
+		f.markBase()
 	}
 	return a, err
 }
 
 // followFromBase は**比べる相手の局面**と、そこから本譜の先端までに足した手順、比べる相手の 1 枚の
 // 色付けのマス（そこへ至った手）を返す。覚えていない・根が変わった・本譜が食い違ったなら ok は偽。
-func (s *StudyService) followFromBase() (base *position.Position, since []string, extra *position.CellMask, ok bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	cb := s.follow.base
-	if cb == nil || s.study == nil || rootSFEN(s.study) != cb.root {
+func (f *follower) followFromBase() (base *position.Position, since []string, extra *position.CellMask, ok bool) {
+	f.smu.Lock()
+	defer f.smu.Unlock()
+	cb := f.base
+	if cb == nil || f.tree() == nil || rootSFEN(f.tree()) != cb.root {
 		return nil, nil, nil, false
 	}
-	cur := s.study.MainLine()
+	cur := f.tree().MainLine()
 	if len(cur) < len(cb.line) || !slices.Equal(cur[:len(cb.line)], cb.line) {
 		return nil, nil, nil, false
 	}
-	base = s.study.Root().Clone()
+	base = f.tree().Root().Clone()
 	for _, m := range cb.line {
 		if base.ApplyMove(m) != nil {
 			return nil, nil, nil, false
@@ -917,7 +911,7 @@ func (s *StudyService) followFromBase() (base *position.Position, since []string
 }
 
 // cellsMask は撮った画像の向きのマスの番号を、解析の向きの CellMask にする（後手目線なら回す）。
-func (s *StudyService) cellsMask(cells []int) *position.CellMask {
+func (f *follower) cellsMask(cells []int) *position.CellMask {
 	m := &position.CellMask{}
 	for _, i := range cells {
 		if i >= 0 && i < 81 {
@@ -925,7 +919,7 @@ func (s *StudyService) cellsMask(cells []int) *position.CellMask {
 		}
 	}
 	// ⚠️ **撮った向きと解析の向きを揃えること**（後手目線で採った局面は 180 度回してある）。
-	if s.src.followRotated() {
+	if f.src.followRotated() {
 		m = m.Rotate180()
 	}
 	return m
@@ -954,27 +948,25 @@ func (s *StudyService) cellsMask(cells []int) *position.CellMask {
 // 間の値や測れなかったときは、今までどおり読んだマスで選ぶ。
 // ⚠️ **1 枚だけでは足さない**のは同じ（`followPending`）。次の 1 枚が変わっていなければ
 // `FollowConfirm` で足す。⚠️ **比べる相手の 1 枚に至った手のマスは、見た目だけ変わってよい**（色付け）。
-//
-//wails:ignore
-func (s *StudyService) FollowCells(changed []int, read []followcam.CellPiece, promo []PromoEvidence) (FollowAuto, error) {
+func (f *follower) FollowCells(changed []int, read []followcam.CellPiece, promo []PromoEvidence) (FollowAuto, error) {
 	// 控えた差し替えは、この 1 枚が同じ差し替えを言うまで「残しているだけ」にする（`followCellsRewind`）。
-	s.holdRewind()
-	mask := s.cellsMask(changed)
-	rotated := s.src.followRotated()
+	f.holdRewind()
+	mask := f.cellsMask(changed)
+	rotated := f.src.followRotated()
 
-	base, since, extra, ok := s.followFromBase()
+	base, since, extra, ok := f.followFromBase()
 	// fromBase は比べる相手の局面が分かっているか（見た目を比べられるのはそのときだけ。`followPromoSplit`）。
 	fromBase := ok
 	if !ok {
 		// 比べる相手の局面を覚えていない。先端から突き合わせる。
-		s.mu.Lock()
-		if s.study == nil {
-			s.mu.Unlock()
+		f.smu.Lock()
+		if f.tree() == nil {
+			f.smu.Unlock()
 			return FollowAuto{}, fmt.Errorf("解析タブにまだ局面がありません")
 		}
-		_, tip, err := s.study.MainTip()
-		main := s.study.MainLine()
-		s.mu.Unlock()
+		_, tip, err := f.tree().MainTip()
+		main := f.tree().MainLine()
+		f.smu.Unlock()
 		if err != nil {
 			return FollowAuto{}, err
 		}
@@ -986,7 +978,7 @@ func (s *StudyService) FollowCells(changed []int, read []followcam.CellPiece, pr
 	unclear := func(n int, err error) (FollowAuto, error) {
 		log.Follow.Info("変わったマスでは手が決まりません（81 マスを読みます）",
 			"変わったマス", mask.Count(), "足し済み", len(since), "合う手順", n, "error", err)
-		return FollowAuto{Kind: FollowUnreachable, Reason: "変わったマスでは手が決まりません", State: s.State()}, nil
+		return FollowAuto{Kind: FollowUnreachable, Reason: "変わったマスでは手が決まりません", State: f.State()}, nil
 	}
 	if len(since) > followCellsBehind {
 		return unclear(0, nil)
@@ -996,7 +988,7 @@ func (s *StudyService) FollowCells(changed []int, read []followcam.CellPiece, pr
 	// 3〜5 秒かけて繋がらないだけだった。駒を動かす手は必ず駒のあったマスを変え、打つ手は 1 手で 1 マス。
 	glow, glowN := followGlowOnly(base, since, mask, extra)
 	if glow && glowN > followCellsDepth {
-		return s.followLooksOnly(glowN), nil
+		return f.followLooksOnly(glowN), nil
 	}
 	if mask.Count() > followCellsMax {
 		// 多すぎて手順を割り出せない（手や頭が被った 1 枚など）。今までどおり 81 マスを読む。
@@ -1019,12 +1011,12 @@ func (s *StudyService) FollowCells(changed []int, read []followcam.CellPiece, pr
 	}
 	if len(rests) == 0 && glow {
 		// 空きのマスだけが変わり、打つ手でも説明が付かない（光ったマスが少ないとき）。
-		return s.followLooksOnly(glowN), nil
+		return f.followLooksOnly(glowN), nil
 	}
 	if len(rests) == 0 {
 		// ⚠️ **推測で足した末尾の手が違っていたなら、ここで差し替えを見る**（2026-10-09。`followCellsRewind`）。
 		// 先端から先しか探さないと、待つあいだに 81 マスを読む周まで差し替えが出ない。
-		if a, done, err := s.followCellsRewind(base, since, mask, extra, read, rotated); done {
+		if a, done, err := f.followCellsRewind(base, since, mask, extra, read, rotated); done {
 			return a, err
 		}
 		// ⚠️ **合う手順が 1 つも無いことを添えること**（`NoMoves`。2026-10-08）。中継セッションはすぐ 81 マスを読まず、
@@ -1042,7 +1034,7 @@ func (s *StudyService) FollowCells(changed []int, read []followcam.CellPiece, pr
 		// ⚠️ **控えた手と合う候補があれば、それを採ること**（2026-10-07 に実機で踏んだ）。▲3三角成 を
 		// 81 マスの読みで控えたあと △同金 が指されると、3三 は金になって成ったかどうかが盤から消え、
 		// 成・不成の 2 通りが残る。控えは前の 1 枚で決めた答えなので、それと合う候補だけに絞る。
-		if pend := s.pendingMoves(); len(pend) > 0 && len(since) == 0 {
+		if pend := f.pendingMoves(); len(pend) > 0 && len(since) == 0 {
 			var keep [][]string
 			for _, r := range rests {
 				n := min(len(r), len(pend))
@@ -1087,7 +1079,7 @@ func (s *StudyService) FollowCells(changed []int, read []followcam.CellPiece, pr
 			log.Follow.Info("変わったマスでは手が分かれました（違いの出るマスだけ読みます）", "候補", len(rests), "読むマス", len(idx),
 				"見た目を比べる組", len(pairs))
 			return FollowAuto{Kind: FollowChoices, Reason: "違いの出るマスを読みます", ReadCells: idx, Compare: pairs,
-				State: s.State()}, nil
+				State: f.State()}, nil
 		}
 		// ⚠️ **見た目の証拠を、読んだマスより先に使うこと**（2026-10-07）。読んだ駒は成駒を成っていない姿に
 		// 読み違えるが、見た目が変わったかは成駒を学習していなくても分かる。決まらなければ読んだマスで選ぶ。
@@ -1114,8 +1106,8 @@ func (s *StudyService) FollowCells(changed []int, read []followcam.CellPiece, pr
 	moves := rests[0]
 	if len(moves) == 0 {
 		// **今の 1 枚は先端そのもの**（足し済みの手で説明が付いた）。比べる相手にしてよい。
-		return s.baseIf(FollowAuto{Kind: FollowSame, Reason: "盤面は変わっていません", Fit: 1,
-			AtFrame: true, State: s.State()}, nil)
+		return f.baseIf(FollowAuto{Kind: FollowSame, Reason: "盤面は変わっていません", Fit: 1,
+			AtFrame: true, State: f.State()}, nil)
 	}
 	// ⚠️ **行き先に指した側の駒が読めてから控える・足すこと**（2026-10-07。`followBackedByRead`）。
 	// 変わったマスの組だけで決めると「駒が来た」ことを確かめないまま手を足す。確かめは控える周にも
@@ -1132,7 +1124,7 @@ func (s *StudyService) FollowCells(changed []int, read []followcam.CellPiece, pr
 			"見た目を比べる組", len(looks))
 		// ⚠️ **見た目の比べも同じ 1 回で頼むこと**（中継セッションが読むのは 1 回だけ）。
 		return FollowAuto{Kind: FollowChoices, Reason: "行き先のマスを読みます", ReadCells: idx, Compare: looks,
-			State: s.State()}, nil
+			State: f.State()}, nil
 	}
 	if ok, bad, got := followBackedByRead(base, since, moves, read, rotated); !ok {
 		// ⚠️ **読めなくても、動く前の駒と見た目が同じなら「駒が来た」証拠にする**（2026-10-08。`followBackedByLooks`）。
@@ -1140,7 +1132,7 @@ func (s *StudyService) FollowCells(changed []int, read []followcam.CellPiece, pr
 		// 読まれ、相手が次を指して色付けが移るまで止まった。見た目の近さは 0.982（光ったマスとつまんだ駒は 0.499）。
 		if !followBackedByLooks(base, since, moves, read, looks, promo, rotated) {
 			log.Follow.Info("行き先に指した側の駒が読めません（81 マスを読みます）", "moves", moves, "マス", bad, "読んだ駒", got)
-			return FollowAuto{Kind: FollowUnreachable, Reason: "行き先に指した側の駒が読めません", State: s.State()}, nil
+			return FollowAuto{Kind: FollowUnreachable, Reason: "行き先に指した側の駒が読めません", State: f.State()}, nil
 		}
 		log.Follow.Info("行き先は読めませんが、動く前の駒と見た目が同じなので駒が来たと見なします", "moves", moves, "マス", bad)
 		why = append(why, "行き先は見た目で確かめた（"+bad+"）")
@@ -1153,7 +1145,7 @@ func (s *StudyService) FollowCells(changed []int, read []followcam.CellPiece, pr
 	// 本当に動いたなら行き先には同じ見た目の駒がある（近さ 0.98 前後）。光ったマスは似ていない。
 	if bad, sim, ok := followLooksDiffer(looks, promo); ok {
 		log.Follow.Info("行き先の見た目が動いた駒と違います（81 マスを読みます）", "moves", moves, "組", bad, "近さ", fmt.Sprintf("%.3f", sim))
-		return FollowAuto{Kind: FollowUnreachable, Reason: "行き先の見た目が動いた駒と違います", State: s.State()}, nil
+		return FollowAuto{Kind: FollowUnreachable, Reason: "行き先の見た目が動いた駒と違います", State: f.State()}, nil
 	}
 	log.Follow.Info("変わったマスで手を割り出しました", "moves", moves, "足し済み", len(since))
 	if sims := followLookSims(looks, promo); sims != "" {
@@ -1161,21 +1153,21 @@ func (s *StudyService) FollowCells(changed []int, read []followcam.CellPiece, pr
 	}
 	reason := strings.Join(why, "・")
 
-	k := s.takePendingPrefix(moves)
+	k := f.takePendingPrefix(moves)
 	switch {
 	case k == 0:
 		// **初めて出た答え。** 控えて、次の 1 枚を待つ（読んだ盤は無い）。
-		s.setPending(&followPending{tip: s.mainTip(), moves: moves, why: reason})
-		return FollowAuto{Kind: FollowUnique, Pending: true, Reason: "確かめています", State: s.State()}, nil
+		f.setPending(&followPending{tip: f.mainTip(), moves: moves, why: reason})
+		return FollowAuto{Kind: FollowUnique, Pending: true, Reason: "確かめています", State: f.State()}, nil
 	case k == len(moves):
-		return s.fastApply(moves, true, "速い経路（2 枚で確かめた）", reason)
+		return f.fastApply(moves, true, "速い経路（2 枚で確かめた）", reason)
 	default:
 		// **2 枚目のほうが先へ進んでいる**（`followConfirmed` と同じ）。揃った頭だけ足し、残りを控え直す。
-		a, err := s.fastApply(moves[:k], false, "速い経路（2 枚で確かめた・頭だけ）", reason)
+		a, err := f.fastApply(moves[:k], false, "速い経路（2 枚で確かめた・頭だけ）", reason)
 		if err != nil {
 			return a, err
 		}
-		s.setPending(&followPending{tip: s.mainTip(), moves: slices.Clone(moves[k:]), why: reason})
+		f.setPending(&followPending{tip: f.mainTip(), moves: slices.Clone(moves[k:]), why: reason})
 		a.Pending, a.Reason = true, "確かめています"
 		return a, nil
 	}
@@ -1224,17 +1216,15 @@ func followGlowOnly(base *position.Position, since []string, mask, extra *positi
 // ゲーム画面で ▲7八金 の金が直前の手の赤い色付けで空きと読まれ、6九 が空いたのも安く数えられて「何も指していない」に
 // なった。その組を覚えたせいで 10 秒ごとの保険でしか見なくなり、▲7八金 が入るまで 1 分かかった。
 // 駒をつまんで行き先が光っている 1 枚では、浮いた駒はそのマスに読め、光ったマスは空きのマスなので真になる。
-//
-//wails:ignore
-func (s *StudyService) CellsLookUnmoved(cells []int) bool {
-	mask := s.cellsMask(cells)
-	s.mu.Lock()
-	frame := s.follow.lastFrame
+func (f *follower) CellsLookUnmoved(cells []int) bool {
+	mask := f.cellsMask(cells)
+	f.smu.Lock()
+	frame := f.lastFrame
 	var tip *position.Position
-	if s.study != nil {
-		_, tip, _ = s.study.MainTip()
+	if f.tree() != nil {
+		_, tip, _ = f.tree().MainTip()
 	}
-	s.mu.Unlock()
+	f.smu.Unlock()
 	if frame == nil || tip == nil || mask.Count() == 0 {
 		return false
 	}
@@ -1278,9 +1268,9 @@ func followOccupied(base *position.Position, since []string, mask, extra *positi
 
 // followLooksOnly は「変わったのは空きのマスだけで、駒は動いていない」と返す（`LooksOnly`）。
 // ⚠️ **手は足さず、控えず、`AtFrame` も立てない**（光ったマスを比べる相手にしない）。
-func (s *StudyService) followLooksOnly(n int) FollowAuto {
+func (f *follower) followLooksOnly(n int) FollowAuto {
 	log.Follow.Info("変わったのは空きのマスだけです（駒は動いていません。81 マスは読みません）", "マス", n)
-	return FollowAuto{Kind: FollowSame, Reason: "駒は動いていません", LooksOnly: true, State: s.State()}
+	return FollowAuto{Kind: FollowSame, Reason: "駒は動いていません", LooksOnly: true, State: f.State()}
 }
 
 // followImageCells は解析の向きのマスの番号を、撮った画像の向きの番号にする（後手目線なら回す）。
@@ -1513,14 +1503,12 @@ func followCellFits(c position.Cell, piece string) bool {
 // （2026-10-07 に実機で踏んだ。変わったマスが 10 → 34 と増え続けた）。**画素の変化と、足した手の
 // 動かすマスが合うか**で確かめる（`position.ChangedFits`）。
 // cells は撮った画像の向きのマスの番号（`followcam.Shot.Cells`）。
-//
-//wails:ignore
-func (s *StudyService) FrameFits(cells []int) bool {
-	base, since, extra, ok := s.followFromBase()
+func (f *follower) FrameFits(cells []int) bool {
+	base, since, extra, ok := f.followFromBase()
 	if !ok {
 		return false
 	}
-	mask := s.cellsMask(cells)
+	mask := f.cellsMask(cells)
 	if len(since) == 0 {
 		// 何も足していない。何も変わっていなければ（露出の揺れだけ）合っている。
 		return mask.Count() == 0
@@ -1534,29 +1522,29 @@ func (s *StudyService) FrameFits(cells []int) bool {
 	if !position.ChangedFits(base.Board, to.Board, mask, extra) {
 		return false
 	}
-	s.markBase()
+	f.markBase()
 	log.Follow.Info("比べる相手を今の 1 枚に替えました（足した手で変わったマスの説明が付いた）", "足した手", len(since))
 	return true
 }
 
 // fastApply は速い経路で決まった手順を本譜の先に足す。atFrame は「これでこの 1 枚とぴったり合う」か。
-func (s *StudyService) fastApply(moves []string, atFrame bool, route, why string) (FollowAuto, error) {
-	s.mu.Lock()
-	if s.study == nil {
-		s.mu.Unlock()
+func (f *follower) fastApply(moves []string, atFrame bool, route, why string) (FollowAuto, error) {
+	f.smu.Lock()
+	if f.tree() == nil {
+		f.smu.Unlock()
 		return FollowAuto{}, fmt.Errorf("解析タブにまだ局面がありません")
 	}
-	atTip := s.study.CurrentID() == mainTipID(s.study)
-	rev, main, rootSfen := s.rev, s.study.MainLine(), rootSFEN(s.study)
-	s.mu.Unlock()
+	atTip := f.tree().CurrentID() == mainTipID(f.tree())
+	rev, main, rootSfen := f.host.hostRev(), f.tree().MainLine(), rootSFEN(f.tree())
+	f.smu.Unlock()
 
 	text := followText(rootSfen, main, moves)
-	applied, err := s.followApply(moves, rev, atTip)
+	applied, err := f.followApply(moves, rev, atTip)
 	if err != nil {
 		return FollowAuto{}, err
 	}
 	logAdded(route, len(main)+1, moves, text, true, why)
-	return s.baseIf(FollowAuto{Kind: FollowUnique, Applied: true, Moves: slices.Clone(moves), Text: text,
+	return f.baseIf(FollowAuto{Kind: FollowUnique, Applied: true, Moves: slices.Clone(moves), Text: text,
 		Added: applied.Added, Guess: true, Fit: 1, Note: applied.Note, State: applied.State,
 		AtFrame: atFrame}, nil)
 }
@@ -1642,14 +1630,14 @@ func usiCells(mv string) *position.CellMask {
 }
 
 // pendingMoves は**今の先端から控えている手順**（無ければ nil）。
-func (s *StudyService) pendingMoves() []string {
-	tip := s.mainTip()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.follow.pending == nil || s.follow.pending.tip != tip {
+func (f *follower) pendingMoves() []string {
+	tip := f.mainTip()
+	f.smu.Lock()
+	defer f.smu.Unlock()
+	if f.pending == nil || f.pending.tip != tip {
 		return nil
 	}
-	return slices.Clone(s.follow.pending.moves)
+	return slices.Clone(f.pending.moves)
 }
 
 // pendingStillFits は**足せる手が出なかった 1 枚が、控えた手順と矛盾しないか**を返す（2026-10-06）。
@@ -1665,18 +1653,18 @@ func (s *StudyService) pendingMoves() []string {
 // ⚠️ **手が映った 1 枚の空想の手は、今までどおり捨てられること**（`TestFollowAutoDropsTransientFrame`）。
 // 手がどいた 1 枚は「何も指していない」とぴったり合い、空想の手のほうが食い違うので、ここは偽になる。
 // ⚠️ **費用表が無いときは偽**（比べる根拠が無いので今までどおり捨てる）。
-func (s *StudyService) pendingStillFits(board *position.Board, cost *position.CellCost, unseen *position.CellMask) bool {
+func (f *follower) pendingStillFits(board *position.Board, cost *position.CellCost, unseen *position.CellMask) bool {
 	if board == nil || cost == nil {
 		return false
 	}
-	s.mu.Lock()
-	pend := s.follow.pending
-	if pend == nil || s.study == nil || pend.tip != mainTipID(s.study) {
-		s.mu.Unlock()
+	f.smu.Lock()
+	pend := f.pending
+	if pend == nil || f.tree() == nil || pend.tip != mainTipID(f.tree()) {
+		f.smu.Unlock()
 		return false
 	}
-	_, from, err := s.study.MainTip()
-	s.mu.Unlock()
+	_, from, err := f.tree().MainTip()
+	f.smu.Unlock()
 	if err != nil {
 		return false
 	}
@@ -1711,10 +1699,10 @@ type followPending struct {
 	rotated bool
 }
 
-func (s *StudyService) setPending(p *followPending) {
-	s.mu.Lock()
-	s.follow.pending = p
-	s.mu.Unlock()
+func (f *follower) setPending(p *followPending) {
+	f.smu.Lock()
+	f.pending = p
+	f.smu.Unlock()
 }
 
 // takePendingPrefix は控え（今の先端からのもの）と今の答えが**頭から何手揃っているか**を返す。
@@ -1722,31 +1710,31 @@ func (s *StudyService) setPending(p *followPending) {
 //
 // ⚠️ **完全一致を求めないこと**（2026-10-06）。2 枚目が 1 手先まで進んでいると
 // 控え直しが続き、速い手が続くあいだ 1 手も足せなかった（`followConfirmed`）。
-func (s *StudyService) takePendingPrefix(moves []string) int {
-	tip := s.mainTip()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.follow.pending == nil || s.follow.pending.tip != tip {
+func (f *follower) takePendingPrefix(moves []string) int {
+	tip := f.mainTip()
+	f.smu.Lock()
+	defer f.smu.Unlock()
+	if f.pending == nil || f.pending.tip != tip {
 		return 0
 	}
 	k := 0
-	for k < len(moves) && k < len(s.follow.pending.moves) && moves[k] == s.follow.pending.moves[k] {
+	for k < len(moves) && k < len(f.pending.moves) && moves[k] == f.pending.moves[k] {
 		k++
 	}
 	if k > 0 {
-		s.follow.pending = nil
+		f.pending = nil
 	}
 	return k
 }
 
 // mainTip は本譜の先端の節点 id（局面が無ければ -1）。
-func (s *StudyService) mainTip() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.study == nil {
+func (f *follower) mainTip() int {
+	f.smu.Lock()
+	defer f.smu.Unlock()
+	if f.tree() == nil {
 		return -1
 	}
-	return mainTipID(s.study)
+	return mainTipID(f.tree())
 }
 
 // followAddable は下見の結果が**追従が足してよい形か**と、最初に足す手を返す。
@@ -1766,14 +1754,14 @@ func followAddable(p FollowProbe) ([]string, bool) {
 }
 
 // followFrom は撮った 1 枚から**取れるだけ取って足す**（確かめが済んだあとの本体）。
-func (s *StudyService) followFrom(board *position.Board, cost *position.CellCost, unseen *position.CellMask, rotated bool) (a FollowAuto, err error) {
+func (f *follower) followFrom(board *position.Board, cost *position.CellCost, unseen *position.CellMask, rotated bool) (a FollowAuto, err error) {
 	// ⚠️ **先端を見ていたなら付いていく**（`tail -f` と同じ）。
 	// 戻って読んでいるなら**動かさない**（`mergeReloadLocked` と同じ約束）。
 	// ⚠️ **判定は繰り返しに入る前の 1 回だけ** —— 自分で足した手で先端が動くので、
 	// 中で見ると**2 手目以降は必ず「先端ではない」**になる。
-	s.mu.Lock()
-	atTip := s.study != nil && s.study.CurrentID() == mainTipID(s.study)
-	s.mu.Unlock()
+	f.smu.Lock()
+	atTip := f.tree() != nil && f.tree().CurrentID() == mainTipID(f.tree())
+	f.smu.Unlock()
 
 	// unexplained は 1 周目の下見が「駒が来たのに説明が付かない」だったか（`looksFlipped` を呼ぶ条件）。
 	unexplained := false
@@ -1783,7 +1771,7 @@ func (s *StudyService) followFrom(board *position.Board, cost *position.CellCost
 	// 効かず、空きを覆した 4 手の修復に、2五 の歩を桂に覆した 2 手の修復を継いで 6 手を取り違えた（中継で踏んだ）。
 	// 何手も写った 1 枚は `Connect` が 1 回で取る（ぴったり合う手順は `followDeepDepth` まで探す）。
 	for i := 0; i < 2; i++ {
-		p, e := s.followProbe(board, cost, unseen, cost != nil, rotated)
+		p, e := f.followProbe(board, cost, unseen, cost != nil, rotated)
 		if e != nil {
 			if a.Applied {
 				// 途中まで足せているなら、それは成果。**捨てない。**
@@ -1846,10 +1834,10 @@ func (s *StudyService) followFrom(board *position.Board, cost *position.CellCost
 			a.Guess = true
 		}
 		moves := p.Candidates[0].Moves
-		s.mu.Lock()
-		ply := len(s.study.MainLine()) + 1
-		s.mu.Unlock()
-		applied, aerr := s.followApply(moves, p.Rev, atTip)
+		f.smu.Lock()
+		ply := len(f.tree().MainLine()) + 1
+		f.smu.Unlock()
+		applied, aerr := f.followApply(moves, p.Rev, atTip)
 		if aerr != nil {
 			if a.Applied {
 				break
@@ -1867,7 +1855,7 @@ func (s *StudyService) followFrom(board *position.Board, cost *position.CellCost
 		a.Note, a.State = applied.Note, applied.State
 	}
 	if !a.Applied {
-		a.State = s.State()
+		a.State = f.State()
 		// ⚠️ **1 手も足せないときは「目線が逆かもしれない」を疑う**
 		// （2026-09-15 に実機で踏んだ）。
 		//
@@ -1890,7 +1878,7 @@ func (s *StudyService) followFrom(board *position.Board, cost *position.CellCost
 		// 「逆」と言って止めた。⚠️ **費用表が無いとき**は「来た」が判定できないので、今までどおり毎回見る
 		// （`Rank` だけなので安い）。
 		if cost == nil || unexplained {
-			a.Flipped, a.FlipMove = s.looksFlipped(board, cost, unseen, a.Fit)
+			a.Flipped, a.FlipMove = f.looksFlipped(board, cost, unseen, a.Fit)
 		}
 	}
 	if a.Added > 1 {
@@ -2235,11 +2223,11 @@ func followBothLegal(p *position.Position, plain string) bool {
 // ⚠️ **下見の前に盤を書き換えること** —— `Rank` / `Connect`・控え（`followPending.board`）・確かめ
 // （`FollowConfirm`）が同じ盤を見るので、2 枚目でも同じ答えになる。
 // board と cost は解析の向き（`followFrame` が回したあと）、証拠は撮った画像の向き。
-func (s *StudyService) followApplyPromo(board *position.Board, cost *position.CellCost, promo []PromoEvidence, rotated bool) {
+func (f *follower) followApplyPromo(board *position.Board, cost *position.CellCost, promo []PromoEvidence, rotated bool) {
 	if board == nil || len(promo) == 0 {
 		return
 	}
-	base, _, _, ok := s.followFromBase()
+	base, _, _, ok := f.followFromBase()
 	if !ok {
 		log.Follow.Info("成・不成の見た目の証拠を使えません（比べる相手の局面がありません）", "証拠", len(promo))
 		return
@@ -2362,18 +2350,18 @@ func followPromoSplit(since []string, rests [][]string, rotated bool) []followca
 // fit は**今の向きでの一致度**（`FollowProbe.Fit`）で、⚠️ **回した説明はそれより良く合うときだけ採る**
 // （2026-10-06 に実機で踏んだ。▲6八玉 のあとで目線を後手にして採ると、回した盤が
 // 玉の 2 マスを直して △4二玉 で説明が付いてしまい、正しく追えているのに止められた）。
-func (s *StudyService) looksFlipped(board *position.Board, cost *position.CellCost, unseen *position.CellMask, fit float64) (bool, string) {
+func (f *follower) looksFlipped(board *position.Board, cost *position.CellCost, unseen *position.CellMask, fit float64) (bool, string) {
 	if board == nil {
 		return false, ""
 	}
-	s.mu.Lock()
-	if s.study == nil {
-		s.mu.Unlock()
+	f.smu.Lock()
+	if f.tree() == nil {
+		f.smu.Unlock()
 		return false, ""
 	}
-	_, from, err := s.study.MainTip()
-	main, rootSfen := s.study.MainLine(), rootSFEN(s.study)
-	s.mu.Unlock()
+	_, from, err := f.tree().MainTip()
+	main, rootSfen := f.tree().MainLine(), rootSFEN(f.tree())
+	f.smu.Unlock()
 	if err != nil {
 		return false, ""
 	}

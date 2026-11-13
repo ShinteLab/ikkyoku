@@ -853,7 +853,7 @@ func (s *StudyService) currentSession() string {
 }
 
 // mainTipID は本譜の先端の節点（組み立てられなければ根）。**画面へ出す用。**
-func mainTipID(st *position.Study) int {
+func mainTipID(st followTree) int {
 	id, _, err := st.MainTip()
 	if err != nil {
 		return 0
@@ -862,7 +862,7 @@ func mainTipID(st *position.Study) int {
 }
 
 // rootSFEN は根の局面の SFEN（組み上がらなければ空）。**同じ対局かの判定用。**
-func rootSFEN(s *position.Study) string {
+func rootSFEN(s followTree) string {
 	v, err := s.Root().SFEN()
 	if err != nil {
 		return ""

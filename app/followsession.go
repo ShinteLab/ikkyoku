@@ -152,17 +152,13 @@ func (fs *follower) resetLocked() {
 	fs.pending, fs.rewind, fs.dropOffer, fs.base, fs.lastFrame = nil, nil, nil, nil, nil
 }
 
-// StartFollow は**中継を追い始める**（「中継を追う」・枠のボタン・訂正タブの「そのまま追跡」）。追っていれば何もしない。
-//
-// 押した瞬間の盤を追う盤として覚え（訂正してから追うなら訂正した 1 枚。撮る側の `AnchorBoard`）、そのとき読んだ 1 枚を
-// 最初の 1 周として流す（捨てると速い経路の比べる相手が決まるまで 81 マスの読みを待つ。2026-10-07）。決まらなければ
-// 理由を帯に出して止まる。⚠️ **戻るのは始めたところまで**（追う盤を決めるのはループの中）。
-func (s *StudyService) StartFollow() error {
-	cam := s.Camera
+// StartFollow は `StudyService.StartFollow` の中身（約束はあちらの説明。フロントの補完に出るのはあちら）。
+func (f *follower) StartFollow() error {
+	cam := f.host.hostCamera()
 	if cam == nil {
 		return errors.New("撮る側が無いので中継を追えません")
 	}
-	fs := &s.follow
+	fs := f
 	fs.mu.Lock()
 	if fs.on {
 		fs.mu.Unlock()
@@ -177,22 +173,19 @@ func (s *StudyService) StartFollow() error {
 	fs.status, fs.statusKind = "", ""
 	fs.mu.Unlock()
 
-	s.mu.Lock()
+	f.smu.Lock()
 	fs.resetLocked()
-	s.mu.Unlock()
+	f.smu.Unlock()
 	cam.BeginFollow()
 	log.Follow.Info("中継の追跡を始めました")
-	s.followPublish(gen, "追う盤を決めています…", "", &FollowNotice{})
-	go s.followLoop(gen, done)
+	f.followPublish(gen, "追う盤を決めています…", "", &FollowNotice{})
+	go f.followLoop(gen, done)
 	return nil
 }
 
-// StopFollow は**人が中継の追跡を止める**（「追跡を止める」・枠のボタン・追従を壊す操作の確認で「はい」）。
-//
-// ⚠️ **走っている 1 周が終わるまで待ってから返す**（`followStopWait` まで）。画面はこれを待ってから根を入れ替える操作を
-// 通す —— 待たないと、走っている 1 周が入れ替えた局面へ手を足す（`followguard.ts`）。
-func (s *StudyService) StopFollow() {
-	done := s.followStop(-1, "中継の追跡を止めました", "")
+// StopFollow は `StudyService.StopFollow` の中身（約束はあちらの説明。フロントの補完に出るのはあちら）。
+func (f *follower) StopFollow() {
+	done := f.followStop(-1, "中継の追跡を止めました", "")
 	if done == nil {
 		return
 	}
@@ -203,10 +196,9 @@ func (s *StudyService) StopFollow() {
 	}
 }
 
-// ChooseFollow は**帯に並べた打った駒の候補から、人が選んだ手を足す**（2026-10-09。`FollowChoose`）。
-// ⚠️ **選べなくなっていたら理由を帯に出すだけ**（追跡は止めない。次の 1 枚でまた聞く）。
-func (s *StudyService) ChooseFollow(moves []string) {
-	fs := &s.follow
+// ChooseFollow は `StudyService.ChooseFollow` の中身（約束はあちらの説明。フロントの補完に出るのはあちら）。
+func (f *follower) ChooseFollow(moves []string) {
+	fs := f
 	fs.mu.Lock()
 	on, gen := fs.on, fs.gen
 	if on {
@@ -216,25 +208,23 @@ func (s *StudyService) ChooseFollow(moves []string) {
 	if !on || len(moves) == 0 {
 		return
 	}
-	if _, err := s.FollowChoose(moves); err != nil {
-		s.followPublish(gen, "", "", &FollowNotice{Text: err.Error(), Kind: "warn", Fade: true})
+	if _, err := f.FollowChoose(moves); err != nil {
+		f.followPublish(gen, "", "", &FollowNotice{Text: err.Error(), Kind: "warn", Fade: true})
 		return
 	}
-	s.followPublish(gen, followOk, "", &FollowNotice{})
+	f.followPublish(gen, followOk, "", &FollowNotice{})
 }
 
 // FollowHideRefused は**追っているあいだに枠を隠そうとして断った**ことを帯に出す（2026-10-10。撮る側の `HideFrame` から）。
 // 打った駒の候補を出していたら、この文で消えるので次の 1 周で出し直させる。
-//
-//wails:ignore
-func (s *StudyService) FollowHideRefused(message string) {
-	fs := &s.follow
+func (f *follower) FollowHideRefused(message string) {
+	fs := f
 	fs.mu.Lock()
 	on, gen := fs.on, fs.gen
 	fs.dropKey = ""
 	fs.mu.Unlock()
 	if on {
-		s.followPublish(gen, "", "", &FollowNotice{Text: message, Kind: "error", Fade: true})
+		f.followPublish(gen, "", "", &FollowNotice{Text: message, Kind: "error", Fade: true})
 	}
 }
 
@@ -244,8 +234,8 @@ func (s *StudyService) FollowHideRefused(message string) {
 // ⚠️ **どの止まり方でも撮る側の持ち物を捨てること**（`EndFollow`。2026-10-10。止まり方によって忘れ損ねると、
 // 外部エンジンの優先度が下がったまま残り、次に追ったときの録画が前の回のディレクトリに混ざった）。
 // kind が空なら**人が自分で止めた**ときで、読めば済むのでしばらくして消す。
-func (s *StudyService) followStop(gen int, message, kind string) <-chan struct{} {
-	fs := &s.follow
+func (f *follower) followStop(gen int, message, kind string) <-chan struct{} {
+	fs := f
 	fs.mu.Lock()
 	if !fs.on || (gen >= 0 && gen != fs.gen) {
 		fs.mu.Unlock()
@@ -258,46 +248,46 @@ func (s *StudyService) followStop(gen int, message, kind string) <-chan struct{}
 	fs.status, fs.statusKind = "", ""
 	fs.mu.Unlock()
 
-	s.mu.Lock()
+	f.smu.Lock()
 	fs.resetLocked()
-	s.mu.Unlock()
-	if cam := s.Camera; cam != nil {
+	f.smu.Unlock()
+	if cam := f.host.hostCamera(); cam != nil {
 		cam.EndFollow()
 	}
 	log.Follow.Info("中継の追跡を止めました", "理由", message)
-	s.followEmit(FollowUpdate{On: false, Waiting: followWaitingOf(s.State()),
+	f.followEmit(FollowUpdate{On: false, Waiting: followWaitingOf(f.State()),
 		Notice: &FollowNotice{Text: message, Kind: kind, Fade: kind == ""}})
 	return done
 }
 
 // followAlive は回 gen がまだ続いているか。
-func (s *StudyService) followAlive(gen int) bool {
-	s.follow.mu.Lock()
-	defer s.follow.mu.Unlock()
-	return s.follow.on && s.follow.gen == gen
+func (f *follower) followAlive(gen int) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.on && f.gen == gen
 }
 
 // followLoop は回 gen を止まるまで 1 周ずつ回す。⚠️ **1 周ずつ順番に回すこと**（間隔で撮ると、前の 1 枚を読んでいる最中に
 // 次が積み上がる）。⚠️ **1 周の中でエラーが出たら止めて理由を出す**（設計原則3 は「落ちない」であって「黙る」ではない）。
-func (s *StudyService) followLoop(gen int, done chan struct{}) {
+func (f *follower) followLoop(gen int, done chan struct{}) {
 	defer close(done)
 	defer func() {
 		if r := recover(); r != nil {
 			log.Follow.Error("中継の追跡の 1 周で落ちました", "panic", r)
-			s.followStop(gen, fmt.Sprintf("中継の追跡が止まりました（%v）", r), "error")
+			f.followStop(gen, fmt.Sprintf("中継の追跡が止まりました（%v）", r), "error")
 		}
 	}()
-	first, err := s.Camera.AnchorBoard()
+	first, err := f.host.hostCamera().AnchorBoard()
 	if err != nil {
-		s.followStop(gen, err.Error(), "error")
+		f.followStop(gen, err.Error(), "error")
 		return
 	}
 	given := &first
-	for s.followAlive(gen) {
-		soon, err := s.followOnce(gen, given)
+	for f.followAlive(gen) {
+		soon, err := f.followOnce(gen, given)
 		given = nil
 		if err != nil {
-			s.followStop(gen, err.Error(), "error")
+			f.followStop(gen, err.Error(), "error")
 			return
 		}
 		wait := followTick
@@ -309,8 +299,8 @@ func (s *StudyService) followLoop(gen int, done chan struct{}) {
 }
 
 // followOnce は 1 周ぶん。戻り値は「すぐ次の 1 周へ行くか」（手が増えた・控えた）。given は既に撮って読んだ 1 枚（最初の 1 周）。
-func (s *StudyService) followOnce(gen int, given *followcam.Shot) (bool, error) {
-	cam := s.Camera
+func (f *follower) followOnce(gen int, given *followcam.Shot) (bool, error) {
+	cam := f.host.hostCamera()
 	var shot followcam.Shot
 	if given != nil {
 		shot = *given
@@ -320,10 +310,10 @@ func (s *StudyService) followOnce(gen int, given *followcam.Shot) (bool, error) 
 			return false, err
 		}
 	}
-	if !s.followAlive(gen) {
+	if !f.followAlive(gen) {
 		return false, nil
 	}
-	fs := &s.follow
+	fs := f
 	// cells は**この周の 1 枚の、比べる相手から変わったマス**（測っていなければ nil）。
 	cells := shot.Cells
 	var got FollowAuto
@@ -338,19 +328,19 @@ func (s *StudyService) followOnce(gen int, given *followcam.Shot) (bool, error) 
 		pendCells := fs.awaitingCells
 		fs.mu.Unlock()
 		if shot.Skipped != "unchanged" || !pend {
-			s.followPublish(gen, "", "", nil) // 読んでいないので前の状態のまま
+			f.followPublish(gen, "", "", nil) // 読んでいないので前の状態のまま
 			return false, nil
 		}
 		// **控えた 1 枚から変わっていない** ＝ 確かめが済んだ。読み直さずに足す。
 		var err error
-		if got, err = s.FollowConfirm(); err != nil {
+		if got, err = f.FollowConfirm(); err != nil {
 			return false, err
 		}
 		// 変わっていないので、変わったマスも控えた 1 枚と同じ。
 		cells = pendCells
 	case shot.Fast:
 		// **速い経路**（2026-10-07）。⚠️ **「盤が映っていない」と取り違えないこと**（SFEN が空なのは読んでいないから）。
-		fast, err := s.FollowCells(shot.Cells, nil, nil)
+		fast, err := f.FollowCells(shot.Cells, nil, nil)
 		if err != nil {
 			return false, err
 		}
@@ -365,25 +355,25 @@ func (s *StudyService) followOnce(gen int, given *followcam.Shot) (bool, error) 
 			}
 			var promo []PromoEvidence
 			if len(fast.Compare) > 0 {
-				promo = s.followEvidence(fast.Compare)
+				promo = f.followEvidence(fast.Compare)
 			}
-			if fast, err = s.FollowCells(shot.Cells, read, promo); err != nil {
+			if fast, err = f.FollowCells(shot.Cells, read, promo); err != nil {
 				return false, err
 			}
 		}
 		if fast.LooksOnly {
 			// **変わったのは空きのマスだけで、駒は動いていない**（2026-10-08）。⚠️ **81 マスを読まない**・見送りに数えない。
 			cam.CellsUnmoved()
-			s.followSetPending(false, nil)
-			s.followPublish(gen, followOk, "", nil)
+			f.followSetPending(false, nil)
+			f.followPublish(gen, followOk, "", nil)
 			return false, nil
 		}
 		if fast.NoMoves {
 			// **変わったマスを説明できる手順が 1 つも無い**（2026-10-08）。⚠️ **すぐ 81 マスを読まない**（組が変わるのを待つ）・
 			// 見送りに数えない・⚠️ **控えは捨てる**（説明の付かない盤のまま、変わっていない次の 1 枚で控えた手を足さない）。
 			cam.CellsUnclear()
-			s.followSetPending(false, nil)
-			s.followPublish(gen, "", "", nil)
+			f.followSetPending(false, nil)
+			f.followPublish(gen, "", "", nil)
 			return false, nil
 		}
 		if fast.Applied || fast.Pending || fast.AtFrame {
@@ -395,29 +385,29 @@ func (s *StudyService) followOnce(gen int, given *followcam.Shot) (bool, error) 
 		if err != nil {
 			return false, err
 		}
-		read, ok, err := s.followRead(gen, again)
+		read, ok, err := f.followRead(gen, again)
 		if err != nil || !ok {
-			s.followSetPending(false, nil)
+			f.followSetPending(false, nil)
 			return false, err
 		}
 		got = read
 	default:
-		read, ok, err := s.followRead(gen, shot)
+		read, ok, err := f.followRead(gen, shot)
 		if err != nil || !ok {
-			s.followSetPending(false, nil)
+			f.followSetPending(false, nil)
 			return false, err
 		}
 		got = read
 	}
 	if got.Pending {
-		s.followSetPending(true, cells)
+		f.followSetPending(true, cells)
 	} else {
-		s.followSetPending(false, nil)
+		f.followSetPending(false, nil)
 	}
 	if got.Kind == FollowSame && !got.AtFrame && len(cells) > 0 {
 		// **81 マスを読んだら何も指していなかったのに、変わったマスがある**（駒を掴んで行き先が光っている。2026-10-08）。
 		// その組を覚えさせる。⚠️ **駒が空いて見えるマスがあれば覚えさせない**（`CellsLookUnmoved`）。
-		if s.CellsLookUnmoved(cells) {
+		if f.CellsLookUnmoved(cells) {
 			cam.CellsUnmoved()
 		}
 	} else if got.Pending || got.Applied {
@@ -429,7 +419,7 @@ func (s *StudyService) followOnce(gen int, given *followcam.Shot) (bool, error) 
 	// ⚠️ **控えているあいだは替えない**（先端とこの 1 枚が食い違っている）。
 	atFrame := got.AtFrame
 	if !atFrame && !got.Pending && cells != nil {
-		atFrame = s.FrameFits(cells)
+		atFrame = f.FrameFits(cells)
 	}
 	if atFrame {
 		cam.SetCellBase()
@@ -437,47 +427,47 @@ func (s *StudyService) followOnce(gen int, given *followcam.Shot) (bool, error) 
 	// ⚠️ **足したうえで残りを控えた周（`Applied` かつ `Pending`）は足した側として出す**（2026-10-06）。
 	if got.Pending && !got.Applied {
 		// ⚠️ **見送りとして数えない**（足せる手は見つかっている）。間を置かずに次の 1 枚で確かめる。
-		s.followPublish(gen, "手を確かめています", "", nil)
+		f.followPublish(gen, "手を確かめています", "", nil)
 		return true, nil
 	}
-	return s.followAfter(gen, got), nil
+	return f.followAfter(gen, got), nil
 }
 
 // followSetPending は控えの有無と、控えた 1 枚の変わったマスを覚える。
-func (s *StudyService) followSetPending(on bool, cells []int) {
-	s.follow.mu.Lock()
-	s.follow.awaiting, s.follow.awaitingCells = on, cells
-	s.follow.mu.Unlock()
+func (f *follower) followSetPending(on bool, cells []int) {
+	f.mu.Lock()
+	f.awaiting, f.awaitingCells = on, cells
+	f.mu.Unlock()
 }
 
 // followRead は**読んだ 1 枚**を追従に渡す（別の盤・盤が無いなら見送って ok は偽）。
-func (s *StudyService) followRead(gen int, shot followcam.Shot) (FollowAuto, bool, error) {
-	cam := s.Camera
-	waiting := followWaitingOf(s.State())
+func (f *follower) followRead(gen int, shot followcam.Shot) (FollowAuto, bool, error) {
+	cam := f.host.hostCamera()
+	waiting := followWaitingOf(f.State())
 	// ⚠️ **別の盤を先に見ること**（2026-09-18）。盤の有無のふるいで落ちた周は読んでいないので SFEN が空で、
 	// 順番が逆だと大盤が映っているのに「盤が映っていません」と出る。⚠️ **止めないこと**（大盤はすぐ本物へ戻る）。
 	if shot.OffBoard {
 		cam.SaveFollowMiss(waiting, "offboard")
-		s.followPublish(gen, fmt.Sprintf("別の盤が映っています（%s）", shot.OffBoardReason), "", nil)
+		f.followPublish(gen, fmt.Sprintf("別の盤が映っています（%s）", shot.OffBoardReason), "", nil)
 		return FollowAuto{}, false, nil
 	}
 	if shot.SFEN == "" {
 		cam.SaveFollowMiss(waiting, "noboard")
-		s.followPublish(gen, "盤が映っていません", "", nil)
+		f.followPublish(gen, "盤が映っていません", "", nil)
 		return FollowAuto{}, false, nil
 	}
 	// ⚠️ **訂正タブへ流さないこと**（2026-09-15 に実機で踏んだ。人が訂正タブで作業していると上書きされた）。
-	if !s.followAlive(gen) {
+	if !f.followAlive(gen) {
 		return FollowAuto{}, false, nil
 	}
-	got, err := s.FollowAuto(shot.SFEN, shot.CellConfidence, shot.CellHidden, nil)
+	got, err := f.FollowAuto(shot.SFEN, shot.CellConfidence, shot.CellHidden, nil)
 	if err != nil {
 		return got, false, err
 	}
 	// ⚠️ **成りも不成も指せる手なら、動く前と後の見た目を比べて同じ 1 枚でもう一度**（2026-10-07）。
 	// ⚠️ **2 回目は証拠が空でも渡す**（nil だとまた頼まれる）。
 	if len(got.Compare) > 0 {
-		got, err = s.FollowAuto(shot.SFEN, shot.CellConfidence, shot.CellHidden, s.followEvidence(got.Compare))
+		got, err = f.FollowAuto(shot.SFEN, shot.CellConfidence, shot.CellHidden, f.followEvidence(got.Compare))
 		if err != nil {
 			return got, false, err
 		}
@@ -488,8 +478,8 @@ func (s *StudyService) followRead(gen int, shot followcam.Shot) (FollowAuto, boo
 // followEvidence は**動く前と後の駒の見た目を測って**成・不成の証拠にする（2026-10-07）。⚠️ **nil を返さない**（空でも渡す）。
 // ⚠️ **捨てるのは測れなかった組（ちょうど -1）だけ**（似ていない駒どうしは近さが負になりうる）。
 // ⚠️ **`Same` を落とさないこと**（打った駒と盤上の駒の比べ。2026-10-09）。
-func (s *StudyService) followEvidence(pairs []followcam.CellPair) []PromoEvidence {
-	sims := s.Camera.ComparePieces(pairs)
+func (f *follower) followEvidence(pairs []followcam.CellPair) []PromoEvidence {
+	sims := f.host.hostCamera().ComparePieces(pairs)
 	out := []PromoEvidence{}
 	for i, p := range pairs {
 		sim := -1.0
@@ -504,10 +494,10 @@ func (s *StudyService) followEvidence(pairs []followcam.CellPair) []PromoEvidenc
 }
 
 // followAfter は追従の結果（足した・足せなかった）を帯と録画に出す。戻り値は「すぐ次の 1 周へ行くか」。
-func (s *StudyService) followAfter(gen int, got FollowAuto) bool {
-	cam := s.Camera
-	fs := &s.follow
-	waiting := followWaitingOf(s.State())
+func (f *follower) followAfter(gen int, got FollowAuto) bool {
+	cam := f.host.hostCamera()
+	fs := f
+	waiting := followWaitingOf(f.State())
 	if got.Applied {
 		// ⚠️ **「足しました」をどこにも書かないこと**（足した手は手順に出る）。
 		fs.mu.Lock()
@@ -525,12 +515,12 @@ func (s *StudyService) followAfter(gen int, got FollowAuto) bool {
 		}
 		// ⚠️ **手を決めた 1 枚だけを残す**（デバッグ用の録画）。手数は足したあとの「次の手数」から逆算する。
 		cam.SaveFollowFrame(max(waiting-len(got.Moves), 0), got.Moves, got.Guess)
-		s.followPublish(gen, followOk, "", notice)
+		f.followPublish(gen, followOk, "", notice)
 		return true
 	}
 	// ⚠️ **盤が上下逆なら、それを言うのが先**（2026-09-15）。⚠️ **勝手に回さないこと**（盤の向きは局面の解釈そのもの）。
 	if got.Flipped {
-		s.followStop(gen, fmt.Sprintf("盤が上下逆に映っているようです（逆向きなら %s で繋がります）。", got.FlipMove)+
+		f.followStop(gen, fmt.Sprintf("盤が上下逆に映っているようです（逆向きなら %s で繋がります）。", got.FlipMove)+
 			"訂正タブの「目線」を『後手が手前』にして、撮り直して「この局面を解析する」からやり直してください", "warn")
 		return false
 	}
@@ -538,20 +528,20 @@ func (s *StudyService) followAfter(gen int, got FollowAuto) bool {
 	// ⚠️ **「変わっていません」と言わないこと** —— 次にすることは同じ（待つ）でも理由が違う。
 	if got.Unseen > 0 {
 		cam.SaveFollowMiss(waiting, "covered")
-		s.followResetLost()
-		s.followPublish(gen, fmt.Sprintf("盤に何か被っています（%d マス）", got.Unseen), "", nil)
+		f.followResetLost()
+		f.followPublish(gen, fmt.Sprintf("盤に何か被っています（%d マス）", got.Unseen), "", nil)
 		return false
 	}
 	// ⚠️ **「変わっていない」は迷子ではない**（長考中は毎周これ）。⚠️ **ここも残すこと**（認識が外して『変わっていない』に
 	// 見えているときも同じ顔をする。残すのは変わり目だけ。撮る側が間引く）。
 	if got.Kind == FollowSame || got.Kind == FollowUnreadable {
 		cam.SaveFollowMiss(waiting, got.Kind)
-		s.followResetLost()
+		f.followResetLost()
 		status := followOk
 		if got.Kind == FollowUnreadable {
 			status = "盤面として読めません"
 		}
-		s.followPublish(gen, status, "", nil)
+		f.followPublish(gen, status, "", nil)
 		return false
 	}
 	// **打った駒の種類が決まらない**（2026-10-09）。帯に候補を並べて人に選んでもらう。⚠️ **見失いに数えない**・
@@ -578,7 +568,7 @@ func (s *StudyService) followAfter(gen int, got FollowAuto) bool {
 			cam.SaveFollowMiss(waiting, "drop")
 			notice = &FollowNotice{Text: "打った駒の候補", Choices: choices}
 		}
-		s.followPublish(gen, "打った駒が決まりません", "warn", notice)
+		f.followPublish(gen, "打った駒が決まりません", "warn", notice)
 		return false
 	}
 	fs.mu.Lock()
@@ -602,24 +592,24 @@ func (s *StudyService) followAfter(gen int, got FollowAuto) bool {
 		if reason == "" {
 			reason = got.Kind
 		}
-		s.followPublish(gen, fmt.Sprintf("中継の手順を見失っています（%s）", reason), "warn", notice)
+		f.followPublish(gen, fmt.Sprintf("中継の手順を見失っています（%s）", reason), "warn", notice)
 		return false
 	}
-	s.followPublish(gen, followOk, "", notice)
+	f.followPublish(gen, followOk, "", notice)
 	return false
 }
 
 // followResetLost は見失いの数を 0 に戻す。
-func (s *StudyService) followResetLost() {
-	s.follow.mu.Lock()
-	s.follow.lost = 0
-	s.follow.mu.Unlock()
+func (f *follower) followResetLost() {
+	f.mu.Lock()
+	f.lost = 0
+	f.mu.Unlock()
 }
 
 // followPublish は回 gen の様子を画面へ流す（`follow:update`）。status が空なら最後の状態の行のまま（読んでいない周）。
 // notice が nil なら知らせは変えない。⚠️ **止めた回からは流さない**（古いループの結果が止めた画面を書き換えない）。
-func (s *StudyService) followPublish(gen int, status, kind string, notice *FollowNotice) {
-	fs := &s.follow
+func (f *follower) followPublish(gen int, status, kind string, notice *FollowNotice) {
+	fs := f
 	fs.mu.Lock()
 	if !fs.on || fs.gen != gen {
 		fs.mu.Unlock()
@@ -630,15 +620,13 @@ func (s *StudyService) followPublish(gen int, status, kind string, notice *Follo
 	}
 	u := FollowUpdate{On: true, Status: fs.status, StatusKind: fs.statusKind, Notice: notice}
 	fs.mu.Unlock()
-	u.Waiting = followWaitingOf(s.State())
-	s.followEmit(u)
+	u.Waiting = followWaitingOf(f.State())
+	f.followEmit(u)
 }
 
 // followEmit は `follow:update` を流す（`Emit` が無ければ何もしない。設計原則3）。
-func (s *StudyService) followEmit(u FollowUpdate) {
-	if s.Emit != nil {
-		s.Emit("follow:update", u)
-	}
+func (f *follower) followEmit(u FollowUpdate) {
+	f.host.hostEmit(u)
 }
 
 // followWaitingOf は本譜の先端から**次に来るはずの手数**（棋譜の数え方）を割り出す。局面が無ければ 0。
