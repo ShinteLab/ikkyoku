@@ -47,5 +47,6 @@ require (
 	golang.org/x/xerrors v0.0.0-20231012003039-104605ab7028 // indirect
 )
 
-// ikkyoku はタグ未発行のため相対パスの replace で参照する(親 CLAUDE.md の運用に準拠)。
+// ikkyoku は同じリポジトリの中のネストモジュール(ルート)なので相対パスの replace で参照する。
+// ルートと一緒に直すため、タグを待てない。
 replace github.com/ShinteLab/ikkyoku => ../../

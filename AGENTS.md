@@ -117,7 +117,7 @@ Claude Code でスキルとして使いたい人は、各自の `.claude/skills/
 | スキル **`ikkyoku-follow`**（`_docs/skills/`） | **中継の追従の調整とデバッグ**（症状から引く表・録画とログの読み方・ふるいの定数の詰め方・速さの実測） | 追従が進まないとき / 定数を詰めるとき |
 | スキル **`ikkyoku-handicap-mate`**（`_docs/skills/`） | **手合割（駒落ち）と詰将棋の全体像**（3 通りの解釈・4 つの入口・側の呼び名）と**詰将棋エンジンを繋ぐ手順**、⚠️ **どのエンジンが何を返すかの実測**（`references/engines.md`） | 駒落ち・詰将棋・詰み探索を触るとき |
 | スキル **`ikkyoku-cloud`**（`_docs/skills/`） | **クラウド（Linux コンテナ）で組む・テストする 1 コマンド**（`cloud.sh test` / `check`）と、使用量を抑える約束。⚠️ **`CLAUDE_CODE_REMOTE=true` のときだけ読む**（手元では要らない） | クラウドで動いているとき（**手探りで準備する前に**） |
-| スキル `wails3` | Wails3 全般。⚠️ **alpha2.117 前提なので beta.26 と食い違う** | Wails の API で詰まったとき |
+| スキル `wails3` | Wails3 全般。⚠️ **alpha2.117 前提なので v3.0.0 と食い違う** | Wails の API で詰まったとき |
 | **各パッケージの `AGENTS.md`** | **そのコードを触るときの制約**（`recognize` / `position` / `analyze` / `app` / `guide` / `piecefont` / `training` / `legal` / `usi` / `followcam` / `_cmd/ikkyoku`）。**テストが何の歯止めか**も、それぞれの「テスト」節 | そのディレクトリを触るとき（自動で読まれる） |
 | `_cmd/ikkyoku/frontend/src/AGENTS.md` | **画面（フロント）の地図と、崩さないこと 12 箇条** | フロントを触るとき（自動で読まれる） |
 | **`_docs/app-*.md` / `cmd-*.md` / `position-*.md`** | **大きすぎたパッケージの制約を話題ごとに分けたもの**（`app` = 棋譜を読む・手合割と詰将棋・棚・目線・エンジン・追従・指し継ぎ・控え / `cmd` = `_cmd/ikkyoku` のウィンドウ・枠・撮る / `position` = `Connect`・手の木）。⚠️ **自動では読まれない** —— 各パッケージの `AGENTS.md` の索引で引く | そのパッケージを触るとき（**触る前に開く**） |
@@ -307,7 +307,7 @@ go test ./...
 - ⚠️ **`frontend/bindings/` は生成物で git に入っていない。** クローン直後・worktree を作った直後は
   `wails3 generate bindings -ts -i` が要る（忘れると `Cannot find module '../bindings/...'` が延々と出る）
 - ⚠️ **配る exe は `task build:embed`**（`wails3 build` は認識器を焼き込まない）
-- ⚠️ **Wails は手元の CLI に追従している**（beta.26）。スキル `wails3` は alpha2.117 前提なので食い違う
+- ⚠️ **Wails は手元の CLI に追従している**（v3.0.0。2026-11-13 時点）。スキル `wails3` は alpha2.117 前提なので食い違う
 - ⚠️ **実機で押していないものは、作業の終わりの返答とコミットメッセージに「実機で見てほしいこと」として書くこと**
   （「型とテストが通った」を「動いた」と言わない）。⚠️ **積み上げる文書（チェックリスト）を作らないこと** ——
   2026-10-07 にやめた（足すばかりで誰も読んでいなかった）。**1 項目 1 行**で、何を押して何が見えれば良いか。

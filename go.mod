@@ -5,10 +5,12 @@ go 1.26.1
 require (
 	github.com/ShinteLab/core v0.2.0
 	github.com/ShinteLab/engine v0.2.1
-	github.com/ShinteLab/suteme v0.2.7
+	github.com/ShinteLab/kicho v0.2.1
+	github.com/ShinteLab/suteme v0.2.8
 	github.com/kbinani/screenshot v0.0.0-20250624051815-089614a94018
 	github.com/wenteasy/log v0.4.0
 	golang.design/x/hotkey v0.6.1
+	golang.org/x/text v0.40.0
 )
 
 require (
@@ -29,7 +31,6 @@ require (
 )
 
 require (
-	github.com/ShinteLab/kicho v0.2.1
 	github.com/gen2brain/shm v0.1.0 // indirect
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
 	github.com/goml/gobrain v0.0.0-20201212123421-2e2d98ca8249 // indirect
@@ -37,6 +38,5 @@ require (
 	github.com/lxn/win v0.0.0-20210218163916-a377121e959e // indirect
 	golang.org/x/image v0.44.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/text v0.40.0
 	golang.org/x/xerrors v0.0.0-20231012003039-104605ab7028 // indirect
 )
