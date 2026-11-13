@@ -239,7 +239,7 @@ func TestFollowSessionNeedsCamera(t *testing.T) {
 	}
 }
 
-// ⚠️ **答えの控えは追い始めと止めたときに捨てること**（2026-10-11。`followSession.resetLocked`）。前の回の控えを、次の回の
+// ⚠️ **答えの控えは追い始めと止めたときに捨てること**（2026-10-11。`follower.resetLocked`）。前の回の控えを、次の回の
 // 最初の「変わっていない」1 枚で足さない。
 func TestFollowSessionDropsHoldsAtStartAndStop(t *testing.T) {
 	board := boardAfter(t, "7g7f")

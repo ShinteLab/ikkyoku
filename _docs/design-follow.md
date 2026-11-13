@@ -464,6 +464,16 @@
     エンジンの優先度）は関数の差し込み口で受け、型（`Shot` / `CellPiece` / `CellPair`）は `followcam` に置いて `app` が import する
     （写すだけの包み `followcamera.go` は無くした）。ロックは `CaptureService.mu` と分かれた（差し込み口は撮る側のロックの外で呼ぶ）。
     変わった点は 1 つ: `RecognizeQuiet` と `AnchorBoard` の 2 回目の矩形の取得にも枠の門番が掛かる（追っているあいだは枠を隠せないので同じはず）
+  - **第 4 段（2026-11-13）: 追従を `StudyService` から別の型 `follower` に分けた**（全体の見直し。ユーザーの判断）。
+    段取りも判断も `StudyService` のメソッド（約 98 個のうち 52 個）で、第 2 段の `followSession` は状態を持つだけだった。困っていたのは 2 つ ——
+    **追従を単体で試せない**（手の木・控え・評価値・棋譜の取得を持った `StudyService` を丸ごと作る）ことと、
+    `TODO.md` 4 の ①（「追いつく」と「棋譜を起こす」を分ける）で**どこまでが追従でどこからが手の木かの線がコードに無い**こと。
+    `followSession` を `follower` に改名して 52 個をそのメソッドにし、手の木に触る口を `followHost` の 10 個に絞った
+    （`s.study.` の呼び出しを洗うと、書き換えは「足す」「分岐にする」「先端へ移る」の 3 つ、読むのは 5 つのメソッドだけだった）。
+    `StudyService` は公開メソッド 10 個を同じ名前のまま取り次ぐ。⚠️ **動かしたのは置き場所だけ** —— 判断の行・しきい値・順番・
+    早期リターン・ロックの取り方（2 つのまま。`s.mu` は `follower.smu` として同じ所で取る）は変えていない。bindings は移す前と後で 1 バイトも変わらない。
+    パッケージは割らない（9 つの Service が非公開メソッドで繋がっている）。メソッドは 1 ファイルずつではなく 1 回で移した ——
+    `followbase` と `followstudy` が互いに呼び合っていて、途中の段に `follower` から `StudyService` へ戻る仮の取り次ぎが要るため
 
 **制約は `_docs/position-connect.md`（`Connect`）・`_docs/app-follow.md`（`followProbe` / `FollowAuto`）・
 `_docs/cmd-capture.md`（ふるい・録画・枠の札）。実機での調整とデバッグ（症状から引く表・

@@ -435,19 +435,34 @@ followProbe ─> Rank（候補から選ぶ。29µs）─┬─ 読めていな�
 - ⚠️ **止まり方は `followStop` の 1 か所**（人・エラー・panic・盤が上下逆・追う盤が決まらない）。どれでも答えの控えを捨て
   （`resetLocked`）、撮る側の持ち物を捨てる（`EndFollow`）
 - ⚠️ **止めた回のループの結果を流さない**（`gen`。止めてから終わった 1 周が、止めた画面を書き換えない）
-- ⚠️ **セッションの mu を持ったまま `StudyService` のメソッドを呼ばない**（あちらは `StudyService.mu` を取る）
+- ⚠️ **`follower.mu` を持ったまま `smu` を取るものを呼ばない**（`follower.State` や `FollowAuto` など。あちらは `StudyService.mu` を取る）
 - ⚠️ **1 周の中のエラーと panic は止めて理由を出す**（設計原則3 は「落ちない」であって「黙る」ではない）
 - **見張り（1 周が返ってこなければ立て直す）は無くした**。画面の setTimeout は予約を取りこぼしたが、Go のループは
   取りこぼさない。⚠️ **撮る側が固まると、その回はそこで止まったまま**になる（`StopFollow` は `followStopWait` で諦めて返る）
 - ⚠️ **`follow:update` の型は bindings に出ない**（`followcontrol.ts` の `FollowUpdate` を手で合わせる）
 - 枠を隠すのを断ったこと（`HideFrame`）は `FollowHideRefused` で受けて帯に出す（打った駒の候補は次の 1 周で出し直す）
 - **追従の状態も 1 回の持ち物**（第 2 段。2026-10-11）。解析タブ側の答えの控え（`pending` / `rewind` / `dropOffer` / `base` /
-  `lastFrame`）は `followSession` の下半分、撮る側（マスタ・録画・比べる相手の 1 枚・ふるい）は `followcam.Camera` の持ち物
+  `lastFrame`）は `follower` の下半分、撮る側（マスタ・録画・比べる相手の 1 枚・ふるい）は `followcam.Camera` の持ち物
   （`captureFollow`。`followcam/camera.go`）。⚠️ **追い始め（`StartFollow` → `BeginFollow`）で作り直し、止めたとき
   （`followStop` → `EndFollow`）に捨てる** —— 前の回の控えを次の回の最初の「変わっていない」1 枚で足さない・録画を前の回の
-  ディレクトリに混ぜない。⚠️ **`followSession` は守る mu が 2 つ**（ループの状態は自分の mu、答えの控えは `StudyService.mu`）。
+  ディレクトリに混ぜない。⚠️ **`follower` は守る mu が 2 つ**（ループの状態は自分の mu、答えの控えと手の木は `StudyService.mu` ＝ `follower.smu`）。
   ⚠️ **追う前から入るものは持ち物に入れない**（訂正した 1 枚 `followShot`・設定・外部エンジンの優先度を下げたか）
   ⚠️ **追っていないときに `FollowAuto` などを直に呼んでも動くこと**（持ち物はゼロ値で始まる。テストがそうしている）
+
+### 追従は `follower` が持つ（2026-11-13。`follower.go`）
+
+**段取りと判断は `follower` のメソッド**で、`StudyService` は `follower` を 1 つ（`StudyService.follow`）持ち、公開メソッド 10 個を
+同じ名前のまま取り次ぐ。理由は `_docs/design-follow.md` の「第 4 段」。
+
+- ⚠️ **追従のコードは `follower` に書く**（`StudyService` に追従のメソッドを足さない。足すのは公開の口の取り次ぎだけ）
+- ⚠️ **手の木には `followHost` の口だけで触る**（読む `hostTree`・版 `hostRev`・足す `hostGraft`・分岐にする `hostBranch`・
+  先端へ移る `hostGoTip`・`state` / `changed` / `publish`・`hostEmit`・`hostCamera` の 10 個）。⚠️ **口を広げない** ——
+  足したくなったら、それが追従の仕事かを先に疑う（`TODO.md` 4 の ① で「追いつく」と「棋譜を起こす」を分けるときの線）。
+  読むのは読み取り専用の面（`followTree`: `Root` / `MainLine` / `MainGuessTail` / `MainTip` / `CurrentID`）だけ
+- ⚠️ **`publish` 以外の口は `smu` を持って呼ぶ**（今までの `s.mu` と同じ所で取っている）
+- ⚠️ **公開メソッドの名前・シグネチャ・`//wails:ignore` を変えない**（bindings に出る。フロントに出る `StartFollow` /
+  `StopFollow` / `ChooseFollow` の説明は取り次ぎ側に書く —— フロントの補完に出るのはあちら）
+- `src`（訂正タブの `followFrame` / `followRotated`）は手の木ではないので口に入れず、`follower` が直に持つ
 
 **画素差分と盤の有無のふるいは撮る側**（`_docs/cmd-capture.md`。2026-09-18）。
 ⚠️ **ふるいが無くても正しさは保たれる** —— CM や解説の画面は `Rank` の
@@ -521,6 +536,9 @@ followProbe ─> Rank（候補から選ぶ。29µs）─┬─ 読めていな�
   ⚠️ **先端に 1 手足せば合う 1 枚で、順番の入れ替えや取られた駒の成・不成だけが違う差し替えをしないこと**
   （`TestFollowRewindKeepsOrderWhenTipExtends` / `TestFollowRewindKeepsPromotionWhenTipExtends`。2026-10-11 の中継。
   どちらも先端から 1 手の候補が無ければ差し替える形であることを先に確かめている）
+- `follower_test.go` — **追従を `StudyService` 無しで試せること**（2026-11-13）。偽の `followHost`（手の木は本物の `position.Study`）だけで
+  1 手を足せること・版が変わっていたら足さないこと。⚠️ **通らなくなったら、`follower` が口の外に頼り始めている**。
+  テストが `StudyService` から直に呼ぶ非公開の追従のメソッドは `follower_forward_test.go` で取り次ぐ（⚠️ **本体のコードに置かない**）
 - `followsession_test.go` — **中継セッション**（2026-10-11。偽の撮る側でループを実際に回す）。⚠️ 歯止めは ——
   **押したときの 1 枚を最初の 1 周に流し、次の 1 枚が変わっていなければ確かめて足すこと**・**止めたら追う盤を忘れ、
   撮る側の入り切りを戻し、「止めました」を消える知らせで出すこと**・**繋がらない周が続いたら「見失っています」**・
