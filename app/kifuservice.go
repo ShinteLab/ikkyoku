@@ -164,11 +164,11 @@ func describeOpenError(err error) error {
 func describeKifuError(err error) error {
 	switch {
 	case errors.Is(err, kicho.ErrEmptyKifu):
-		return fmt.Errorf("%w。KIF 形式のテキストを貼るか、.kif の URL を指定してください", err)
+		return fmt.Errorf("%w。KIF か CSA 形式のテキストを貼るか、棋譜の URL を指定してください", err)
 	case errors.Is(err, kicho.ErrNotKifu):
 		// 一番よくあるのが「中継のトップページを貼った」。
 		// **棋譜そのものを指しているか**を確かめてもらう。
-		return fmt.Errorf("%w。棋譜そのもの（.kif）を指しているか確かめてください", err)
+		return fmt.Errorf("%w。棋譜そのもの（.kif / .csa）を指しているか確かめてください", err)
 	case errors.Is(err, kicho.ErrUnsupportedSource):
 		// 取り直せるのは取りに行く先があるものだけ。
 		// ⚠️ **貼り付けを「中継だけ」と言わないこと**（2026-09-12）——

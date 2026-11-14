@@ -578,7 +578,7 @@ export function mountInputTab(root: HTMLElement, opts: InputTabOptions): InputTa
   kifuImport.addEventListener("click", () => {
     const text = kifuText.value.trim();
     if (!text) {
-      showKifuStatus("棋譜が空です。KIF 形式のテキストを貼り付けてください。", "error");
+      showKifuStatus("棋譜が空です。KIF 形式か CSA 形式のテキストを貼り付けてください。", "error");
       return;
     }
     void runKifuImport(kifuImport, () => KifuService.ImportKIF(text));

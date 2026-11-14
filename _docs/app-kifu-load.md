@@ -31,7 +31,9 @@
 - **CSA 形式も読める**（2026-11-15）。入口は `position.FromKifu` で、**形式の見分けも読み取りも
   `core/kifu`**（`IsCSA` / `ParseCSA`）。CSA は KIF と同じ `kifu.Document` に寄せてから
   同じ組み立てを通るので、終局・千日手・消費時間・コメントの扱いは KIF と同じ。
-  ⚠️ **URL と「棋譜に登録する」は `kicho` を通る**ので、CSA を受けるかは向こう次第
+  URL と「棋譜に登録する」は `kicho` を通る（kicho v0.3.0 から CSA を受け、**原本のまま形式 `csa` で
+  保存する**）。⚠️ **棚の本文（`GameDetail.KIF`）は欄の名前に反して CSA のこともある**ので、
+  読むときは `position.FromKifu` を通すこと（`FromKIF` を直に呼ばない）
 - **盤面図（BOD）つきの KIF も読める**（2026-09-16。`core/kifu/bod.go`）。途中局面から
   始まる棋譜は手合割ではなく盤面図が根になる。⚠️ **盤面図があるなら 0 手でも通す**
   （`position.FromKIF`）
