@@ -1,16 +1,21 @@
 package position
 
-// KIF テキストから検討（根 + 手順）を組み立てる入口（Phase 5 の「棋譜を貼り付ける」）。
+// 棋譜のテキスト（KIF / CSA）から検討（根 + 手順）を組み立てる入口（Phase 5 の「棋譜を貼り付ける」）。
 //
 // ⚠️ **画像を知らない層のまま。** 貼り付けた棋譜には画像も座標系も無いので、
 // `recognize` を通らずに直接ここへ入る。訂正タブを経由しないのは、
 // **棋譜の局面は既に確定している**（初期局面 + 手順で一意に決まる）から。
 //
-// **KIF の読み取りも、指し手 → USI の変換も `core/kifu`。** ここに書かないこと
+// **KIF / CSA の読み取りも、指し手 → USI の変換も `core/kifu`。** ここに書かないこと
 // （将棋の**仕様**は core に一本化する）。ここがやるのは
 // 「読めた手を 1 手ずつ Study に指させる」というアプリ側の組み立てだけ。
+//
+// **CSA も KIF と同じ `kifu.Document` で受ける**（2026-11-15。`kifu.ParseCSA` が寄せる）。
+// ⚠️ **組み立てを形式ごとに分けないこと**（`fromDocument` の 1 本）。分けると
+// 終局・千日手・消費時間・コメントの扱いが片方だけ古くなる。
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -50,6 +55,39 @@ func FromKIF(text string) (*Study, KIFLoad, error) {
 	if err != nil {
 		return nil, KIFLoad{}, err
 	}
+	return fromDocument(doc, "")
+}
+
+// FromKifu は棋譜のテキストを、形式を見分けて読む（CSA なら `FromCSA`、それ以外は `FromKIF`）。
+//
+// **貼り付け・URL・棚の入口はこれを呼ぶ**（2026-11-15）。見分けは `kifu.IsCSA`
+// （**仕様は core**。ここで行の形を見ないこと）。
+func FromKifu(text string) (*Study, KIFLoad, error) {
+	if kifu.IsCSA(text) {
+		return FromCSA(text)
+	}
+	return FromKIF(text)
+}
+
+// FromCSA は CSA 形式の棋譜を読んで検討を組み立てる（2026-11-15）。
+//
+// ⚠️ **指し手の途中で読めなくなってもエラーにしない**（`FromKIF` と同じ。設計原則3）。
+// そこまでの手を載せて、理由を `Note` に出す。error を返すのは開始局面が読めないときなど。
+func FromCSA(text string) (*Study, KIFLoad, error) {
+	doc, err := kifu.ParseCSA(text)
+	note := ""
+	if err != nil {
+		if !errors.Is(err, kifu.ErrCSAMoves) {
+			return nil, KIFLoad{}, err
+		}
+		note = err.Error()
+	}
+	return fromDocument(doc, note)
+}
+
+// fromDocument は読めた棋譜（`kifu.Document`）から検討を組み立てる（KIF と CSA で共通）。
+// note は読み取りの段階で止まった理由（無ければ空）。
+func fromDocument(doc kifu.Document, note string) (*Study, KIFLoad, error) {
 	// ⚠️ **kifu.Parse は指し手 0 手をエラーにしない**（中継は対局前から
 	// ヘッダだけの棋譜を配信しているため）。断るのは**ヘッダも手も盤面図も
 	// 1 つも読めなかった**とき（HTML やただの文章 = 貼り間違い）だけ。
@@ -75,6 +113,7 @@ func FromKIF(text string) (*Study, KIFLoad, error) {
 	// ⚠️ **変換に失敗しても、そこまでの手は返ってくる。** 理由は Note に回す。
 	moves, decodeErr := kifu.DecodeMoves(doc.Moves)
 	load.Total = len(moves)
+	load.Note = note
 	if decodeErr != nil {
 		load.Note = decodeErr.Error()
 	}

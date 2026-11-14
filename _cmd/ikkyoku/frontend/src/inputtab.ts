@@ -184,7 +184,7 @@ export function mountInputTab(root: HTMLElement, opts: InputTabOptions): InputTa
     <div class="setting-group">
       <span class="setting-title" data-hint="hint-paste">棋譜を貼り付ける</span>
       <span id="hint-paste" class="setting-note is-hint">
-        KIF 形式の棋譜を貼って<strong>「解析する」</strong>を押すと、
+        KIF 形式か CSA 形式の棋譜を貼って<strong>「解析する」</strong>を押すと、
         <strong>指し手を全て反映した局面</strong>で<strong>解析タブ</strong>が開きます。
         手順は盤の右に並ぶので、押せばその局面まで戻れます。
         <strong>訂正タブは通りません</strong>（棋譜の局面は初期局面と手順で決まるため）。
@@ -536,7 +536,7 @@ export function mountInputTab(root: HTMLElement, opts: InputTabOptions): InputTa
   kifuLoad.addEventListener("click", () => {
     const text = kifuText.value.trim();
     if (!text) {
-      showKifuStatus("棋譜が空です。KIF 形式のテキストを貼り付けてください。", "error");
+      showKifuStatus("棋譜が空です。KIF 形式か CSA 形式のテキストを貼り付けてください。", "error");
       return;
     }
     void runKifuLoad(kifuLoad, () => StudyService.LoadKifu(text));

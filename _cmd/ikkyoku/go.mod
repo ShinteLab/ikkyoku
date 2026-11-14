@@ -3,7 +3,7 @@ module ikkyoku
 go 1.26.1
 
 require (
-	github.com/ShinteLab/core v0.2.0
+	github.com/ShinteLab/core v0.3.0
 	github.com/ShinteLab/ikkyoku v0.0.0-00010101000000-000000000000
 	github.com/wailsapp/wails/v3 v3.0.0
 	golang.org/x/sys v0.48.0

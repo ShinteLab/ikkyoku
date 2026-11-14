@@ -488,7 +488,7 @@ func (s *StudyService) loadKifuFrom(text, sourceURL, gameID, key string) (load K
 	// ⚠️ **ロックを取る前に呼ぶこと**（向こうがロックを取る）。
 	s.saveNow()
 
-	study, k, err := position.FromKIF(text)
+	study, k, err := position.FromKifu(text)
 	if err != nil {
 		return KifuLoad{State: s.State()}, err
 	}
@@ -670,7 +670,7 @@ func (s *StudyService) reloadKifu(advance bool) (load KifuLoad, err error) {
 	}
 	// ⚠️ **取れなかった / 読めなかったときは今の手順を壊さないこと。**
 	// 組み立てが通ってから初めて入れ替える。
-	study, k, err := position.FromKIF(got.Text)
+	study, k, err := position.FromKifu(got.Text)
 	if err != nil {
 		return KifuLoad{State: s.State()}, err
 	}
@@ -746,7 +746,7 @@ func (s *StudyService) graftKifu(text string) (load KifuLoad, err error) {
 	s.saveNow()
 
 	// ⚠️ **読めなかったときは今の手順を壊さないこと**（`ReloadKifu` と同じ）。
-	study, k, err := position.FromKIF(text)
+	study, k, err := position.FromKifu(text)
 	if err != nil {
 		return KifuLoad{State: s.State()}, err
 	}
