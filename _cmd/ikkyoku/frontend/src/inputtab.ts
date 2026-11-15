@@ -12,6 +12,7 @@
 // （`sidepane.ts` と同じ型）。**訂正タブにも解析タブにも直には触れない** —— 局面を出すのも、
 // 訂正タブを置き換えるのも呼び出し側（撮った画像に紐づくものの片付けは `edittab.ts` の `clearShotContext`）。
 // ⚠️ **局面の写しを持たない**（frontend/src/AGENTS.md の 5）。
+import { Events } from "@wailsio/runtime";
 import { CaptureService } from "../bindings/ikkyoku";
 import { KifuService, StudyService } from "../bindings/github.com/ShinteLab/ikkyoku/app";
 import type {
@@ -181,11 +182,13 @@ export function mountInputTab(root: HTMLElement, opts: InputTabOptions): InputTa
 
     <!-- 棋譜を貼り付ける。**画像を通らない 2 つめの入口**なので、行き先も違う
          （撮影は認識を通るので訂正タブ、棋譜は既に確定しているので解析タブ）。 -->
-    <div class="setting-group">
+    <!-- ⚠️ **ファイルを落とせるのはこの群だけ**（2026-11-15。data-file-drop-target）。
+         id は Go 側の KifuDropTarget と揃える（Go は落ちた要素の id で確かめる）。 -->
+    <div class="setting-group kifu-drop" id="kifu-drop" data-file-drop-target>
       <span class="setting-title" data-hint="hint-paste">棋譜を貼り付ける</span>
       <span id="hint-paste" class="setting-note is-hint">
-        KIF 形式か CSA 形式の棋譜を貼るか、<strong>「ファイルを開く…」</strong>で
-        .kif / .csa を読み込んで<strong>「解析する」</strong>を押すと、
+        KIF 形式か CSA 形式の棋譜を貼るか、<strong>「ファイルを開く…」</strong>か
+        ここへのドラッグ＆ドロップで .kif / .csa を読み込んで<strong>「解析する」</strong>を押すと、
         <strong>指し手を全て反映した局面</strong>で<strong>解析タブ</strong>が開きます。
         手順は盤の右に並ぶので、押せばその局面まで戻れます。
         <strong>訂正タブは通りません</strong>（棋譜の局面は初期局面と手順で決まるため）。
@@ -508,6 +511,12 @@ export function mountInputTab(root: HTMLElement, opts: InputTabOptions): InputTa
   // 「解析する」「棋譜に登録する」。⚠️ **文字コードをここで持たないこと** —— 開いた本文のまま
   // 登録されたら元の文字コードを残すのは Go 側（`KifuService.ImportKIF`）。
   // ⚠️ **取り消しは失敗ではない**（空の本文が返る。欄も状態も変えない）。
+  // 開いた・落としたファイルの中身を欄に入れる（**ここから先はどちらから来たかで変えない**）。
+  const fillFromFile = (got: { name: string; text: string; encoding: string }, note = "") => {
+    kifuText.value = got.text;
+    const encoding = got.encoding === "shift_jis" ? "Shift_JIS" : "UTF-8";
+    showKifuStatus(`${got.name} を読み込みました（${encoding}）${note}`);
+  };
   const kifuFile = root.querySelector<HTMLButtonElement>("#kifu-file")!;
   kifuFile.addEventListener("click", () => {
     void (async () => {
@@ -517,9 +526,7 @@ export function mountInputTab(root: HTMLElement, opts: InputTabOptions): InputTa
         if (!got?.text) {
           return; // 取り消し
         }
-        kifuText.value = got.text;
-        const encoding = got.encoding === "shift_jis" ? "Shift_JIS" : "UTF-8";
-        showKifuStatus(`${got.name} を読み込みました（${encoding}）`);
+        fillFromFile(got);
       } catch (err) {
         showKifuStatus(
           `ファイルを読み込めませんでした: ${String(err instanceof Error ? err.message : err)}`,
@@ -529,6 +536,19 @@ export function mountInputTab(root: HTMLElement, opts: InputTabOptions): InputTa
         kifuFile.disabled = false;
       }
     })();
+  });
+  // `kifu:dropped` の中身（Go の `app.KifuDrop`）。⚠️ **bindings には出ない**（`DropKifuFiles` は
+  // `//wails:ignore` なので型が生成されない）ので、ここで形を書く。**Go の json タグと揃えること。**
+  type KifuDrop = { name: string; text: string; encoding: string; error: string; skipped: number };
+  // ドラッグ＆ドロップ（2026-11-15）。**読むのは Go 側**（`KifuService.DropKifuFiles`。落ちた先が
+  // この群のときだけ）で、ここは届いた中身を欄に入れるだけ。⚠️ **2 つ目以降は読まない**（欄は 1 つ）。
+  Events.On("kifu:dropped", (event: { data: KifuDrop }) => {
+    const got = event.data;
+    if (got.error) {
+      showKifuStatus(`ファイルを読み込めませんでした: ${got.error}`, "error");
+      return;
+    }
+    fillFromFile(got, got.skipped > 0 ? `。ほかの ${got.skipped} 個は読んでいません` : "");
   });
   // 貼り付けでも URL でも、読み込んだあとにやることは同じ。
   // **1 か所にまとめてある**（2 つに分けると、片方だけ直したときに挙動が食い違う）。

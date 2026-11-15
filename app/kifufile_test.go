@@ -102,3 +102,29 @@ func TestOpenKifuFileCancelEmptyAndLarge(t *testing.T) {
 		t.Error("大きすぎるファイルが通った")
 	}
 }
+
+// **落とされたファイルも「ファイルを開く…」と同じ扱い**（読むのは最初の 1 つ・元の文字コードを覚える）。
+func TestDropKifuFiles(t *testing.T) {
+	svc, _ := newTestKifuService(t)
+	sjis, err := japanese.ShiftJIS.NewEncoder().String(testKIF)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, _ := writeKifuFile(t, "first.kif", []byte(sjis))
+	second, _ := writeKifuFile(t, "second.csa", []byte("PI\n+\n"))
+	got := svc.DropKifuFiles([]string{first, second})
+	if got.Error != "" || got.Name != "first.kif" || got.Skipped != 1 || got.Encoding != kicho.EncodingShiftJIS {
+		t.Fatalf("KifuDrop = %+v", got)
+	}
+	if enc := svc.encodingFor(got.Text); enc != kicho.EncodingShiftJIS {
+		t.Errorf("落としたファイルの文字コードを覚えていない: %q", enc)
+	}
+	// 読めなければ理由を返す（パニックしない・前に開いた本文は覚えたまま）。
+	bad := svc.DropKifuFiles([]string{filepath.Join(t.TempDir(), "missing.kif")})
+	if bad.Error == "" || bad.Text != "" {
+		t.Errorf("読めないファイル = %+v", bad)
+	}
+	if empty := svc.DropKifuFiles(nil); empty.Error == "" {
+		t.Error("空のドロップに理由が無い")
+	}
+}

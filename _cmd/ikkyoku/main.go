@@ -322,6 +322,24 @@ func wireWails(app *application.App, wins *appWindows, sv services, issues *ikky
 	// （`app.Event.Emit` はアプリ全体に届く）。
 	studySvc.Emit = func(name string, data any) { app.Event.Emit(name, data) }
 	issues.Emit = func(name string, data any) { app.Event.Emit(name, data) }
+	registerKifuDrop(app, wins.main, sv.kifu)
+}
+
+// registerKifuDrop は**メイン画面に落とされた棋譜ファイル**を読んで画面へ届ける（2026-11-15）。
+//
+// ⚠️ **落ちた要素が「棋譜を貼り付ける」の群のときだけ読む**（`ikkyokuapp.KifuDropTarget`）。
+// Wails は `data-file-drop-target` を付けた要素にしか落とさせないが、受け先を増やしたときに
+// 別の場所のドロップを棋譜として読まないよう、id でも確かめる。
+// ⚠️ **FilesDropped は `RegisterHook` では受けられない**（Wails v3.0.0 は listener にだけ配る）。
+func registerKifuDrop(app *application.App, main *application.WebviewWindow, kifu *ikkyokuapp.KifuService) {
+	main.OnWindowEvent(events.Common.WindowFilesDropped, func(e *application.WindowEvent) {
+		ctx := e.Context()
+		target := ctx.DropTargetDetails()
+		if target == nil || target.ElementID != ikkyokuapp.KifuDropTarget {
+			return
+		}
+		app.Event.Emit(ikkyokuapp.KifuDroppedEvent, kifu.DropKifuFiles(ctx.DroppedFiles()))
+	})
 }
 
 // openKifuDBAtStartup は棚を開き、設定タブで場所を変えたときに開き直す口を繋ぐ。
@@ -620,6 +638,10 @@ func newMainWindow(app *application.App, st guide.Window) (*application.WebviewW
 		Frameless: true,
 		// 出すのは revealMain。上の ⚠️ を読むこと。
 		Hidden: true,
+		// 棋譜ファイルのドラッグ＆ドロップ（2026-11-15。`registerKifuDrop`）。
+		// ⚠️ **受けるのは `data-file-drop-target` を付けた要素だけ**（入力タブの「棋譜を貼り付ける」）。
+		// ほかの場所では「置けない」カーソルになり、落としても何も起きない。
+		EnableFileDrop: true,
 		// AlwaysOnTop は付けない。中継を観ながら使う画面なので、最前面に居座ると
 		// 中継そのものを覆ってしまう。最前面が要るのは位置合わせをする枠だけ。
 	}

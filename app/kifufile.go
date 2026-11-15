@@ -65,6 +65,52 @@ func (s *KifuService) OpenKifuFile() (KifuFile, error) {
 	if path == "" {
 		return KifuFile{}, nil // 取り消し
 	}
+	return s.adoptKifuFile(path, "開きました")
+}
+
+// KifuDropTarget は棋譜ファイルを落とせる場所（入力タブの「棋譜を貼り付ける」の群）の要素 ID（2026-11-15）。
+//
+// ⚠️ **画面の `data-file-drop-target` を付けた要素の id と揃えること**（`inputtab.ts` の `#kifu-drop`）。
+// Wails は落ちた要素の id を一緒に渡してくるので、`_cmd/ikkyoku` はこれと同じときだけ `DropKifuFiles` を呼ぶ。
+const KifuDropTarget = "kifu-drop"
+
+// KifuDroppedEvent は落とされた棋譜ファイルを画面へ届けるイベントの名前（中身は `KifuDrop`）。
+const KifuDroppedEvent = "kifu:dropped"
+
+// KifuDrop は落とされた棋譜ファイル（`kifu:dropped` で画面へ届く）。
+type KifuDrop struct {
+	KifuFile
+	// Error は読めなかった理由（読めたなら空）。
+	Error string `json:"error"`
+	// Skipped は読まなかったファイルの数（**読むのは最初の 1 つだけ**）。
+	Skipped int `json:"skipped"`
+}
+
+// DropKifuFiles は落とされた棋譜ファイルを読む（2026-11-15。入力タブの「棋譜を貼り付ける」へのドラッグ＆ドロップ）。
+//
+// **「ファイルを開く…」で選んだのと同じ扱い**（中身を貼り付け欄に入れるだけ・開いた本文のまま
+// 登録したら元の文字コードを残す）。⚠️ **読むのは最初の 1 つだけ** —— 貼り付け欄は 1 つなので、
+// 2 つ目以降は読まずに数だけ返す（画面が「1 つだけ読みました」と出す）。
+//
+// ⚠️ **`//wails:ignore` を外さないこと。** `_cmd/ikkyoku` がドロップのイベントから呼ぶ口で、
+// フロントの API ではない（外すと画面から任意のパスを読めてしまう）。
+//
+//wails:ignore
+func (s *KifuService) DropKifuFiles(paths []string) KifuDrop {
+	if len(paths) == 0 {
+		return KifuDrop{Error: "ファイルがありません"}
+	}
+	got, err := s.adoptKifuFile(paths[0], "落とされたので読みました")
+	drop := KifuDrop{KifuFile: got, Skipped: len(paths) - 1}
+	if err != nil {
+		drop.Error = err.Error()
+	}
+	return drop
+}
+
+// adoptKifuFile は棋譜ファイルを読み、**登録するときに元の文字コードを残せるよう覚える**
+// （「ファイルを開く…」とドロップの合流点。ここから先はどちらから来たかで変えない）。
+func (s *KifuService) adoptKifuFile(path, how string) (KifuFile, error) {
 	got, err := readKifuFile(path)
 	if err != nil {
 		return KifuFile{}, err
@@ -73,7 +119,7 @@ func (s *KifuService) OpenKifuFile() (KifuFile, error) {
 	s.lastKifuDir = filepath.Dir(path)
 	s.opened = openedKifu{text: normalizeKifuText(got.Text), encoding: got.Encoding}
 	s.mu.Unlock()
-	log.Info("棋譜ファイルを開きました", "path", path, "encoding", got.Encoding, "bytes", len(got.Text))
+	log.Info("棋譜ファイルを"+how, "path", path, "encoding", got.Encoding, "bytes", len(got.Text))
 	return got, nil
 }
 

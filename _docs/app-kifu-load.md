@@ -51,6 +51,11 @@
   最後に開いた本文を覚えて比べる）。⚠️ **比べるときは改行を揃える**（textarea は CRLF を LF にして返す）
 - ⚠️ **棚が開けていなくても開ける**（`library()` を呼ばない。設計原則3）
 - 上限 4MiB（URL と同じ）。取り消しはエラーではない（空の本文が返り、画面は何も変えない）
+- **ドラッグ＆ドロップも同じ扱い**（`KifuService.DropKifuFiles` → `kifu:dropped`。合流点は `adoptKifuFile`）。
+  ⚠️ **受けるのは「棋譜を貼り付ける」の群だけ**（`data-file-drop-target` と id `kifu-drop` =
+  `KifuDropTarget`。メイン画面の `EnableFileDrop`。`_cmd/ikkyoku` の `registerKifuDrop` が id で確かめる）。
+  ⚠️ **読むのは最初の 1 つだけ**（欄は 1 つ）。⚠️ **`DropKifuFiles` は `//wails:ignore`** —— 画面から
+  任意のパスを読ませない（パスは Wails のドロップからしか来ない）
 
 ## URL から取る（`kifufetch.go` → `kicho`）
 
