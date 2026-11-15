@@ -322,23 +322,47 @@ func wireWails(app *application.App, wins *appWindows, sv services, issues *ikky
 	// （`app.Event.Emit` はアプリ全体に届く）。
 	studySvc.Emit = func(name string, data any) { app.Event.Emit(name, data) }
 	issues.Emit = func(name string, data any) { app.Event.Emit(name, data) }
-	registerKifuDrop(app, wins.main, sv.kifu)
+	registerFileDrop(app, wins.main, sv.kifu, captureSvc)
 }
 
-// registerKifuDrop は**メイン画面に落とされた棋譜ファイル**を読んで画面へ届ける（2026-11-15）。
+// imageDropTarget は画像ファイルを落とせる場所（入力タブの「画像ファイルを読み込む」の群）の要素 ID（2026-11-15）。
+// ⚠️ **画面の `#image-drop`（`inputtab.ts`）と揃えること。**
+const imageDropTarget = "image-drop"
+
+// registerFileDrop は**メイン画面に落とされたファイル**を、落ちた群に応じて読む（2026-11-15）。
 //
-// ⚠️ **落ちた要素が「棋譜を貼り付ける」の群のときだけ読む**（`ikkyokuapp.KifuDropTarget`）。
-// Wails は `data-file-drop-target` を付けた要素にしか落とさせないが、受け先を増やしたときに
-// 別の場所のドロップを棋譜として読まないよう、id でも確かめる。
+//   - 「棋譜を貼り付ける」（`ikkyokuapp.KifuDropTarget`）→ 棋譜として読んで貼り付け欄へ（`kifu:dropped`）
+//   - 「画像ファイルを読み込む」（`imageDropTarget`）→ **「画像を選ぶ…」と同じ経路**（`loadImage`）で
+//     認識して訂正タブへ（`capture:shot` / `capture:done`。読めなければ `image:drop-failed`）
+//
+// ⚠️ **落ちた群の id で振り分ける**（Wails は落ちた位置にいちばん近い `data-file-drop-target` の id を渡す）。
+// どちらでもない id のドロップは読まない。⚠️ **読むのは最初の 1 つだけ**（どちらも 1 つずつしか受けない）。
 // ⚠️ **FilesDropped は `RegisterHook` では受けられない**（Wails v3.0.0 は listener にだけ配る）。
-func registerKifuDrop(app *application.App, main *application.WebviewWindow, kifu *ikkyokuapp.KifuService) {
+func registerFileDrop(app *application.App, main *application.WebviewWindow, kifu *ikkyokuapp.KifuService, capture *CaptureService) {
 	main.OnWindowEvent(events.Common.WindowFilesDropped, func(e *application.WindowEvent) {
 		ctx := e.Context()
 		target := ctx.DropTargetDetails()
-		if target == nil || target.ElementID != ikkyokuapp.KifuDropTarget {
+		files := ctx.DroppedFiles()
+		if target == nil || len(files) == 0 {
 			return
 		}
-		app.Event.Emit(ikkyokuapp.KifuDroppedEvent, kifu.DropKifuFiles(ctx.DroppedFiles()))
+		switch target.ElementID {
+		case ikkyokuapp.KifuDropTarget:
+			app.Event.Emit(ikkyokuapp.KifuDroppedEvent, kifu.DropKifuFiles(files))
+		case imageDropTarget:
+			if len(files) > 1 {
+				log.Info("画像は最初の 1 つだけ読みます", "読む", files[0], "読まない", len(files)-1)
+			}
+			// ⚠️ **認識は数秒かかるので、ドロップの listener の外で走らせる**（返事はイベントで届く）。
+			go func(path string) {
+				if _, err := capture.loadImage(path); err != nil {
+					log.Warn("落とされた画像を読み込めませんでした", "path", path, "error", err)
+					// ⚠️ **`capture:failed` にしない** —— あちらは「キャプチャに失敗しました」と出す。
+					// 出し方は「画像を選ぶ…」で読めなかったときと同じ（`inputtab.ts`）。
+					app.Event.Emit("image:drop-failed", err.Error())
+				}
+			}(files[0])
+		}
 	})
 }
 
@@ -638,8 +662,8 @@ func newMainWindow(app *application.App, st guide.Window) (*application.WebviewW
 		Frameless: true,
 		// 出すのは revealMain。上の ⚠️ を読むこと。
 		Hidden: true,
-		// 棋譜ファイルのドラッグ＆ドロップ（2026-11-15。`registerKifuDrop`）。
-		// ⚠️ **受けるのは `data-file-drop-target` を付けた要素だけ**（入力タブの「棋譜を貼り付ける」）。
+		// 棋譜ファイルと画像ファイルのドラッグ＆ドロップ（2026-11-15。`registerFileDrop`）。
+		// ⚠️ **受けるのは `data-file-drop-target` を付けた要素だけ**（入力タブの「画像ファイルを読み込む」と「棋譜を貼り付ける」）。
 		// ほかの場所では「置けない」カーソルになり、落としても何も起きない。
 		EnableFileDrop: true,
 		// AlwaysOnTop は付けない。中継を観ながら使う画面なので、最前面に居座ると

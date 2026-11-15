@@ -77,13 +77,16 @@ export function mountInputTab(root: HTMLElement, opts: InputTabOptions): InputTa
          ⚠️ **結果の行は下の #status を共用する。** 撮ったのか読み込んだのかで
          **別の面を作らない** —— 出てくるものは同じ「画像から起こした 1 局面」で、
          この先の訂正も学習への還元も 1 つの経路しかない。 -->
-    <div class="setting-group">
+    <!-- ⚠️ **画像ファイルを落とせるのはこの群だけ**（2026-11-15。data-file-drop-target）。
+         id は Go 側の imageDropTarget と揃える。落とした画像は「画像を選ぶ…」と同じ経路で読む。 -->
+    <div class="setting-group file-drop" id="image-drop" data-file-drop-target>
       <span class="setting-title" data-hint="hint-image">画像ファイルを読み込む</span>
       <span id="hint-image" class="setting-note is-hint">
         手元の画像（PNG / JPEG / GIF）から盤面を認識します。
         撮るのと同じで、読み込むと<strong>訂正タブ</strong>が開きます。
         <strong>枠は要りません</strong>（どこを撮るかの指定が無いので）。
         撮り溜めた PNG を<strong>認識し直す</strong>のにも使えます。
+        ここへのドラッグ＆ドロップでも読み込めます。
       </span>
       <div class="setting-fields">
         <button id="image-open" class="ghost-btn is-primary" type="button">画像を選ぶ…</button>
@@ -184,7 +187,7 @@ export function mountInputTab(root: HTMLElement, opts: InputTabOptions): InputTa
          （撮影は認識を通るので訂正タブ、棋譜は既に確定しているので解析タブ）。 -->
     <!-- ⚠️ **ファイルを落とせるのはこの群だけ**（2026-11-15。data-file-drop-target）。
          id は Go 側の KifuDropTarget と揃える（Go は落ちた要素の id で確かめる）。 -->
-    <div class="setting-group kifu-drop" id="kifu-drop" data-file-drop-target>
+    <div class="setting-group file-drop" id="kifu-drop" data-file-drop-target>
       <span class="setting-title" data-hint="hint-paste">棋譜を貼り付ける</span>
       <span id="hint-paste" class="setting-note is-hint">
         KIF 形式か CSA 形式の棋譜を貼るか、<strong>「ファイルを開く…」</strong>か
@@ -299,6 +302,13 @@ export function mountInputTab(root: HTMLElement, opts: InputTabOptions): InputTa
   // ⚠️ **取り消しは失敗ではない**（ダイアログを閉じただけ）。Go 側はパスが空の
   // 結果を返し、イベントも出さないので、**画面を 1 つも変えずに黙って戻る**。
   const imageOpen = root.querySelector<HTMLButtonElement>("#image-open")!;
+  // 落とした画像が読めなかった（2026-11-15。Go の `registerFileDrop`）。**出し方は「画像を選ぶ…」と同じ**。
+  // ⚠️ **読めたときはここでは何もしない** —— 撮った 1 枚と同じ `capture:shot` / `capture:done` が運ぶ。
+  Events.On("image:drop-failed", (event: { data: string }) => {
+    status.textContent = `画像を読み込めませんでした: ${event.data}`;
+    status.classList.add("is-error");
+    status.classList.remove("is-warn");
+  });
   imageOpen.addEventListener("click", () => {
     void (async () => {
       imageOpen.disabled = true;

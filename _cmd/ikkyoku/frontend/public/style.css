@@ -5963,10 +5963,10 @@ html.is-graph #app {
   border-color: var(--info);
 }
 
-/* 棋譜ファイルを運んでいるあいだの「ここに落とせる」（2026-11-15）。
+/* ファイル（棋譜・画像）を運んでいるあいだの「ここに落とせる」（2026-11-15）。
    `file-drop-target-active` は Wails のランタイムが `data-file-drop-target` の要素に付け外しする。
    ⚠️ **枠線ではなく outline で出す**（border を変えると群の寸法が動き、下の欄が押し下げられる）。 */
-.kifu-drop.file-drop-target-active {
+.file-drop.file-drop-target-active {
   outline: 2px dashed var(--accent);
   outline-offset: 2px;
   background: rgb(var(--accent-rgb) / 0.08);

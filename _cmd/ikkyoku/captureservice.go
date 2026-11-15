@@ -355,7 +355,7 @@ func (s *CaptureService) OpenImage() (CaptureResult, error) {
 }
 
 // loadImage は画像ファイルを読んで認識に掛ける（`OpenImage` の中身）。
-// **ドラッグ＆ドロップを足すときもここに合流させる**（パスを渡す口を増やすだけ）。
+// **ドラッグ＆ドロップもここに合流する**（2026-11-15。`registerFileDrop` がパスを渡すだけ）。
 //
 // ⚠️ **PNG 以外は PNG にして控えること。** この先は `Path` を「撮った PNG」として
 // 扱う口が 2 つある（学習への還元 `TrainingService.Send` と画像のコピー
