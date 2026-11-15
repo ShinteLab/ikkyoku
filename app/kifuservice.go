@@ -59,10 +59,18 @@ type KifuService struct {
 	// ⚠️ **nil でも動くこと**（設計原則3）—— 印が出ず、毎回まっさらに始まるだけ。
 	Store *StudyStore
 
+	// PickFile はファイル選択ダイアログ（2026-11-15。棋譜ファイルを開く）。**`_cmd/ikkyoku` が差す**
+	// （`SettingsService.PickFile` と同じ形。公開フィールドなので bindings には出ない）。
+	PickFile FilePicker
+
 	mu      sync.Mutex
 	path    string
 	lib     *kicho.Library
 	openErr error
+	// lastKifuDir は最後に棋譜ファイルを開いたディレクトリ（次に開くときの始まり）。
+	lastKifuDir string
+	// opened は最後に開いた棋譜ファイル（`kifufile.go`。登録するときに元の文字コードを残す）。
+	opened openedKifu
 }
 
 // NewKifuService は棚を**まだ開かずに**作る。
@@ -754,10 +762,12 @@ func (s *KifuService) PreviewKIF(text string) (GameDetail, error) {
 	return fetchedToDetail(f), nil
 }
 
-// ImportKIF は KIF テキストを解析して棚に入れる（入力タブの「棚に登録する」）。
+// ImportKIF は KIF / CSA のテキストを解析して棚に入れる（入力タブの「棚に登録する」）。
 //
 // 取得元での一意な ID が無いため、**毎回新しい棋譜として登録される**
 // （同じものを 2 回登録すれば 2 件になる。重複は棋譜タブから消す）。
+//
+// **ファイルから開いた本文のままなら、元の文字コードも記録する**（2026-11-15。`encodingFor`）。
 func (s *KifuService) ImportKIF(text string) (GameSummary, error) {
 	lib, err := s.library()
 	if err != nil {
@@ -766,7 +776,7 @@ func (s *KifuService) ImportKIF(text string) (GameSummary, error) {
 	ctx, cancel := kifuDBContext()
 	defer cancel()
 
-	rec, err := lib.ImportKIF(ctx, text)
+	rec, err := lib.ImportKIFWithEncoding(ctx, text, s.encodingFor(text))
 	if err != nil {
 		return GameSummary{}, describeKifuError(err)
 	}

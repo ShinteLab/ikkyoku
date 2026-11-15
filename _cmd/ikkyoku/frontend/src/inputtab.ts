@@ -184,7 +184,8 @@ export function mountInputTab(root: HTMLElement, opts: InputTabOptions): InputTa
     <div class="setting-group">
       <span class="setting-title" data-hint="hint-paste">棋譜を貼り付ける</span>
       <span id="hint-paste" class="setting-note is-hint">
-        KIF 形式か CSA 形式の棋譜を貼って<strong>「解析する」</strong>を押すと、
+        KIF 形式か CSA 形式の棋譜を貼るか、<strong>「ファイルを開く…」</strong>で
+        .kif / .csa を読み込んで<strong>「解析する」</strong>を押すと、
         <strong>指し手を全て反映した局面</strong>で<strong>解析タブ</strong>が開きます。
         手順は盤の右に並ぶので、押せばその局面まで戻れます。
         <strong>訂正タブは通りません</strong>（棋譜の局面は初期局面と手順で決まるため）。
@@ -202,7 +203,11 @@ export function mountInputTab(root: HTMLElement, opts: InputTabOptions): InputTa
            ⚠️ **二系統を残してある**（2026-09-04）——「解析する」は棚に入らず
            解析タブへ直行し、「棋譜に登録する」は棚へ入れるだけで解析タブを触らない。
            **棚は解析の前提条件ではない**（設計原則3）。 -->
+      <!-- ⚠️ **「ファイルを開く…」は欄に入れるだけ**（2026-11-15）。行き先は下の 2 つのまま
+           （ファイル専用の「解析する」「登録する」を作らない）。文字コードの判別は Go 側。 -->
       <div class="setting-fields">
+        <button id="kifu-file" class="ghost-btn" type="button"
+                title=".kif / .csa を貼り付け欄に読み込みます">ファイルを開く…</button>
         <button id="kifu-load" class="ghost-btn" type="button">解析する</button>
         <button id="kifu-import" class="ghost-btn" type="button"
                 title="貼り付けた棋譜を棋譜タブに登録します">棋譜に登録する</button>
@@ -498,6 +503,32 @@ export function mountInputTab(root: HTMLElement, opts: InputTabOptions): InputTa
     kifuText.value = "";
     showKifuStatus("");
     kifuText.focus();
+  });
+  // ファイルを開く（2026-11-15）。**中身を貼り付け欄に入れるだけ** —— あとは貼ったときと同じ
+  // 「解析する」「棋譜に登録する」。⚠️ **文字コードをここで持たないこと** —— 開いた本文のまま
+  // 登録されたら元の文字コードを残すのは Go 側（`KifuService.ImportKIF`）。
+  // ⚠️ **取り消しは失敗ではない**（空の本文が返る。欄も状態も変えない）。
+  const kifuFile = root.querySelector<HTMLButtonElement>("#kifu-file")!;
+  kifuFile.addEventListener("click", () => {
+    void (async () => {
+      kifuFile.disabled = true;
+      try {
+        const got = await KifuService.OpenKifuFile();
+        if (!got?.text) {
+          return; // 取り消し
+        }
+        kifuText.value = got.text;
+        const encoding = got.encoding === "shift_jis" ? "Shift_JIS" : "UTF-8";
+        showKifuStatus(`${got.name} を読み込みました（${encoding}）`);
+      } catch (err) {
+        showKifuStatus(
+          `ファイルを読み込めませんでした: ${String(err instanceof Error ? err.message : err)}`,
+          "error",
+        );
+      } finally {
+        kifuFile.disabled = false;
+      }
+    })();
   });
   // 貼り付けでも URL でも、読み込んだあとにやることは同じ。
   // **1 か所にまとめてある**（2 つに分けると、片方だけ直したときに挙動が食い違う）。

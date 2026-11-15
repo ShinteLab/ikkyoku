@@ -315,6 +315,7 @@ func wireWails(app *application.App, wins *appWindows, sv services, issues *ikky
 	// ⚠️ **Wails の口はここで差し込む。** Service 本体は ikkyoku/app にあり
 	// wails3 を import していないので、ダイアログとイベントだけを関数で渡す。
 	settingsSvc.PickFile = pickFile(app)
+	sv.kifu.PickFile = pickFile(app)
 	analyzeSvc.Emit = func(name string, data any) { app.Event.Emit(name, data) }
 	// ⚠️ **解析タブの局面が変わったことも流すこと**（2026-09-08。`study:changed`）。
 	// **別ウィンドウとの連動の土台**で、これが無いと「変えた窓」しか気づけない
