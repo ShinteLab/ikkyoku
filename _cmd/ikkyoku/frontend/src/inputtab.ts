@@ -201,6 +201,17 @@ export function mountInputTab(root: HTMLElement, opts: InputTabOptions): InputTa
         同じ棋譜をもう一度貼って「解析する」を押したときも続きから開きます。
         URL から取り込むときは<strong>下の「棋譜の URL から」</strong>です。
       </span>
+      <!-- **欄の上は欄を埋める・空ける操作、欄の下は欄の中身を送る操作**（2026-11-15）。
+           ⚠️ **混ぜて 1 列に戻さないこと** —— 入力の操作と行き先の操作が並ぶと、
+           どれが「送る」ボタンなのかが読めなくなる。
+
+           ⚠️ **「ファイルを開く…」は欄に入れるだけ**（2026-11-15）。行き先は下の 2 つのまま
+           （ファイル専用の「解析する」「登録する」を作らない）。文字コードの判別は Go 側。 -->
+      <div class="setting-fields">
+        <button id="kifu-file" class="ghost-btn" type="button"
+                title=".kif / .csa を貼り付け欄に読み込みます">ファイルを開く…</button>
+        <button id="kifu-clear" class="ghost-btn" type="button">消す</button>
+      </div>
       <textarea id="kifu-text" class="kifu-text" spellcheck="false"
                 placeholder="手数----指手---------消費時間--&#10;   1 ７六歩(77)   ( 0:16/00:00:16)&#10;   2 ３四歩(33)   ( 0:04/00:00:04)"></textarea>
       <!-- ⚠️ **入力欄を 2 つに増やさない。** 同じ入力の**行き先が 2 つある**
@@ -209,15 +220,10 @@ export function mountInputTab(root: HTMLElement, opts: InputTabOptions): InputTa
            ⚠️ **二系統を残してある**（2026-09-04）——「解析する」は棚に入らず
            解析タブへ直行し、「棋譜に登録する」は棚へ入れるだけで解析タブを触らない。
            **棚は解析の前提条件ではない**（設計原則3）。 -->
-      <!-- ⚠️ **「ファイルを開く…」は欄に入れるだけ**（2026-11-15）。行き先は下の 2 つのまま
-           （ファイル専用の「解析する」「登録する」を作らない）。文字コードの判別は Go 側。 -->
       <div class="setting-fields">
-        <button id="kifu-file" class="ghost-btn" type="button"
-                title=".kif / .csa を貼り付け欄に読み込みます">ファイルを開く…</button>
         <button id="kifu-load" class="ghost-btn" type="button">解析する</button>
         <button id="kifu-import" class="ghost-btn" type="button"
                 title="貼り付けた棋譜を棋譜タブに登録します">棋譜に登録する</button>
-        <button id="kifu-clear" class="ghost-btn" type="button">消す</button>
       </div>
       <p id="kifu-status" class="status" role="status" aria-live="polite" hidden></p>
     </div>
