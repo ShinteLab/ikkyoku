@@ -328,7 +328,7 @@ func (s *CaptureService) applyFollowDebug(v bool) {
 // ⚠️ **枠が出ているかは見ない**（`requireFrame` を掛けない）。あれは「どこを撮るのかが
 // 画面に見えていること」を撮る条件にする門番で、**ファイルにはその話が無い。**
 //
-// **取り消しはエラーではない。** パスが空で返るので、そのまま何もせずに返す
+// **取り消しはエラーではない。** `dialogPath` で空のパスに揃え、そのまま何もせずに返す
 // （イベントも出ないので、画面は 1 つも変わらない）。
 func (s *CaptureService) OpenImage() (CaptureResult, error) {
 	if s.app == nil {
@@ -344,7 +344,7 @@ func (s *CaptureService) OpenImage() (CaptureResult, error) {
 	if dir, err := ikkyoku.DefaultOutDir(); err == nil {
 		dlg.SetDirectory(dir)
 	}
-	path, err := dlg.PromptForSingleSelection()
+	path, err := dialogPath(dlg.PromptForSingleSelection())
 	if err != nil {
 		return CaptureResult{}, err
 	}

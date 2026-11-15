@@ -1205,8 +1205,26 @@ func pickFile(a *application.App) ikkyokuapp.FilePicker {
 		for i := 0; i+1 < len(filters); i += 2 {
 			dlg.AddFilter(filters[i], filters[i+1])
 		}
-		return dlg.PromptForSingleSelection()
+		return dialogPath(dlg.PromptForSingleSelection())
 	}
+}
+
+// dialogCancelledMsg は Wails が Windows でダイアログを取り消したときに返すエラーの文言
+// （`internal/go-common-file-dialog/cfd.ErrorCancelled`。v3.0.0 で確認）。
+// internal パッケージなので import できず、`errors.Is` で見分けられない。
+const dialogCancelledMsg = "cancelled by user"
+
+// dialogPath はファイルダイアログの結果を「**取り消し = 空文字・nil**」に揃える。
+//
+// ⚠️ **ファイルダイアログの結果は必ずこれを通すこと。** Wails v3.0.0 は **Windows だけ**
+// 取り消しをエラーで返す（macOS・Linux は空文字と nil）。通さないと、取り消しただけで
+// 画面に「cancelled by user」が出る（2026-11-15）。Wails が直してエラーを返さなく
+// なっても、ここは何もしなくなるだけ。
+func dialogPath(path string, err error) (string, error) {
+	if err != nil && err.Error() == dialogCancelledMsg {
+		return "", nil
+	}
+	return path, err
 }
 
 // applyLogLevel は設定「ログの細かさ」を当てる（起動時と切り替えたとき。`SettingsService.OnLogLevel`）。
