@@ -6399,6 +6399,21 @@ html.is-graph #app {
   background: var(--backdrop);
 }
 
+/* 詳細の見出し（棋戦名）。⚠️ **長い名前でもモーダルの幅を押し広げないこと**（2026-11-15）——
+   floodgate の対局名のように**区切りの無い長い名前**は 1 語として扱われ、
+   折り返せずにモーダルの横幅を突き破っていた（横にスクロールして中身がずれる）。
+   **縮めて（`min-width: 0`）どこででも折り返す**（読みたい名前なので省略はしない）。
+   「閉じる」は縮ませない。 */
+.library-modal-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.library-modal .library-head > button {
+  flex: 0 0 auto;
+}
+
 /* 一覧と同じで、縦に伸びるのは中身だけ（見出しと足は動かない）。 */
 .library-modal .library-meta {
   flex: 0 1 auto;
@@ -6476,7 +6491,9 @@ html.is-graph #app {
 
 .library-meta {
   display: grid;
-  grid-template-columns: auto 1fr;
+  /* ⚠️ **値の列は `minmax(0, 1fr)`**（2026-11-15）—— `1fr` の下限は中身の最小幅なので、
+     区切りの無い長い値（URL・対局名）があると列が伸びてモーダルの幅を突き破る。 */
+  grid-template-columns: auto minmax(0, 1fr);
   gap: 2px 12px;
   margin: 0;
   font-size: 12.5px;

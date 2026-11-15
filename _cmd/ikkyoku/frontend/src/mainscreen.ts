@@ -223,7 +223,7 @@ export function mountMainScreen(root: HTMLElement): void {
              棋戦名・備考を直すのもここ（2026-10-02）。 -->
         <dialog id="library-modal" class="library-modal">
           <div class="library-head">
-            <span id="library-modal-title" class="field-label"></span>
+            <span id="library-modal-title" class="field-label library-modal-title"></span>
             <button id="library-modal-close" class="ghost-btn" type="button">閉じる</button>
           </div>
           <dl id="library-modal-meta" class="library-meta"></dl>
