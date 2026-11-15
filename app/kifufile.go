@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -136,6 +137,12 @@ func readKifuFile(path string) (KifuFile, error) {
 	}
 	if len(b) > kifuFileMaxBytes {
 		return KifuFile{}, fmt.Errorf("ファイルが大きすぎます（%d MiB まで）: %s", kifuFileMaxBytes>>20, filepath.Base(path))
+	}
+	// ⚠️ **中身が文字でなければ断る**（2026-11-15）。文字コードの判別は UTF-8 で読めなければ
+	// Shift_JIS として読むので、**画像などを渡すと文字化けした本文として通ってしまう**
+	// （画像を「棋譜を貼り付ける」に落としたときに欄が化けた文字で埋まる）。NUL は棋譜に現れない。
+	if bytes.IndexByte(b, 0) >= 0 {
+		return KifuFile{}, fmt.Errorf("棋譜のファイルではありません（文字ではない中身です）: %s", filepath.Base(path))
 	}
 	text, encoding, err := kicho.DecodeKIF(b)
 	if err != nil {

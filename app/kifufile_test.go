@@ -127,4 +127,9 @@ func TestDropKifuFiles(t *testing.T) {
 	if empty := svc.DropKifuFiles(nil); empty.Error == "" {
 		t.Error("空のドロップに理由が無い")
 	}
+	// ⚠️ **画像を落とされても文字化けした本文にしない**（Shift_JIS としては読めてしまう）。
+	png, _ := writeKifuFile(t, "board.png", []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"))
+	if img := svc.DropKifuFiles([]string{png}); img.Error == "" || img.Text != "" {
+		t.Errorf("画像が棋譜として通った: %+v", img)
+	}
 }
