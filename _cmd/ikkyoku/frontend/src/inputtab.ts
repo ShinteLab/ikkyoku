@@ -239,10 +239,10 @@ export function mountInputTab(root: HTMLElement, opts: InputTabOptions): InputTa
       <div class="setting-fields">
         <button id="kifu-paste" class="ghost-btn is-primary" type="button"
                 title="クリップボードの URL・棋譜 ID・棋譜（KIF / CSA）をカードにします">貼り付け</button>
-        <button id="kifu-manual" class="ghost-btn" type="button"
-                title="URL・棋譜 ID・棋譜（KIF / CSA）を打ち込んでカードにします">手入力…</button>
         <button id="kifu-file" class="ghost-btn" type="button"
                 title=".kif / .csa を開いてカードにします">ファイルを開く…</button>
+        <button id="kifu-manual" class="ghost-btn" type="button"
+                title="URL・棋譜 ID・棋譜（KIF / CSA）を打ち込んでカードにします">手入力…</button>
       </div>
       <!-- ⚠️ **この群の状態表示は 1 つ**（#fetch-status）。貼り付け・ファイルの
            どれもここへ出す（持ち主は fetchcards.ts。入力タブは setStatus を借りる）。
