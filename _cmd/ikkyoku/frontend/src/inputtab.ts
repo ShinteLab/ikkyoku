@@ -5,8 +5,8 @@
 //   画面から撮る / 画像ファイル … 認識を通るので**訂正タブ**（撮る操作そのものは枠のツールバー）
 //   新規対局                   … **解析タブ**（「訂正タブで調整」だけは訂正タブ。独自ハンデの入口）
 //   詰将棋                     … 空の盤を**訂正タブ**へ
-//   棋譜を貼り付ける            … **解析タブ**（「棋譜に登録」は棋譜タブへ入れるだけ）
-//   棋譜の URL から             … 取得してカードに積む（`fetchcards.ts`）
+//   棋譜を読み込む              … **解析タブ**（「棋譜に登録」は棋譜タブへ入れるだけ）。
+//                                 本文も URL も 1 つの欄。URL ならカードも積む（`fetchcards.ts`）
 //
 // ⚠️ **受け渡しは `InputTabOptions`（もらうもの）と `InputTabHandle`（返すもの）だけ**
 // （`sidepane.ts` と同じ型）。**訂正タブにも解析タブにも直には触れない** —— 局面を出すのも、
@@ -183,82 +183,45 @@ export function mountInputTab(root: HTMLElement, opts: InputTabOptions): InputTa
       <p id="mate-status" class="status" role="status" aria-live="polite" hidden></p>
     </div>
 
-    <!-- 棋譜を貼り付ける。**画像を通らない 2 つめの入口**なので、行き先も違う
-         （撮影は認識を通るので訂正タブ、棋譜は既に確定しているので解析タブ）。 -->
+    <!-- 棋譜を読み込む（2026-11-18 に「棋譜を貼り付ける」と「棋譜の URL から」を 1 つにした）。
+         **画像を通らない入口**なので、行き先も違う
+         （撮影は認識を通るので訂正タブ、棋譜は既に確定しているので解析タブ）。
+
+         ⚠️ **欄はこの 1 つだけ**（#kifu-text）。本文も URL・棋譜 ID も同じ欄に入れる。
+         **#kifu-url を戻さないこと** —— ユーザが持っているのは「棋譜」1 つで、
+         それが本文なのか URL なのか、URL が読売なのか連盟なのかは**こちらの都合**。
+         **入り口は 1 つにして、中で分岐する**（本文か在り処かは Go の IsKifuRef、
+         取得元は kicho の Fetch。⚠️ **判別を画面に書かないこと**）。
+
+         **行き先が 2 つあるだけ**（どちらも同じ 1 つの欄から）:
+           解析する         … 解析タブへ直行（棋譜タブには入らない）
+           棋譜に登録する    … 棋譜タブへ入れるだけ（解析タブは触らない）
+         ⚠️ **URL・棋譜 ID ならどちらもカードを積む**（更新で取り直す・再起動後も残る）。
+         ⚠️ **二系統を残してある**（2026-09-04）。**棚は解析の前提条件ではない**（設計原則3）。 -->
     <!-- ⚠️ **ファイルを落とせるのはこの群だけ**（2026-11-15。data-file-drop-target）。
          id は Go 側の KifuDropTarget と揃える（Go は落ちた要素の id で確かめる）。 -->
     <div class="setting-group file-drop" id="kifu-drop" data-file-drop-target>
-      <span class="setting-title" data-hint="hint-paste">棋譜を貼り付ける</span>
-      <span id="hint-paste" class="setting-note is-hint">
-        KIF 形式か CSA 形式の棋譜を貼るか、<strong>「ファイルを開く…」</strong>か
-        ここへのドラッグ＆ドロップで .kif / .csa を読み込んで<strong>「解析する」</strong>を押すと、
-        <strong>指し手を全て反映した局面</strong>で<strong>解析タブ</strong>が開きます。
-        手順は盤の右に並ぶので、押せばその局面まで戻れます。
-        <strong>訂正タブは通りません</strong>（棋譜の局面は初期局面と手順で決まるため）。
-        <strong>「棋譜に登録する」を押すと棋譜タブに残ります</strong>
-        （解析するだけでは残りません）。解析したあとに登録しても、
-        <strong>その解析は棋譜タブの「解析する」から続きを開けます</strong>。
-        同じ棋譜をもう一度貼って「解析する」を押したときも続きから開きます。
-        URL から取り込むときは<strong>下の「棋譜の URL から」</strong>です。
-      </span>
-      <!-- **欄の上は欄を埋める・空ける操作、欄の下は欄の中身を送る操作**（2026-11-15）。
-           ⚠️ **混ぜて 1 列に戻さないこと** —— 入力の操作と行き先の操作が並ぶと、
-           どれが「送る」ボタンなのかが読めなくなる。
-
-           ⚠️ **「ファイルを開く…」は欄に入れるだけ**（2026-11-15）。行き先は下の 2 つのまま
-           （ファイル専用の「解析する」「登録する」を作らない）。文字コードの判別は Go 側。 -->
-      <div class="setting-fields">
-        <button id="kifu-file" class="ghost-btn" type="button"
-                title=".kif / .csa を貼り付け欄に読み込みます">ファイルを開く…</button>
-        <button id="kifu-clear" class="ghost-btn" type="button">消す</button>
-      </div>
-      <textarea id="kifu-text" class="kifu-text" spellcheck="false"
-                placeholder="手数----指手---------消費時間--&#10;   1 ７六歩(77)   ( 0:16/00:00:16)&#10;   2 ３四歩(33)   ( 0:04/00:00:04)"></textarea>
-      <!-- ⚠️ **入力欄を 2 つに増やさない。** 同じ入力の**行き先が 2 つある**
-           だけなので、欄を分けると「どちらに貼ったか」で挙動が変わる面になる。
-
-           ⚠️ **二系統を残してある**（2026-09-04）——「解析する」は棚に入らず
-           解析タブへ直行し、「棋譜に登録する」は棚へ入れるだけで解析タブを触らない。
-           **棚は解析の前提条件ではない**（設計原則3）。 -->
-      <div class="setting-fields">
-        <button id="kifu-load" class="ghost-btn" type="button">解析する</button>
-        <button id="kifu-import" class="ghost-btn" type="button"
-                title="貼り付けた棋譜を棋譜タブに登録します">棋譜に登録する</button>
-      </div>
-      <p id="kifu-status" class="status" role="status" aria-live="polite" hidden></p>
-    </div>
-
-    <!-- 棋譜の URL から（2026-09-12 に「中継から取得する」と URL 欄を 1 つにした）。
-
-         ⚠️ **URL の入力欄を 2 つにしないこと。** ユーザが持っているのは
-         「棋譜の URL」1 つで、それが読売なのか連盟なのか他サイトの .kif なのかは
-         **こちらの都合**。以前は「棋譜を貼り付ける」の中と「中継から取得する」に
-         欄が 1 つずつあり、**同じ URL を入れる場所が 2 か所あって、どちらに
-         入れるかで通る道が変わっていた**（連盟の URL を上に入れると増える、など）。
-         **入り口は 1 つにして、中で分岐する。**
-
-         ⚠️ **判別を画面に書かないこと。** 連盟 / 読売 / それ以外の .kif /
-         棋譜 ID の見分けは kicho の Fetch がやる（親 CLAUDE.md）。
-
-         **行き先が 3 つあるだけ**（どれも同じ 1 つの入力から）:
-           解析する         … 解析タブへ直行（棋譜タブには入らない）
-           棋譜に登録する    … 棋譜タブへ入れるだけ（解析タブは触らない）
-           取得して追う      … カードに積む（更新で取り直す・再起動後も残る） -->
-    <div class="setting-group">
-      <span class="setting-title" data-hint="hint-url">棋譜の URL から</span>
-      <span id="hint-url" class="setting-note is-hint">
+      <span class="setting-title" data-hint="hint-kifu">棋譜を読み込む</span>
+      <span id="hint-kifu" class="setting-note is-hint">
         <span class="hint-para">
-        <strong>どのサイトの URL でもかまいません。</strong>
-        <strong>読売（竜王戦）の対局ページ</strong>・<strong>日本将棋連盟の棋譜中継</strong>・
-        ほかのサイトの <code>.kif</code>・読売の棋譜 ID を、この 1 つの欄で扱います
-        （<strong>どこのものかは自動で見分けます</strong>）。
+        KIF 形式か CSA 形式の棋譜を貼るか、<strong>棋譜の URL</strong>を入れて
+        <strong>「解析する」</strong>を押すと、<strong>指し手を全て反映した局面</strong>で
+        <strong>解析タブ</strong>が開きます。<strong>「ファイルを開く…」</strong>か
+        ここへのドラッグ＆ドロップで .kif / .csa も読み込めます。
+        <strong>訂正タブは通りません</strong>（棋譜の局面は初期局面と手順で決まるため）。
         </span>
         <span class="hint-para">
-        <strong>「取得」を押すと下にカードが出ます。</strong>そこから
-        <strong>「解析する」</strong>で解析タブへ送り、<strong>「この内容を保存」</strong>で
-        棋譜タブに残します（<strong>同じ棋譜を保存し直しても増えません</strong>）。
-        対局中は棋譜が伸びるので、<strong>「更新」</strong>で取り直してから
-        保存し直してください。
+        <strong>URL はどのサイトのものでもかまいません。</strong>
+        <strong>読売（竜王戦）の対局ページ</strong>・<strong>日本将棋連盟の棋譜中継</strong>・
+        ほかのサイトの <code>.kif</code>・読売の棋譜 ID を扱います
+        （<strong>どこのものかは自動で見分けます</strong>）。
+        URL のときは<strong>下にカードも出ます</strong>。対局中は棋譜が伸びるので、
+        カードの<strong>「更新」</strong>で取り直せます。
+        </span>
+        <span class="hint-para">
+        <strong>「棋譜に登録する」を押すと棋譜タブに残ります</strong>
+        （解析するだけでは残りません。<strong>同じ URL の棋譜は登録し直しても増えません</strong>）。
+        解析したあとに登録しても、<strong>その解析は棋譜タブの「解析する」から続きを開けます</strong>。
         </span>
         <span class="hint-para">
         <strong>カードは再起動しても残ります。</strong>2 日制の対局で翌日また URL を
@@ -269,24 +232,32 @@ export function mountInputTab(root: HTMLElement, opts: InputTabOptions): InputTa
         （<strong>保存済みの棋譜は消えません</strong>）。終局した棋譜を保存したときは自動で外れます。
         </span>
       </span>
-      <!-- ⚠️ **入力欄はこの 1 つだけ**（#kifu-url）。⚠️ **#fetch-input に
-           戻さないこと** —— 取得（カード）も解析も登録も同じ欄を読む。
+      <!-- **欄の上は欄を埋める・空ける操作、欄の下は欄の中身を送る操作**（2026-11-15）。
+           ⚠️ **混ぜて 1 列に戻さないこと** —— 入力の操作と行き先の操作が並ぶと、
+           どれが「送る」ボタンなのかが読めなくなる。
 
-           ⚠️ **取得も文字コードの判別も Go 側**（kicho）。webview の fetch では
-           CORS で弾かれるうえ、**中継の .kif は Shift_JIS** なので、
-           いずれにせよこちらでは扱えない。 -->
-      <div class="setting-fields kifu-url-row">
-        <span class="field-label">URL / 棋譜 ID</span>
-        <input id="kifu-url" type="text" spellcheck="false"
-               placeholder="http://live.shogi.or.jp/oui/kifu/67/oui202607290101.html" />
-        <button id="fetch-run" class="ghost-btn is-primary" type="button"
-                title="この URL の棋譜を取ってカードに出します（解析・登録はカードから）">取得</button>
+           ⚠️ **「ファイルを開く…」は欄に入れるだけ**（2026-11-15）。行き先は下の 2 つのまま
+           （ファイル専用の「解析する」「登録する」を作らない）。文字コードの判別は Go 側。 -->
+      <div class="setting-fields">
+        <button id="kifu-file" class="ghost-btn" type="button"
+                title=".kif / .csa を欄に読み込みます">ファイルを開く…</button>
+        <button id="kifu-clear" class="ghost-btn" type="button">消す</button>
       </div>
-      <!-- ⚠️ **この群の状態表示は 1 つ**（#fetch-status）。解析・登録・取得の
-           どれもここへ出す（持ち主は fetchcards.ts。setStatus を借りる）。
-           **群が 1 つなら状態の行も 1 つ** —— 2 つ置くと、どのボタンの返事なのかが
-           読めなくなる。 -->
-      <p id="fetch-status" class="status" role="status" aria-live="polite" hidden></p>
+      <textarea id="kifu-text" class="kifu-text" spellcheck="false"
+                placeholder="KIF / CSA の本文、または棋譜の URL・棋譜 ID&#10;&#10;手数----指手---------消費時間--&#10;   1 ７六歩(77)   ( 0:16/00:00:16)&#10;&#10;http://live.shogi.or.jp/oui/kifu/67/oui202607290101.html"></textarea>
+      <!-- ⚠️ **入力欄を 2 つに増やさない。** 同じ入力の**行き先が 2 つある**
+           だけなので、欄を分けると「どちらに入れたか」で挙動が変わる面になる。
+           ⚠️ **「取得」だけのボタンを戻さないこと**（2026-11-18）。取ってきた棋譜は
+           どちらのボタンでもカードに積まれる。 -->
+      <div class="setting-fields">
+        <button id="kifu-load" class="ghost-btn is-primary" type="button">解析する</button>
+        <button id="kifu-import" class="ghost-btn" type="button"
+                title="棋譜を棋譜タブに登録します">棋譜に登録する</button>
+      </div>
+      <!-- ⚠️ **この群の状態の行は 1 つ**（#kifu-status。2026-11-18 に #fetch-status を畳んだ）。
+           本文でも URL でも、どのボタンの返事もここへ出す（カード自身の返事はカードの中）。
+           **群が 1 つなら状態の行も 1 つ** —— 2 つ置くと、どのボタンの返事なのかが読めなくなる。 -->
+      <p id="kifu-status" class="status" role="status" aria-live="polite" hidden></p>
       <!-- 取得結果。**新しいものが先頭。** 同じ棋譜を取り直したときは
            カードを増やさず中身だけ差し替える（key = 取得元:棋譜 ID）。
            ⚠️ **起動時は仮の一覧（DB）から復元する**（サイトへは取りに行かない）。 -->
@@ -500,14 +471,12 @@ export function mountInputTab(root: HTMLElement, opts: InputTabOptions): InputTa
     })();
   });
 
-  // 棋譜（KIF）を貼り付ける。**キャプチャと並ぶ入力の口で、行き先は解析タブ。**
+  // 棋譜を読み込む。**キャプチャと並ぶ入力の口で、行き先は解析タブ。**
   //
   // ⚠️ **読み取りも指し手の変換も Go 側**（core/kifu → position.FromKIF）。
   // フロントで KIF を解釈しないこと（将棋の仕様は core に一本化する）。
-  // ⚠️ **URL の欄はここで引かない**（2026-09-12）。**URL は「取得」だけ**になり、
-  // 解析も登録もカードが持っているので、持ち主は `fetchcards.ts` の 1 か所。
-  // **`#kifu-url` をここから触らないこと**（2 か所が読むと、どちらの値で
-  // 動いたのかが追えなくなる）。
+  // ⚠️ **欄は 1 つで、持ち主はここ**（2026-11-18。本文も URL も入る）。本文か URL かは
+  // Go の `KifuService.IsKifuRef` が決め、URL ならカード（`fetchcards.ts`）の口へ渡す。
   const kifuText = root.querySelector<HTMLTextAreaElement>("#kifu-text")!;
   const kifuLoad = root.querySelector<HTMLButtonElement>("#kifu-load")!;
   const kifuImport = root.querySelector<HTMLButtonElement>("#kifu-import")!;
@@ -518,6 +487,19 @@ export function mountInputTab(root: HTMLElement, opts: InputTabOptions): InputTa
     kifuStatus.classList.toggle("is-error", kind === "error");
     kifuStatus.hidden = message === "";
   };
+  // ---- 中継から取得（カード）--------------------------------------------
+  //
+  // ⚠️ **取得元の判別も取得も Go 側（KifuService）。** ここは行き先を繋ぐだけ。
+  // ⚠️ **カードはあちらが持つ**（欄と状態の行はこちら。2026-11-18）。
+  // こちらが触るのは行き先（解析タブ・棋譜タブの一覧）だけ。
+  const cards = mountFetchCards(root, {
+    confirmAnalyze: () => confirmStopFollow("棋譜を解析タブへ送る"),
+    // 棚を通らない経路だが、**描き方は棚から送ったときと同じ**（KifuLoad）。
+    onAnalyze: (got) => opts.openStudy(got.state),
+    onSaved: () => opts.onKifuSaved(),
+    setStatus: showKifuStatus,
+  });
+
   root.querySelector<HTMLButtonElement>("#kifu-clear")!.addEventListener("click", () => {
     kifuText.value = "";
     showKifuStatus("");
@@ -566,16 +548,16 @@ export function mountInputTab(root: HTMLElement, opts: InputTabOptions): InputTa
     }
     fillFromFile(got, got.skipped > 0 ? `。ほかの ${got.skipped} 個は読んでいません` : "");
   });
-  // 貼り付けでも URL でも、読み込んだあとにやることは同じ。
+  // 本文でも URL でも、読み込んだあとにやることは同じ。
   // **1 か所にまとめてある**（2 つに分けると、片方だけ直したときに挙動が食い違う）。
-  // ⚠️ **違うのは返事の出し先だけ**（`report`）。
-  const runKifuLoad = async (button: HTMLButtonElement, load: () => Promise<KifuLoad>) => {
+  // ⚠️ **違うのは読み方と待つあいだの文だけ**（`load` / `busy`）。
+  // ⚠️ **中継を追っているかは取りに行く前に聞く**（URL なら数秒かかる）。
+  const runKifuLoad = async (busy: string, load: () => Promise<KifuLoad>) => {
     if (!(await confirmStopFollow("棋譜を読み込む"))) {
       return;
     }
-    button.disabled = true;
     kifuLoad.disabled = true;
-    showKifuStatus("読み込んでいます…");
+    showKifuStatus(busy);
     try {
       const got = await load();
       // ⚠️ **タブを先に開いてから描くこと。** 手順のリストは「今見ている手」を
@@ -600,13 +582,30 @@ export function mountInputTab(root: HTMLElement, opts: InputTabOptions): InputTa
       kifuLoad.disabled = false;
     }
   };
-  kifuLoad.addEventListener("click", () => {
+  // kifuInput は欄の中身（空なら状態の行に出して null）。
+  const kifuInput = (): string | null => {
     const text = kifuText.value.trim();
     if (!text) {
-      showKifuStatus("棋譜が空です。KIF 形式か CSA 形式のテキストを貼り付けてください。", "error");
-      return;
+      showKifuStatus(
+        "棋譜が空です。KIF 形式か CSA 形式のテキスト、または棋譜の URL を入れてください。",
+        "error",
+      );
+      return null;
     }
-    void runKifuLoad(kifuLoad, () => StudyService.LoadKifu(text));
+    return text;
+  };
+  kifuLoad.addEventListener("click", () => {
+    void (async () => {
+      const text = kifuInput();
+      if (text === null) {
+        return;
+      }
+      if (await KifuService.IsKifuRef(text)) {
+        await runKifuLoad("取得しています…", () => cards.fetchToStudy(text));
+        return;
+      }
+      await runKifuLoad("読み込んでいます…", () => StudyService.LoadKifu(text));
+    })();
   });
 
   // 棚に登録する（棋譜タブ）。**「読み込む」とは行き先が違うだけ**で、
@@ -614,18 +613,17 @@ export function mountInputTab(root: HTMLElement, opts: InputTabOptions): InputTa
   //
   // ⚠️ **二系統を残してある**（2026-09-04）——「解析する」は棚に入らず解析タブへ
   // 直行し、こちらは棚へ入れるだけで**解析タブを触らない**。
-  // ⚠️ **貼り付けた本文と URL の両方が通る**（2026-09-12）。URL のほうは
-  // `KifuService.ImportURL` が kicho に取得元を判別させるので、**連盟・読売なら
+  // ⚠️ **本文と URL の両方が通る**（2026-11-18）。URL のほうはカードを積んでから
+  // カードの内容を保存する（`fetchToShelf`）ので、kicho が取得元を判別し、**連盟・読売なら
   // 中継としての ID が付き、同じ URL を登録し直しても増えない。**棚は解析の前提条件では
-  // ないので（設計原則3）、DB が開けていなくても「読み込む」は今までどおり動く。
+  // ないので（設計原則3）、DB が開けていなくても「解析する」は今までどおり動く。
   //
   // ⚠️ **タブは移らない。** 登録は「あとで探せるようにする」操作で、今すぐ見る
   // わけではない（今すぐ見たいなら「解析する」）。**代わりに一覧は取り直す**
   // （棋譜タブを開いたときに反映されていないと、登録できたのか分からない）。
-  const runKifuImport = async (button: HTMLButtonElement, save: () => Promise<GameSummary>) => {
-    button.disabled = true;
+  const runKifuImport = async (busy: string, save: () => Promise<GameSummary>) => {
     kifuImport.disabled = true;
-    showKifuStatus("棋譜に登録しています…");
+    showKifuStatus(busy);
     try {
       const rec = await save();
       opts.onKifuSaved();
@@ -643,25 +641,17 @@ export function mountInputTab(root: HTMLElement, opts: InputTabOptions): InputTa
     }
   };
   kifuImport.addEventListener("click", () => {
-    const text = kifuText.value.trim();
-    if (!text) {
-      showKifuStatus("棋譜が空です。KIF 形式か CSA 形式のテキストを貼り付けてください。", "error");
-      return;
-    }
-    void runKifuImport(kifuImport, () => KifuService.ImportKIF(text));
-  });
-
-  // ---- 中継から取得（入力タブ）--------------------------------------------
-  //
-  // ⚠️ **取得元の判別も取得も Go 側（KifuService）。** ここは行き先を繋ぐだけ。
-  // ⚠️ **URL の欄・状態の行・カードは全部あちらが持つ**（2026-09-12）。
-  // URL からできることは「取得」だけで、解析も登録も**カード**の操作なので、
-  // こちらが触るのは行き先（解析タブ・棋譜タブの一覧）だけ。
-  mountFetchCards(root, {
-    confirmAnalyze: () => confirmStopFollow("棋譜を解析タブへ送る"),
-    // 棚を通らない経路だが、**描き方は棚から送ったときと同じ**（KifuLoad）。
-    onAnalyze: (got) => opts.openStudy(got.state),
-    onSaved: () => opts.onKifuSaved(),
+    void (async () => {
+      const text = kifuInput();
+      if (text === null) {
+        return;
+      }
+      if (await KifuService.IsKifuRef(text)) {
+        await runKifuImport("取得して棋譜に登録しています…", () => cards.fetchToShelf(text));
+        return;
+      }
+      await runKifuImport("棋譜に登録しています…", () => KifuService.ImportKIF(text));
+    })();
   });
 
   return { captureStatus: status };
