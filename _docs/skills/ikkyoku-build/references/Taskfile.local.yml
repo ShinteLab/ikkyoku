@@ -5,6 +5,7 @@ version: '3'
 #
 #   wails3 task local:deploy                            既定のコピー先へ
 #   wails3 task local:deploy DEPLOY_DEST="D:/tmp/ikkyoku"  コピー先を指定（-- の後ろの引数は渡らない）
+#   wails3 task local:install                           焼き込みビルドしてコピーするだけ（bump・コミット・タグはしない）
 #   wails3 task local:build-info                        ビルド情報の反映だけ（bump・コミット・タグはしない）
 #   wails3 task local:deploy MODEL_DIR=D:/models/x      焼き込むモデルを入れ替えてから（build:embed へ届く）
 
@@ -29,13 +30,8 @@ vars:
 
 tasks:
   deploy:
-    desc: Deploy built files locally.
+    desc: Bump, build (embed), commit build info, tag and install locally.
     cmds:
-      # 起動中の exe は上書きできないので先に終了させる。
-      # 未起動時は Get-Process が失敗し powershell.exe が exit 1 を返すので
-      # ignore_error で無視する（起動していないのは正常な状態）。
-      - cmd: powershell -Command "Get-Process {{.APP_NAME}} -ErrorAction SilentlyContinue | Stop-Process -Force"
-        ignore_error: true
       - task: bump-version
       # CI でビルドしないので、バージョンやアプリ情報はここで反映してから焼き込む
       - task: build-info
@@ -45,6 +41,30 @@ tasks:
       # ビルドが通ってからコミットする（build 中の npm install が package-lock.json を揃えるので、それも含める）
       - task: commit-build-info
       - task: tag-version
+      - task: copy-bin
+
+  install:
+    desc: Build (embed) and install locally (no bump, no commit, no tag).
+    cmds:
+      # 版上げ・build-info・コミット・タグはしない。焼き込まれるのは build/config.yml などに今ある版。
+      # 手元で直したものを試しに入れるとき・コピーだけ失敗した deploy をやり直すときに使う
+      # （deploy をやり直すと、直前の deploy が打ったタグを見て patch が上がってしまう）。
+      # build 中の npm install が package-lock.json を変えたら、その変更は手元に残る
+      - task: :build:embed
+      - task: copy-bin
+
+  # 起動中の ikkyoku を止めて exe を常用場所へコピーする（deploy・install の最後の段）
+  copy-bin:
+    internal: true
+    preconditions:
+      - sh: test -f "bin/{{.APP_NAME}}.exe"
+        msg: "bin/{{.APP_NAME}}.exe がありません（ビルドが exe を出していません）"
+    cmds:
+      # 起動中の exe は上書きできないので先に終了させる。
+      # 未起動時は Get-Process が失敗し powershell.exe が exit 1 を返すので
+      # ignore_error で無視する（起動していないのは正常な状態）。
+      - cmd: powershell -Command "Get-Process {{.APP_NAME}} -ErrorAction SilentlyContinue | Stop-Process -Force"
+        ignore_error: true
       - powershell -Command "New-Item -ItemType Directory -Force -Path '{{.DEPLOY_DEST}}' | Out-Null"
       # ⚠️ bin/* ではなく exe だけ。ログは exe の隣（ikkyoku_<日付>.log）に出るので、bin の exe を
       # 試しに起動していると、そのログでコピー先の同じ日のログを上書きしてしまう。

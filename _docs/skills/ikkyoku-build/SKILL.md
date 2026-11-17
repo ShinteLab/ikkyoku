@@ -191,12 +191,18 @@ Copy-Item _docs\skills\ikkyoku-build\references\Taskfile.local.yml _cmd\ikkyoku\
 cd _cmd\ikkyoku
 wails3 task local:deploy                               # 既定は D:/Program Files/ikkyoku
 wails3 task local:deploy DEPLOY_DEST="D:/tmp/ikkyoku"  # コピー先を変える（-- の後ろの引数は渡らない）
+wails3 task local:install                              # 焼き込みビルドしてコピーするだけ（bump・コミット・タグはしない）
 wails3 task local:build-info                           # ビルド情報の反映だけ（bump・コミット・タグはしない）
 ```
 
-やること（順に）: 起動中の ikkyoku を止める → **タグ `v<今のバージョン>` があれば patch を上げる** →
+やること（順に）: **タグ `v<今のバージョン>` があれば patch を上げる** →
 `version.go` で揃え直し → `update build-assets` → **`build:embed`**（認識器を焼き込む） →
-**ビルド情報のファイルだけをコミット** → `v<バージョン>` のタグ（push しない） → **exe だけ**をコピー。
+**ビルド情報のファイルだけをコミット** → `v<バージョン>` のタグ（push しない） →
+起動中の ikkyoku を止めて **exe だけ**をコピー。
+
+**`local:install` は `build:embed` → 止めてコピー、だけ**（版上げ・`build-info`・コミット・タグはしない）。
+手元で直したものを試しに入れるとき、コピーだけ失敗した deploy をやり直すときに使う。
+焼き込まれる版は `build/config.yml` などに今ある値（deploy で最後に揃えた版のまま）。
 
 - ⚠️ **`Taskfile.yml` の `local` の include から `optional: true` を外さない。** 無い環境で
   `wails3 build` / `wails3 dev` まで落ちる。⚠️ **`Taskfile.yml` 側から `local:` のタスクを呼ばない**（同じ理由）
@@ -208,7 +214,7 @@ wails3 task local:build-info                           # ビルド情報の反�
 - ⚠️ **コミットは列挙したファイルだけ**（`git commit -- <paths>`）。作業中の変更は巻き込まないが、
   **exe には入る**。リリースとして残すなら、先にコミットしてから deploy する
 - ⚠️ **同じコミットで deploy し直しても patch が上がる**（直前の deploy がタグを打っているため）。
-  コピーだけやり直したいなら `bin\ikkyoku.exe` を手でコピーする
+  コピーだけやり直したいなら `local:install`
 - ⚠️ **ずっと `update build-assets` が走っていなかった**（2026-10-04 まで）。生成物は
   テンプレートのまま（会社名 `My Company`・製品名 `My Product`）。**`build/windows/info.json` だけは
   2026-10-04 に手で直した**（`update build-assets` が config.yml から作るものと 1 バイトも違わない
