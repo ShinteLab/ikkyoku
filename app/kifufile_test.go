@@ -133,3 +133,49 @@ func TestDropKifuFiles(t *testing.T) {
 		t.Errorf("画像が棋譜として通った: %+v", img)
 	}
 }
+
+// **開いたファイルはカードになって並ぶので、後から別のファイルを開いても前のカードの文字コードは落ちない**
+// （2026-11-18。それまでは最後に開いた 1 つだけを覚えていた）。
+func TestEncodingForRemembersSeveralFiles(t *testing.T) {
+	svc, _ := newTestKifuService(t)
+	sjis, err := japanese.ShiftJIS.NewEncoder().String(testKIF)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, _ := writeKifuFile(t, "first.kif", []byte(sjis))
+	second, _ := writeKifuFile(t, "second.csa", []byte("V2.2\nPI\n+\n+7776FU\n"))
+	a, err := svc.adoptKifuFile(first, "開きました")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.adoptKifuFile(second, "開きました"); err != nil {
+		t.Fatal(err)
+	}
+	if enc := svc.encodingFor(a.Text); enc != kicho.EncodingShiftJIS {
+		t.Errorf("前に開いたファイルの文字コード = %q, want shift_jis", enc)
+	}
+	// 貼った本文（開いていない）は utf-8。
+	if enc := svc.encodingFor(testKIF + "   3 ２六歩(27)\n"); enc != kicho.EncodingUTF8 {
+		t.Errorf("貼った本文の文字コード = %q, want utf-8", enc)
+	}
+}
+
+// **貼り付けたカードは棚が開けていなくても作れる**（2026-11-18。設計原則3）・
+// **同じ本文なら改行が違っても同じ鍵**（貼り直してもカードを増やさない）・**棋譜でなければ断る**。
+func TestPreviewPaste(t *testing.T) {
+	svc := NewKifuService(NewStudyService(NewPositionService()))
+	got, err := svc.PreviewPaste(testKIF)
+	if err != nil {
+		t.Fatalf("PreviewPaste: %v", err)
+	}
+	if got.Key == "" || got.Game.KIF != testKIF || got.Game.Moves == 0 || got.Game.SourceID != "" {
+		t.Errorf("PastedKifu = %+v", got)
+	}
+	again, err := svc.PreviewPaste(strings.ReplaceAll(testKIF, "\n", "\r\n"))
+	if err != nil || again.Key != got.Key {
+		t.Errorf("改行だけ違う本文の鍵 = %q, want %q (%v)", again.Key, got.Key, err)
+	}
+	if _, err := svc.PreviewPaste("こんにちは"); err == nil {
+		t.Error("棋譜でない文字列をカードにした")
+	}
+}

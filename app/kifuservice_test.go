@@ -651,28 +651,3 @@ func TestKifuServiceAnnotate(t *testing.T) {
 		t.Errorf("無い id で ErrNotFound が返りません: %v", err)
 	}
 }
-
-// 入力タブの棋譜の欄（2026-11-18。本文も URL も 1 つの欄に入る）の見分け。
-// ⚠️ 歯止めは —— **何行かある本文を URL として取りに行かないこと**（1 行目が URL に見える KIF でも）・
-// **前後の空白や改行が付いた URL を本文として読まないこと**（コピーすると末尾に改行が付く）。
-func TestIsKifuRef(t *testing.T) {
-	cases := []struct {
-		in   string
-		want bool
-	}{
-		{"http://live.shogi.or.jp/oui/kifu/67/oui202607290101.html", true},
-		{"  https://example.com/a.kif\r\n", true},
-		{"0123456789abcdef01234567", true}, // 読売の棋譜 ID
-		{"", false},
-		{"   \n", false},
-		{"手数----指手---------消費時間--\n   1 ７六歩(77)   ( 0:16/00:00:16)", false},
-		{"http://example.com/a.kif\n手数----指手--", false},
-		{"V2.2\nPI\n+\n+7776FU", false},
-		{"先手：藤井　聡太", false}, // 全角の空白も空白
-	}
-	for _, c := range cases {
-		if got := isKifuRef(c.in); got != c.want {
-			t.Errorf("isKifuRef(%q) = %v, want %v", c.in, got, c.want)
-		}
-	}
-}

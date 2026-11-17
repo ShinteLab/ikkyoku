@@ -8,7 +8,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode"
 
 	"github.com/ShinteLab/ikkyoku/log"
 	"github.com/ShinteLab/kicho"
@@ -70,8 +69,10 @@ type KifuService struct {
 	openErr error
 	// lastKifuDir は最後に棋譜ファイルを開いたディレクトリ（次に開くときの始まり）。
 	lastKifuDir string
-	// opened は最後に開いた棋譜ファイル（`kifufile.go`。登録するときに元の文字コードを残す）。
-	opened openedKifu
+	// opened は最近開いた棋譜ファイル（`kifufile.go`。登録するときに元の文字コードを残す）。
+	// ⚠️ **1 件ではなく何件か覚える**（2026-11-18）—— 開いたファイルはカードになって並ぶので、
+	// 後から開いた別のファイルで前のカードの文字コードが落ちないように。
+	opened []openedKifu
 }
 
 // NewKifuService は棚を**まだ開かずに**作る。
@@ -674,24 +675,6 @@ func (s *KifuService) SendToStudyGame(d GameDetail) (KifuLoad, error) {
 	return s.study.loadKifuFrom(d.KIF, kicho.RefetchableURL(d.Source, d.SourceURL), d.ID, key)
 }
 
-// IsKifuRef は入力タブの棋譜の欄の中身が、**棋譜の本文ではなく在り処（URL か棋譜 ID）**かどうか
-// （2026-11-18。「棋譜を貼り付ける」と「棋譜の URL から」を 1 つの欄にした）。
-//
-// 真なら `Fetch` に、偽なら本文として `StudyService.LoadKifu` / `ImportKIF` に渡す。
-// 見分け方は**1 行で空白を含まない**こと —— KIF / CSA の本文は必ず何行かあり、
-// URL と読売の棋譜 ID は空白を含まない 1 語なので、ここで両者は重ならない。
-//
-// ⚠️ **ここで取得元（連盟 / 読売 / それ以外）を見分けないこと**（判別は kicho の `Fetch`）。
-// ⚠️ **フロントに同じ判定を書かないこと**（画面が知るのは真か偽かだけ）。
-func (s *KifuService) IsKifuRef(text string) bool {
-	return isKifuRef(text)
-}
-
-func isKifuRef(text string) bool {
-	t := strings.TrimSpace(text)
-	return t != "" && !strings.ContainsFunc(t, unicode.IsSpace)
-}
-
 // Fetch は URL（か棋譜 ID）から棋譜を取得する（**保存はしない**）。
 //
 // 取得元は入力から判別する（判別も取得も kicho 側）。
@@ -766,6 +749,31 @@ func (s *KifuService) linkStudy(key, gameID string) {
 		return
 	}
 	s.study.linkGame(key, gameID)
+}
+
+// PastedKifu は貼り付けた・開いた棋譜をカードにしたもの（2026-11-18。入力タブの「貼り付け」）。
+type PastedKifu struct {
+	// Game はカードに出す中身（対局者・手数など。`Source` は paste、`SourceID` は空）。
+	Game GameDetail `json:"game"`
+	// Key はカードの鍵（本文のハッシュ。**同じ本文を貼り直してもカードを増やさない**）。
+	// ⚠️ **検討の控えの鍵と同じ作り方**（`pasteKeyOf`）—— 画面が鍵を作らない。
+	Key string `json:"key"`
+}
+
+// PreviewPaste は貼り付けた（開いた）棋譜を読んでカードの中身を返す（**保存はしない**。2026-11-18）。
+//
+// 入力タブの「貼り付け」「ファイルを開く…」・ドラッグ＆ドロップがここを通り、カードから
+// 「解析する」（`StudyService.LoadKifu`）・「棋譜に登録する」（`ImportKIF`）へ進む。
+//
+// ⚠️ **棚（DB）を要らないこと**（`kifuFetcher`。設計原則3）—— 棚が開けていなくても
+// 貼ってカードにして解析できる。棚が要るのは登録のほう。
+// ⚠️ **棋譜として読めなければ断る**（カードにしない。判定は kicho の `PreviewKIF`）。
+func (s *KifuService) PreviewPaste(text string) (PastedKifu, error) {
+	f, err := kifuFetcher.PreviewKIF(text)
+	if err != nil {
+		return PastedKifu{}, describeKifuError(err)
+	}
+	return PastedKifu{Game: fetchedToDetail(f), Key: pasteKeyOf(text)}, nil
 }
 
 // PreviewKIF は KIF テキストを解析して内容を返す（**保存はしない**）。

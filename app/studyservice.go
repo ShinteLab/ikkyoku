@@ -364,7 +364,7 @@ func foulOf(p *position.Position) error {
 	return nil
 }
 
-// KifuLoad は棋譜を読み込んだ結果（入力タブの「棋譜を貼り付ける」）。
+// KifuLoad は棋譜を読み込んだ結果（入力タブのカード・棋譜タブの「解析する」）。
 type KifuLoad struct {
 	// State は読み込んだあとの解析タブの状態。**そのまま showStudy に渡す。**
 	State StudyState `json:"state"`

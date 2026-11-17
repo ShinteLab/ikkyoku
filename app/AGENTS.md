@@ -48,7 +48,7 @@
 | `analyzeservice.go` | 確定した局面を解析する Service（`Start` / `Stop` / `State` / `CheckEngine`）。**順位 1 の評価値を `StudyService.recordEval` に渡す**（評価値グラフ。⚠️ **記録先の判断はしない** —— 手順を持っていないので、捨てた枝かどうかを確かめようがない）。**局面は持たない**（`StudyService` から読む。⚠️ **`PositionService` を見ないこと**）。⚠️ **登録した「解析に使う」エンジンを同時に走らせる**（1 エンジン 1 プロセス）。途中経過はイベント（**`engineId` つき**）。⚠️ **発火の口は持たない** ——`Emit`（`app.EventEmitter`）を `main.go` が差し込む |
 | `diagservice.go` | **フロントが生きているかの計測**（心拍・例外の中継）。局面にもキャプチャにも関与しない。「メイン画面が真っ黒になる」現象を切り分けるためのもの（`_docs/cmd-windows.md`）。ログは `log.Diag`（dev だけ `ikkyoku-diag_<日付>.log` に残る。`log/AGENTS.md`） |
 | `issueservice.go` | **起動はできたが足りないもの・できないことの一覧**（2026-10-04。`Report` だけがフロントの API。`Set` / `Clear` / `SetLogDir` は `//wails:ignore` で `main` から呼ぶ）。メイン画面のツールバーの ⚠ が写す。⚠️ **鍵ごとに 1 つ・直ったら `Clear`**（積みっぱなしにしない）・⚠️ **同じ鍵は並びを動かさずに差し替える**・⚠️ **起動を止めるものはここに来ない**（`_cmd/ikkyoku/fatal.go`）。何を載せるかは `_cmd/ikkyoku/issues.go`、線引きは `_docs/cmd-windows.md` の「起動で黙って消えない」 |
-| `kifufile.go` | **棋譜ファイルを開く**（`KifuService.OpenKifuFile`。2026-11-15）。中身を貼り付け欄に入れるだけで、開いた本文のまま登録したら元の文字コードを残す。⚠️ **棚が開けていなくても開ける** |
+| `kifufile.go` | **棋譜ファイルを開く**（`KifuService.OpenKifuFile`。2026-11-15）。中身を貼り付けと同じカードにするだけで、開いた本文のまま登録したら元の文字コードを残す（**最近開いた 16 個まで覚える**。カードが並ぶため）。⚠️ **棚が開けていなくても開ける** |
 | `kifufetch.go` | **URL から棋譜を取ってくる**（`fetchKIF`）。文字コードの判別・HTML から .kif を辿る・上限つきの読み取りは全部 `kicho/scrape`。⚠️ **`kicho.Library` を経由しない** —— URL から棋譜を読むのは棚に依らない操作（設計原則3） |
 
 ## 訂正タブ ⇄ 解析タブの継ぎ目

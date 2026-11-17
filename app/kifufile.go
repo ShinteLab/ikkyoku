@@ -14,9 +14,9 @@ import (
 
 // 棋譜ファイルを開く（2026-11-15。入力タブの「ファイルを開く」）。
 //
-// **開いたファイルは貼り付け欄に入るだけ。** 行き先（「解析する」→ 解析タブ /
-// 「棋譜に登録する」→ 棚）は貼り付けと同じ 2 つで、**ファイル専用の行き先を作らない**
-// （入力欄を 2 つに増やさないのと同じ理由。同じ入力の入り方が 1 つ増えただけ）。
+// **開いたファイルは貼り付けと同じカードになるだけ**（2026-11-18。それまでは貼り付け欄に入れていた）。
+// 行き先（カードの「解析する」→ 解析タブ / 「棋譜に登録する」→ 棚）は貼り付けと同じ 2 つで、
+// **ファイル専用の行き先を作らない**（同じ入力の入り方が 1 つ増えただけ）。
 //
 // ⚠️ **棚が開けていなくても開けること**（設計原則3）。読むのは手元のファイルで、
 // 棚（kicho の DB）には触らない。`KifuService` に置いてあるのはダイアログと
@@ -26,7 +26,7 @@ import (
 // .kif は Shift_JIS のことが多く、UTF-8 決め打ちにすると漢数字が壊れて 1 手も読めない。
 
 // kifuFileMaxBytes は開く棋譜ファイルの上限（URL の取得と同じ 4MiB。kicho の `scrape.MaxKifuBytes`）。
-// 棋譜 1 局は大きくても数十 KB なので、誤って巨大なファイルを選んだときに貼り付け欄を固めないための保険。
+// 棋譜 1 局は大きくても数十 KB なので、誤って巨大なファイルを選んだときに画面を固めないための保険。
 const kifuFileMaxBytes = 4 << 20
 
 // KifuFile は開いた棋譜ファイルの中身。
@@ -39,7 +39,11 @@ type KifuFile struct {
 	Encoding string `json:"encoding"`
 }
 
-// openedKifu は最後に開いたファイル（登録するときに元の文字コードを残すため）。
+// openedKifuKeep は文字コードを覚えておく開いたファイルの数（古いものから忘れる）。
+// カードは 2〜3 枚が普通なので、これで足りる。忘れても utf-8 で登録されるだけ。
+const openedKifuKeep = 16
+
+// openedKifu は開いたファイル 1 つ（登録するときに元の文字コードを残すため）。
 type openedKifu struct {
 	text     string // 改行を "\n" に揃え、前後の空白を落としたもの（`sameKifuText`）
 	encoding string
@@ -69,7 +73,7 @@ func (s *KifuService) OpenKifuFile() (KifuFile, error) {
 	return s.adoptKifuFile(path, "開きました")
 }
 
-// KifuDropTarget は棋譜ファイルを落とせる場所（入力タブの「棋譜を貼り付ける」の群）の要素 ID（2026-11-15）。
+// KifuDropTarget は棋譜ファイルを落とせる場所（入力タブの「棋譜を読み込む」の群）の要素 ID（2026-11-15）。
 //
 // ⚠️ **画面の `data-file-drop-target` を付けた要素の id と揃えること**（`inputtab.ts` の `#kifu-drop`）。
 // Wails は落ちた要素の id を一緒に渡してくるので、`_cmd/ikkyoku` はこれと同じときだけ `DropKifuFiles` を呼ぶ。
@@ -87,11 +91,11 @@ type KifuDrop struct {
 	Skipped int `json:"skipped"`
 }
 
-// DropKifuFiles は落とされた棋譜ファイルを読む（2026-11-15。入力タブの「棋譜を貼り付ける」へのドラッグ＆ドロップ）。
+// DropKifuFiles は落とされた棋譜ファイルを読む（2026-11-15。入力タブの「棋譜を読み込む」へのドラッグ＆ドロップ）。
 //
-// **「ファイルを開く…」で選んだのと同じ扱い**（中身を貼り付け欄に入れるだけ・開いた本文のまま
-// 登録したら元の文字コードを残す）。⚠️ **読むのは最初の 1 つだけ** —— 貼り付け欄は 1 つなので、
-// 2 つ目以降は読まずに数だけ返す（画面が「1 つだけ読みました」と出す）。
+// **「ファイルを開く…」で選んだのと同じ扱い**（中身をカードにするだけ・開いた本文のまま
+// 登録したら元の文字コードを残す）。⚠️ **読むのは最初の 1 つだけ** —— 2 つ目以降は
+// 読まずに数だけ返す（画面が「ほかの n 個は読んでいません」と出す）。
 //
 // ⚠️ **`//wails:ignore` を外さないこと。** `_cmd/ikkyoku` がドロップのイベントから呼ぶ口で、
 // フロントの API ではない（外すと画面から任意のパスを読めてしまう）。
@@ -118,7 +122,10 @@ func (s *KifuService) adoptKifuFile(path, how string) (KifuFile, error) {
 	}
 	s.mu.Lock()
 	s.lastKifuDir = filepath.Dir(path)
-	s.opened = openedKifu{text: normalizeKifuText(got.Text), encoding: got.Encoding}
+	s.opened = append(s.opened, openedKifu{text: normalizeKifuText(got.Text), encoding: got.Encoding})
+	if len(s.opened) > openedKifuKeep {
+		s.opened = s.opened[len(s.opened)-openedKifuKeep:]
+	}
 	s.mu.Unlock()
 	log.Info("棋譜ファイルを"+how, "path", path, "encoding", got.Encoding, "bytes", len(got.Text))
 	return got, nil
@@ -140,7 +147,7 @@ func readKifuFile(path string) (KifuFile, error) {
 	}
 	// ⚠️ **中身が文字でなければ断る**（2026-11-15）。文字コードの判別は UTF-8 で読めなければ
 	// Shift_JIS として読むので、**画像などを渡すと文字化けした本文として通ってしまう**
-	// （画像を「棋譜を貼り付ける」に落としたときに欄が化けた文字で埋まる）。NUL は棋譜に現れない。
+	// （画像を「棋譜を読み込む」に落としたときに化けた文字のカードができる）。NUL は棋譜に現れない。
 	if bytes.IndexByte(b, 0) >= 0 {
 		return KifuFile{}, fmt.Errorf("棋譜のファイルではありません（文字ではない中身です）: %s", filepath.Base(path))
 	}
@@ -154,13 +161,16 @@ func readKifuFile(path string) (KifuFile, error) {
 	return KifuFile{Name: filepath.Base(path), Text: text, Encoding: encoding}, nil
 }
 
-// encodingFor は登録する本文の元の文字コードを返す。**最後に開いたファイルと同じ本文のときだけ**
-// その文字コードで、書き換えた・貼り付けた本文は utf-8（貼り付けと同じ）。
+// encodingFor は登録する本文の元の文字コードを返す。**最近開いたファイルと同じ本文のときだけ**
+// その文字コードで、貼り付けた本文は utf-8（貼り付けと同じ）。新しく開いたものを先に見る。
 func (s *KifuService) encodingFor(text string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.opened.encoding != "" && s.opened.text == normalizeKifuText(text) {
-		return s.opened.encoding
+	t := normalizeKifuText(text)
+	for i := len(s.opened) - 1; i >= 0; i-- {
+		if o := s.opened[i]; o.encoding != "" && o.text == t {
+			return o.encoding
+		}
 	}
 	return kicho.EncodingUTF8
 }

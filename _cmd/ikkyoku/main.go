@@ -331,7 +331,7 @@ const imageDropTarget = "image-drop"
 
 // registerFileDrop は**メイン画面に落とされたファイル**を、落ちた群に応じて読む（2026-11-15）。
 //
-//   - 「棋譜を貼り付ける」（`ikkyokuapp.KifuDropTarget`）→ 棋譜として読んで貼り付け欄へ（`kifu:dropped`）
+//   - 「棋譜を読み込む」（`ikkyokuapp.KifuDropTarget`）→ 棋譜として読んでカードへ（`kifu:dropped`）
 //   - 「画像ファイルを読み込む」（`imageDropTarget`）→ **「画像を選ぶ…」と同じ経路**（`loadImage`）で
 //     認識して訂正タブへ（`capture:shot` / `capture:done`。読めなければ `image:drop-failed`）
 //
@@ -663,7 +663,7 @@ func newMainWindow(app *application.App, st guide.Window) (*application.WebviewW
 		// 出すのは revealMain。上の ⚠️ を読むこと。
 		Hidden: true,
 		// 棋譜ファイルと画像ファイルのドラッグ＆ドロップ（2026-11-15。`registerFileDrop`）。
-		// ⚠️ **受けるのは `data-file-drop-target` を付けた要素だけ**（入力タブの「画像ファイルを読み込む」と「棋譜を貼り付ける」）。
+		// ⚠️ **受けるのは `data-file-drop-target` を付けた要素だけ**（入力タブの「画像ファイルを読み込む」と「棋譜を読み込む」）。
 		// ほかの場所では「置けない」カーソルになり、落としても何も起きない。
 		EnableFileDrop: true,
 		// AlwaysOnTop は付けない。中継を観ながら使う画面なので、最前面に居座ると

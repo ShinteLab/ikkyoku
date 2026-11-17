@@ -5937,32 +5937,6 @@ html.is-graph #app {
   stroke: #ffc46b;
 }
 
-/* 棋譜を読み込む欄（本文も URL も入る。2026-11-18）。**入力タブの 2 つめの入口。**
-   高さを固定してあるのは、貼った棋譜の長さで下の行（ボタンと結果）が
-   動かないようにするため（100 手の棋譜を貼るとページごと伸びる）。
-   溢れたぶんは中でスクロールさせる。 */
-.kifu-text {
-  align-self: stretch;
-  min-height: 120px;
-  max-height: 220px;
-  padding: 6px 8px;
-  font-family: "Consolas", "Courier New", monospace;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--text);
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 5px;
-  resize: vertical;
-  overflow: auto;
-  white-space: pre;
-}
-
-.kifu-text:focus {
-  outline: none;
-  border-color: var(--info);
-}
-
 /* ファイル（棋譜・画像）を運んでいるあいだの「ここに落とせる」（2026-11-15）。
    `file-drop-target-active` は Wails のランタイムが `data-file-drop-target` の要素に付け外しする。
    ⚠️ **枠線ではなく outline で出す**（border を変えると群の寸法が動き、下の欄が押し下げられる）。 */
@@ -5970,6 +5944,19 @@ html.is-graph #app {
   outline: 2px dashed var(--accent);
   outline-offset: 2px;
   background: rgb(var(--accent-rgb) / 0.08);
+}
+
+/* 棋譜の URL 欄。ボタンまで 1 行に収め、**入力欄だけが伸び縮みする**
+   （ボタンが折り返して縦に伸びると、下の行が押し下げられる）。 */
+.kifu-url-row {
+  align-self: stretch;
+  flex-wrap: nowrap;
+  padding-left: 0;
+}
+
+.kifu-url-row input {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 /* ---- 連続解析の幕（2026-08-14）--------------------------------------------

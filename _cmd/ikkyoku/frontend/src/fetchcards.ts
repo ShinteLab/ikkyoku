@@ -20,12 +20,18 @@
 // ⚠️ **「取得 URL をコピー」は置かない**（kicho の UI にはある）。あれは
 // ShogiHome 等の外部ツールへ渡すためのもので、ikkyoku では渡す先が自分自身。
 // **代わりに置くのが「解析する」。**
-import { KifuService } from "../bindings/github.com/ShinteLab/ikkyoku/app";
+//
+// **貼り付けた棋譜もカードになる**（2026-11-18。「貼り付け」・「ファイルを開く…」・ドラッグ＆ドロップ）。
+// 取得したカードとの違いは**取りに行く先が無いこと**だけ —— ⚠️ **「更新」を出さない**・
+// ⚠️ **仮の一覧に載せない**（再起動すると消える。kicho も弾く）。行き先は同じ 2 つ
+// （「解析する」→ 解析タブ / 「棋譜に登録する」→ 棋譜タブ）。
+import { KifuService, StudyService } from "../bindings/github.com/ShinteLab/ikkyoku/app";
 import { openPopup } from "./popup";
 import type {
   GameDetail,
   GameSummary,
   KifuLoad,
+  PastedKifu,
   WatchEntry,
 } from "../bindings/github.com/ShinteLab/ikkyoku/app/models";
 
@@ -41,6 +47,7 @@ const SOURCE_LABELS: Record<string, string> = {
   shogilive: "将棋連盟 中継",
   shogidb2: "将棋DB2",
   url: "URL",
+  paste: "貼り付け",
 };
 
 // cardKey はカードの識別子。
@@ -65,10 +72,15 @@ const movesText = (g: GameDetail): string => {
   return `${g.moves}手`;
 };
 
-// FetchCard は取得結果 1 枚。
+// FetchCard は取得結果 1 枚（貼り付けた棋譜も同じ形。`pasted`）。
 type FetchCard = {
   key: string;
   game: GameDetail;
+  // pasted は貼り付けた（開いた）棋譜のカードか（2026-11-18）。**取りに行く先が無い**ので
+  // 「更新」を出さず、仮の一覧にも載せない。⚠️ **鍵は Go が本文から作る**（`PastedKifu.key`）。
+  pasted: boolean;
+  // origin は貼り付けたカードの出どころ（"貼り付け" かファイル名）。取得したカードは空。
+  origin: string;
   // saved は棚に入れたときの記録（「保存し直す」の出し分けに使う）。
   saved: GameSummary | null;
   // watched は仮の一覧（棚の DB）に載っているか。
@@ -107,14 +119,23 @@ const cardFromWatch = (w: WatchEntry): FetchCard => {
     kif: "",
     encoding: "",
   };
-  return { key: cardKey(game), game, saved: null, watched: true, notice: "", error: "" };
+  return {
+    key: cardKey(game),
+    game,
+    pasted: false,
+    origin: "",
+    saved: null,
+    watched: true,
+    notice: "",
+    error: "",
+  };
 };
 
 // isRestored は「復元しただけで、まだサイトから取り直していない」カードかどうか。
 //
 // ⚠️ **判定は本文の有無。** 別のフラグを持たせると、更新して中身が入ったのに
 // 復元扱いのまま、という食い違いが起きる。
-const isRestored = (card: FetchCard): boolean => card.game.kif === "";
+const isRestored = (card: FetchCard): boolean => !card.pasted && card.game.kif === "";
 
 // refreshNotice は取り直したときの案内。
 //
@@ -131,35 +152,37 @@ const refreshNotice = (prev: FetchCard, g: GameDetail): string => {
   return prev.saved ? `${head}。保存し直すと棋譜タブの棋譜も最新になります` : head;
 };
 
-// FetchCardsHandle は入力タブの棋譜の欄から呼ぶ口（2026-11-18）。
-//
-// ⚠️ **欄はここが持たない。** 「棋譜を貼り付ける」と「棋譜の URL から」を 1 つの欄
-// （`#kifu-text`。持ち主は `inputtab.ts`）にしたので、欄の中身が URL・棋譜 ID だったときに
-// 入力タブがここを呼ぶ。**どちらも取得したらカードを積む**（更新・再起動後の復元はカードの役目）。
-// ⚠️ **失敗は投げる**（返事の出し先は欄の下の状態の行 1 つ。持ち主は入力タブ）。
+// FetchCardsHandle は入力タブから呼ぶ口（2026-11-18）。
 export interface FetchCardsHandle {
-  // fetchToStudy は取得してカードを積み、その内容を解析タブへ送る形にする（欄の「解析する」）。
-  // ⚠️ **中継を追っているかを聞くのは呼び出し側**（取りに行く前に聞く）。
-  fetchToStudy(input: string): Promise<KifuLoad>;
-  // fetchToShelf は取得してカードを積み、その内容を棋譜タブへ入れる（欄の「棋譜に登録する」）。
-  // ⚠️ **棋譜タブの一覧を取り直すのは呼び出し側**（貼った本文を登録したときと同じ口）。
-  fetchToShelf(input: string): Promise<GameSummary>;
+  // addPasted は貼り付けた（開いた）棋譜をカードにする。origin はカードの札と失敗の文に出す
+  // （"貼り付け" かファイル名）。読めなければ群の状態の行に出して false。
+  // ⚠️ **棋譜かどうかの判定も対局者などの読み取りも Go 側**（`KifuService.PreviewPaste`）。
+  addPasted(text: string, origin: string): Promise<boolean>;
+  // setStatus は群の状態の行（#fetch-status）。⚠️ **群が 1 つなので行も 1 つ** —— 貼り付けの
+  // 失敗もここへ出す（入力タブに別の行を作らない）。
+  setStatus(msg: string, kind?: "" | "error" | "warn"): void;
 }
 
 export function mountFetchCards(
   root: ParentNode,
   opts: {
-    // onAnalyze はカードの「解析する」を押したとき（解析タブへ移って描くのは呼び出し側）。
+    // onAnalyze は「解析する」を押したとき（解析タブへ移って描くのは呼び出し側）。
     onAnalyze: (load: KifuLoad) => void;
     // confirmAnalyze は**送る前に聞く**（中継を追っているなら止めてよいか。偽ならやめる）。
     confirmAnalyze?: () => Promise<boolean>;
-    // onSaved はカードの「保存」で棚に入れたとき（棋譜タブの一覧を取り直す）。
+    // onSaved は棚に入れたとき（棋譜タブの一覧を取り直す）。
     onSaved: () => void;
-    // setStatus は群の状態の行（2026-11-18。欄と同じ 1 行を借りる。持ち主は入力タブ）。
-    // ここから書くのは前回のカードを復元できなかったときだけ。
-    setStatus: (msg: string, kind?: "warn" | "error") => void;
   },
 ): FetchCardsHandle {
+  // ⚠️ **入力欄は「棋譜の URL から」の 1 つだけで、持ち主はここ**（2026-09-12）。
+  // **`#fetch-input` に戻さないこと** —— 同じ URL を入れる場所が 2 か所あると、
+  // どちらに入れたかで通る道が変わる（それを畳んだのがこの変更）。
+  // ⚠️ **URL からできることは「取得」だけ。** 解析も登録も**カード**が持つので、
+  // `mainscreen.ts` はこの欄を読まない（読む側が 2 つあると、どちらの値で
+  // 動いたのかが追えなくなる）。
+  const input = root.querySelector<HTMLInputElement>("#kifu-url")!;
+  const run = root.querySelector<HTMLButtonElement>("#fetch-run")!;
+  const status = root.querySelector<HTMLParagraphElement>("#fetch-status")!;
   const host = root.querySelector<HTMLElement>("#fetch-cards")!;
 
   // ⚠️ **状態はここが持つ**（タブを跨いでも消えない）。
@@ -167,16 +190,26 @@ export function mountFetchCards(
   // 「どのサイトのどの棋譜か」と一覧用のメタだけ。
   let cards: FetchCard[] = [];
 
+  const setStatus = (msg: string, kind: "" | "error" | "warn" = "") => {
+    status.textContent = msg;
+    status.hidden = msg === "";
+    status.classList.toggle("is-error", kind === "error");
+    status.classList.toggle("is-warn", kind === "warn");
+  };
+
   // mergeCard は取得結果をカードへ反映する。
   //
   // ⚠️ **key が一致するカードがあれば増やさず、位置と saved を保って中身だけ
-  // 差し替える。** 入力欄から取ったときもカードの「更新」もここを通す。
+  // 差し替える。** 入力欄からの「取得」もカードの「更新」もここを通す。
   const mergeCard = (g: GameDetail) => {
     const key = cardKey(g);
     const i = cards.findIndex((c) => c.key === key);
     if (i < 0) {
       // watched は仮の一覧へ載せてから立てる（remember を参照）。
-      cards = [{ key, game: g, saved: null, watched: false, notice: "", error: "" }, ...cards];
+      cards = [
+        { key, game: g, pasted: false, origin: "", saved: null, watched: false, notice: "", error: "" },
+        ...cards,
+      ];
       return;
     }
     cards[i] = { ...cards[i], game: g, notice: refreshNotice(cards[i], g), error: "" };
@@ -254,33 +287,47 @@ export function mountFetchCards(
     }
   };
 
-  // saveCard はカードの内容を棚へ入れて、カードに印を付ける（カードの「保存」と欄の「棋譜に登録する」）。
+  // savePasted は貼り付けたカードを棚へ入れる（2026-11-18）。
   //
-  // ⚠️ **画面に出している内容をそのまま保存する**（サイトへ取り直しには行かない）。
-  // 最新にしたいなら先に「更新」を押す、という役割分担。
-  // ⚠️ **仮の一覧へ載せた後に呼ぶこと**（終局していれば kicho が外すので、逆順だと載せ直してしまう）。
-  const saveCard = async (key: string, game: GameDetail): Promise<GameSummary> => {
-    const rec = await KifuService.Save(game);
-    // ⚠️ **終局していれば kicho 側が仮の一覧から外す**（もう取り直す必要が無い）。
-    // **対局中はそのまま残る** —— 2 日制なら翌日も同じカードで追うので消えては困る。
-    // **この分岐を書き換えないこと**（判断を持っているのは `Library.Save`）。
-    const watched = cards.find((c) => c.key === key)?.watched ?? false;
-    patch(key, {
-      saved: rec,
-      watched: rec.finished ? false : watched,
-      notice: rec.finished
-        ? "棋譜タブに保存しました（終局しているので仮の一覧から外しました）"
-        : "棋譜タブに保存しました",
-      error: "",
-    });
-    return rec;
-  };
-
-  const save = async (card: FetchCard) => {
+  // ⚠️ **貼った本文の登録は毎回新しい棋譜になる**（取得元の ID が無い。`ImportKIF`）ので、
+  // 登録したら**ボタンを「登録済み」で止める**（押し直すと棋譜タブに同じ棋譜が 2 件できる）。
+  // 開いたファイルのまま登録すれば元の文字コードも残る（Go 側が本文で引き当てる）。
+  const savePasted = async (card: FetchCard) => {
     busyKeys.add(card.key);
     render();
     try {
-      await saveCard(card.key, card.game);
+      const rec = await KifuService.ImportKIF(card.game.kif);
+      patch(card.key, { saved: rec, notice: "棋譜タブに登録しました", error: "" });
+      opts.onSaved();
+    } catch (err) {
+      patch(card.key, { error: `棋譜に登録できませんでした: ${String(err)}`, notice: "" });
+    } finally {
+      busyKeys.delete(card.key);
+      render();
+    }
+  };
+
+  const save = async (card: FetchCard) => {
+    if (card.pasted) {
+      return savePasted(card);
+    }
+    busyKeys.add(card.key);
+    render();
+    try {
+      // ⚠️ **画面に出している内容をそのまま保存する**（サイトへ取り直しには行かない）。
+      // 最新にしたいなら先に「更新」を押す、という役割分担。
+      const rec = await KifuService.Save(card.game);
+      // ⚠️ **終局していれば kicho 側が仮の一覧から外す**（もう取り直す必要が無い）。
+      // **対局中はそのまま残る** —— 2 日制なら翌日も同じカードで追うので消えては困る。
+      // **この分岐を書き換えないこと**（判断を持っているのは `Library.Save`）。
+      patch(card.key, {
+        saved: rec,
+        watched: rec.finished ? false : card.watched,
+        notice: rec.finished
+          ? "棋譜タブに保存しました（終局しているので仮の一覧から外しました）"
+          : "棋譜タブに保存しました",
+        error: "",
+      });
       opts.onSaved();
     } catch (err) {
       patch(card.key, { error: `保存できませんでした: ${String(err)}`, notice: "" });
@@ -318,7 +365,12 @@ export function mountFetchCards(
         game = got;
       }
       // ⚠️ **棚を通さない。** 取得しただけの棋譜も解析できる（二系統を残す方針）。
-      opts.onAnalyze(await KifuService.SendToStudyGame(game));
+      // ⚠️ **貼り付けたカードは本文の口**（`LoadKifu`。前に同じ本文を解析していれば続きから開く）。
+      opts.onAnalyze(
+        card.pasted
+          ? await StudyService.LoadKifu(game.kif)
+          : await KifuService.SendToStudyGame(game),
+      );
     } catch (err) {
       patch(card.key, { error: `解析タブへ送れませんでした: ${String(err)}`, notice: "" });
     } finally {
@@ -348,12 +400,17 @@ export function mountFetchCards(
   // ⚠️ **消える範囲が違うので、そう書くこと** —— 棚の削除（棋譜タブ）と
   // 見た目が同じ赤いボタンなので、何が消えるのかを文言で分ける。
   const askRemove = (e: MouseEvent, card: FetchCard) => {
+    // ⚠️ **登録していない貼り付けのカードは、閉じると本文ごと消える**（取り直す先が無い）。
+    const label =
+      card.pasted && !card.saved
+        ? "カードを閉じる（棋譜タブに登録していない棋譜は消えます）"
+        : "カードを閉じる（棋譜タブの棋譜は消えません）";
     openPopup(e.clientX, e.clientY, {
       label: "このカードを閉じる",
       focus: 1,
       items: [
         {
-          label: "カードを閉じる（棋譜タブの棋譜は消えません）",
+          label,
           kind: "danger",
           onPick: () => void removeCard(card),
         },
@@ -380,12 +437,13 @@ export function mountFetchCards(
     title.textContent = game.event || "(棋戦名なし)";
     const tag = document.createElement("span");
     tag.className = "fetch-card-source";
-    tag.textContent = SOURCE_LABELS[game.source] ?? game.source;
+    tag.textContent = card.origin || (SOURCE_LABELS[game.source] ?? game.source);
     head.append(title, tag);
 
     // ⚠️ **仮の一覧に載っていないことは画面に出すこと。** 載っていないカードは
     // 再起動で消えるので、黙っていると「昨日のカードが無い」の理由が分からない。
-    if (!card.watched) {
+    // ⚠️ **貼り付けたカードには出さない**（載せられないのが当たり前で、いつも出ていると見慣れる）。
+    if (!card.watched && !card.pasted) {
       const warn = document.createElement("span");
       warn.className = "fetch-card-source";
       warn.textContent = "仮の一覧に無し";
@@ -408,7 +466,13 @@ export function mountFetchCards(
     closeBtn.title = "このカードを画面と仮の一覧から外します（棋譜タブの棋譜は消えません）";
     closeBtn.disabled = busy;
     closeBtn.addEventListener("click", (e) => askRemove(e, card));
-    head.append(refreshBtn, closeBtn);
+    // ⚠️ **貼り付けたカードに「更新」を出さない**（取りに行く先が無い）。
+    if (card.pasted) {
+      closeBtn.title = "このカードを画面から外します（棋譜タブに登録した棋譜は消えません）";
+      head.append(closeBtn);
+    } else {
+      head.append(refreshBtn, closeBtn);
+    }
     box.append(head);
 
     const meta = document.createElement("dl");
@@ -431,7 +495,7 @@ export function mountFetchCards(
         "「取り直して解析」ならそのまま進めます。" +
         "棋譜タブに入れるときは先に「更新」を押してください。";
       box.append(hint);
-    } else if (!game.finished) {
+    } else if (!game.finished && !card.pasted) {
       // ⚠️ **未終局の注意は出すこと。** 保存は画面の内容をそのまま書き込むので、
       // 「更新してから保存」の順序を知らないと古い棋譜が棚に入る。
       const hint = document.createElement("p");
@@ -470,7 +534,9 @@ export function mountFetchCards(
         : "解析する";
     analyzeBtn.title = restored
       ? "サイトから取り直してから解析タブで開きます（棋譜タブには入りません）"
-      : "この内容を解析タブで開きます（棋譜タブには入りません。最新手は「更新」してから）";
+      : card.pasted
+        ? "この棋譜を解析タブで開きます（棋譜タブには入りません）"
+        : "この内容を解析タブで開きます（棋譜タブには入りません。最新手は「更新」してから）";
     // ⚠️ **`sourceId` を見るのは取り直すときだけ。** 本文があるカードは
     // 送るだけなので、取得元の ID は要らない。
     analyzeBtn.disabled = busy || (restored && !game.sourceId);
@@ -479,14 +545,26 @@ export function mountFetchCards(
     const saveBtn = document.createElement("button");
     saveBtn.type = "button";
     saveBtn.className = "ghost-btn";
-    saveBtn.textContent = saved ? "保存し直す" : "この内容を保存";
+    // ⚠️ **貼り付けたカードは「棋譜に登録する」→「登録済み」**（押し直すと 2 件になる。`savePasted`）。
+    saveBtn.textContent = card.pasted
+      ? saved
+        ? "登録済み"
+        : "棋譜に登録する"
+      : saved
+        ? "保存し直す"
+        : "この内容を保存";
     // ⚠️ **保存は「解析する」と違って、取り直しに行かない。** 保存は
     // **画面の内容をそのまま書き込む**操作だから（上の「未終局の注意」と同根）で、
     // 本文の無いカードは押せないままにしてある。
     saveBtn.title = restored
       ? "先に「更新」でサイトから取り直してください（棋譜本文がまだありません）"
       : "いま表示している内容を棋譜タブに書き込みます";
-    saveBtn.disabled = busy || restored;
+    if (card.pasted) {
+      saveBtn.title = saved
+        ? "棋譜タブに登録してあります"
+        : "この棋譜を棋譜タブに登録します";
+    }
+    saveBtn.disabled = busy || restored || (card.pasted && saved !== null);
     saveBtn.addEventListener("click", () => void save(card));
 
     actions.append(analyzeBtn, saveBtn);
@@ -509,30 +587,37 @@ export function mountFetchCards(
     host.replaceChildren(...cards.map(renderCard));
   };
 
-  // fetchCard は欄の URL・棋譜 ID から取得してカードを積み、仮の一覧へ載せる。
-  //
-  // ⚠️ **取得そのものの失敗はカードにならない**ので投げる（呼び出し側が欄の下に出す）。
-  // ⚠️ **仮の一覧へ載せ損ねても失敗にしない**（`remember` がカードに出す）。
-  const fetchCard = async (input: string): Promise<GameDetail> => {
-    const got = await KifuService.Fetch(input.trim());
-    mergeCard(got);
-    render();
+  const fetchNow = async () => {
+    const value = input.value.trim();
+    if (!value) {
+      setStatus("URL または棋譜 ID を入れてください。", "error");
+      return;
+    }
+    run.disabled = true;
+    setStatus("取得しています…");
+    let got: GameDetail;
+    try {
+      got = await KifuService.Fetch(value);
+      mergeCard(got);
+      setStatus("");
+      render();
+    } catch (err) {
+      // ⚠️ **取得そのものの失敗はカードにならない**ので、ここに出す。
+      setStatus(`取得できませんでした: ${String(err)}`, "error");
+      return;
+    } finally {
+      run.disabled = false;
+    }
     await remember(got);
-    return got;
   };
 
-  // withBusy は欄から取ったカードを、続きの操作のあいだ塞ぐ（カードのボタンと取り合わないように）。
-  const withBusy = async <T>(game: GameDetail, run: () => Promise<T>): Promise<T> => {
-    const key = cardKey(game);
-    busyKeys.add(key);
-    render();
-    try {
-      return await run();
-    } finally {
-      busyKeys.delete(key);
-      render();
+  run.addEventListener("click", () => void fetchNow());
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      void fetchNow();
     }
-  };
+  });
 
   // 起動時に仮の一覧からカードを復元する。
   //
@@ -550,7 +635,7 @@ export function mountFetchCards(
     } catch (err) {
       // ⚠️ **ここで赤字にしないこと** —— 復元できないだけで何かを壊したわけでは
       // ない。直す先（設定タブ）は Go 側の文言が持っている。
-      opts.setStatus(`前回のカードを復元できませんでした: ${String(err)}`, "warn");
+      setStatus(`前回のカードを復元できませんでした: ${String(err)}`, "warn");
       return;
     }
     if (!list || list.length === 0) return;
@@ -564,14 +649,39 @@ export function mountFetchCards(
   render();
 
   return {
-    fetchToStudy: async (input) => {
-      const game = await fetchCard(input);
-      // ⚠️ **棚を通さない**（カードの「解析する」と同じ口）。
-      return withBusy(game, () => KifuService.SendToStudyGame(game));
+    addPasted: async (text, origin) => {
+      let got: PastedKifu;
+      try {
+        got = await KifuService.PreviewPaste(text);
+      } catch (err) {
+        // ⚠️ **読めなかったものはカードにしない**（取得の失敗と同じで、群の状態の行に出す）。
+        setStatus(`${origin}を棋譜として読めませんでした: ${String(err)}`, "error");
+        return false;
+      }
+      const i = cards.findIndex((c) => c.key === got.key);
+      if (i < 0) {
+        cards = [
+          {
+            key: got.key,
+            game: got.game,
+            pasted: true,
+            origin,
+            saved: null,
+            watched: false,
+            notice: "",
+            error: "",
+          },
+          ...cards,
+        ];
+        setStatus("");
+      } else {
+        // ⚠️ **同じ本文ならカードを増やさない**（位置と「登録済み」を保つ。取得したカードと同じ約束）。
+        cards[i] = { ...cards[i], notice: "同じ棋譜のカードがあります（増やしていません）", error: "" };
+        setStatus("");
+      }
+      render();
+      return true;
     },
-    fetchToShelf: async (input) => {
-      const game = await fetchCard(input);
-      return withBusy(game, () => saveCard(cardKey(game), game));
-    },
+    setStatus,
   };
 }
