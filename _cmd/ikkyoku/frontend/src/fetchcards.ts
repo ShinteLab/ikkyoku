@@ -8,14 +8,17 @@
 // 複数局を交互に追う）があるので、取得のたびにカードを 1 枚積む。
 //
 // ⚠️ **同じ棋譜を取り直したときはカードを増やさない。** 対局中は同じ棋譜を
-// 繰り返し取りに行くので、key（取得元:棋譜 ID）が一致するカードは位置と
-// 「保存済み」を保ったまま中身だけ差し替える。
+// 繰り返し取りに行くので、key（取得元:棋譜 ID）が一致するカードは位置を
+// 保ったまま中身だけ差し替える。
 //
 // ⚠️ **カードは棚の DB にも残る**（仮の一覧 / `watches`。2026-09-08）。
 // 2 日制の対局では翌日また中継の URL を貼り直すことになるので、
 // **「どのサイトのどの棋譜か」だけ**を覚えておいて再起動後に並べ直す。
 // **KIF 本文は持たない** —— 中身は「更新」で取り直す。棋譜そのものを残すのは
-// 「この内容を保存」（棚）の役目で、**役割を混ぜないこと。**
+// 「棋譜に保存」（棚）の役目で、**役割を混ぜないこと。**
+//
+// ⚠️ **「棋譜に保存」したらカードを閉じる**（2026-11-18）。棋譜タブに入った棋譜はそちらで
+// 扱う（解析も棋譜タブから）ので、カードに残す理由が無い。仮の一覧からも外す。
 //
 // ⚠️ **「取得 URL をコピー」は置かない**（kicho の UI にはある）。あれは
 // ShogiHome 等の外部ツールへ渡すためのもので、ikkyoku では渡す先が自分自身。
@@ -24,7 +27,7 @@
 // **貼り付けた棋譜もカードになる**（2026-11-18。「貼り付け」・「ファイルを開く…」・ドラッグ＆ドロップ）。
 // 取得したカードとの違いは**取りに行く先が無いこと**だけ —— ⚠️ **「更新」を出さない**・
 // ⚠️ **仮の一覧に載せない**（再起動すると消える。kicho も弾く）。行き先は同じ 2 つ
-// （「解析する」→ 解析タブ / 「棋譜に登録する」→ 棋譜タブ）。
+// （「解析する」→ 解析タブ / 「棋譜に保存」→ 棋譜タブ）。
 import { KifuService, StudyService } from "../bindings/github.com/ShinteLab/ikkyoku/app";
 import { openPopup } from "./popup";
 import type {
@@ -81,12 +84,9 @@ type FetchCard = {
   pasted: boolean;
   // origin は貼り付けたカードの出どころ（"貼り付け" かファイル名）。取得したカードは空。
   origin: string;
-  // saved は棚に入れたときの記録（「保存し直す」の出し分けに使う）。
-  saved: GameSummary | null;
   // watched は仮の一覧（棚の DB）に載っているか。
   //
-  // 載っていれば再起動しても復元される。**終局済みを保存すると kicho 側が
-  // 外す**ので false に戻る（もう取り直す必要がないため）。
+  // 載っていれば再起動しても復元される。**「棋譜に保存」するとカードごと外す。**
   watched: boolean;
   notice: string;
   error: string;
@@ -124,7 +124,6 @@ const cardFromWatch = (w: WatchEntry): FetchCard => {
     game,
     pasted: false,
     origin: "",
-    saved: null,
     watched: true,
     notice: "",
     error: "",
@@ -140,16 +139,13 @@ const isRestored = (card: FetchCard): boolean => !card.pasted && card.game.kif =
 // refreshNotice は取り直したときの案内。
 //
 // **手数の変化を出す**（対局が進んだかどうかが知りたい）。
-// ⚠️ **保存済みで手数が変わったら「保存し直す」よう促すこと。** 保存は画面の内容を
-// そのまま書き込むので、更新しただけでは棚の中身は古いまま —— 黙っていると
-// 「更新＝保存」だと誤解される。
+// ⚠️ **保存したカードはもう無い**（2026-11-18。保存すると閉じる）ので、「保存し直す」の案内も無い。
 const refreshNotice = (prev: FetchCard, g: GameDetail): string => {
   // 復元しただけのカードは「前と比べて何手増えた」の比較対象にならない
   // （手数のメタは持っているが、中身が無いので初めて取れたのと同じ）。
   if (isRestored(prev)) return "サイトから取り直しました";
   if (g.moves === prev.game.moves) return "最新化しました（手数は変わっていません）";
-  const head = `最新化しました（${prev.game.moves} → ${g.moves} 手）`;
-  return prev.saved ? `${head}。保存し直すと棋譜タブの棋譜も最新になります` : head;
+  return `最新化しました（${prev.game.moves} → ${g.moves} 手）`;
 };
 
 // FetchCardsHandle は入力タブから呼ぶ口（2026-11-18）。
@@ -199,7 +195,7 @@ export function mountFetchCards(
 
   // mergeCard は取得結果をカードへ反映する。
   //
-  // ⚠️ **key が一致するカードがあれば増やさず、位置と saved を保って中身だけ
+  // ⚠️ **key が一致するカードがあれば増やさず、位置を保って中身だけ
   // 差し替える。** 入力欄からの「取得」もカードの「更新」もここを通す。
   const mergeCard = (g: GameDetail) => {
     const key = cardKey(g);
@@ -207,7 +203,7 @@ export function mountFetchCards(
     if (i < 0) {
       // watched は仮の一覧へ載せてから立てる（remember を参照）。
       cards = [
-        { key, game: g, pasted: false, origin: "", saved: null, watched: false, notice: "", error: "" },
+        { key, game: g, pasted: false, origin: "", watched: false, notice: "", error: "" },
         ...cards,
       ];
       return;
@@ -287,54 +283,41 @@ export function mountFetchCards(
     }
   };
 
-  // savePasted は貼り付けたカードを棚へ入れる（2026-11-18）。
+  // save はカードの棋譜を棋譜タブへ入れて、**カードを閉じる**（2026-11-18。「棋譜に保存」）。
   //
-  // ⚠️ **貼った本文の登録は毎回新しい棋譜になる**（取得元の ID が無い。`ImportKIF`）ので、
-  // 登録したら**ボタンを「登録済み」で止める**（押し直すと棋譜タブに同じ棋譜が 2 件できる）。
-  // 開いたファイルのまま登録すれば元の文字コードも残る（Go 側が本文で引き当てる）。
-  const savePasted = async (card: FetchCard) => {
-    busyKeys.add(card.key);
-    render();
-    try {
-      const rec = await KifuService.ImportKIF(card.game.kif);
-      patch(card.key, { saved: rec, notice: "棋譜タブに登録しました", error: "" });
-      opts.onSaved();
-    } catch (err) {
-      patch(card.key, { error: `棋譜に登録できませんでした: ${String(err)}`, notice: "" });
-    } finally {
-      busyKeys.delete(card.key);
-      render();
-    }
-  };
-
+  // ⚠️ **画面に出している内容をそのまま保存する**（サイトへ取り直しには行かない）。
+  // 最新にしたいなら先に「更新」を押す、という役割分担。
+  // 取得したカードは `Save`（取得元で upsert。同じ棋譜を保存し直しても増えない）、
+  // 貼り付けたカードは `ImportKIF`（毎回新しい棋譜。開いたファイルのままなら元の文字コードも残る）。
+  // ⚠️ **閉じるときは仮の一覧からも外す**（外さないと再起動で戻ってくる。`removeCard`）。
+  // 終局していれば kicho の `Library.Save` が先に外しているが、もう一度外しても失敗にはならない。
+  // ⚠️ **閉じたあとの返事は群の状態の行**（カードはもう無い）。
   const save = async (card: FetchCard) => {
-    if (card.pasted) {
-      return savePasted(card);
-    }
     busyKeys.add(card.key);
     render();
+    let rec: GameSummary;
     try {
-      // ⚠️ **画面に出している内容をそのまま保存する**（サイトへ取り直しには行かない）。
-      // 最新にしたいなら先に「更新」を押す、という役割分担。
-      const rec = await KifuService.Save(card.game);
-      // ⚠️ **終局していれば kicho 側が仮の一覧から外す**（もう取り直す必要が無い）。
-      // **対局中はそのまま残る** —— 2 日制なら翌日も同じカードで追うので消えては困る。
-      // **この分岐を書き換えないこと**（判断を持っているのは `Library.Save`）。
-      patch(card.key, {
-        saved: rec,
-        watched: rec.finished ? false : card.watched,
-        notice: rec.finished
-          ? "棋譜タブに保存しました（終局しているので仮の一覧から外しました）"
-          : "棋譜タブに保存しました",
-        error: "",
-      });
-      opts.onSaved();
+      rec = card.pasted
+        ? await KifuService.ImportKIF(card.game.kif)
+        : await KifuService.Save(card.game);
     } catch (err) {
-      patch(card.key, { error: `保存できませんでした: ${String(err)}`, notice: "" });
-    } finally {
       busyKeys.delete(card.key);
-      render();
+      patch(card.key, { error: `棋譜に保存できませんでした: ${String(err)}`, notice: "" });
+      return;
     }
+    opts.onSaved();
+    busyKeys.delete(card.key);
+    const failed = await removeCard(card);
+    if (failed) {
+      // ⚠️ **保存はできている**ので、そう書く（「保存できなかった」に見せない）。
+      patch(card.key, {
+        error: `棋譜タブに保存しましたが、仮の一覧から外せませんでした（再起動すると戻ります）: ${failed}`,
+        notice: "",
+      });
+      return;
+    }
+    const who = [rec.black, rec.white].filter(Boolean).join(" - ");
+    setStatus(`棋譜タブに保存しました: ${[rec.event, who].filter(Boolean).join(" / ") || "(棋戦名なし)"}`);
   };
 
   // analyze はカードの棋譜を解析タブへ送る。
@@ -379,20 +362,21 @@ export function mountFetchCards(
     }
   };
 
-  // カードを閉じる。**棚の棋譜は消えないが、仮の一覧からは外す。**
+  // removeCard はカードを閉じる。**棚の棋譜は消えないが、仮の一覧からは外す。**
+  // 外せなければカードを残して理由を返す（閉じられたら null）。
   //
   // ⚠️ **外さずに閉じると再起動で戻ってくる**（画面から消えただけになる）。
-  const removeCard = async (card: FetchCard) => {
+  const removeCard = async (card: FetchCard): Promise<string | null> => {
     if (card.watched) {
       try {
         await KifuService.Unwatch(card.game.source, card.game.sourceId);
       } catch (err) {
-        patch(card.key, { error: `仮の一覧から外せませんでした: ${String(err)}`, notice: "" });
-        return;
+        return String(err);
       }
     }
     cards = cards.filter((c) => c.key !== card.key);
     render();
+    return null;
   };
 
   // 削除の確認。**カードを画面から外すだけで、棚の棋譜は消えない。**
@@ -400,11 +384,10 @@ export function mountFetchCards(
   // ⚠️ **消える範囲が違うので、そう書くこと** —— 棚の削除（棋譜タブ）と
   // 見た目が同じ赤いボタンなので、何が消えるのかを文言で分ける。
   const askRemove = (e: MouseEvent, card: FetchCard) => {
-    // ⚠️ **登録していない貼り付けのカードは、閉じると本文ごと消える**（取り直す先が無い）。
-    const label =
-      card.pasted && !card.saved
-        ? "カードを閉じる（棋譜タブに登録していない棋譜は消えます）"
-        : "カードを閉じる（棋譜タブの棋譜は消えません）";
+    // ⚠️ **貼り付けのカードは、閉じると本文ごと消える**（取り直す先が無い。保存したカードはもう無い）。
+    const label = card.pasted
+      ? "カードを閉じる（棋譜タブに保存していない棋譜は消えます）"
+      : "カードを閉じる（棋譜タブの棋譜は消えません）";
     openPopup(e.clientX, e.clientY, {
       label: "このカードを閉じる",
       focus: 1,
@@ -412,7 +395,12 @@ export function mountFetchCards(
         {
           label,
           kind: "danger",
-          onPick: () => void removeCard(card),
+          onPick: () =>
+            void removeCard(card).then((failed) => {
+              if (failed) {
+                patch(card.key, { error: `仮の一覧から外せませんでした: ${failed}`, notice: "" });
+              }
+            }),
         },
         { label: "やめる", onPick: () => {} },
       ],
@@ -420,7 +408,7 @@ export function mountFetchCards(
   };
 
   const renderCard = (card: FetchCard): HTMLElement => {
-    const { game, saved, notice, error } = card;
+    const { game, notice, error } = card;
     // 「通信中…」を出すのは今取りに行っているカードだけ。
     const fetching = busyKeys.has(card.key);
     const busy = fetching;
@@ -468,7 +456,7 @@ export function mountFetchCards(
     closeBtn.addEventListener("click", (e) => askRemove(e, card));
     // ⚠️ **貼り付けたカードに「更新」を出さない**（取りに行く先が無い）。
     if (card.pasted) {
-      closeBtn.title = "このカードを画面から外します（棋譜タブに登録した棋譜は消えません）";
+      closeBtn.title = "このカードを画面から外します（棋譜タブに保存していない棋譜は消えます）";
       head.append(closeBtn);
     } else {
       head.append(refreshBtn, closeBtn);
@@ -543,26 +531,17 @@ export function mountFetchCards(
     const saveBtn = document.createElement("button");
     saveBtn.type = "button";
     saveBtn.className = "ghost-btn";
-    // ⚠️ **貼り付けたカードは「棋譜に登録する」→「登録済み」**（押し直すと 2 件になる。`savePasted`）。
-    saveBtn.textContent = card.pasted
-      ? saved
-        ? "登録済み"
-        : "棋譜に登録する"
-      : saved
-        ? "保存し直す"
-        : "この内容を保存";
+    // ⚠️ **取得したカードも貼り付けたカードも「棋譜に保存」**（2026-11-18。押すとカードを閉じる。`save`）。
+    saveBtn.textContent = "棋譜に保存";
     // ⚠️ **保存は「解析する」と違って、取り直しに行かない。** 保存は
     // **画面の内容をそのまま書き込む**操作だから（上の「未終局の注意」と同根）で、
     // 本文の無いカードは押せないままにしてある。
     saveBtn.title = restored
       ? "先に「更新」でサイトから取り直してください（棋譜本文がまだありません）"
-      : "いま表示している内容を棋譜タブに書き込みます";
-    if (card.pasted) {
-      saveBtn.title = saved
-        ? "棋譜タブに登録してあります"
-        : "この棋譜を棋譜タブに登録します";
-    }
-    saveBtn.disabled = busy || restored || (card.pasted && saved !== null);
+      : card.pasted
+        ? "この棋譜を棋譜タブに保存して、カードを閉じます"
+        : "いま表示している内容を棋譜タブに保存して、カードを閉じます";
+    saveBtn.disabled = busy || restored;
     saveBtn.addEventListener("click", () => void save(card));
 
     actions.append(analyzeBtn, saveBtn);
@@ -617,7 +596,6 @@ export function mountFetchCards(
           game: got.game,
           pasted: true,
           origin,
-          saved: null,
           watched: false,
           notice: "",
           error: "",
@@ -625,7 +603,7 @@ export function mountFetchCards(
         ...cards,
       ];
     } else {
-      // ⚠️ **同じ本文ならカードを増やさない**（位置と「登録済み」を保つ。取得したカードと同じ約束）。
+      // ⚠️ **同じ本文ならカードを増やさない**（位置を保つ。取得したカードと同じ約束）。
       cards[i] = { ...cards[i], notice: "同じ棋譜のカードがあります（増やしていません）", error: "" };
     }
     render();

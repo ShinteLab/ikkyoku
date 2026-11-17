@@ -134,7 +134,7 @@ KifuService.SendToStudy(id)
 | `KifuService.SendToStudyGame`（中継カード・棋譜タブの「解析する」の控えが無いとき） | `sourceKeyOf(source, source_id)` | 控えがあれば**続きから開いて据え直す**。行の id があれば**そこで結ぶ** |
 | `StudyService.LoadKifu`（貼り付けの「解析する」） | `pasteKeyOf(本文)` | 同上（据え直しまで） |
 | `KifuService.Save` / `ImportURL` | `sourceKeyOf(返った行)` | その控えに**棚の棋譜 id を書き足す** |
-| `KifuService.ImportKIF`（貼り付けの「棋譜に登録する」） | `pasteKeyOf(本文)` | 同上 |
+| `KifuService.ImportKIF`（貼り付けたカードの「棋譜に保存」） | `pasteKeyOf(本文)` | 同上 |
 
 - ⚠️ **開き直しの据え直しは `graftKifu`**（棋譜タブから開くときと同じ規約）。
   **中継が伸びていても枝と評価値を捨てない。** 据え直せなくても開けたことは成功

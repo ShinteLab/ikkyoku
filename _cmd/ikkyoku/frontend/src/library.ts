@@ -447,7 +447,7 @@ export function mountLibrary(
       setStatus(
         hasConditions()
           ? "条件に合う棋譜がありません。"
-          : "まだ棋譜がありません。入力タブの「棋譜に登録する」や「中継から取得」で追加してください。",
+          : "まだ棋譜がありません。入力タブのカードの「棋譜に保存」で追加してください。",
         "warn",
       );
     } else if (res.truncated) {
