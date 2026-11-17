@@ -17,7 +17,7 @@
 // **KIF 本文は持たない** —— 中身は「更新」で取り直す。棋譜そのものを残すのは
 // 「棋譜に保存」（棚）の役目で、**役割を混ぜないこと。**
 //
-// ⚠️ **「棋譜に保存」したらカードを閉じる**（2026-11-18）。棋譜タブに入った棋譜はそちらで
+// ⚠️ **「棋譜に保存」したらカードを削除する**（2026-11-18）。棋譜タブに入った棋譜はそちらで
 // 扱う（解析も棋譜タブから）ので、カードに残す理由が無い。仮の一覧からも外す。
 //
 // ⚠️ **「取得 URL をコピー」は置かない**（kicho の UI にはある）。あれは
@@ -140,7 +140,7 @@ const isRestored = (card: FetchCard): boolean => !card.pasted && card.game.kif =
 // refreshNotice は取り直したときの案内。
 //
 // **手数の変化を出す**（対局が進んだかどうかが知りたい）。
-// ⚠️ **保存したカードはもう無い**（2026-11-18。保存すると閉じる）ので、「保存し直す」の案内も無い。
+// ⚠️ **保存したカードはもう無い**（2026-11-18。保存すると削除する）ので、「保存し直す」の案内も無い。
 const refreshNotice = (prev: FetchCard, g: GameDetail): string => {
   // 復元しただけのカードは「前と比べて何手増えた」の比較対象にならない
   // （手数のメタは持っているが、中身が無いので初めて取れたのと同じ）。
@@ -284,15 +284,15 @@ export function mountFetchCards(
     }
   };
 
-  // save はカードの棋譜を棋譜タブへ入れて、**カードを閉じる**（2026-11-18。「棋譜に保存」）。
+  // save はカードの棋譜を棋譜タブへ入れて、**カードを削除する**（2026-11-18。「棋譜に保存」）。
   //
   // ⚠️ **画面に出している内容をそのまま保存する**（サイトへ取り直しには行かない）。
   // 最新にしたいなら先に「更新」を押す、という役割分担。
   // 取得したカードは `Save`（取得元で upsert。同じ棋譜を保存し直しても増えない）、
   // 貼り付けたカードは `ImportKIF`（毎回新しい棋譜。開いたファイルのままなら元の文字コードも残る）。
-  // ⚠️ **閉じるときは仮の一覧からも外す**（外さないと再起動で戻ってくる。`removeCard`）。
+  // ⚠️ **削除するときは仮の一覧からも外す**（外さないと再起動で戻ってくる。`removeCard`）。
   // 終局していれば kicho の `Library.Save` が先に外しているが、もう一度外しても失敗にはならない。
-  // ⚠️ **閉じたあとの返事は群の状態の行**（カードはもう無い）。
+  // ⚠️ **削除したあとの返事は群の状態の行**（カードはもう無い）。
   const save = async (card: FetchCard) => {
     busyKeys.add(card.key);
     render();
@@ -363,10 +363,10 @@ export function mountFetchCards(
     }
   };
 
-  // removeCard はカードを閉じる。**棚の棋譜は消えないが、仮の一覧からは外す。**
-  // 外せなければカードを残して理由を返す（閉じられたら null）。
+  // removeCard はカードを削除する。**棚の棋譜は消えないが、仮の一覧からは外す。**
+  // 外せなければカードを残して理由を返す（削除できたら null）。
   //
-  // ⚠️ **外さずに閉じると再起動で戻ってくる**（画面から消えただけになる）。
+  // ⚠️ **外さずに消すと再起動で戻ってくる**（画面から消えただけになる）。
   const removeCard = async (card: FetchCard): Promise<string | null> => {
     if (card.watched) {
       try {
@@ -380,21 +380,18 @@ export function mountFetchCards(
     return null;
   };
 
-  // 削除の確認。**カードを画面から外すだけで、棚の棋譜は消えない。**
+  // 削除の確認。**カードと仮の一覧から外すだけで、棚の棋譜は消えない。**
   //
-  // ⚠️ **消える範囲が違うので、そう書くこと** —— 棚の削除（棋譜タブ）と
-  // 見た目が同じ赤いボタンなので、何が消えるのかを文言で分ける。
+  // ⚠️ **文言は「削除する」だけ**（2026-11-18）。以前は「棋譜タブの棋譜は消えません」と添えていたが、
+  // 保存したカードは消えるようになったので、残っているカードは棋譜タブに入れていないもの ——
+  // 添える理由が無くなった。⚠️ **初期フォーカスは「やめる」**（消す操作なので、Enter の連打で消えない）。
   const askRemove = (e: MouseEvent, card: FetchCard) => {
-    // ⚠️ **貼り付けのカードは、閉じると本文ごと消える**（取り直す先が無い。保存したカードはもう無い）。
-    const label = card.pasted
-      ? "カードを閉じる（棋譜タブに保存していない棋譜は消えます）"
-      : "カードを閉じる（棋譜タブの棋譜は消えません）";
     openPopup(e.clientX, e.clientY, {
-      label: "このカードを閉じる",
+      label: "このカードを削除",
       focus: 1,
       items: [
         {
-          label,
+          label: "削除する",
           kind: "danger",
           onPick: () =>
             void removeCard(card).then((failed) => {
@@ -448,19 +445,17 @@ export function mountFetchCards(
     refreshBtn.disabled = busy || !game.sourceId;
     refreshBtn.addEventListener("click", () => void refresh(card));
 
-    const closeBtn = document.createElement("button");
-    closeBtn.type = "button";
-    closeBtn.className = "danger-btn";
-    closeBtn.textContent = "閉じる";
-    closeBtn.title = "このカードを画面と仮の一覧から外します（棋譜タブの棋譜は消えません）";
-    closeBtn.disabled = busy;
-    closeBtn.addEventListener("click", (e) => askRemove(e, card));
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "danger-btn";
+    deleteBtn.textContent = "削除";
+    deleteBtn.disabled = busy;
+    deleteBtn.addEventListener("click", (e) => askRemove(e, card));
     // ⚠️ **貼り付けたカードに「更新」を出さない**（取りに行く先が無い）。
     if (card.pasted) {
-      closeBtn.title = "このカードを画面から外します（棋譜タブに保存していない棋譜は消えます）";
-      head.append(closeBtn);
+      head.append(deleteBtn);
     } else {
-      head.append(refreshBtn, closeBtn);
+      head.append(refreshBtn, deleteBtn);
     }
     box.append(head);
 
@@ -532,7 +527,7 @@ export function mountFetchCards(
     const saveBtn = document.createElement("button");
     saveBtn.type = "button";
     saveBtn.className = "ghost-btn";
-    // ⚠️ **取得したカードも貼り付けたカードも「棋譜に保存」**（2026-11-18。押すとカードを閉じる。`save`）。
+    // ⚠️ **取得したカードも貼り付けたカードも「棋譜に保存」**（2026-11-18。押すとカードを削除する。`save`）。
     saveBtn.textContent = "棋譜に保存";
     // ⚠️ **保存は「解析する」と違って、取り直しに行かない。** 保存は
     // **画面の内容をそのまま書き込む**操作だから（上の「未終局の注意」と同根）で、
@@ -540,8 +535,8 @@ export function mountFetchCards(
     saveBtn.title = restored
       ? "先に「更新」でサイトから取り直してください（棋譜本文がまだありません）"
       : card.pasted
-        ? "この棋譜を棋譜タブに保存して、カードを閉じます"
-        : "いま表示している内容を棋譜タブに保存して、カードを閉じます";
+        ? "この棋譜を棋譜タブに保存して、カードを削除します"
+        : "いま表示している内容を棋譜タブに保存して、カードを削除します";
     saveBtn.disabled = busy || restored;
     saveBtn.addEventListener("click", () => void save(card));
 
@@ -620,7 +615,7 @@ export function mountFetchCards(
   //
   // ⚠️ **棚を開き直したとき（設定タブ）に復元し直していない。** 復元は
   // メタだけで作り直すので、**今日取ったカードの本文（KIF）を捨てることになる。**
-  // 閉じれば新しい棚からも外れる（無ければ何も起きない）ので実害は無い。
+  // 削除すれば新しい棚からも外れる（無ければ何も起きない）ので実害は無い。
   const restore = async () => {
     let list: WatchEntry[] | null;
     try {
@@ -638,8 +633,8 @@ export function mountFetchCards(
     cards = [...cards, ...restored];
     render();
     for (const r of restored) {
-      // ⚠️ **その間に人が触ったカードは飛ばす**（閉じた・保存した・自分で更新や解析を押した）。
-      // 閉じたカードを取り直すと `mergeCard` がカードを積み直してしまう。
+      // ⚠️ **その間に人が触ったカードは飛ばす**（削除した・保存した・自分で更新や解析を押した）。
+      // 削除したカードを取り直すと `mergeCard` がカードを積み直してしまう。
       const card = cards.find((c) => c.key === r.key);
       if (!card || busyKeys.has(card.key) || !isRestored(card)) continue;
       await refresh(card);

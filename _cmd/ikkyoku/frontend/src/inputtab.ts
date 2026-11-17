@@ -188,7 +188,7 @@ export function mountInputTab(root: HTMLElement, opts: InputTabOptions): InputTa
          IsKifuRef。⚠️ **判別を画面に書かないこと**）。ファイル・ドロップは本文として貼り付けたカード。
            取得したカード   … 更新で取り直す・再起動後も残る
            貼り付けたカード … 取りに行く先が無いので更新は無い・再起動すると消える
-         どちらのカードからも「解析する」で解析タブ、「棋譜に保存」で棋譜タブ（保存したカードは閉じる）。
+         どちらのカードからも「解析する」で解析タブ、「棋譜に保存」で棋譜タブ（保存したカードは削除する）。
          ⚠️ **二系統を残してある**（2026-09-04。棚は解析の前提条件ではない）。
 
          ⚠️ **群の中に入力欄を置かないこと**（2026-11-18 に URL の欄も本文の欄も外した）。打つなら
@@ -216,7 +216,7 @@ export function mountInputTab(root: HTMLElement, opts: InputTabOptions): InputTa
         （<strong>同じ棋譜を保存し直しても増えません</strong>）。
         </span>
         <span class="hint-para">
-        カードの<strong>「棋譜に保存」</strong>で<strong>棋譜タブに残り、カードは閉じます</strong>
+        カードの<strong>「棋譜に保存」</strong>で<strong>棋譜タブに残り、カードは消えます</strong>
         （解析するだけでは残りません）。解析したあとに保存しても、
         <strong>その解析は棋譜タブの「解析する」から続きを開けます</strong>。
         </span>
@@ -226,8 +226,7 @@ export function mountInputTab(root: HTMLElement, opts: InputTabOptions): InputTa
         （<strong>棋譜そのものではありません</strong>）。起動したときにサイトから取り直します
         （取れなかったときは「更新」で取り直せます）。
         <strong>棋譜を貼ったカードは再起動すると消えます</strong>（残すなら棋譜タブに保存してください）。
-        追うのをやめるときはカードの「閉じる」で外します
-        （<strong>棋譜タブの棋譜は消えません</strong>）。
+        追うのをやめるときはカードを「削除」します。
         </span>
       </span>
       <!-- 入り方（2026-11-18）。**どれもカードを 1 枚出すだけ**で、行き先はカードが持つ。
