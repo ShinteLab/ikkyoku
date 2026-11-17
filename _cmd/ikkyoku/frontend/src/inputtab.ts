@@ -5,7 +5,7 @@
 //   画面から撮る / 画像ファイル … 認識を通るので**訂正タブ**（撮る操作そのものは枠のツールバー）
 //   新規対局                   … **解析タブ**（「訂正タブで調整」だけは訂正タブ。独自ハンデの入口）
 //   詰将棋                     … 空の盤を**訂正タブ**へ
-//   棋譜を読み込む              … URL の取得・貼り付け・ファイルの**どれもカードに積む**（`fetchcards.ts`）。
+//   棋譜を読み込む              … 貼り付け・手入力（URL も棋譜も）・ファイルの**どれもカードに積む**（`fetchcards.ts`）。
 //                                 カードの「解析する」で**解析タブ**、「棋譜に登録」で棋譜タブ
 //
 // ⚠️ **受け渡しは `InputTabOptions`（もらうもの）と `InputTabHandle`（返すもの）だけ**
@@ -183,24 +183,26 @@ export function mountInputTab(root: HTMLElement, opts: InputTabOptions): InputTa
          **画像を通らない入口**なので、行き先も違う
          （撮影は認識を通るので訂正タブ、棋譜は既に確定しているので解析タブ）。
 
-         **入り方は 2 つ、出口はカード 1 つ**:
-           URL / 棋譜 ID → 取得        … カード（更新で取り直す・再起動後も残る）
-           貼り付け / ファイル / ドロップ … カード（取りに行く先が無いので更新は無い）
+         **入り方は「貼り付け」と「手入力」の違いだけ**（2026-11-18）。どちらも URL・棋譜 ID・KIF・CSA を
+         受け、**URL・棋譜 ID なら取得したカード、本文なら貼り付けたカード**になる（見分けは Go の
+         IsKifuRef。⚠️ **判別を画面に書かないこと**）。ファイル・ドロップは本文として貼り付けたカード。
+           取得したカード   … 更新で取り直す・再起動後も残る
+           貼り付けたカード … 取りに行く先が無いので更新は無い・再起動すると消える
          どちらのカードからも「解析する」で解析タブ、「棋譜に登録する」（取得したものは
          「この内容を保存」）で棋譜タブ。⚠️ **二系統を残してある**（2026-09-04。棚は解析の前提条件ではない）。
 
-         ⚠️ **本文を打つ欄（textarea）を戻さないこと**（2026-11-18 に外した）。棋譜は打つものではなく
-         **貼るか開くもの**で、貼った中身はカードの「KIF を表示」で見える。
-         ⚠️ **URL の入力欄を 2 つにしないこと**（2026-09-12）。読売なのか連盟なのか他サイトの .kif
-         なのかは**こちらの都合**で、判別は kicho の Fetch（⚠️ **判別を画面に書かないこと**）。 -->
+         ⚠️ **群の中に入力欄を置かないこと**（2026-11-18 に URL の欄も本文の欄も外した）。打つなら
+         「手入力」のダイアログ。⚠️ **入れる場所を 2 つにしないこと** —— URL と本文で欄を分けると、
+         どちらに入れたかで通る道が変わる（2026-09-12 に URL の欄を 1 つにしたのと同じ理由）。 -->
     <!-- ⚠️ **ファイルを落とせるのはこの群だけ**（2026-11-15。data-file-drop-target）。
          id は Go 側の KifuDropTarget と揃える（Go は落ちた要素の id で確かめる）。 -->
     <div class="setting-group file-drop" id="kifu-drop" data-file-drop-target>
       <span class="setting-title" data-hint="hint-kifu">棋譜を読み込む</span>
       <span id="hint-kifu" class="setting-note is-hint">
         <span class="hint-para">
-        <strong>棋譜の URL を入れて「取得」</strong>するか、コピーした KIF / CSA の棋譜を
+        コピーした<strong>棋譜の URL</strong> か <strong>KIF / CSA の棋譜</strong>を
         <strong>「貼り付け」</strong>で取り込むと、<strong>下にカードが出ます。</strong>
+        <strong>「手入力」</strong>なら同じものを打ち込めます。
         <strong>「ファイルを開く…」</strong>かここへのドラッグ＆ドロップで .kif / .csa も読み込めます。
         カードの<strong>「解析する」</strong>で、<strong>指し手を全て反映した局面</strong>で
         <strong>解析タブ</strong>が開きます（<strong>訂正タブは通りません</strong>）。
@@ -208,59 +210,67 @@ export function mountInputTab(root: HTMLElement, opts: InputTabOptions): InputTa
         <span class="hint-para">
         <strong>URL はどのサイトのものでもかまいません。</strong>
         <strong>読売（竜王戦）の対局ページ</strong>・<strong>日本将棋連盟の棋譜中継</strong>・
-        ほかのサイトの <code>.kif</code>・読売の棋譜 ID を、この 1 つの欄で扱います
-        （<strong>どこのものかは自動で見分けます</strong>）。
+        ほかのサイトの <code>.kif</code>・読売の棋譜 ID を扱います
+        （<strong>URL か棋譜か、どこのものかは自動で見分けます</strong>）。
         対局中は棋譜が伸びるので、カードの<strong>「更新」</strong>で取り直してから
         保存し直してください（<strong>同じ棋譜を保存し直しても増えません</strong>）。
         </span>
         <span class="hint-para">
-        カードの<strong>「棋譜に登録する」</strong>（取得したものは<strong>「この内容を保存」</strong>）で
+        カードの<strong>「棋譜に登録する」</strong>（URL から取ったものは<strong>「この内容を保存」</strong>）で
         <strong>棋譜タブに残ります</strong>（解析するだけでは残りません）。解析したあとに登録しても、
         <strong>その解析は棋譜タブの「解析する」から続きを開けます</strong>。
         </span>
         <span class="hint-para">
-        <strong>取得したカードは再起動しても残ります。</strong>2 日制の対局で翌日また URL を
+        <strong>URL から取ったカードは再起動しても残ります。</strong>2 日制の対局で翌日また URL を
         貼り直さずに済むよう、「どのサイトのどの棋譜か」を覚えておきます
         （<strong>棋譜そのものではありません</strong>）。復元したカードは中身が空なので
         「更新」でサイトから取り直してください（「取り直して解析」なら 1 回で済みます）。
-        <strong>貼り付けたカードは再起動すると消えます</strong>（残すなら棋譜タブに登録してください）。
+        <strong>棋譜を貼ったカードは再起動すると消えます</strong>（残すなら棋譜タブに登録してください）。
         追うのをやめるときはカードの「閉じる」で外します
         （<strong>棋譜タブの棋譜は消えません</strong>）。終局した棋譜を保存したときは自動で外れます。
         </span>
       </span>
-      <!-- ⚠️ **URL の入力欄はこの 1 つだけ**（#kifu-url）。⚠️ **#fetch-input に
-           戻さないこと** —— 取得（カード）も解析も登録も同じ欄を読む。
-
-           ⚠️ **取得も文字コードの判別も Go 側**（kicho）。webview の fetch では
-           CORS で弾かれるうえ、**中継の .kif は Shift_JIS** なので、
-           いずれにせよこちらでは扱えない。 -->
-      <div class="setting-fields kifu-url-row">
-        <span class="field-label">URL / 棋譜 ID</span>
-        <input id="kifu-url" type="text" spellcheck="false"
-               placeholder="http://live.shogi.or.jp/oui/kifu/67/oui202607290101.html" />
-        <button id="fetch-run" class="ghost-btn is-primary" type="button"
-                title="この URL の棋譜を取ってカードに出します（解析・登録はカードから）">取得</button>
-      </div>
-      <!-- 貼り付け・ファイル（2026-11-18）。**どれもカードを 1 枚出すだけ**で、行き先はカードが持つ。
+      <!-- 入り方（2026-11-18）。**どれもカードを 1 枚出すだけ**で、行き先はカードが持つ。
            ⚠️ **ここに「解析する」「登録する」を置かないこと**（行き先の口が 2 か所になる）。
            ⚠️ **クリップボードは Wails ランタイムで読む**（navigator.clipboard はカスタムスキーム配信の
-           webview では当てにできない）。 -->
+           webview では当てにできない）。
+           ⚠️ **取得も文字コードの判別も Go 側**（kicho）。webview の fetch では CORS で弾かれるうえ、
+           **中継の .kif は Shift_JIS** なので、いずれにせよこちらでは扱えない。 -->
       <div class="setting-fields">
-        <button id="kifu-paste" class="ghost-btn" type="button"
-                title="クリップボードの棋譜（KIF / CSA）をカードにします">貼り付け</button>
+        <button id="kifu-paste" class="ghost-btn is-primary" type="button"
+                title="クリップボードの URL・棋譜 ID・棋譜（KIF / CSA）をカードにします">貼り付け</button>
+        <button id="kifu-manual" class="ghost-btn" type="button"
+                title="URL・棋譜 ID・棋譜（KIF / CSA）を打ち込んでカードにします">手入力…</button>
         <button id="kifu-file" class="ghost-btn" type="button"
                 title=".kif / .csa を開いてカードにします">ファイルを開く…</button>
       </div>
-      <!-- ⚠️ **この群の状態表示は 1 つ**（#fetch-status）。取得・貼り付け・ファイルの
+      <!-- ⚠️ **この群の状態表示は 1 つ**（#fetch-status）。貼り付け・ファイルの
            どれもここへ出す（持ち主は fetchcards.ts。入力タブは setStatus を借りる）。
            **群が 1 つなら状態の行も 1 つ** —— 2 つ置くと、どのボタンの返事なのかが
-           読めなくなる。カード自身の返事はカードの中。 -->
+           読めなくなる。カード自身の返事はカードの中。手入力の返事はダイアログの中。 -->
       <p id="fetch-status" class="status" role="status" aria-live="polite" hidden></p>
       <!-- カード。**新しいものが先頭。** 同じ棋譜を取り直した・貼り直したときは
            カードを増やさない（取得は key = 取得元:棋譜 ID、貼り付けは本文のハッシュ）。
            ⚠️ **起動時は仮の一覧（DB）から取得したカードだけを復元する**（サイトへは取りに行かない）。 -->
       <div id="fetch-cards" class="fetch-cards"></div>
     </div>
+
+    <!-- 手入力（2026-11-18）。**貼り付けと同じものを打ち込むだけ**（URL・棋譜 ID・KIF・CSA）で、
+         通る道も貼り付けと同じ（addText）。⚠️ **失敗はダイアログの中に出して閉じない**（直して出し直せる）。
+         ⚠️ **やめても書きかけは残す**（取り込めたら空にする）。
+         ⚠️ **群の外に置く**（中に置くと、ダイアログに落としたファイルが群へのドロップになる）。 -->
+    <dialog id="kifu-manual-dialog" class="library-modal kifu-manual">
+      <div class="library-head">
+        <span class="field-label library-modal-title">手入力</span>
+      </div>
+      <textarea id="kifu-manual-text" class="kifu-text" spellcheck="false"
+                placeholder="URL / 棋譜 ID / KIF / CSA"></textarea>
+      <p id="kifu-manual-status" class="status" role="status" aria-live="polite" hidden></p>
+      <div class="library-modal-foot">
+        <button id="kifu-manual-cancel" class="ghost-btn" type="button">やめる</button>
+        <button id="kifu-manual-ok" class="ghost-btn is-primary" type="button">取り込む</button>
+      </div>
+    </dialog>
   `;
 
   // 項目の説明をホバーで出す（`hint.ts`）。⚠️ **innerHTML を組んだ直後に 1 回だけ**
@@ -471,9 +481,9 @@ export function mountInputTab(root: HTMLElement, opts: InputTabOptions): InputTa
 
   // ---- 棋譜を読み込む（カード）--------------------------------------------
   //
-  // ⚠️ **取得元の判別も取得も、棋譜かどうかの判定も Go 側（KifuService）。** ここは
-  // 入り方（貼り付け・ファイル・ドロップ）をカードへ繋ぐだけ。
-  // ⚠️ **URL の欄・状態の行・カードは全部あちらが持つ**（2026-09-12）。
+  // ⚠️ **取得元の判別も取得も、URL か本文かの見分けも、棋譜かどうかの判定も Go 側（KifuService）。**
+  // ここは入り方（貼り付け・手入力・ファイル・ドロップ）をカードへ繋ぐだけ。
+  // ⚠️ **状態の行・カードはあちらが持つ**（2026-09-12）。
   // 解析も登録も**カード**の操作なので、こちらが触るのは行き先（解析タブ・棋譜タブの一覧）だけ。
   // ⚠️ **フロントで KIF を解釈しないこと**（将棋の仕様は core に一本化する）。
   const cards = mountFetchCards(root, {
@@ -482,34 +492,93 @@ export function mountInputTab(root: HTMLElement, opts: InputTabOptions): InputTa
     onAnalyze: (got) => opts.openStudy(got.state),
     onSaved: () => opts.onKifuSaved(),
   });
+  const errText = (err: unknown) => String(err instanceof Error ? err.message : err);
 
-  // 貼り付け（2026-11-18）。**クリップボードの中身をカードにするだけ**（本文を打つ欄は無い）。
+  // 貼り付け（2026-11-18）。**クリップボードの中身をカードにするだけ**（URL でも棋譜でもよい）。
   // ⚠️ **クリップボードは Wails ランタイム**（`navigator.clipboard` は当てにできない。`library.ts` と同じ）。
   const kifuPaste = root.querySelector<HTMLButtonElement>("#kifu-paste")!;
   kifuPaste.addEventListener("click", () => {
     void (async () => {
       kifuPaste.disabled = true;
       try {
-        const text = (await Clipboard.Text()).trim();
-        if (!text) {
-          cards.setStatus("クリップボードに文字がありません。棋譜（KIF / CSA）をコピーしてから押してください。", "error");
+        let text: string;
+        try {
+          text = (await Clipboard.Text()).trim();
+        } catch (err) {
+          cards.setStatus(`クリップボードを読めませんでした: ${errText(err)}`, "error");
           return;
         }
-        await cards.addPasted(text, "貼り付け");
+        if (!text) {
+          cards.setStatus("クリップボードに文字がありません。", "error");
+          return;
+        }
+        cards.setStatus("読み込んでいます…");
+        await cards.addText(text, "貼り付け");
+        cards.setStatus("");
       } catch (err) {
-        cards.setStatus(
-          `クリップボードを読めませんでした: ${String(err instanceof Error ? err.message : err)}`,
-          "error",
-        );
+        cards.setStatus(errText(err), "error");
       } finally {
         kifuPaste.disabled = false;
       }
     })();
   });
 
+  // 手入力（2026-11-18）。**貼り付けと同じものを打ち込むダイアログ**で、通る道も同じ（`addText`）。
+  // ⚠️ **失敗はダイアログの中に出して閉じない**（直して出し直せるように）。
+  // ⚠️ **やめても書きかけは残す**（取り込めたときだけ空にする）。
+  const manualDialog = root.querySelector<HTMLDialogElement>("#kifu-manual-dialog")!;
+  const manualText = root.querySelector<HTMLTextAreaElement>("#kifu-manual-text")!;
+  const manualStatus = root.querySelector<HTMLParagraphElement>("#kifu-manual-status")!;
+  const manualOk = root.querySelector<HTMLButtonElement>("#kifu-manual-ok")!;
+  const manualCancel = root.querySelector<HTMLButtonElement>("#kifu-manual-cancel")!;
+  const showManualStatus = (msg: string, kind?: "error") => {
+    manualStatus.textContent = msg;
+    manualStatus.hidden = msg === "";
+    manualStatus.classList.toggle("is-error", kind === "error");
+  };
+  let manualBusy = false;
+  root.querySelector<HTMLButtonElement>("#kifu-manual")!.addEventListener("click", () => {
+    showManualStatus("");
+    manualDialog.showModal();
+    manualText.focus();
+  });
+  manualCancel.addEventListener("click", () => manualDialog.close());
+  // ⚠️ **取り込んでいるあいだは Esc で閉じさせない**（閉じた後に結果が届くと、どこにも出せない）。
+  manualDialog.addEventListener("cancel", (e) => {
+    if (manualBusy) e.preventDefault();
+  });
+  const submitManual = async () => {
+    if (manualBusy) return;
+    manualBusy = true;
+    manualOk.disabled = true;
+    manualCancel.disabled = true;
+    showManualStatus("読み込んでいます…");
+    try {
+      await cards.addText(manualText.value, "手入力");
+      manualText.value = "";
+      showManualStatus("");
+      manualDialog.close();
+    } catch (err) {
+      showManualStatus(errText(err), "error");
+    } finally {
+      manualBusy = false;
+      manualOk.disabled = false;
+      manualCancel.disabled = false;
+    }
+  };
+  manualOk.addEventListener("click", () => void submitManual());
+  // Ctrl+Enter でも取り込む（Enter は改行。⚠️ **変換中は確定であって取り込みではない**）。
+  manualText.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !e.isComposing) {
+      e.preventDefault();
+      void submitManual();
+    }
+  });
+
   // ファイルを開く（2026-11-15。2026-11-18 から**カードにする**）。⚠️ **文字コードをここで持たないこと** ——
   // 開いた本文のまま登録されたら元の文字コードを残すのは Go 側（`KifuService.ImportKIF`）。
   // ⚠️ **取り消しは失敗ではない**（空の本文が返る。カードも状態も変えない）。
+  // ⚠️ **ファイルの中身は本文として扱う**（`addPasted`。URL かどうかを見ない）。
   const kifuFile = root.querySelector<HTMLButtonElement>("#kifu-file")!;
   kifuFile.addEventListener("click", () => {
     void (async () => {
@@ -520,11 +589,9 @@ export function mountInputTab(root: HTMLElement, opts: InputTabOptions): InputTa
           return; // 取り消し
         }
         await cards.addPasted(got.text, got.name);
+        cards.setStatus("");
       } catch (err) {
-        cards.setStatus(
-          `ファイルを読み込めませんでした: ${String(err instanceof Error ? err.message : err)}`,
-          "error",
-        );
+        cards.setStatus(`ファイルを読み込めませんでした: ${errText(err)}`, "error");
       } finally {
         kifuFile.disabled = false;
       }
@@ -541,11 +608,15 @@ export function mountInputTab(root: HTMLElement, opts: InputTabOptions): InputTa
       cards.setStatus(`ファイルを読み込めませんでした: ${got.error}`, "error");
       return;
     }
-    void cards.addPasted(got.text, got.name).then((ok) => {
-      if (ok && got.skipped > 0) {
-        cards.setStatus(`${got.name} を読み込みました。ほかの ${got.skipped} 個は読んでいません`, "warn");
-      }
-    });
+    void cards.addPasted(got.text, got.name).then(
+      () => {
+        cards.setStatus(
+          got.skipped > 0 ? `${got.name} を読み込みました。ほかの ${got.skipped} 個は読んでいません` : "",
+          got.skipped > 0 ? "warn" : "",
+        );
+      },
+      (err) => cards.setStatus(`ファイルを読み込めませんでした: ${errText(err)}`, "error"),
+    );
   });
 
   return { captureStatus: status };

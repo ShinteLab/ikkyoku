@@ -5946,17 +5946,39 @@ html.is-graph #app {
   background: rgb(var(--accent-rgb) / 0.08);
 }
 
-/* 棋譜の URL 欄。ボタンまで 1 行に収め、**入力欄だけが伸び縮みする**
-   （ボタンが折り返して縦に伸びると、下の行が押し下げられる）。 */
-.kifu-url-row {
-  align-self: stretch;
-  flex-wrap: nowrap;
-  padding-left: 0;
+/* 手入力のダイアログ（2026-11-18。入力タブの「手入力…」）。枠は棋譜タブの詳細のモーダル
+   （.library-modal）をそのまま使い、棋譜を貼れる幅だけ広げる。 */
+.kifu-manual {
+  width: min(640px, calc(100vw - 48px));
 }
 
-.kifu-url-row input {
-  flex: 1 1 auto;
-  min-width: 0;
+.kifu-manual .library-modal-foot {
+  gap: 8px;
+}
+
+/* 打ち込む欄（URL・棋譜 ID・KIF・CSA）。
+   高さに上限を付けて、長い棋譜を貼っても下のボタンがダイアログの外へ押し出されないようにする
+   （溢れたぶんは中でスクロールさせる）。 */
+.kifu-text {
+  flex: 0 1 auto;
+  min-height: 160px;
+  max-height: 360px;
+  padding: 6px 8px;
+  font-family: "Consolas", "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  resize: vertical;
+  overflow: auto;
+  white-space: pre;
+}
+
+.kifu-text:focus {
+  outline: none;
+  border-color: var(--info);
 }
 
 /* ---- 連続解析の幕（2026-08-14）--------------------------------------------

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/ShinteLab/ikkyoku/log"
 	"github.com/ShinteLab/kicho"
@@ -673,6 +674,24 @@ func (s *KifuService) SendToStudyGame(d GameDetail) (KifuLoad, error) {
 		return load, nil
 	}
 	return s.study.loadKifuFrom(d.KIF, kicho.RefetchableURL(d.Source, d.SourceURL), d.ID, key)
+}
+
+// IsKifuRef は入力タブで貼り付けた・手入力した文字が、**棋譜の本文ではなく在り処（URL か棋譜 ID）**かどうか
+// （2026-11-18。入力タブの入り方を「貼り付け」と「手入力」の 2 つにし、どちらも URL・KIF・CSA を受ける）。
+//
+// 真なら `Fetch`（取得したカード）に、偽なら本文として `PreviewPaste`（貼り付けたカード）に渡す。
+// 見分け方は**1 行で空白を含まない**こと —— KIF / CSA の本文は必ず何行かあり、
+// URL と読売の棋譜 ID は空白を含まない 1 語なので、ここで両者は重ならない。
+//
+// ⚠️ **ここで取得元（連盟 / 読売 / それ以外）を見分けないこと**（判別は kicho の `Fetch`）。
+// ⚠️ **フロントに同じ判定を書かないこと**（画面が知るのは真か偽かだけ）。
+func (s *KifuService) IsKifuRef(text string) bool {
+	return isKifuRef(text)
+}
+
+func isKifuRef(text string) bool {
+	t := strings.TrimSpace(text)
+	return t != "" && !strings.ContainsFunc(t, unicode.IsSpace)
 }
 
 // Fetch は URL（か棋譜 ID）から棋譜を取得する（**保存はしない**）。

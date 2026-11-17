@@ -153,11 +153,17 @@ const refreshNotice = (prev: FetchCard, g: GameDetail): string => {
 };
 
 // FetchCardsHandle は入力タブから呼ぶ口（2026-11-18）。
+//
+// ⚠️ **どれも失敗は投げる**（理由の文つきの Error）。どこへ出すかは呼び出し側が決める ——
+// 「貼り付け」・ファイルは群の状態の行、「手入力」はダイアログの中（直して出し直せるように）。
 export interface FetchCardsHandle {
-  // addPasted は貼り付けた（開いた）棋譜をカードにする。origin はカードの札と失敗の文に出す
-  // （"貼り付け" かファイル名）。読めなければ群の状態の行に出して false。
+  // addText は貼り付けた・手入力した文字をカードにする（2026-11-18）。**URL・棋譜 ID なら取得したカード、
+  // KIF / CSA の本文なら貼り付けたカード。** ⚠️ **見分けは Go**（`KifuService.IsKifuRef`。画面に書かない）。
+  // origin は本文だったときのカードの札（"貼り付け" / "手入力"）。
+  addText(text: string, origin: string): Promise<void>;
+  // addPasted は本文をそのまま貼り付けたカードにする（ファイル・ドロップ。origin はファイル名）。
   // ⚠️ **棋譜かどうかの判定も対局者などの読み取りも Go 側**（`KifuService.PreviewPaste`）。
-  addPasted(text: string, origin: string): Promise<boolean>;
+  addPasted(text: string, origin: string): Promise<void>;
   // setStatus は群の状態の行（#fetch-status）。⚠️ **群が 1 つなので行も 1 つ** —— 貼り付けの
   // 失敗もここへ出す（入力タブに別の行を作らない）。
   setStatus(msg: string, kind?: "" | "error" | "warn"): void;
@@ -174,14 +180,8 @@ export function mountFetchCards(
     onSaved: () => void;
   },
 ): FetchCardsHandle {
-  // ⚠️ **入力欄は「棋譜の URL から」の 1 つだけで、持ち主はここ**（2026-09-12）。
-  // **`#fetch-input` に戻さないこと** —— 同じ URL を入れる場所が 2 か所あると、
-  // どちらに入れたかで通る道が変わる（それを畳んだのがこの変更）。
-  // ⚠️ **URL からできることは「取得」だけ。** 解析も登録も**カード**が持つので、
-  // `mainscreen.ts` はこの欄を読まない（読む側が 2 つあると、どちらの値で
-  // 動いたのかが追えなくなる）。
-  const input = root.querySelector<HTMLInputElement>("#kifu-url")!;
-  const run = root.querySelector<HTMLButtonElement>("#fetch-run")!;
+  // ⚠️ **URL の入力欄は無い**（2026-11-18）。URL も本文も「貼り付け」か「手入力」で入ってきて、
+  // ここは `addText` で受け取るだけ。**URL からできることは「取得」だけ** —— 解析も登録も**カード**が持つ。
   const status = root.querySelector<HTMLParagraphElement>("#fetch-status")!;
   const host = root.querySelector<HTMLElement>("#fetch-cards")!;
 
@@ -587,37 +587,51 @@ export function mountFetchCards(
     host.replaceChildren(...cards.map(renderCard));
   };
 
-  const fetchNow = async () => {
-    const value = input.value.trim();
-    if (!value) {
-      setStatus("URL または棋譜 ID を入れてください。", "error");
-      return;
-    }
-    run.disabled = true;
-    setStatus("取得しています…");
+  // fetchRef は URL・棋譜 ID から取得してカードに積み、仮の一覧へ載せる。
+  // ⚠️ **取得そのものの失敗はカードにならない**ので投げる（呼び出し側が出す）。
+  // ⚠️ **仮の一覧へ載せ損ねても失敗にしない**（`remember` がカードに出す）。
+  const fetchRef = async (value: string) => {
     let got: GameDetail;
     try {
       got = await KifuService.Fetch(value);
-      mergeCard(got);
-      setStatus("");
-      render();
     } catch (err) {
-      // ⚠️ **取得そのものの失敗はカードにならない**ので、ここに出す。
-      setStatus(`取得できませんでした: ${String(err)}`, "error");
-      return;
-    } finally {
-      run.disabled = false;
+      throw new Error(`取得できませんでした: ${String(err)}`);
     }
+    mergeCard(got);
+    render();
     await remember(got);
   };
 
-  run.addEventListener("click", () => void fetchNow());
-  input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      void fetchNow();
+  // addPasted は本文を貼り付けたカードにする。
+  // ⚠️ **読めなかったものはカードにしない**（投げる）。
+  const addPasted = async (text: string, origin: string) => {
+    let got: PastedKifu;
+    try {
+      got = await KifuService.PreviewPaste(text);
+    } catch (err) {
+      throw new Error(`棋譜として読めませんでした: ${String(err)}`);
     }
-  });
+    const i = cards.findIndex((c) => c.key === got.key);
+    if (i < 0) {
+      cards = [
+        {
+          key: got.key,
+          game: got.game,
+          pasted: true,
+          origin,
+          saved: null,
+          watched: false,
+          notice: "",
+          error: "",
+        },
+        ...cards,
+      ];
+    } else {
+      // ⚠️ **同じ本文ならカードを増やさない**（位置と「登録済み」を保つ。取得したカードと同じ約束）。
+      cards[i] = { ...cards[i], notice: "同じ棋譜のカードがあります（増やしていません）", error: "" };
+    }
+    render();
+  };
 
   // 起動時に仮の一覧からカードを復元する。
   //
@@ -649,39 +663,18 @@ export function mountFetchCards(
   render();
 
   return {
-    addPasted: async (text, origin) => {
-      let got: PastedKifu;
-      try {
-        got = await KifuService.PreviewPaste(text);
-      } catch (err) {
-        // ⚠️ **読めなかったものはカードにしない**（取得の失敗と同じで、群の状態の行に出す）。
-        setStatus(`${origin}を棋譜として読めませんでした: ${String(err)}`, "error");
-        return false;
+    addText: async (text, origin) => {
+      const value = text.trim();
+      if (!value) {
+        throw new Error("棋譜が空です。URL・棋譜 ID か、KIF / CSA の棋譜を入れてください。");
       }
-      const i = cards.findIndex((c) => c.key === got.key);
-      if (i < 0) {
-        cards = [
-          {
-            key: got.key,
-            game: got.game,
-            pasted: true,
-            origin,
-            saved: null,
-            watched: false,
-            notice: "",
-            error: "",
-          },
-          ...cards,
-        ];
-        setStatus("");
-      } else {
-        // ⚠️ **同じ本文ならカードを増やさない**（位置と「登録済み」を保つ。取得したカードと同じ約束）。
-        cards[i] = { ...cards[i], notice: "同じ棋譜のカードがあります（増やしていません）", error: "" };
-        setStatus("");
+      if (await KifuService.IsKifuRef(value)) {
+        await fetchRef(value);
+        return;
       }
-      render();
-      return true;
+      await addPasted(value, origin);
     },
+    addPasted,
     setStatus,
   };
 }
