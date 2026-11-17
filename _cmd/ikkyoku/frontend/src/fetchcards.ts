@@ -94,8 +94,8 @@ type FetchCard = {
 
 // cardFromWatch は仮の一覧の 1 件をカードに戻す（再起動後の復元）。
 //
-// ⚠️ **KIF 本文は入っていない。** 復元の時点ではサイトへ取りに行かないので、
-// 中身が要るときは「更新」を押す（保存はそれまでできない）。
+// ⚠️ **KIF 本文は入っていない。** 復元したあと裏で取り直す（`restore`）が、取れるまで・
+// 取れなかったときは本文が無い（保存はそれまでできない。「更新」で取り直せる）。
 // ⚠️ **解析だけは直行できる** —— 「解析する」が先に取り直す（analyze を参照）。
 const cardFromWatch = (w: WatchEntry): FetchCard => {
   const game: GameDetail = {
@@ -609,11 +609,13 @@ export function mountFetchCards(
     render();
   };
 
-  // 起動時に仮の一覧からカードを復元する。
+  // 起動時に仮の一覧からカードを復元し、**続けてサイトから取り直す**（2026-11-18）。
   //
-  // ⚠️ **ここではサイトへ取りに行かない。** 起動のたびに追跡ぶんの通信が走ると
-  // 待たされるうえ、中継を追っていない日でも毎回外へ出ることになる。
-  // 中身が要るときはカードの「更新」を押す（「解析する」も先に取り直す）。
+  // 以前は「起動のたびに通信が走ると待たされる・中継を追っていない日も外へ出る」ので
+  // 取りに行かず、「更新」を押させていた。⚠️ **待たせないこと** —— 取り直しは復元して
+  // 描いたあとに裏で回し、画面はその間も使える（カードは 1 枚ずつ「通信中…」になる）。
+  // ⚠️ **1 枚ずつ順に取りに行く**（同じサイトへまとめて投げない。カードは 2〜3 枚が普通）。
+  // ⚠️ **取れなかったカードは復元したまま残す**（理由はカードに出る。「更新」で取り直せる）。
   //
   // ⚠️ **棚を開き直したとき（設定タブ）に復元し直していない。** 復元は
   // メタだけで作り直すので、**今日取ったカードの本文（KIF）を捨てることになる。**
@@ -631,8 +633,16 @@ export function mountFetchCards(
     if (!list || list.length === 0) return;
     // ⚠️ **既に取ったカードを上書きしないこと**（復元は本文の無いカード）。
     const known = new Set(cards.map((c) => c.key));
-    cards = [...cards, ...list.map(cardFromWatch).filter((c) => !known.has(c.key))];
+    const restored = list.map(cardFromWatch).filter((c) => !known.has(c.key));
+    cards = [...cards, ...restored];
     render();
+    for (const r of restored) {
+      // ⚠️ **その間に人が触ったカードは飛ばす**（閉じた・保存した・自分で更新や解析を押した）。
+      // 閉じたカードを取り直すと `mergeCard` がカードを積み直してしまう。
+      const card = cards.find((c) => c.key === r.key);
+      if (!card || busyKeys.has(card.key) || !isRestored(card)) continue;
+      await refresh(card);
+    }
   };
   void restore();
 

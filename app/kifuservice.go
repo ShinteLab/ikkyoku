@@ -940,9 +940,8 @@ func toWatchEntry(w store.Watch) WatchEntry {
 
 // Watches は仮の一覧を新しい順に返す（入力タブの取得カードの復元に使う）。
 //
-// ⚠️ **ここからサイトへは取りに行かない。** 起動のたびに追跡ぶんの通信が走ると
-// 待たされるうえ、**中継を追っていない日でも毎回外へ出ることになる。**
-// 中身が要るときはカードの「更新」（`Refresh`）を押す。
+// ⚠️ **ここからサイトへは取りに行かない**（棚を読むだけで返す）。起動時の取り直しは
+// 画面が復元して描いたあとに 1 枚ずつ `Refresh` を呼ぶ（2026-11-18。`fetchcards.ts` の `restore`）。
 func (s *KifuService) Watches() ([]WatchEntry, error) {
 	lib, err := s.library()
 	if err != nil {

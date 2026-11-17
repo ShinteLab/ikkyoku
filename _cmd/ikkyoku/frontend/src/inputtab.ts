@@ -223,8 +223,8 @@ export function mountInputTab(root: HTMLElement, opts: InputTabOptions): InputTa
         <span class="hint-para">
         <strong>URL から取ったカードは再起動しても残ります。</strong>2 日制の対局で翌日また URL を
         貼り直さずに済むよう、「どのサイトのどの棋譜か」を覚えておきます
-        （<strong>棋譜そのものではありません</strong>）。復元したカードは中身が空なので
-        「更新」でサイトから取り直してください（「解析する」は取り直してから開きます）。
+        （<strong>棋譜そのものではありません</strong>）。起動したときにサイトから取り直します
+        （取れなかったときは「更新」で取り直せます）。
         <strong>棋譜を貼ったカードは再起動すると消えます</strong>（残すなら棋譜タブに保存してください）。
         追うのをやめるときはカードの「閉じる」で外します
         （<strong>棋譜タブの棋譜は消えません</strong>）。
@@ -251,7 +251,7 @@ export function mountInputTab(root: HTMLElement, opts: InputTabOptions): InputTa
       <p id="fetch-status" class="status" role="status" aria-live="polite" hidden></p>
       <!-- カード。**新しいものが先頭。** 同じ棋譜を取り直した・貼り直したときは
            カードを増やさない（取得は key = 取得元:棋譜 ID、貼り付けは本文のハッシュ）。
-           ⚠️ **起動時は仮の一覧（DB）から取得したカードだけを復元する**（サイトへは取りに行かない）。 -->
+           ⚠️ **起動時は仮の一覧（DB）から取得したカードだけを復元し、裏で 1 枚ずつ取り直す**（2026-11-18）。 -->
       <div id="fetch-cards" class="fetch-cards"></div>
     </div>
 
