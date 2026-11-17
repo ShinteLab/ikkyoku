@@ -201,3 +201,65 @@ func TestStudyServiceFollowKifuDropsStaleFetch(t *testing.T) {
 		t.Errorf("始めた対局が棋譜で上書きされました: handicap=%q url=%q", st.Handicap, st.SourceURL)
 	}
 }
+
+// **解析タブが取り直して本譜が変わったら、入力タブのカードに知らせる**こと（2026-11-18。`kifu:reloaded`）。
+// ⚠️ 歯止めは —— **手が来ていないときは知らせないこと**（自動更新は何度も回るので、毎回カードが取り直すと
+// サイトを叩き続ける）・**カードの鍵（取得元と棋譜 ID）が、カードから送ったときと同じに戻ること**
+// （棋譜 ID が URL でも切れない）・**取得元の鍵が無い局面では知らせないこと**。
+func TestStudyServiceReloadEmitsKifuReloaded(t *testing.T) {
+	body := kifuHead + "   1 ７六歩(77)\n   2 ３四歩(33)\n"
+	srv := kifuServer(t, &body)
+	url := srv.URL + "/live.kif"
+	s := NewStudyService(NewPositionService())
+	var got []KifuReloaded
+	s.Emit = func(name string, data any) {
+		if name == KifuReloadedEvent {
+			got = append(got, data.(KifuReloaded))
+		}
+	}
+	// カードの「解析する」と同じ鍵で読む（`SendToStudyGame`）。
+	if _, err := s.loadKifuFrom(body, url, "", sourceKeyOf("url", url)); err != nil {
+		t.Fatalf("loadKifuFrom: %v", err)
+	}
+
+	if _, err := s.ReloadKifu(); err != nil {
+		t.Fatalf("ReloadKifu: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("手が来ていないのに知らせました: %+v", got)
+	}
+
+	body = kifuHead + "   1 ７六歩(77)\n   2 ３四歩(33)\n   3 ２六歩(27)\n"
+	if _, err := s.ReloadKifu(); err != nil {
+		t.Fatalf("ReloadKifu: %v", err)
+	}
+	if len(got) != 1 || got[0].Source != "url" || got[0].SourceID != url || got[0].Moves != 3 {
+		t.Fatalf("kifu:reloaded = %+v, want 1 件（url / %s / 3 手）", got, url)
+	}
+
+	// 取得元の鍵が無い（URL から読んだがカードではない）局面では知らせない。
+	got = nil
+	body = kifuHead + "   1 ７六歩(77)\n"
+	if _, err := s.LoadKifuURL(url); err != nil {
+		t.Fatalf("LoadKifuURL: %v", err)
+	}
+	body = kifuHead + "   1 ７六歩(77)\n   2 ３四歩(33)\n"
+	if _, err := s.ReloadKifu(); err != nil {
+		t.Fatalf("ReloadKifu: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("取得元の鍵が無いのに知らせました: %+v", got)
+	}
+}
+
+func TestSplitSourceKey(t *testing.T) {
+	src, id, ok := splitSourceKey(sourceKeyOf("url", "https://example.com/a:b.kif"))
+	if !ok || src != "url" || id != "https://example.com/a:b.kif" {
+		t.Errorf("splitSourceKey = %q %q %v", src, id, ok)
+	}
+	for _, k := range []string{"", "kif:abcd", "src:", "src:url", "src::x", "src:url:"} {
+		if _, _, ok := splitSourceKey(k); ok {
+			t.Errorf("splitSourceKey(%q) が ok を返しました", k)
+		}
+	}
+}

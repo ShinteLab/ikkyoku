@@ -28,6 +28,7 @@
 // 取得したカードとの違いは**取りに行く先が無いこと**だけ —— ⚠️ **「更新」を出さない**・
 // ⚠️ **仮の一覧に載せない**（再起動すると消える。kicho も弾く）。行き先は同じ 2 つ
 // （「解析する」→ 解析タブ / 「棋譜に保存」→ 棋譜タブ）。
+import { Events } from "@wailsio/runtime";
 import { KifuService, StudyService } from "../bindings/github.com/ShinteLab/ikkyoku/app";
 import { openPopup } from "./popup";
 import type {
@@ -645,6 +646,22 @@ export function mountFetchCards(
     }
   };
   void restore();
+
+  // 解析タブが URL から取り直して本譜が変わった（2026-11-18。Go の `kifu:reloaded`）。
+  // **同じ棋譜のカードも取り直す** —— 40 手で解析を始めて自動更新で 60 手まで進んでも、
+  // カードが 40 手のまま残らないように。
+  // ⚠️ **解析タブの本文を写さず、カードの口（`Refresh`）で取り直す**（カードの中身は取得元ごとに
+  // kicho が組み立てるので、解析タブが読んだ本文とは作りが違いうる）。そのぶん通信は 1 回増えるが、
+  // Go は**本譜が変わったときだけ**知らせてくる（手が来ていない自動更新では来ない）。
+  // ⚠️ **取り直している最中のカードは飛ばす**（同じ取り直しを重ねない）。
+  // `kifu:reloaded` の中身（Go の `app.KifuReloaded`）。⚠️ **bindings には出ない**ので形を手書きする。
+  type KifuReloaded = { source: string; sourceId: string; moves: number };
+  Events.On("kifu:reloaded", (event: { data: KifuReloaded }) => {
+    const key = `${event.data.source}:${event.data.sourceId}`;
+    const card = cards.find((c) => c.key === key);
+    if (!card || card.pasted || busyKeys.has(key)) return;
+    void refresh(card);
+  });
 
   render();
 

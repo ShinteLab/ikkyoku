@@ -35,6 +35,22 @@ func sourceKeyOf(source, sourceID string) string {
 	return "src:" + source + ":" + sourceID
 }
 
+// splitSourceKey は `sourceKeyOf` の鍵を取得元と棋譜 ID に戻す（2026-11-18。取り直したことを
+// 入力タブのカードへ知らせるため）。取得元の鍵でなければ ok は偽。
+//
+// ⚠️ **切るのは最初の ":" だけ**（取得元の名前に ":" は無いが、棋譜 ID は URL のことがある）。
+func splitSourceKey(key string) (source, sourceID string, ok bool) {
+	rest, found := strings.CutPrefix(key, "src:")
+	if !found {
+		return "", "", false
+	}
+	source, sourceID, found = strings.Cut(rest, ":")
+	if !found || source == "" || sourceID == "" {
+		return "", "", false
+	}
+	return source, sourceID, true
+}
+
 // pasteKeyOf は貼り付けた KIF の本文から鍵を作る（**同じ本文なら同じ鍵**）。
 //
 // ⚠️ **本文そのものを控えに書かないこと**（ハッシュで足りる）。

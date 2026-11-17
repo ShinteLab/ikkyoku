@@ -692,6 +692,7 @@ func (s *StudyService) reloadKifu(advance bool) (load KifuLoad, err error) {
 	atTip := s.study != nil && s.study.CurrentID() == mainTipID(s.study)
 	graft := s.mergeReloadLocked(study)
 	s.game = k.Game
+	key := s.sourceKey
 	followed := false
 	if advance && s.kifuFollow && atTip && graft.Added > 0 {
 		if id, _, e := s.study.MainTip(); e == nil && s.study.GoTo(id) == nil {
@@ -726,8 +727,41 @@ func (s *StudyService) reloadKifu(advance bool) (load KifuLoad, err error) {
 	log.Info("棋譜を取り直しました", "url", got.URL, "moves", k.Loaded,
 		"kept", graft.Kept, "added", graft.Added, "movedAt", graft.MovedAt,
 		"auto", advance, "followed", followed)
+	// 入力タブのカードにも知らせる（2026-11-18）。**本譜が変わったときだけ**（伸びた・差し替わった・終局した）。
+	if graft.Added > 0 || graft.MovedAt > 0 || stopped {
+		s.emitKifuReloaded(key, k.Loaded)
+	}
 	return KifuLoad{State: st, Summary: summary, Note: note,
 		Added: graft.Added, Followed: followed}, nil
+}
+
+// KifuReloadedEvent は解析タブが URL から棋譜を取り直して本譜が変わったことを知らせるイベントの名前
+// （2026-11-18。中身は `KifuReloaded`）。
+//
+// **入力タブのカードを解析タブに付いていかせるため**（40 手で解析を始めて自動更新で 60 手まで
+// 進んでも、カードが 40 手のままにならないように）。受けたカードは自分で取り直す（`KifuService.Refresh`）。
+// ⚠️ **取り直した本文をここで渡さないこと** —— カードの中身は取得元ごとに kicho が組み立てる
+// （読売は KIF を組み立てる）ので、解析タブが読んだ本文とは作りが違いうる。カードは自分の口で取る。
+const KifuReloadedEvent = "kifu:reloaded"
+
+// KifuReloaded は `kifu:reloaded` の中身。⚠️ **bindings には出ない**（フロントで形を手書きしている。
+// json タグを変えたら `fetchcards.ts` も直すこと）。
+type KifuReloaded struct {
+	// Source / SourceID はカードの鍵（kicho の取得元と棋譜 ID）。
+	Source   string `json:"source"`
+	SourceID string `json:"sourceId"`
+	// Moves は取り直した棋譜の手数（ログと画面の参考。カードは自分で取り直した値を出す）。
+	Moves int `json:"moves"`
+}
+
+// emitKifuReloaded は `kifu:reloaded` を出す。⚠️ **ロックの外で呼ぶこと**（先はフロント）。
+// 取得元の鍵が無い（貼り付けた棋譜など）なら何もしない。
+func (s *StudyService) emitKifuReloaded(key string, moves int) {
+	source, sourceID, ok := splitSourceKey(key)
+	if !ok || s.Emit == nil {
+		return
+	}
+	s.Emit(KifuReloadedEvent, KifuReloaded{Source: source, SourceID: sourceID, Moves: moves})
 }
 
 // graftKifu は手元の KIF を**今の木に据え直す**（棚から前の検討を開いたとき）。
