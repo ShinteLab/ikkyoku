@@ -665,7 +665,7 @@ export function mountFetchCards(
     addText: async (text, origin) => {
       const value = text.trim();
       if (!value) {
-        throw new Error("棋譜が空です。URL・棋譜 ID か、KIF / CSA の棋譜を入れてください。");
+        throw new Error("棋譜が空です。URL・棋譜 ID か、KIF / KI2 / CSA の棋譜を入れてください。");
       }
       if (await KifuService.IsKifuRef(value)) {
         await fetchRef(value);

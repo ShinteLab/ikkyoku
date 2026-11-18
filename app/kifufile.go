@@ -49,7 +49,7 @@ type openedKifu struct {
 	encoding string
 }
 
-// OpenKifuFile は棋譜ファイル（KIF / CSA）を選んで読む。**取り消したら空の KifuFile を返す**（エラーではない）。
+// OpenKifuFile は棋譜ファイル（KIF / KI2 / CSA）を選んで読む。**取り消したら空の KifuFile を返す**（エラーではない）。
 //
 // 読んだ本文と元の文字コードを覚えておき、**同じ本文のまま「棋譜に保存」が
 // 押されたら、その文字コードで記録する**（`ImportKIF`）。⚠️ **文字コードを画面に
@@ -62,7 +62,7 @@ func (s *KifuService) OpenKifuFile() (KifuFile, error) {
 	start := s.lastKifuDir
 	s.mu.Unlock()
 	path, err := s.PickFile("棋譜ファイルを選ぶ", start,
-		"棋譜 (*.kif, *.kifu, *.csa)", "*.kif;*.kifu;*.csa",
+		"棋譜 (*.kif, *.kifu, *.ki2, *.csa)", "*.kif;*.kifu;*.ki2;*.csa",
 		"すべてのファイル", "*.*")
 	if err != nil {
 		return KifuFile{}, fmt.Errorf("ファイルを選べませんでした: %w", err)

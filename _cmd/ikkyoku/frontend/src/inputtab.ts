@@ -200,10 +200,10 @@ export function mountInputTab(root: HTMLElement, opts: InputTabOptions): InputTa
       <span class="setting-title" data-hint="hint-kifu">棋譜を読み込む</span>
       <span id="hint-kifu" class="setting-note is-hint">
         <span class="hint-para">
-        コピーした<strong>棋譜の URL</strong> か <strong>KIF / CSA の棋譜</strong>を
+        コピーした<strong>棋譜の URL</strong> か <strong>KIF / KI2 / CSA の棋譜</strong>を
         <strong>「貼り付け」</strong>で取り込むと、<strong>下にカードが出ます。</strong>
         <strong>「手入力」</strong>なら同じものを打ち込めます。
-        <strong>「ファイルを開く…」</strong>かここへのドラッグ＆ドロップで .kif / .csa も読み込めます。
+        <strong>「ファイルを開く…」</strong>かここへのドラッグ＆ドロップで .kif / .ki2 / .csa も読み込めます。
         カードの<strong>「解析する」</strong>で、<strong>指し手を全て反映した局面</strong>で
         <strong>解析タブ</strong>が開きます（<strong>訂正タブは通りません</strong>）。
         </span>
@@ -238,11 +238,11 @@ export function mountInputTab(root: HTMLElement, opts: InputTabOptions): InputTa
            **中継の .kif は Shift_JIS** なので、いずれにせよこちらでは扱えない。 -->
       <div class="setting-fields">
         <button id="kifu-paste" class="ghost-btn is-primary" type="button"
-                title="クリップボードの URL・棋譜 ID・棋譜（KIF / CSA）をカードにします">貼り付け</button>
+                title="クリップボードの URL・棋譜 ID・棋譜（KIF / KI2 / CSA）をカードにします">貼り付け</button>
         <button id="kifu-file" class="ghost-btn" type="button"
-                title=".kif / .csa を開いてカードにします">ファイルを開く…</button>
+                title=".kif / .ki2 / .csa を開いてカードにします">ファイルを開く…</button>
         <button id="kifu-manual" class="ghost-btn" type="button"
-                title="URL・棋譜 ID・棋譜（KIF / CSA）を打ち込んでカードにします">手入力…</button>
+                title="URL・棋譜 ID・棋譜（KIF / KI2 / CSA）を打ち込んでカードにします">手入力…</button>
       </div>
       <!-- ⚠️ **この群の状態表示は 1 つ**（#fetch-status）。貼り付け・ファイルの
            どれもここへ出す（持ち主は fetchcards.ts。入力タブは setStatus を借りる）。
@@ -264,7 +264,7 @@ export function mountInputTab(root: HTMLElement, opts: InputTabOptions): InputTa
         <span class="field-label library-modal-title">手入力</span>
       </div>
       <textarea id="kifu-manual-text" class="kifu-text" spellcheck="false"
-                placeholder="URL / 棋譜 ID / KIF / CSA"></textarea>
+                placeholder="URL / 棋譜 ID / KIF / KI2 / CSA"></textarea>
       <p id="kifu-manual-status" class="status" role="status" aria-live="polite" hidden></p>
       <div class="library-modal-foot">
         <button id="kifu-manual-cancel" class="ghost-btn" type="button">やめる</button>

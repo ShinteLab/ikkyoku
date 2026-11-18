@@ -1,6 +1,6 @@
 package position
 
-// 棋譜のテキスト（KIF / CSA）から検討（根 + 手順）を組み立てる入口（Phase 5 の「棋譜を貼り付ける」）。
+// 棋譜のテキスト（KIF / CSA / KI2）から検討（根 + 手順）を組み立てる入口（Phase 5 の「棋譜を貼り付ける」）。
 //
 // ⚠️ **画像を知らない層のまま。** 貼り付けた棋譜には画像も座標系も無いので、
 // `recognize` を通らずに直接ここへ入る。訂正タブを経由しないのは、
@@ -13,6 +13,7 @@ package position
 // **CSA も KIF と同じ `kifu.Document` で受ける**（2026-11-15。`kifu.ParseCSA` が寄せる）。
 // ⚠️ **組み立てを形式ごとに分けないこと**（`fromDocument` の 1 本）。分けると
 // 終局・千日手・消費時間・コメントの扱いが片方だけ古くなる。
+// **KI2 も同じ**（2026-11-18。`KI2Document.KIF()` で盤に当てて `Document` にしてから通す）。
 
 import (
 	"errors"
@@ -55,18 +56,60 @@ func FromKIF(text string) (*Study, KIFLoad, error) {
 	if err != nil {
 		return nil, KIFLoad{}, err
 	}
+	if err := readable(doc.Empty(), doc.Start); err != nil {
+		return nil, KIFLoad{}, err
+	}
 	return fromDocument(doc, "")
 }
 
-// FromKifu は棋譜のテキストを、形式を見分けて読む（CSA なら `FromCSA`、それ以外は `FromKIF`）。
+// FromKifu は棋譜のテキストを、形式を見分けて読む（CSA なら `FromCSA`、KI2 なら `FromKI2`、
+// それ以外は `FromKIF`）。
 //
-// **貼り付け・URL・棚の入口はこれを呼ぶ**（2026-11-15）。見分けは `kifu.IsCSA`
+// **貼り付け・URL・棚の入口はこれを呼ぶ**（2026-11-15）。見分けは `kifu.IsCSA` / `kifu.IsKI2`
 // （**仕様は core**。ここで行の形を見ないこと）。
 func FromKifu(text string) (*Study, KIFLoad, error) {
-	if kifu.IsCSA(text) {
+	switch {
+	case kifu.IsCSA(text):
 		return FromCSA(text)
+	case kifu.IsKI2(text):
+		return FromKI2(text)
 	}
 	return FromKIF(text)
+}
+
+// FromKI2 は KI2 形式（移動元を書かない表記）の棋譜を読んで検討を組み立てる（2026-11-18）。
+//
+// kicho v0.5.0 から、ふわりと将棋の棋譜は KI2 の原本のまま届く（手入力の誤記もそのまま）。
+// 指し手は `KI2Document.KIF()` が盤に当てて移動元を割り出す（**仕様は core**）。
+//
+// ⚠️ **当てられない手があってもエラーにしない**（`FromKIF` と同じ。設計原則3）。
+// そこまでの手を載せて、理由を `Note` に出す。⚠️ **`Total` は原本に書いてあった手数**
+// （当てられた手数ではない）—— 「全部で何手のうち何手まで載ったか」が見えるように。
+// error を返すのは何も読めなかったとき・開始局面が組めないとき（知らない手合割など）だけ。
+func FromKI2(text string) (*Study, KIFLoad, error) {
+	k, err := kifu.ParseKI2(text)
+	if err != nil {
+		return nil, KIFLoad{}, err
+	}
+	// ⚠️ **当てた後の Document では見ないこと。** 1 手目から当てられないと手が 0 になり、
+	// ヘッダの無い KI2 が「何も読めない」で断られる。
+	if err := readable(k.Empty(), k.Start); err != nil {
+		return nil, KIFLoad{}, err
+	}
+	doc, _, err := k.KIF()
+	note := ""
+	if err != nil {
+		if !errors.Is(err, kifu.ErrKI2Move) {
+			return nil, KIFLoad{}, err
+		}
+		note = err.Error()
+	}
+	study, load, err := fromDocument(doc, note)
+	if err != nil {
+		return nil, KIFLoad{}, err
+	}
+	load.Total = len(k.Moves)
+	return study, load, nil
 }
 
 // FromCSA は CSA 形式の棋譜を読んで検討を組み立てる（2026-11-15）。
@@ -82,12 +125,14 @@ func FromCSA(text string) (*Study, KIFLoad, error) {
 		}
 		note = err.Error()
 	}
+	if err := readable(doc.Empty(), doc.Start); err != nil {
+		return nil, KIFLoad{}, err
+	}
 	return fromDocument(doc, note)
 }
 
-// fromDocument は読めた棋譜（`kifu.Document`）から検討を組み立てる（KIF と CSA で共通）。
-// note は読み取りの段階で止まった理由（無ければ空）。
-func fromDocument(doc kifu.Document, note string) (*Study, KIFLoad, error) {
+// readable は棋譜として何か読めたかを確かめる（empty は形式ごとの `Empty()`、start は盤面図）。
+func readable(empty bool, start string) error {
 	// ⚠️ **kifu.Parse は指し手 0 手をエラーにしない**（中継は対局前から
 	// ヘッダだけの棋譜を配信しているため）。断るのは**ヘッダも手も盤面図も
 	// 1 つも読めなかった**とき（HTML やただの文章 = 貼り間違い）だけ。
@@ -97,9 +142,16 @@ func fromDocument(doc kifu.Document, note string) (*Study, KIFLoad, error) {
 	// いるので、手が無くても**解析できる局面はある**。以前は「手も盤面図も無ければ
 	// 断る」にしていて、URL から取った対局前の棋譜が解析タブへ送れなかった。
 	// 盤面図だけの棋譜（撮った 1 局面を棚に入れて開き直す口。Step 3）も同じ理由で通す。
-	if doc.Empty() && doc.Start == "" {
-		return nil, KIFLoad{}, fmt.Errorf("棋譜として読み取れるものがありませんでした")
+	if empty && start == "" {
+		return fmt.Errorf("棋譜として読み取れるものがありませんでした")
 	}
+	return nil
+}
+
+// fromDocument は読めた棋譜（`kifu.Document`）から検討を組み立てる（KIF・CSA・KI2 で共通）。
+// note は読み取りの段階で止まった理由（無ければ空）。⚠️ **「何か読めたか」は呼ぶ側が
+// `readable` で確かめておくこと**（KI2 は盤に当てる前の原本で見る必要があるため）。
+func fromDocument(doc kifu.Document, note string) (*Study, KIFLoad, error) {
 	start, err := doc.StartSFEN()
 	if err != nil {
 		return nil, KIFLoad{}, err

@@ -175,11 +175,11 @@ func describeOpenError(err error) error {
 func describeKifuError(err error) error {
 	switch {
 	case errors.Is(err, kicho.ErrEmptyKifu):
-		return fmt.Errorf("%w。KIF か CSA 形式のテキストを貼るか、棋譜の URL を指定してください", err)
+		return fmt.Errorf("%w。KIF・KI2・CSA 形式のテキストを貼るか、棋譜の URL を指定してください", err)
 	case errors.Is(err, kicho.ErrNotKifu):
 		// 一番よくあるのが「中継のトップページを貼った」。
 		// **棋譜そのものを指しているか**を確かめてもらう。
-		return fmt.Errorf("%w。棋譜そのもの（.kif / .csa）を指しているか確かめてください", err)
+		return fmt.Errorf("%w。棋譜そのもの（.kif / .ki2 / .csa）を指しているか確かめてください", err)
 	case errors.Is(err, kicho.ErrUnsupportedSource):
 		// 取り直せるのは取りに行く先があるものだけ。
 		// ⚠️ **貼り付けを「中継だけ」と言わないこと**（2026-09-12）——
@@ -700,7 +700,7 @@ func isKifuRef(text string) bool {
 //
 //   - live.shogi.or.jp の URL  → 日本将棋連盟の棋譜中継
 //   - shogidb2.com の URL      → 将棋DB2
-//   - fuwalete.com の URL      → ふわりと将棋の棋譜速報（記事の KI2 から kicho が KIF を組み立てる）
+//   - fuwalete.com の URL      → ふわりと将棋の棋譜速報（記事の KI2 を原本のまま返す。読むのは `position.FromKifu`）
 //   - yomiuri.co.jp の URL     → 読売（竜王戦）
 //   - それ以外の http(s) URL   → その中身を .kif として読む
 //   - URL でない文字列         → 読売の棋譜 ID
@@ -810,7 +810,7 @@ func (s *KifuService) PreviewKIF(text string) (GameDetail, error) {
 	return fetchedToDetail(f), nil
 }
 
-// ImportKIF は KIF / CSA のテキストを解析して棚に入れる（入力タブの「棚に登録する」）。
+// ImportKIF は KIF / KI2 / CSA のテキストを解析して棚に入れる（入力タブの「棚に登録する」）。
 //
 // 取得元での一意な ID が無いため、**毎回新しい棋譜として登録される**
 // （同じものを 2 回登録すれば 2 件になる。重複は棋譜タブから消す）。
