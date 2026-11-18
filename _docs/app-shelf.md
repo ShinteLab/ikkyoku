@@ -66,7 +66,9 @@ kicho の UI は将来「テスト用のモック」または
    kicho の UI の「棋譜 URL をコピー」「取得 URL をコピー」は**外部ツール
    （ShogiHome 等）へ渡すため**のもので、ikkyoku では渡す先が自分自身。
    **代わりに置いたのが「解析する」**。⚠️ **URL コピーを戻すなら、先に
-   「ikkyoku がサーバを持つか」を決めること**
+   「ikkyoku がサーバを持つか」を決めること**。
+   入力タブのカードの「取得元 URL」で**サイトの URL をコピーできる**のは別の話（2026-11-19）——
+   人が何を元にしたカードかを確かめる・ブラウザで開くためで、サーバは要らない
 7. ⚠️ **エラーは文言比較で分岐しない。** kicho は**「画面と文言は使う側にある」
    という前提で sentinel を公開している**（`ErrNoInput` / `ErrEmptyKifu` /
    `ErrNotKifu` / `ErrUnsupportedSource` と `store.ErrNotFound` /

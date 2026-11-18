@@ -23,12 +23,14 @@
 // ⚠️ **「取得 URL をコピー」は置かない**（kicho の UI にはある）。あれは
 // ShogiHome 等の外部ツールへ渡すためのもので、ikkyoku では渡す先が自分自身。
 // **代わりに置くのが「解析する」。**
+// **取得元 URL の行で URL を押すとコピーできる**のは別の話（2026-11-19）—— 人が
+// 何を元にしたカードかを確かめる・ブラウザで開くためのもので、外部ツールへ渡す口ではない。
 //
 // **貼り付けた棋譜もカードになる**（2026-11-18。「貼り付け」・「ファイルを開く…」・ドラッグ＆ドロップ）。
 // 取得したカードとの違いは**取りに行く先が無いこと**だけ —— ⚠️ **「更新」を出さない**・
 // ⚠️ **仮の一覧に載せない**（再起動すると消える。kicho も弾く）。行き先は同じ 2 つ
 // （「解析する」→ 解析タブ / 「棋譜に保存」→ 棋譜タブ）。
-import { Events } from "@wailsio/runtime";
+import { Clipboard, Events } from "@wailsio/runtime";
 import { KifuService, StudyService } from "../bindings/github.com/ShinteLab/ikkyoku/app";
 import { errorMarks } from "./kifumarks";
 import { openPopup } from "./popup";
@@ -258,6 +260,37 @@ export function mountFetchCards(
     dl.append(dt, dd);
   };
 
+  // addSource は「取得元 URL」の行（2026-11-19）。サイト名の札と URL を並べ、**URL を押すとコピーする**
+  // （撮った画像のパスの `.path-btn` と同じ流儀。⚠️ **できた合図は色だけ** —— 文字を変えると幅が動く）。
+  // ⚠️ **取りに行っているあいだも押せる**（コピーは取得と関わらない）。
+  const addSource = (dl: HTMLElement, g: GameDetail) => {
+    const dt = document.createElement("dt");
+    dt.textContent = "取得元 URL";
+    const dd = document.createElement("dd");
+    dd.className = "fetch-card-from";
+    const tag = document.createElement("span");
+    tag.className = "fetch-card-source";
+    tag.textContent = SOURCE_LABELS[g.source] ?? g.source;
+    dd.append(tag);
+    if (g.sourceUrl) {
+      const url = document.createElement("button");
+      url.type = "button";
+      url.className = "fetch-card-url";
+      url.textContent = g.sourceUrl;
+      url.title = "URL をコピー";
+      url.addEventListener("click", () => {
+        void Clipboard.SetText(g.sourceUrl).then(() => {
+          url.classList.add("is-copied");
+          window.setTimeout(() => url.classList.remove("is-copied"), 900);
+        });
+      });
+      dd.append(url);
+    } else {
+      dd.append("-");
+    }
+    dl.append(dt, dd);
+  };
+
   // busyKeys は今サイトへ取りに行っているカード。
   //
   // ⚠️ **1 枚ずつ塞ぐ**（2026-09-12 に「すべて更新」を外したので、全部を
@@ -434,11 +467,16 @@ export function mountFetchCards(
     const title = document.createElement("span");
     title.className = "fetch-card-title";
     title.textContent = game.event || "(棋戦名なし)";
-    const tag = document.createElement("span");
-    tag.className = "fetch-card-source";
-    tag.textContent = card.origin || (SOURCE_LABELS[game.source] ?? game.source);
     // カードに出す印は盤に当たらない手（⚠ N手目）だけ（2026-11-19。指摘と親子は棋譜タブの行の持ち物）。
-    head.append(title, ...errorMarks(game), tag);
+    head.append(title, ...errorMarks(game));
+    // ⚠️ **見出しの札は貼り付けたカードだけ**（2026-11-19。"貼り付け" かファイル名）。
+    // 取得したカードのサイト名は「取得元 URL」の行に URL と並べて出す（`addSource`）。
+    if (card.pasted) {
+      const tag = document.createElement("span");
+      tag.className = "fetch-card-source";
+      tag.textContent = card.origin || (SOURCE_LABELS[game.source] ?? game.source);
+      head.append(tag);
+    }
 
     // ⚠️ **仮の一覧に載っていないことは画面に出すこと。** 載っていないカードは
     // 再起動で消えるので、黙っていると「昨日のカードが無い」の理由が分からない。
@@ -480,6 +518,10 @@ export function mountFetchCards(
     addMeta(meta, "開始", formatDate(game.startedAt));
     addMeta(meta, "場所", game.place);
     addMeta(meta, "手数", movesText(game));
+    // 取得元 URL（2026-11-19）。**何を元にしたカードか**を見せる（棋戦名が空のカードは見分けが付かない）。
+    // 名前は棋譜タブの詳細（`library.ts`）と揃える。⚠️ **貼り付けたカードには出さない**（取りに行く先が無い。
+    // 出どころは見出しの札の `origin`）。復元したカードも仮の一覧が覚えている URL が入る。
+    if (!card.pasted) addSource(meta, game);
     box.append(meta);
 
     if (restored) {
