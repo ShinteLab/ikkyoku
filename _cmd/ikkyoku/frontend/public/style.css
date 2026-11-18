@@ -6556,6 +6556,40 @@ html.is-graph #app {
   border-radius: 999px;
 }
 
+/* 「取得元 URL」の行（2026-11-19）。サイト名の札と URL を並べる。
+   ⚠️ **URL は折り返す**（区切りの無い長い値。値の列は `.library-meta` が `minmax(0, 1fr)` にしてある）。 */
+.fetch-card-from {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 6px;
+}
+
+/* URL そのものがコピーのボタン（`.path-btn` と同じ流儀で、見た目は控えめにする）。 */
+.fetch-card-url {
+  min-width: 0;
+  padding: 0 4px;
+  font: inherit;
+  color: var(--text-table);
+  text-align: left;
+  word-break: break-all;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.fetch-card-url:hover {
+  color: var(--text);
+  border-color: var(--line-hover);
+}
+
+/* コピーできたことの合図。**文字は変えずに色だけ**（幅が動かないように）。 */
+.fetch-card-url.is-copied {
+  color: var(--success);
+  border-color: var(--success);
+}
+
 /* 更新・閉じるは右端へ。⚠️ **.danger-btn の margin-left: auto がここでは効く**
    （閉じるを一番右に置きたいので、そのままにしてある）。 */
 .fetch-card-head > .ghost-btn {
