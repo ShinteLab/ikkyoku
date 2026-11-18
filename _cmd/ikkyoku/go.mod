@@ -28,7 +28,7 @@ require (
 
 require (
 	github.com/ShinteLab/engine v0.2.1 // indirect
-	github.com/ShinteLab/kicho v0.6.1 // indirect
+	github.com/ShinteLab/kicho v0.6.2 // indirect
 	github.com/ShinteLab/suteme v0.3.0 // indirect
 	github.com/adrg/xdg v0.5.3 // indirect
 	github.com/coder/websocket v1.8.14 // indirect
