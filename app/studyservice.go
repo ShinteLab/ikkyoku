@@ -12,6 +12,7 @@ import (
 	"github.com/ShinteLab/ikkyoku/legal"
 	"github.com/ShinteLab/ikkyoku/log"
 	"github.com/ShinteLab/ikkyoku/position"
+	"github.com/ShinteLab/kicho/store"
 )
 
 // StudyService は**確定した局面**を持つ Service（解析タブ）。
@@ -151,6 +152,14 @@ type StudyService struct {
 	// （`DropFrom`・根の入れ替え）を知っているのはここだけなので、
 	// **どこまでを捨てるかの判断もここに置く**（`AnalyzeService` は記録を頼むだけ）。
 	evals evalStore
+
+	// fix は原本と直しの表（棋譜の誤記を直す。`kifufix.go`）。⚠️ **根を入れ替えたら捨てる**（`newSessionLocked`）。
+	fix kifuFixState
+	// flagsOf は棚の棋譜の指摘と kicho のエラーの印を読む口（`KifuService` が入れる）。⚠️ **nil でも動くこと**。
+	// ⚠️ **ロックを持ったまま呼ばないこと**（棚を読む）。
+	flagsOf func(gameID string) ([]store.Flag, int)
+	// addFlag は棚の棋譜に指摘を付ける口（`KifuService` が入れる。反則手の指摘）。⚠️ **nil でも動くこと**。
+	addFlag func(gameID string, move int, reason, by string) error
 }
 
 func NewStudyService(src *PositionService) *StudyService {
@@ -232,6 +241,16 @@ type StudyState struct {
 	// 本譜が終局で終わっていて、まだ棋譜タブと結んでおらず、URL から読んだ棋譜でないとき。
 	// ⚠️ **フロントで同じ判定を書かないこと**（判断は `registerableLocked` の 1 か所）。
 	CanRegister bool `json:"canRegister"`
+	// RegisterLabel は投了の行の登録の項目名（直した手があれば「訂正版として登録」。2026-11-19）。
+	RegisterLabel string `json:"registerLabel"`
+
+	// KifuStop は原本を読み進められなかった手（手順リストの ⚠ の行。読めたなら nil。2026-11-19）。
+	// ⚠️ **節点ではない**（終局の行と同じ）。描くのはフロント、出すかどうかは Go。
+	KifuStop *KifuStop `json:"kifuStop"`
+	// MoveMarks は手の後ろの印（直した手 ✎・枝に下がった原本の手・指摘 ⚑）。
+	MoveMarks []MoveMark `json:"moveMarks"`
+	// MoveActions は手の右クリックで出す直し・指摘の項目（⚠️ **出す条件は Go**。フロントで手数を比べない）。
+	MoveActions []MoveAction `json:"moveActions"`
 
 	// RootSFEN は根の局面（採ったときの局面）。**エンジンに渡すのはこれ + Played。**
 	RootSFEN string `json:"rootSfen"`
@@ -488,10 +507,18 @@ func (s *StudyService) loadKifuFrom(text, sourceURL, gameID, key string) (load K
 	// ⚠️ **ロックを取る前に呼ぶこと**（向こうがロックを取る）。
 	s.saveNow()
 
-	study, k, err := position.FromKifu(text)
+	// **原本として読む**（2026-11-19。止まった手の先まで持つ。直しの表は根を入れ替えるので空から）。
+	o, study, k, b, err := readOriginal(text, nil)
 	if err != nil {
 		return KifuLoad{State: s.State()}, err
 	}
+	// 棚の棋譜なら、読み終えたあとに指摘を読み、反則手で止まっていれば指摘を付ける（ロックの外）。
+	// ⚠️ **返す状態もこちらで描き直したものにする**（この defer は publish より先に走る）。
+	defer func() {
+		if err == nil {
+			load.State = s.afterKifuRead()
+		}
+	}()
 
 	s.mu.Lock()
 	// **根ごと入れ替える**（Adopt と同じ）。前の手順と解析結果は別の局面の話になる。
@@ -510,6 +537,8 @@ func (s *StudyService) loadKifuFrom(text, sourceURL, gameID, key string) (load K
 	// **出どころの鍵**（控えを同じ棋譜に結び直す手掛かり。`studykey.go`）。
 	s.sourceKey = key
 	s.newSessionLocked()
+	s.fix.original, s.fix.text = o, text
+	s.takeBuiltLocked(b)
 	st := s.changed()
 	s.mu.Unlock()
 
@@ -669,11 +698,21 @@ func (s *StudyService) reloadKifu(advance bool) (load KifuLoad, err error) {
 		return KifuLoad{State: s.State()}, err
 	}
 	// ⚠️ **取れなかった / 読めなかったときは今の手順を壊さないこと。**
-	// 組み立てが通ってから初めて入れ替える。
-	study, k, err := position.FromKifu(got.Text)
+	// 組み立てが通ってから初めて入れ替える。⚠️ **直しの表を当ててから据え直す**（2026-11-19。当てないと
+	// 盤に当たる誤記の直しが枝へ押し戻される）。
+	s.mu.Lock()
+	fixes := append([]position.KifuFix(nil), s.fix.fixes...)
+	s.mu.Unlock()
+	o, study, k, b, err := readOriginal(got.Text, fixes)
 	if err != nil {
 		return KifuLoad{State: s.State()}, err
 	}
+	// ⚠️ **返す状態もこちらで描き直したものにする**（この defer は publish より先に走る）。
+	defer func() {
+		if err == nil {
+			load.State = s.afterKifuRead()
+		}
+	}()
 
 	s.mu.Lock()
 	// ⚠️ **取りに行っているあいだに別の局面へ入れ替わっていたら据えないこと**
@@ -692,6 +731,8 @@ func (s *StudyService) reloadKifu(advance bool) (load KifuLoad, err error) {
 	atTip := s.study != nil && s.study.CurrentID() == mainTipID(s.study)
 	graft := s.mergeReloadLocked(study)
 	s.game = k.Game
+	s.fix.original, s.fix.text = o, got.Text
+	dropped := s.takeBuiltLocked(b)
 	key := s.sourceKey
 	followed := false
 	if advance && s.kifuFollow && atTip && graft.Added > 0 {
@@ -714,7 +755,7 @@ func (s *StudyService) reloadKifu(advance bool) (load KifuLoad, err error) {
 	if stopped {
 		stopNote = "終局まで載ったので自動更新を止めました"
 	}
-	for _, msg := range []string{graft.Note, reloadNote(graft), stopNote} {
+	for _, msg := range []string{graft.Note, reloadNote(graft), dropped, stopNote} {
 		if msg == "" {
 			continue
 		}
@@ -780,19 +821,31 @@ func (s *StudyService) graftKifu(text string) (load KifuLoad, err error) {
 	s.saveNow()
 
 	// ⚠️ **読めなかったときは今の手順を壊さないこと**（`ReloadKifu` と同じ）。
-	study, k, err := position.FromKifu(text)
+	// ⚠️ **直しの表を当ててから据え直す**（控えから戻した表。2026-11-19）。
+	s.mu.Lock()
+	fixes := append([]position.KifuFix(nil), s.fix.fixes...)
+	s.mu.Unlock()
+	o, study, k, b, err := readOriginal(text, fixes)
 	if err != nil {
 		return KifuLoad{State: s.State()}, err
 	}
+	// ⚠️ **返す状態もこちらで描き直したものにする**（この defer は publish より先に走る）。
+	defer func() {
+		if err == nil {
+			load.State = s.afterKifuRead()
+		}
+	}()
 
 	s.mu.Lock()
 	graft := s.mergeReloadLocked(study)
 	s.game = k.Game
+	s.fix.original, s.fix.text = o, text
+	dropped := s.takeBuiltLocked(b)
 	st := s.changed()
 	s.mu.Unlock()
 
 	note := k.Note
-	for _, msg := range []string{graft.Note, reloadNote(graft)} {
+	for _, msg := range []string{graft.Note, reloadNote(graft), dropped} {
 		if msg == "" {
 			continue
 		}
@@ -1550,6 +1603,7 @@ func (s *StudyService) state() StudyState {
 			Hands: []position.Stock{}, Warnings: []string{},
 			Nodes: []position.Node{}, Line: []int{},
 			Played: []string{}, Legal: []legal.Move{},
+			MoveMarks: []MoveMark{}, MoveActions: []MoveAction{},
 			Rev: s.rev,
 		}
 	}
@@ -1570,6 +1624,19 @@ func (s *StudyService) state() StudyState {
 		moves, legalErr = []legal.Move{}, err.Error()
 	}
 	played := s.study.Played()
+	nodes := s.study.Nodes()
+	aligned := s.alignedLocked(nodes)
+	fixActs := s.fixActionsLocked()
+	acts := []MoveAction{}
+	for _, a := range fixActs {
+		if a.ID != 0 {
+			acts = append(acts, a.MoveAction)
+		}
+	}
+	registerLabel := "棋譜に登録"
+	if s.hasFixesLocked() {
+		registerLabel = "訂正版として登録"
+	}
 	var last *legal.Move
 	if n := len(played); n > 0 {
 		if m, ok := legal.Parse(played[n-1]); ok {
@@ -1587,7 +1654,7 @@ func (s *StudyService) state() StudyState {
 		Warnings:    warnings,
 		RootSFEN:    root,
 		First:       s.moveBaseLocked(),
-		Nodes:       s.study.Nodes(),
+		Nodes:       nodes,
 		RootComment: s.study.RootComment(),
 		CurrentID:   s.study.CurrentID(),
 		MainTip:     mainTipID(s.study),
@@ -1607,6 +1674,11 @@ func (s *StudyService) state() StudyState {
 		CanUnresign: s.gameID == "" && s.study.RecordEndByHand(),
 		CanRegister: s.registerableLocked() == nil,
 		Rev:         s.rev,
+
+		RegisterLabel: registerLabel,
+		KifuStop:      s.kifuStopLocked(aligned, fixActs),
+		MoveMarks:     s.moveMarksLocked(nodes, aligned),
+		MoveActions:   acts,
 	}
 }
 
@@ -1616,6 +1688,17 @@ func (s *StudyService) state() StudyState {
 // 目的（以前は手順の見出しの「再読み込み」の隣にボタンがあって押し間違えた）。
 // ⚠️ **URL から読んだ棋譜は中継カードの「保存」で入れる**（取得元の原本のまま入る）。
 func (s *StudyService) registerableLocked() error {
+	// **直した手があれば訂正版として登録する**（2026-11-19）。原本（親）と直した本譜（子）が親子で入るので、
+	// 棚と結んでいても URL から読んでいても通す。⚠️ **同じ本譜で 2 度登録しない**。
+	if s.study != nil && s.hasFixesLocked() {
+		switch {
+		case !s.endedOnMainLocked():
+			return fmt.Errorf("終局していません（直して原本の最後まで読めると、訂正版として登録できます）")
+		case s.fix.registered == mainDigest(s.study.MainLine()):
+			return fmt.Errorf("この本譜はもう訂正版として登録しました")
+		}
+		return nil
+	}
 	switch {
 	case s.study == nil:
 		return fmt.Errorf("まだ局面がありません")

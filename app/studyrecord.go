@@ -106,6 +106,15 @@ type StudyRecord struct {
 	SourceKey string `json:"sourceKey,omitempty"`
 	// Evals は評価値の点（木の全部）。**どのエンジンだったかは `EngineID` で引く。**
 	Evals []StudyEvalSeries `json:"evals"`
+
+	// Original は原本の本文（2026-11-19。棋譜・URL・棚から読んだときだけ）。**開き直したときに直しの表を当て直し、
+	// ⚠ の行を出すため**（再起動で取り直さなくても直せるように）。⚠️ **交換形式ではない**（読み直すための控え）。
+	Original string `json:"original,omitempty"`
+	// Fixes は直しの表（⚠️ 手数は原本の手数）。Dismissed は人が外した ikkyoku の指摘。
+	Fixes     []position.KifuFix `json:"fixes,omitempty"`
+	Dismissed []DismissedFlag    `json:"dismissed,omitempty"`
+	// Registered は訂正版を登録したときの本譜の要約（同じ本譜で 2 度登録しない）。
+	Registered string `json:"registered,omitempty"`
 }
 
 // newSessionID は検討の id を作る。
@@ -134,6 +143,8 @@ func newSessionID() string {
 func (s *StudyService) newSessionLocked() {
 	s.evals.reset()
 	s.session = newSessionID()
+	// ⚠️ **原本と直しの表も捨てる**（2026-11-19。残っていると別の棋譜に当たる）。
+	s.fix = kifuFixState{}
 }
 
 // sessionRecord は今の検討を控えにする（**まだ採っていなければ false**）。
@@ -167,6 +178,11 @@ func (s *StudyService) sessionRecord() (StudyRecord, bool) {
 		SourceURL: s.sourceURL,
 		SourceKey: s.sourceKey,
 		Evals:     s.evals.all(),
+
+		Original:   s.fix.text,
+		Fixes:      append([]position.KifuFix(nil), s.fix.fixes...),
+		Dismissed:  append([]DismissedFlag(nil), s.fix.dismissed...),
+		Registered: s.fix.registered,
 	}, true
 }
 
@@ -229,6 +245,18 @@ func (s *StudyService) applySessionLocked(rec StudyRecord, study *position.Study
 	s.kifuFollow = false
 	s.gameID = rec.GameID
 	s.session = rec.ID
+	// **原本と直しの表**（2026-11-19）。⚠️ **木は控えのまま**（据え直すのは棋譜を読み直したとき）。
+	// 原本が読めなくても検討は戻す（直せなくなるだけ。設計原則3）。
+	s.fix = kifuFixState{text: rec.Original, fixes: append([]position.KifuFix(nil), rec.Fixes...),
+		dismissed: append([]DismissedFlag(nil), rec.Dismissed...), registered: rec.Registered}
+	if rec.Original != "" {
+		if o, err := position.ReadOriginal(rec.Original); err == nil {
+			if _, _, b, err := o.Build(s.fix.fixes); err == nil {
+				s.fix.original = o
+				s.fix.built = b
+			}
+		}
+	}
 	// ⚠️ **点の手数と指し手は木から引き直す**（控えには入っていない）。
 	// **木に無い節点の点は捨てる** —— 描く先が無いので持っていても意味が無い。
 	nodes := map[int]position.Node{}

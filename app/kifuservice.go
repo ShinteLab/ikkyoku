@@ -81,7 +81,10 @@ type KifuService struct {
 // 開くのは open（main が起動時に、設定タブがパスを変えたときに呼ぶ）。
 // **コンストラクタで開かないのは、開けなかったときにアプリを止めないため。**
 func NewKifuService(study *StudyService) *KifuService {
-	return &KifuService{study: study}
+	s := &KifuService{study: study}
+	// 解析タブが棚の指摘を読み・付けられるように（2026-11-19。`kifufixshelf.go`）。
+	s.connectStudyFlags()
+	return s
 }
 
 // 操作ごとの制限時間。
@@ -1042,6 +1045,10 @@ func (s *KifuService) UnwatchAll() (int, error) {
 func (s *KifuService) SaveStudy() (GameSummary, error) {
 	if err := s.study.registerable(); err != nil {
 		return GameSummary{}, err
+	}
+	// **直した手があれば訂正版として入れる**（2026-11-19。原本が親、直した本譜が子）。
+	if s.study.correctionPending() {
+		return s.saveCorrection()
 	}
 	text, err := s.study.exportKIF()
 	if err != nil {
