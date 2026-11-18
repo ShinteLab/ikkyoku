@@ -467,6 +467,10 @@ export function mountFetchCards(
     addMeta(meta, "開始", formatDate(game.startedAt));
     addMeta(meta, "場所", game.place);
     addMeta(meta, "手数", movesText(game));
+    // 取得元 URL（2026-11-19）。**何を元にしたカードか**を見せる（棋戦名が空のカードは見分けが付かない）。
+    // 名前は棋譜タブの詳細（`library.ts`）と揃える。⚠️ **貼り付けたカードには出さない**（取りに行く先が無い。
+    // 出どころは札の `origin`）。復元したカードも仮の一覧が覚えている URL が入る。
+    if (!card.pasted) addMeta(meta, "取得元 URL", game.sourceUrl);
     box.append(meta);
 
     if (restored) {
