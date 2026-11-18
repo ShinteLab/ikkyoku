@@ -302,6 +302,26 @@ type GameSummary struct {
 	EventEdited string `json:"eventEdited"`
 	// Note は備考。
 	Note string `json:"note"`
+
+	// ここから下は**kicho が付けた印**（2026-11-19。`_docs/app-shelf.md` の「棋譜の印」）。
+	// ⚠️ **kicho の値をそのまま運ぶこと**（画面でもここでも本文を読んで判定し直さない）。
+	// 取得しただけのカード（`fetchedToDetail`）に入るのは `ErrorMove` / `Error` だけ。
+
+	// ErrorMove は本文を盤に当てられない最初の手（1 始まり。0 = 無し）。Error はその理由。
+	ErrorMove int    `json:"errorMove"`
+	Error     string `json:"error"`
+	// Flags は指摘の数。FlaggedMove は指摘された最も若い手（棋譜全体への指摘だけなら 0）。
+	// FlagsStale は付けたあとに本文が変わった指摘があるか。
+	Flags       int  `json:"flags"`
+	FlaggedMove int  `json:"flaggedMove"`
+	FlagsStale  bool `json:"flagsStale"`
+	// ParentID / Relation は派生棋譜（訂正版など）の親と関係。ParentChanged は子を作ったあとに
+	// 親の本文が変わったか、ParentMissing は親が削除済みか。Children はこの棋譜を親に持つ棋譜の数。
+	ParentID      string `json:"parentId"`
+	Relation      string `json:"relation"`
+	ParentChanged bool   `json:"parentChanged"`
+	ParentMissing bool   `json:"parentMissing"`
+	Children      int    `json:"children"`
 }
 
 // GameDetail は棋譜 1 件の詳細（KIF 本文つき）。
@@ -331,6 +351,17 @@ func toSummary(r store.Record) GameSummary {
 		// ⚠️ **`Event` に `DisplayEvent()` を入れないこと**（上の `GameSummary` の約束）。
 		EventEdited: r.EventEdited,
 		Note:        r.Note,
+
+		ErrorMove:     r.ErrorMove,
+		Error:         r.Error,
+		Flags:         r.Flags,
+		FlaggedMove:   r.FlaggedMove,
+		FlagsStale:    r.FlagsStale,
+		ParentID:      r.ParentID,
+		Relation:      r.Relation,
+		ParentChanged: r.ParentChanged,
+		ParentMissing: r.ParentMissing,
+		Children:      r.Children,
 	}
 	if !r.StartedAt.IsZero() {
 		s.StartedAt = r.StartedAt.Format(time.RFC3339)
@@ -358,6 +389,9 @@ func fetchedToDetail(f kicho.Fetched) GameDetail {
 			EndMark:   f.EndMark,
 			Finished:  f.Finished(),
 			Moves:     f.Moves,
+			// 指摘と親子は棚の行の持ち物なので、取得しただけの棋譜にはエラーの印だけ。
+			ErrorMove: f.ErrorMove,
+			Error:     f.Error,
 		},
 		KIF:      f.KIF,
 		Encoding: f.Encoding,
@@ -371,6 +405,7 @@ func fetchedToDetail(f kicho.Fetched) GameDetail {
 // detailToFetched は画面の内容を保存できる形に戻す。
 //
 // **諸元（source_url）と手数は `Library.Save` が決め直す**ので、ここでは運ぶだけ。
+// エラーの印も kicho が本文から付け直すので運ばない。
 //
 // ⚠️ **`EventEdited` / `Note` は運ばないこと**（2026-10-02）。`kicho.Fetched` は
 // **取得した値**の入れ物で、`Library.Save` はどうせ人が書く欄に触らないが、
@@ -411,6 +446,9 @@ type SearchQuery struct {
 	To   string `json:"to"`
 	// FinishedOnly が true なら終局済みのみ。
 	FinishedOnly bool `json:"finishedOnly"`
+	// NeedsAttention が true ならエラーの印か指摘のある棋譜のみ（棋譜タブの「要確認」。
+	// 判定は kicho の `Query.NeedsAttention`）。
+	NeedsAttention bool `json:"needsAttention"`
 	// Limit は取得件数の上限（0 なら MaxSearchRows）。
 	Limit int `json:"limit"`
 	// Offset は読み飛ばす件数。
@@ -474,10 +512,11 @@ func (s *KifuService) Search(q SearchQuery) (SearchResult, error) {
 	}
 
 	sq := store.Query{
-		Text:         q.Text,
-		FinishedOnly: q.FinishedOnly,
-		Limit:        q.Limit,
-		Offset:       q.Offset,
+		Text:           q.Text,
+		FinishedOnly:   q.FinishedOnly,
+		NeedsAttention: q.NeedsAttention,
+		Limit:          q.Limit,
+		Offset:         q.Offset,
 	}
 
 	// 日付は JST の 0:00 / 23:59:59 として解釈する。
@@ -583,6 +622,85 @@ func (s *KifuService) Annotate(id, eventEdited, note string) (GameDetail, error)
 		return GameDetail{}, err
 	}
 	return recordToDetail(r), nil
+}
+
+// FlagEntry は棋譜に付いた指摘 1 件（棋譜タブの詳細の一覧。kicho の `store.Flag` の写し）。
+type FlagEntry struct {
+	ID string `json:"id"`
+	// Move は指摘した手（1 始まり。0 は棋譜全体）。
+	Move   int    `json:"move"`
+	Reason string `json:"reason"`
+	// By は誰が付けたか（"ikkyoku" / "user"。kicho アプリなど他から付けたものはその値のまま）。
+	By        string `json:"by"`
+	CreatedAt string `json:"createdAt"` // RFC3339
+	// Stale は付けたあとに本文が変わったか。
+	Stale bool `json:"stale"`
+}
+
+// GameFlags は棚の棋譜の指摘を手の順に返す（棋譜タブの詳細）。
+func (s *KifuService) GameFlags(id string) ([]FlagEntry, error) {
+	lib, err := s.library()
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := kifuDBContext()
+	defer cancel()
+
+	flags, err := lib.Flags(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]FlagEntry, 0, len(flags))
+	for _, f := range flags {
+		e := FlagEntry{ID: f.ID, Move: f.Move, Reason: f.Reason, By: f.By, Stale: f.Stale}
+		if !f.CreatedAt.IsZero() {
+			e.CreatedAt = f.CreatedAt.Format(time.RFC3339)
+		}
+		out = append(out, e)
+	}
+	return out, nil
+}
+
+// FlagGame は棚の棋譜の全体に指摘を付ける（棋譜タブの詳細の「この棋譜に指摘する…」。手数 0・`By` は "user"）。
+//
+// 手に付ける指摘は解析タブの手順から（`FlagMove`）。外すのはどちらも `Unflag`。
+func (s *KifuService) FlagGame(id, reason string) error {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return fmt.Errorf("指摘の理由を書いてください")
+	}
+	lib, err := s.library()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := kifuDBContext()
+	defer cancel()
+
+	if _, err := lib.Flag(ctx, id, 0, reason, flagByUser); err != nil {
+		return describeKifuError(err)
+	}
+	log.Info("棋譜全体に指摘を付けました", "gameId", id)
+	return nil
+}
+
+// Children は棚の棋譜を親に持つ棋譜（訂正版など）を新しい順に返す（棋譜タブの詳細。本文なし）。
+func (s *KifuService) Children(id string) ([]GameSummary, error) {
+	lib, err := s.library()
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := kifuDBContext()
+	defer cancel()
+
+	list, err := lib.Children(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]GameSummary, 0, len(list))
+	for _, r := range list {
+		out = append(out, toSummary(r))
+	}
+	return out, nil
 }
 
 // Delete は棋譜を削除する。

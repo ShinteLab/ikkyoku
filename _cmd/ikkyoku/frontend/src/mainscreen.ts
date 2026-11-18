@@ -188,6 +188,11 @@ export function mountMainScreen(root: HTMLElement): void {
             <input id="library-finished" type="checkbox" />
             <span>終局済みのみ</span>
           </label>
+          <!-- 要確認（2026-11-19）。エラーの印か指摘のある棋譜だけ（判定は kicho の Query.NeedsAttention）。 -->
+          <label class="library-check" title="盤に当たらない手か指摘のある棋譜だけを出します">
+            <input id="library-attention" type="checkbox" />
+            <span>要確認</span>
+          </label>
           <button id="library-search" class="ghost-btn is-primary" type="button">検索</button>
           <button id="library-clear" class="ghost-btn" type="button">条件をクリア</button>
         </div>
@@ -226,7 +231,23 @@ export function mountMainScreen(root: HTMLElement): void {
             <span id="library-modal-title" class="field-label library-modal-title"></span>
             <button id="library-modal-close" class="ghost-btn" type="button">閉じる</button>
           </div>
+          <!-- 棋譜の印（2026-11-19。行と同じもの）。 -->
+          <div id="library-modal-marks" class="kifu-marks" hidden></div>
           <dl id="library-modal-meta" class="library-meta"></dl>
+          <!-- 指摘と訂正版（2026-11-19）。値は kicho のまま（KifuService.GameFlags / Children）。 -->
+          <div class="library-section">
+            <div class="library-section-head">
+              <span class="field-label">指摘</span>
+              <button id="library-modal-flag" class="ghost-btn" type="button">この棋譜に指摘する…</button>
+            </div>
+            <ul id="library-modal-flags" class="library-list" hidden></ul>
+          </div>
+          <div id="library-modal-children-box" class="library-section" hidden>
+            <div class="library-section-head">
+              <span class="field-label">訂正版</span>
+            </div>
+            <ul id="library-modal-children" class="library-list"></ul>
+          </div>
           <!-- 人が書く欄（2026-10-02）。**棋戦名を直す・備考を残す**だけで、
                ⚠️ **KIF の本文は編集しない**（棚の KIF は原本のまま）。
                ⚠️ **取得した棋戦名は書き換えない** —— 直した名前は別の欄に入り、

@@ -13,9 +13,12 @@
 import { Clipboard } from "@wailsio/runtime";
 import { FiEdit2 } from "react-icons/fi";
 import { KifuService } from "../bindings/github.com/ShinteLab/ikkyoku/app";
+import { askText } from "./asktext";
 import { iconMarkup } from "./icon";
+import { flagByLabel, shelfMarks } from "./kifumarks";
 import { openPopup } from "./popup";
 import type {
+  FlagEntry,
   GameDetail,
   GameSummary,
   KifuLoad,
@@ -97,6 +100,7 @@ export function mountLibrary(
   const from = root.querySelector<HTMLInputElement>("#library-from")!;
   const to = root.querySelector<HTMLInputElement>("#library-to")!;
   const finishedOnly = root.querySelector<HTMLInputElement>("#library-finished")!;
+  const attention = root.querySelector<HTMLInputElement>("#library-attention")!;
   const search = root.querySelector<HTMLButtonElement>("#library-search")!;
   const clear = root.querySelector<HTMLButtonElement>("#library-clear")!;
   const hint = root.querySelector<HTMLElement>("#library-hint")!;
@@ -114,6 +118,12 @@ export function mountLibrary(
   const modalStatus = root.querySelector<HTMLParagraphElement>("#library-modal-status")!;
   const modalSave = root.querySelector<HTMLButtonElement>("#library-modal-save")!;
   const modalRevert = root.querySelector<HTMLButtonElement>("#library-modal-revert")!;
+  // 棋譜の印・指摘・訂正版（2026-11-19）。
+  const modalMarks = root.querySelector<HTMLElement>("#library-modal-marks")!;
+  const modalFlag = root.querySelector<HTMLButtonElement>("#library-modal-flag")!;
+  const modalFlags = root.querySelector<HTMLUListElement>("#library-modal-flags")!;
+  const modalChildrenBox = root.querySelector<HTMLElement>("#library-modal-children-box")!;
+  const modalChildren = root.querySelector<HTMLUListElement>("#library-modal-children")!;
 
   // 今開いている詳細の KIF（原本）。**「KIF をコピー」が渡すのはこれ。**
   // ⚠️ **画面には出さない**（本文を出すのをやめたのが 2026-09-12 の変更）。
@@ -135,7 +145,8 @@ export function mountLibrary(
   };
 
   const hasConditions = (): boolean =>
-    text.value !== "" || from.value !== "" || to.value !== "" || finishedOnly.checked;
+    text.value !== "" || from.value !== "" || to.value !== "" || finishedOnly.checked ||
+    attention.checked;
 
   // 3 文字未満の案内。**索引が効かないので全件走査になる**ことを知らせる
   // （件数が増えたときに「急に遅くなった」と見えないように）。
@@ -256,7 +267,136 @@ export function mountLibrary(
     modalSave.classList.remove("is-saved");
     setModalStatus("");
     syncAnnotateButtons();
+    renderMarks(d);
+    modalFlags.replaceChildren();
+    modalFlags.hidden = true;
+    modalChildren.replaceChildren();
+    modalChildrenBox.hidden = true;
+    void loadFlags(d.id);
+    void loadChildren(d);
     if (!modal.open) modal.showModal();
+  };
+
+  // renderMarks は詳細の見出しの下に行と同じ印を出す。
+  const renderMarks = (g: GameSummary) => {
+    const marks = shelfMarks(g);
+    modalMarks.replaceChildren(...marks);
+    modalMarks.hidden = marks.length === 0;
+  };
+
+  // loadFlags は指摘の一覧を読み直す。⚠️ **閉じたあと・別の棋譜を開いたあとに届いた返事は捨てる。**
+  const loadFlags = async (id: string) => {
+    let flags: FlagEntry[];
+    try {
+      flags = (await KifuService.GameFlags(id)) ?? [];
+    } catch (err) {
+      if (openDetail?.id === id) setModalStatus(`指摘を読めませんでした: ${String(err)}`, "error");
+      return;
+    }
+    if (openDetail?.id !== id) return;
+    modalFlags.replaceChildren(...flags.map((f) => flagRow(id, f)));
+    modalFlags.hidden = flags.length === 0;
+  };
+
+  const flagRow = (gameID: string, f: FlagEntry): HTMLLIElement => {
+    const li = document.createElement("li");
+    li.className = "library-list-row" + (f.stale ? " is-stale" : "");
+    const move = document.createElement("span");
+    move.className = "library-list-move";
+    move.textContent = f.move > 0 ? `${f.move}手目` : "棋譜全体";
+    const reason = document.createElement("span");
+    reason.className = "library-list-main";
+    reason.textContent = f.reason;
+    reason.title = f.stale ? `${f.reason}（指摘のあとに本文が変わっています）` : f.reason;
+    const by = document.createElement("span");
+    by.className = "library-list-sub";
+    by.textContent = flagByLabel(f.by);
+    if (f.createdAt) by.title = formatDate(f.createdAt);
+    li.append(move, reason, by);
+    if (f.stale) {
+      const stale = document.createElement("span");
+      stale.className = "library-list-sub";
+      stale.textContent = "古い";
+      stale.title = "指摘のあとに本文が変わっています";
+      li.append(stale);
+    }
+    const off = document.createElement("button");
+    off.type = "button";
+    off.className = "ghost-btn";
+    off.textContent = "外す";
+    off.addEventListener("click", () => void unflag(gameID, f.id, off));
+    li.append(off);
+    return li;
+  };
+
+  // marksChanged は指摘を変えたあとに印と一覧を読み直す（⚠️ **人が書く欄は描き直さない** —— 書きかけが消える）。
+  const marksChanged = async (id: string) => {
+    void loadFlags(id);
+    void load();
+    try {
+      const d = await KifuService.Get(id);
+      if (openDetail?.id !== id) return;
+      renderMarks(d);
+    } catch {
+      // 印が古いだけ（一覧は読み直している）。
+    }
+  };
+
+  const unflag = async (gameID: string, flagID: string, btn: HTMLButtonElement) => {
+    btn.disabled = true;
+    setModalStatus("");
+    try {
+      // ⚠️ **手順リストの「指摘を外す」と同じ口**（開いている検討の「外した」の記録もあちらが持つ）。
+      await KifuService.Unflag(flagID);
+    } catch (err) {
+      btn.disabled = false;
+      setModalStatus(`指摘を外せませんでした: ${String(err)}`, "error");
+      return;
+    }
+    await marksChanged(gameID);
+  };
+
+  // loadChildren は訂正版（この棋譜を親に持つ棋譜）の一覧を出す。
+  const loadChildren = async (d: GameDetail) => {
+    if (d.children <= 0) return;
+    let kids: GameSummary[];
+    try {
+      kids = (await KifuService.Children(d.id)) ?? [];
+    } catch (err) {
+      if (openDetail?.id === d.id) setModalStatus(`訂正版を読めませんでした: ${String(err)}`, "error");
+      return;
+    }
+    if (openDetail?.id !== d.id) return;
+    modalChildren.replaceChildren(...kids.map(childRow));
+    modalChildrenBox.hidden = kids.length === 0;
+  };
+
+  const childRow = (c: GameSummary): HTMLLIElement => {
+    const li = document.createElement("li");
+    li.className = "library-list-row";
+    const date = document.createElement("span");
+    date.className = "library-list-sub";
+    date.textContent = formatDate(c.startedAt);
+    const name = document.createElement("span");
+    name.className = "library-list-main";
+    name.textContent = displayEvent(c) || NO_EVENT;
+    name.title = name.textContent;
+    const moves = document.createElement("span");
+    moves.className = "library-list-sub";
+    moves.textContent = movesText(c);
+    li.append(date, name, moves, ...shelfMarks(c));
+    const go = document.createElement("button");
+    go.type = "button";
+    go.className = "ghost-btn";
+    go.textContent = "解析する";
+    // 送れたらモーダルを閉じる（解析タブへ移るので）。
+    go.addEventListener("click", () => {
+      void analyze(c.id, go).then((ok) => {
+        if (ok) closePreview();
+      });
+    });
+    li.append(go);
+    return li;
   };
 
   const show = async (id: string) => {
@@ -301,9 +441,10 @@ export function mountLibrary(
   // analyze は棚の 1 局を解析タブへ送る（**棋戦名のリンク**から呼ばれる）。
   //
   // btn は押した相手（リンクもボタン）。⚠️ **送っているあいだ押せなくすること。**
-  const analyze = async (id: string, btn: HTMLButtonElement) => {
+  // 送れたら true（詳細の訂正版の「解析する」は、送れたらモーダルを閉じる）。
+  const analyze = async (id: string, btn: HTMLButtonElement): Promise<boolean> => {
     if (opts.confirmAnalyze && !(await opts.confirmAnalyze())) {
-      return;
+      return false;
     }
     setStatus("");
     btn.disabled = true;
@@ -311,8 +452,12 @@ export function mountLibrary(
       // ⚠️ **取得元の URL も一緒に渡るのは Go 側の仕事**（`SendToStudy`）。
       // これがあると解析タブの「再読み込み」で中継の最新手を追える。
       opts.onAnalyze(await KifuService.SendToStudy(id));
+      return true;
     } catch (err) {
-      setStatus(`解析タブへ送れませんでした: ${String(err)}`, "error");
+      const msg = `解析タブへ送れませんでした: ${String(err)}`;
+      setStatus(msg, "error");
+      if (modal.open) setModalStatus(msg, "error");
+      return false;
     } finally {
       btn.disabled = false;
     }
@@ -367,6 +512,8 @@ export function mountLibrary(
         mark.title = `棋戦名を直してあります（取得元: ${sourceEvent(g)}）`;
         line.append(mark);
       }
+      // 棋譜の印（2026-11-19。kicho の値のまま）。⚠️ **押せるものにしない**（押せるのは棋戦名のリンクだけ）。
+      line.append(...shelfMarks(g));
       event.append(line);
       // 備考は棋戦名の下に薄く 1 行（2026-10-02）。全文は title。
       // ⚠️ **改行は詰めて 1 行にする**（textarea で書けるので入りうる。
@@ -480,6 +627,7 @@ export function mountLibrary(
         from: from.value,
         to: to.value,
         finishedOnly: finishedOnly.checked,
+        needsAttention: attention.checked,
         limit: 0,
         offset: 0,
       });
@@ -511,7 +659,7 @@ export function mountLibrary(
   text.addEventListener("keydown", (e) => {
     if (e.key === "Enter") runSearch();
   });
-  for (const el of [from, to, finishedOnly]) {
+  for (const el of [from, to, finishedOnly, attention]) {
     el.addEventListener("change", runSearch);
   }
   clear.addEventListener("click", () => {
@@ -519,9 +667,30 @@ export function mountLibrary(
     from.value = "";
     to.value = "";
     finishedOnly.checked = false;
+    attention.checked = false;
     runSearch();
   });
   modalClose.addEventListener("click", closePreview);
+  // 棋譜全体への指摘（手数 0）。手に付けるのは解析タブの手順から。
+  modalFlag.addEventListener("click", (e) => {
+    const cur = openDetail;
+    if (!cur) return;
+    // キーボードで押したとき（`detail` が 0）はボタンの下に出す。
+    const r = modalFlag.getBoundingClientRect();
+    const [x, y] = e.detail === 0 ? [r.left, r.bottom] : [e.clientX, e.clientY];
+    void (async () => {
+      const reason = await askText(x, y, { label: "指摘する", placeholder: "理由" });
+      if (reason === null || openDetail?.id !== cur.id) return;
+      setModalStatus("");
+      try {
+        await KifuService.FlagGame(cur.id, reason);
+      } catch (err) {
+        setModalStatus(`指摘できませんでした: ${String(err)}`, "error");
+        return;
+      }
+      await marksChanged(cur.id);
+    })();
+  });
   // Esc で閉じたときも状態を揃える（`<dialog>` は自前で閉じる）。
   modal.addEventListener("close", () => {
     openKif = "";

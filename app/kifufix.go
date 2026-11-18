@@ -1,6 +1,6 @@
 package app
 
-// 棋譜の誤記を直す・指摘する（2026-11-19。仕様は `_docs/spec-kifu-fix.md`）。
+// 棋譜の誤記を直す・指摘する（2026-11-19。`_docs/app-kifu-fix.md`）。
 //
 // 直しは**表として持つ**（`kifuFixState.fixes`。木に焼き付けない）。原本を読むたびに表を当ててから
 // 据え直す（`position.Original.Build` → `mergeReloadLocked`）ので、取り直しで直しが枝へ押し戻されない。

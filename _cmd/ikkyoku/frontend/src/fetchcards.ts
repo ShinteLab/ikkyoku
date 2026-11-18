@@ -30,6 +30,7 @@
 // （「解析する」→ 解析タブ / 「棋譜に保存」→ 棋譜タブ）。
 import { Events } from "@wailsio/runtime";
 import { KifuService, StudyService } from "../bindings/github.com/ShinteLab/ikkyoku/app";
+import { errorMarks } from "./kifumarks";
 import { openPopup } from "./popup";
 import type {
   GameDetail,
@@ -118,6 +119,17 @@ const cardFromWatch = (w: WatchEntry): FetchCard => {
     // 棋譜タブに入った棋譜だけ（`KifuService.Annotate`）で、仮の一覧は対象外。
     eventEdited: "",
     note: "",
+    // エラーの印は本文から kicho が付ける（取り直すまで無い）。指摘と親子は棚の行の持ち物。
+    errorMove: 0,
+    error: "",
+    flags: 0,
+    flaggedMove: 0,
+    flagsStale: false,
+    parentId: "",
+    relation: "",
+    parentChanged: false,
+    parentMissing: false,
+    children: 0,
     kif: "",
     encoding: "",
   };
@@ -425,7 +437,8 @@ export function mountFetchCards(
     const tag = document.createElement("span");
     tag.className = "fetch-card-source";
     tag.textContent = card.origin || (SOURCE_LABELS[game.source] ?? game.source);
-    head.append(title, tag);
+    // カードに出す印は盤に当たらない手（⚠ N手目）だけ（2026-11-19。指摘と親子は棋譜タブの行の持ち物）。
+    head.append(title, ...errorMarks(game), tag);
 
     // ⚠️ **仮の一覧に載っていないことは画面に出すこと。** 載っていないカードは
     // 再起動で消えるので、黙っていると「昨日のカードが無い」の理由が分からない。

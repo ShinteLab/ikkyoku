@@ -196,11 +196,14 @@ func (s *StudyService) restoreSession(rec StudyRecord) error {
 		return err
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.study != nil {
+		s.mu.Unlock()
 		return fmt.Errorf("ikkyoku/app: 既に検討が始まっています")
 	}
 	s.applySessionLocked(rec, study)
+	s.mu.Unlock()
+	// 棚の棋譜なら指摘を読んでおく（手順リストの ⚑。2026-11-19）。⚠️ **ロックの外で**（棚を読む）。
+	s.refreshFlags()
 	return nil
 }
 

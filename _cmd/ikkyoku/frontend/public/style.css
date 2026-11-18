@@ -5301,6 +5301,43 @@ html.is-graph #app {
   background: transparent;
 }
 
+/* 原本を読み進められなかった手（「47 ⚠ ▲７七同角」。2026-11-19）。押せない行（`is-end` と同じ扱い）で、
+   注意の色。後ろの読めていない原本の手（`is-kifu-rest`）は薄く。⚠️ **赤にしない**（消す操作の色）。 */
+.move-chip.is-kifu-stop {
+  color: var(--warn-ink);
+}
+
+.move-chip.is-kifu-rest {
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
+/* 枝に下がった原本の手（直した手の元。2026-11-19）。取り消し線だけ（手としては今までどおり押せる）。 */
+.move-chip.is-struck .move-text {
+  text-decoration: line-through;
+}
+
+/* 直した手 ✎ と指摘 ⚑（2026-11-19）。⚠️ **行の高さを増やさない**（`.move-source` と同じ大きさで並べる）。
+   古くなった指摘（指摘のあとに原本が変わった）は薄く。 */
+.move-mark {
+  flex: 0 0 auto;
+  align-self: center;
+  font-size: 0.8em;
+  line-height: 1;
+}
+
+.move-mark.is-fixed {
+  color: var(--info-ink);
+}
+
+.move-mark.is-flag {
+  color: var(--warn-ink);
+}
+
+.move-mark.is-flag.is-stale {
+  opacity: 0.45;
+}
+
 /* 右クリックで消そうとしている範囲（2026-08-13）。**押した手とその先の全部**が
    消えるので、聞いているあいだ**消える側を赤く見せる**。⚠️ 「その手以下が
    消える」は文字で言うより見せたほうが早い（消す量は 1 手とは限らない）。
@@ -6503,6 +6540,190 @@ html.is-graph #app {
   margin: 0;
   color: var(--text-table);
   word-break: break-all;
+}
+
+/* 棋譜の印（2026-11-19。`kifumarks.ts`）。棋譜タブの行・詳細と入力タブのカード。
+   ⚠️ **行の高さを増やさない**（小さな札を 1 行に並べる。棋戦名のリンクが縮み、札は縮まない）。
+   指摘は手順リストの ⚑ と同じ色で、古いものは薄く。 */
+.kifu-mark {
+  flex: 0 0 auto;
+  margin-left: 6px;
+  padding: 0 5px;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: nowrap;
+  border: 1px solid var(--line-2);
+  border-radius: 3px;
+  color: var(--text-dim-3);
+  cursor: default;
+}
+
+.kifu-mark.is-error {
+  color: var(--danger-ink);
+  background: var(--danger-bg);
+  border-color: var(--line-danger);
+}
+
+.kifu-mark.is-flag {
+  color: var(--warn-ink);
+  border-color: currentColor;
+}
+
+.kifu-mark.is-flag.is-stale {
+  opacity: 0.45;
+}
+
+.kifu-mark.is-lineage.is-warn {
+  color: var(--warn-ink);
+  border-color: currentColor;
+}
+
+.kifu-marks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* ⚠️ **`display: flex` は `hidden` に勝つ**（下の 2 つも同じ）。 */
+.kifu-marks[hidden] {
+  display: none;
+}
+
+.kifu-marks > .kifu-mark {
+  margin-left: 0;
+}
+
+/* 詳細の指摘と訂正版（2026-11-19）。⚠️ **縮ませない**（人が書く欄と同じ。縮むのはメタの側）。 */
+.library-section {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.library-section[hidden] {
+  display: none;
+}
+
+.library-section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.library-section-head > .ghost-btn {
+  margin-left: auto;
+  padding: 2px 9px;
+  font-size: 12px;
+}
+
+.library-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 140px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  font-size: 12.5px;
+}
+
+.library-list[hidden] {
+  display: none;
+}
+
+.library-list-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.library-list-row.is-stale .library-list-main {
+  opacity: 0.6;
+}
+
+.library-list-move {
+  flex: 0 0 auto;
+  min-width: 4.5em;
+  color: var(--text-dim-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.library-list-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-table);
+}
+
+.library-list-sub {
+  flex: 0 0 auto;
+  font-size: 11.5px;
+  color: var(--text-dim-3);
+  white-space: nowrap;
+}
+
+.library-list-row > .ghost-btn {
+  flex: 0 0 auto;
+  padding: 1px 8px;
+  font-size: 11.5px;
+}
+
+.library-list-row > .kifu-mark {
+  margin-left: 0;
+}
+
+/* 押した場所で 1 行を聞く（2026-11-19。`asktext.ts`）。形は `.popup-menu` に揃える。
+   ⚠️ **`<dialog>` の既定の位置（真ん中）と白地を上書きすること。** 幕は暗くしない（メニューと同じ）。 */
+.ask-text {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  width: min(320px, calc(100vw - 16px));
+  padding: 6px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 6px 18px var(--shadow-50);
+}
+
+.ask-text:not([open]) {
+  display: none;
+}
+
+.ask-text::backdrop {
+  background: transparent;
+}
+
+.ask-text-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+}
+
+.ask-text-input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.ask-text > .ghost-btn {
+  flex: 0 0 auto;
+  padding: 3px 10px;
+  font-size: 12px;
 }
 
 /* ---- 中継から取得（入力タブ）----------------------------------------------

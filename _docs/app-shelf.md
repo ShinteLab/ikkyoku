@@ -206,6 +206,23 @@ kicho の `store` は接続を 1 本に絞っているので、止まらない�
   備考は名前の下に薄く 1 行。⚠️ **押せる場所は増やさない**（棋戦名のリンクが解析の口で、
   印も備考も押せない。直すのは「表示」のモーダルから）
 
+### 棋譜の印（エラー・指摘・訂正版）— **2026-11-19**
+
+kicho が持つ印を棋譜タブとカードに出す（直す・指摘する操作の側は `_docs/app-kifu-fix.md`）。
+
+- ⚠️ **kicho の値をそのまま運ぶ**（`GameSummary` の `errorMove` / `error` / `flags` / `flaggedMove` / `flagsStale` /
+  `parentId` / `relation` / `parentChanged` / `parentMissing` / `children`）。**画面でも `toSummary` でも本文を読んで判定し直さない**
+- 並びは kicho アプリ（`ErrorBadge` / `FlagBadge` / `LineageTags`）に揃える: `⚠ N手目`（理由はバルーン）・`指摘 N`（古いものがあれば薄く）・
+  `訂正版`・`親が更新`・`親は削除済み`・`派生 N`（作るのは `kifumarks.ts` の 1 か所）。⚠️ **印は押せるものにしない**（行で押せるのは棋戦名と「表示」だけ）
+- **カード（取得しただけ）に出すのは `⚠ N手目` だけ**（`fetchedToDetail` が運ぶのも `ErrorMove` / `Error` だけ。指摘と親子は棚の行の持ち物）。
+  ⚠️ **`detailToFetched` でエラーの印を運ばない**（kicho が本文から付け直す）
+- 詳細に**指摘の一覧**（`GameFlags`。手数 0 は「棋譜全体」・誰が・古いか・「外す」）と**訂正版の一覧**（`Children`。それぞれ「解析する」）。
+  棋譜全体への指摘は詳細の「この棋譜に指摘する…」（`FlagGame`。手数 0・`By` は `"user"`）。⚠️ **外すのは手順リストと同じ `Unflag`**
+  （開いている検討の「外した」の記録もあちらが持つ）
+- 絞り込みの「要確認」は `SearchQuery.NeedsAttention` → kicho の `Query.NeedsAttention`（判定は kicho）
+- 理由の 1 行は `asktext.ts` の `askText`（押した場所に出す。⚠️ **`<dialog>` の `showModal` で出す** —— 詳細はモーダルなので、
+  body に置いた箱はその下に隠れる）
+
 ### 中継から取得（入力タブのカード）
 
 移植元は kicho の「取得」タブ。読売（竜王戦）のスクレイピングと
@@ -377,3 +394,7 @@ kicho 側の実装で、ikkyoku は `Library.Watches / Watch / Unwatch / Unwatch
   両方に乗ること・⚠️ **取り直して保存しても消えないこと**（`detailToFetched` が運ばない
   ことの歯止めでもある）・直した名前と備考で検索に当たること・取得した値と同じ名前は
   「直していない」になること・空で取り消せること・無い id は `store.ErrNotFound`
+- `kifuservice_marks_test.go` — **棋譜の印**（2026-11-19。`TestKifuServiceCarriesKichoMarks`）。⚠️ 歯止めは ——
+  **kicho の印が一覧・詳細・カードに載ること**（運び損ねると画面の印が黙って出なくなる）・**「要確認」が kicho に届くこと**・
+  **棋譜全体への指摘は手数 0・`"user"` で付き、理由が空なら断ること**・訂正版の親子（子の数・関係・親は削除済み）。
+  ⚠️ **壊れた棋譜は CSA で作る**（kicho がエラーの印を付けるのは KI2 と CSA だけ。KIF では付かない）

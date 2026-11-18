@@ -12,7 +12,8 @@
 //
 // ⚠️ **畳み方だけはここが持つ**（画面だけの状態。Go には持たせない）。
 import { KifuService, StudyService } from "../bindings/github.com/ShinteLab/ikkyoku/app";
-import type { StudyState } from "../bindings/github.com/ShinteLab/ikkyoku/app/models";
+import type { KifuStop, MoveAction, MoveMark, StudyState } from "../bindings/github.com/ShinteLab/ikkyoku/app/models";
+import { askText } from "./asktext";
 import { confirmStopFollow, isFollowing } from "./followguard";
 import { openPopup, type PopupHandle, type PopupItem } from "./popup";
 
@@ -178,7 +179,7 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
       o?: {
         depth?: number; main?: boolean; parent?: number; fork?: boolean;
         sources?: string[]; hand?: boolean; guess?: boolean;
-        time?: string; comment?: string;
+        time?: string; comment?: string; mark?: MoveMark;
       },
     ) => {
       // ⚠️ **行は chip とトグルの 2 つ**（ボタンの中にボタンは置けない）。
@@ -251,6 +252,31 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
         dot.className = "move-source is-guess";
         dot.title = "中継の画面から推測で足した手（違っていたらここから消せます）";
         main.appendChild(dot);
+      }
+      // **棋譜の誤記を直した印と指摘**（2026-11-19。`_docs/ui/moves.md` の「原本の ⚠ の行と直し」）。⚠️ **重ねてよい**（どれも本当）。
+      // ⚠️ **出すかどうかは Go**（`StudyState.moveMarks`）。文言（ホバー）も Go が作る。
+      const mk = o?.mark;
+      if (mk?.fixed) {
+        const fx = document.createElement("span");
+        fx.className = "move-mark is-fixed";
+        fx.textContent = "✎";
+        fx.title = mk.fixed;
+        main.appendChild(fx);
+      }
+      for (const f of mk?.flags ?? []) {
+        const fl = document.createElement("span");
+        fl.className = f.stale ? "move-mark is-flag is-stale" : "move-mark is-flag";
+        fl.textContent = "⚑";
+        fl.title = [
+          f.reason,
+          f.by === "ikkyoku" ? "（一局が付けた指摘）" : "（人が付けた指摘）",
+          f.stale ? "指摘のあとに原本が変わりました" : "",
+        ].filter((x) => x).join("\n");
+        main.appendChild(fl);
+      }
+      if (mk?.struck) {
+        b.classList.add("is-struck");
+        b.title = mk.struck + "\n" + title;
       }
       // ⚠️ **手の後ろに出す**（前に置くと、手数と手のあいだに割り込んで
       // **縦に並んだ手の頭が揃わなくなる**）。
@@ -348,8 +374,41 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
       row.append(pad, body);
       return row;
     };
+    // 原本を読み進められなかった手（⚠ の行）と、その後ろの読めていない原本（灰色。2026-11-19）。
+    //
+    // ⚠️ **どちらも手ではないので押せない行にする**（終局の行と同じ。節点ではないので戻る先も消す相手も無い）。
+    // ⚠ の行の右クリックは「この手を飛ばす」（`askStopMenu`）。灰色の行は何も出さない。
+    // ⚠️ **出すかどうかと中身は Go**（`StudyState.kifuStop`）。フロントで手数を比べない。
+    const stopRows = (ks: KifuStop, depth: number): HTMLElement[] => {
+      const line = (num: string, text: string, cls: string, title: string) => {
+        const row = endRow(num, text, "", -1, depth);
+        const body = row.querySelector<HTMLElement>(".move-chip");
+        if (body) {
+          body.classList.add(cls);
+          body.title = title;
+          delete body.dataset.endOf;
+        }
+        return row;
+      };
+      const out = [line(String(ks.number), "⚠ " + ks.text, "is-kifu-stop", ks.reason)];
+      (ks.rest ?? []).forEach((t, i) => {
+        out.push(line(String(ks.number + 1 + i), t, "is-kifu-rest", "読めていない原本の手"));
+      });
+      if (ks.more > 0) {
+        out.push(line("…", `（残り ${ks.more} 手）`, "is-kifu-rest", "読めていない原本の手"));
+      }
+      return out;
+    };
+    const marks = new Map<number, MoveMark>();
+    for (const mk of state.moveMarks ?? []) {
+      marks.set(mk.id, mk);
+    }
+    const kifuStop = state.kifuStop ?? null;
     movesPanel.appendChild(
       chip("", "開始局面", 0, "採ったときの局面に戻ります", { comment: rootComment }));
+    if (kifuStop && kifuStop.after === 0) {
+      movesPanel.append(...stopRows(kifuStop, 0));
+    }
     for (const m of rows) {
       // 畳んである枝の中は出さない（**畳むのは見た目だけ**なので、手順は生きている）。
       if (hidden(m.id)) {
@@ -365,7 +424,7 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
           {
             depth: m.depth, main: m.main, parent: m.parent, fork: isFork(m),
             sources: m.sources ?? [], hand: m.hand ?? false, guess: m.guess ?? false,
-            time: m.time ?? "", comment: m.comment ?? "",
+            time: m.time ?? "", comment: m.comment ?? "", mark: marks.get(m.id),
           }),
       );
       // ⚠️ **手数は終わった手の次**（90 手目で終わったら「91 投了」）。
@@ -374,6 +433,10 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
       if (m.end) {
         movesPanel.appendChild(
           endRow(String((state.first ?? 0) + m.number + 1), m.end, m.endNote ?? "", m.id, m.depth));
+      }
+      // ⚠ の行は止まった手の 1 つ前の手の直後（そこから指した手はこの下に並ぶ）。
+      if (kifuStop && kifuStop.after === m.id) {
+        movesPanel.append(...stopRows(kifuStop, m.depth));
       }
     }
     // 今見ている手が画面の外にあると、進めても手順が動いていないように見える。
@@ -509,7 +572,8 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
     const items: PopupItem[] = [];
     if (state.canRegister) {
       items.push({
-        label: "棋譜に登録",
+        // 直した手があれば「訂正版として登録」（2026-11-19。文言は Go）。
+        label: state.registerLabel || "棋譜に登録",
         onPick: () =>
           void (async () => {
             try {
@@ -534,6 +598,49 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
     ask = openPopup(x, y, { label: "終局", items });
   };
 
+  // fixItems は直し・指摘の項目（2026-11-19。`_docs/ui/moves.md` の「原本の ⚠ の行と直し」）。
+  //
+  // ⚠️ **出す条件も文言も Go**（`StudyState.moveActions` / `kifuStop.actions`）。フロントは並べて、押されたら呼ぶだけ。
+  // ⚠️ **確認は挟まない** —— どれも何も消さない（直しは取り消せ、原本の手は枝に残る）。
+  const fixItems = (acts: MoveAction[], x: number, y: number): PopupItem[] =>
+    acts.map((a) => ({
+      label: a.label,
+      onPick: () => {
+        switch (a.op) {
+          case "flag":
+            askFlag(x, y, a.id);
+            return;
+          case "unflag":
+            void run(() => KifuService.Unflag(a.flag ?? ""));
+            return;
+          default:
+            void run(() => StudyService.FixMove(a.id, a.op));
+        }
+      },
+    }));
+
+  // askStopMenu は ⚠ の行（原本を読み進められなかった手）の右クリック。
+  const askStopMenu = (x: number, y: number) => {
+    closeAsk();
+    const items = fixItems(state?.kifuStop?.actions ?? [], x, y);
+    if (items.length === 0) {
+      return;
+    }
+    ask = openPopup(x, y, { label: "原本", items });
+  };
+
+  // askFlag は「指摘する…」の理由を 1 行聞いてから付ける。
+  const askFlag = (x: number, y: number, id: number) => {
+    closeAsk();
+    void (async () => {
+      const reason = await askText(x, y, { label: "指摘する", placeholder: "理由" });
+      if (reason === null || reason.trim() === "") {
+        return;
+      }
+      await run(() => KifuService.FlagMove(id, reason));
+    })();
+  };
+
   // askMoveMenu は手を右クリックしたときのメニュー。
   //
   // ⚠️ **ここでは何も起きない**（消すほうは、2 手以上なら押すと確認が出る）。
@@ -544,7 +651,7 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
     o: { main: boolean; chosen: boolean; canPromote: boolean },
   ) => {
     closeAsk();
-    const items: PopupItem[] = [];
+    const items: PopupItem[] = fixItems((state?.moveActions ?? []).filter((a) => a.id === id), x, y);
     // 「本線にする」は**続きがまだ決まっていない分かれ道の子にだけ出す**
     // （2026-08-18）。⚠️ **出す条件は Go 側が付けた印**（`Node.canPromote`）で、
     // **画面の字下げから判断しないこと** —— 続きが決まっているかは木の形で決まる。
@@ -586,6 +693,14 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
     }
     // ⚠️ **webview の既定メニューを止める**（訂正タブの盤と同じ）。
     e.preventDefault();
+    // ⚠ の行は「この手を飛ばす」。読めていない原本の行は何も出さない（2026-11-19）。
+    if (chip.classList.contains("is-kifu-stop")) {
+      askStopMenu(e.clientX, e.clientY);
+      return;
+    }
+    if (chip.classList.contains("is-kifu-rest")) {
+      return;
+    }
     // 終局の行（「91 投了」）は手ではないので、**手のメニューは出さない**。
     if (chip.classList.contains("is-end")) {
       askEndMenu(e.clientX, e.clientY);
