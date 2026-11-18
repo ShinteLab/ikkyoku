@@ -11,17 +11,15 @@ package position
 // 「読めた手を 1 手ずつ Study に指させる」というアプリ側の組み立てだけ。
 //
 // **CSA も KIF と同じ `kifu.Document` で受ける**（2026-11-15。`kifu.ParseCSA` が寄せる）。
-// ⚠️ **組み立てを形式ごとに分けないこと**（`fromDocument` の 1 本）。分けると
-// 終局・千日手・消費時間・コメントの扱いが片方だけ古くなる。
-// **KI2 も同じ**（2026-11-18。`KI2Document.KIF()` で盤に当てて `Document` にしてから通す）。
+// ⚠️ **組み立てを形式ごとに分けないこと**（`Original.Build` の 1 本。`original.go`）。分けると
+// 終局・千日手・消費時間・コメントの扱いが片方だけ古くなる。KIF・CSA・KI2 はどれも
+// 原本（`Original`）に寄せてから通す。
 
 import (
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 
-	"github.com/ShinteLab/core/kifu"
 	"github.com/ShinteLab/core/sfen"
 )
 
@@ -52,64 +50,28 @@ type KIFLoad struct {
 // error を返すのは「棋譜として何も読めなかった」「開始局面が組めなかった」ときだけ。
 // **指し手 0 手はエラーにしない**（開始局面だけの検討になる）。
 func FromKIF(text string) (*Study, KIFLoad, error) {
-	doc, err := kifu.Parse(text)
-	if err != nil {
-		return nil, KIFLoad{}, err
-	}
-	if err := readable(doc.Empty(), doc.Start); err != nil {
-		return nil, KIFLoad{}, err
-	}
-	return fromDocument(doc, "")
+	return build(readKIF(text))
 }
 
 // FromKifu は棋譜のテキストを、形式を見分けて読む（CSA なら `FromCSA`、KI2 なら `FromKI2`、
-// それ以外は `FromKIF`）。
+// それ以外は `FromKIF`）。**直しは当てない**（当てるなら `ReadOriginal` → `Original.Build`）。
 //
 // **貼り付け・URL・棚の入口はこれを呼ぶ**（2026-11-15）。見分けは `kifu.IsCSA` / `kifu.IsKI2`
 // （**仕様は core**。ここで行の形を見ないこと）。
 func FromKifu(text string) (*Study, KIFLoad, error) {
-	switch {
-	case kifu.IsCSA(text):
-		return FromCSA(text)
-	case kifu.IsKI2(text):
-		return FromKI2(text)
-	}
-	return FromKIF(text)
+	return build(ReadOriginal(text))
 }
 
 // FromKI2 は KI2 形式（移動元を書かない表記）の棋譜を読んで検討を組み立てる（2026-11-18）。
 //
 // kicho v0.5.0 から、ふわりと将棋の棋譜は KI2 の原本のまま届く（手入力の誤記もそのまま）。
-// 指し手は `KI2Document.KIF()` が盤に当てて移動元を割り出す（**仕様は core**）。
+// 指し手は `kifu.KI2Decoder` が盤に当てて移動元を割り出す（**仕様は core**）。
 //
 // ⚠️ **当てられない手があってもエラーにしない**（`FromKIF` と同じ。設計原則3）。
 // そこまでの手を載せて、理由を `Note` に出す。⚠️ **`Total` は原本に書いてあった手数**
 // （当てられた手数ではない）—— 「全部で何手のうち何手まで載ったか」が見えるように。
-// error を返すのは何も読めなかったとき・開始局面が組めないとき（知らない手合割など）だけ。
 func FromKI2(text string) (*Study, KIFLoad, error) {
-	k, err := kifu.ParseKI2(text)
-	if err != nil {
-		return nil, KIFLoad{}, err
-	}
-	// ⚠️ **当てた後の Document では見ないこと。** 1 手目から当てられないと手が 0 になり、
-	// ヘッダの無い KI2 が「何も読めない」で断られる。
-	if err := readable(k.Empty(), k.Start); err != nil {
-		return nil, KIFLoad{}, err
-	}
-	doc, _, err := k.KIF()
-	note := ""
-	if err != nil {
-		if !errors.Is(err, kifu.ErrKI2Move) {
-			return nil, KIFLoad{}, err
-		}
-		note = err.Error()
-	}
-	study, load, err := fromDocument(doc, note)
-	if err != nil {
-		return nil, KIFLoad{}, err
-	}
-	load.Total = len(k.Moves)
-	return study, load, nil
+	return build(readKI2(text))
 }
 
 // FromCSA は CSA 形式の棋譜を読んで検討を組み立てる（2026-11-15）。
@@ -117,101 +79,16 @@ func FromKI2(text string) (*Study, KIFLoad, error) {
 // ⚠️ **指し手の途中で読めなくなってもエラーにしない**（`FromKIF` と同じ。設計原則3）。
 // そこまでの手を載せて、理由を `Note` に出す。error を返すのは開始局面が読めないときなど。
 func FromCSA(text string) (*Study, KIFLoad, error) {
-	doc, err := kifu.ParseCSA(text)
-	note := ""
-	if err != nil {
-		if !errors.Is(err, kifu.ErrCSAMoves) {
-			return nil, KIFLoad{}, err
-		}
-		note = err.Error()
-	}
-	if err := readable(doc.Empty(), doc.Start); err != nil {
-		return nil, KIFLoad{}, err
-	}
-	return fromDocument(doc, note)
+	return build(readCSA(text))
 }
 
-// readable は棋譜として何か読めたかを確かめる（empty は形式ごとの `Empty()`、start は盤面図）。
-func readable(empty bool, start string) error {
-	// ⚠️ **kifu.Parse は指し手 0 手をエラーにしない**（中継は対局前から
-	// ヘッダだけの棋譜を配信しているため）。断るのは**ヘッダも手も盤面図も
-	// 1 つも読めなかった**とき（HTML やただの文章 = 貼り間違い）だけ。
-	//
-	// ⚠️ **指し手 0 手でも通すこと**（2026-10-02）。開始局面は**盤面図があれば
-	// それ、無ければ手合割の初期局面**（手合割の指定が無ければ平手）で決まって
-	// いるので、手が無くても**解析できる局面はある**。以前は「手も盤面図も無ければ
-	// 断る」にしていて、URL から取った対局前の棋譜が解析タブへ送れなかった。
-	// 盤面図だけの棋譜（撮った 1 局面を棚に入れて開き直す口。Step 3）も同じ理由で通す。
-	if empty && start == "" {
-		return fmt.Errorf("棋譜として読み取れるものがありませんでした")
-	}
-	return nil
-}
-
-// fromDocument は読めた棋譜（`kifu.Document`）から検討を組み立てる（KIF・CSA・KI2 で共通）。
-// note は読み取りの段階で止まった理由（無ければ空）。⚠️ **「何か読めたか」は呼ぶ側が
-// `readable` で確かめておくこと**（KI2 は盤に当てる前の原本で見る必要があるため）。
-func fromDocument(doc kifu.Document, note string) (*Study, KIFLoad, error) {
-	start, err := doc.StartSFEN()
+// build は原本を直し無しで組み立てる。⚠️ **組み立ては `Original.Build` の 1 本**（形式ごとに分けない）。
+func build(o *Original, err error) (*Study, KIFLoad, error) {
 	if err != nil {
 		return nil, KIFLoad{}, err
 	}
-	root, err := FromFullSFEN(start)
-	if err != nil {
-		return nil, KIFLoad{}, err
-	}
-
-	load := KIFLoad{Game: Game(doc), RootSFEN: start}
-	// ⚠️ **変換に失敗しても、そこまでの手は返ってくる。** 理由は Note に回す。
-	moves, decodeErr := kifu.DecodeMoves(doc.Moves)
-	load.Total = len(moves)
-	load.Note = note
-	if decodeErr != nil {
-		load.Note = decodeErr.Error()
-	}
-
-	study := NewStudy(root)
-	// **棋譜の消費時間とコメントも手に持たせる**（2026-10-04。手順リストに出す）。
-	// 開始局面のコメント（最初の手より前の `*` 行）は根に付ける。
-	study.top.note.Comment = doc.Comment
-	for i, mv := range moves {
-		// ⚠️ **`Play` を使わないこと**（2026-08-14）。あちらは「人が盤で指した」
-		// 印が付く。**棋譜の手は実際に現れた指し手**なので、自分で試しに指した手と
-		// 同じ印を付けると、手順リストでどちらか分からなくなる。
-		if err := study.play(mv, mark{}); err != nil {
-			name := mv
-			if i < len(doc.Moves) {
-				name = doc.Moves[i].Name
-			}
-			load.Note = fmt.Sprintf("%d手目「%s」で止まりました: %v", i+1, name, err)
-			break
-		}
-		// ⚠️ **`moves` と `doc.Moves` は同じ並び**（`DecodeMoves` は終局印を
-		// 数えず、読めなくなったところで切るだけ）。⚠️ **時間の欄が無い棋譜では
-		// `Timed` を立てないこと** —— 全手 0 秒として "0:00" が並ぶ。
-		if i < len(doc.Moves) {
-			study.cur.note = MoveNote{
-				Spend:   doc.Moves[i].Spend,
-				Timed:   doc.ShowTime,
-				Comment: doc.Moves[i].Comment,
-			}
-		}
-		load.Loaded++
-	}
-	// **棋譜に終局が書いてあれば、そこが対局の終わり**（2026-09-16）。
-	// ここから先に並べた手は**対局の手ではなく検討**（中継で言う「投了図以下」）。
-	//
-	// ⚠️ **最後まで読めたときだけ立てること。** 途中で止まったなら、
-	// **そこは対局の終わりではない**（読めなかっただけ）。立てると
-	// 棋譜の途中に「対局の終わり」の印が出る。
-	// **種別（"投了" など）も覚える**（2026-10-09。手順リストの最後に「91 投了」と出す）。
-	if mark := doc.EndMark(); mark != "" && load.Loaded == load.Total {
-		study.SetRecordEnd(study.CurrentID(), mark)
-	}
-	// **終局が書いていなくても、千日手ならそこで終わっている**（2026-10-09。中継の棋譜は
-	// 千日手の行が載る前に取れることがある）。⚠️ **1 手ごとではなく最後に 1 回**（本譜を丸ごと辿る）。
-	study.settleRepetition()
-	return study, load, nil
+	study, load, _, err := o.Build(nil)
+	return study, load, err
 }
 
 // FromFullSFEN は完全形の SFEN（盤面・手番・持ち駒・手数）から局面を作る。
