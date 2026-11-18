@@ -50,6 +50,7 @@ const SOURCE_LABELS: Record<string, string> = {
   yomiuri: "読売（竜王戦）",
   shogilive: "将棋連盟 中継",
   shogidb2: "将棋DB2",
+  fuwalete: "ふわりと将棋",
   url: "URL",
   paste: "貼り付け",
 };

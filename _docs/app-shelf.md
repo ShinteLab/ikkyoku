@@ -334,6 +334,7 @@ kicho 側の実装で、ikkyoku は `Library.Watches / Watch / Unwatch / Unwatch
 | 取得元 | `source_url` | 取り直せるか |
 |---|---|---|
 | `shogilive` | 中継ページ（HTML） | **○**（`KifURLFromHTML` で .kif を辿る） |
+| `fuwalete` | 棋譜速報の記事（HTML） | **○**（`Fetch` が記事の slug を取り出して組み立て直す。2026-11-18） |
 | `url` | 指定された .kif | **○** |
 | `yomiuri` | 棋譜ビューアのページ | ⚠️ **×**。Nuxt のページで .kif が無い（KIF は `_payload.js` から組み立てている）。**取り直す口は取得カードの「更新」** |
 | `paste` | 空 | —（取り直す先が無い） |

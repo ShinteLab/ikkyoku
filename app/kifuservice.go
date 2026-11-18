@@ -699,6 +699,8 @@ func isKifuRef(text string) bool {
 // 取得元は入力から判別する（判別も取得も kicho 側）。
 //
 //   - live.shogi.or.jp の URL  → 日本将棋連盟の棋譜中継
+//   - shogidb2.com の URL      → 将棋DB2
+//   - fuwalete.com の URL      → ふわりと将棋の棋譜速報（記事の KI2 から kicho が KIF を組み立てる）
 //   - yomiuri.co.jp の URL     → 読売（竜王戦）
 //   - それ以外の http(s) URL   → その中身を .kif として読む
 //   - URL でない文字列         → 読売の棋譜 ID

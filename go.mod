@@ -3,9 +3,9 @@ module github.com/ShinteLab/ikkyoku
 go 1.26.1
 
 require (
-	github.com/ShinteLab/core v0.3.0
+	github.com/ShinteLab/core v0.4.0
 	github.com/ShinteLab/engine v0.2.1
-	github.com/ShinteLab/kicho v0.4.0
+	github.com/ShinteLab/kicho v0.4.1
 	github.com/ShinteLab/suteme v0.3.0
 	github.com/kbinani/screenshot v0.0.0-20250624051815-089614a94018
 	github.com/wenteasy/log v0.4.0

@@ -1,11 +1,11 @@
 github.com/Masterminds/semver/v3 v3.5.0 h1:kQceYJfbupGfZOKZQg0kou0DgAKhzDg2NZPAwZ/2OOE=
 github.com/Masterminds/semver/v3 v3.5.0/go.mod h1:4V+yj/TJE1HU9XfppCwVMZq3I84lprf4nC11bSS5beM=
-github.com/ShinteLab/core v0.3.0 h1:zzqgUr/GnZGA43aVTbNt3/V8GN8uZh/1g65OvrpDu3g=
-github.com/ShinteLab/core v0.3.0/go.mod h1:QPvoFUYaiYPCSBLzdctbW3b7+yeGB+oDsrm6dQrIdkU=
+github.com/ShinteLab/core v0.4.0 h1:9awsyR2R9V3QTMg5dgmQ26ByIa9HNJxwUMo6bZomk00=
+github.com/ShinteLab/core v0.4.0/go.mod h1:QPvoFUYaiYPCSBLzdctbW3b7+yeGB+oDsrm6dQrIdkU=
 github.com/ShinteLab/engine v0.2.1 h1:+A2ngSF3GJjDlGhV205bp/2lT6XJEY7mqa9baDARWtA=
 github.com/ShinteLab/engine v0.2.1/go.mod h1:d7wpetvwK9RAbvamQr1sIuYq+LXvEd4DXCLYtAFYyUc=
-github.com/ShinteLab/kicho v0.4.0 h1:Q5UPJ1Jgd89IEUs+vT44OavU0OGwN3XG7wodMSY6PAE=
-github.com/ShinteLab/kicho v0.4.0/go.mod h1:xi+LqY13FVcPzSe+GArgab79jMTJmb9fgBI9VDKn+fY=
+github.com/ShinteLab/kicho v0.4.1 h1:/oIV2HpbkJBIBFnmEg+joKbUyE6mHIz4661minyisfU=
+github.com/ShinteLab/kicho v0.4.1/go.mod h1:RgXXz/PoIi0F74ntg00LFRjuj76W1q3ZX56515LRjTQ=
 github.com/ShinteLab/suteme v0.3.0 h1:LpAG8gr+htVu6eJUf4ts8nTZrra9BlubGQZfBUgkfr8=
 github.com/ShinteLab/suteme v0.3.0/go.mod h1:zUIp+2tYGOhEOrVmtpuAfDZBUSKhmRkeRl8AHAEzqes=
 github.com/dlclark/regexp2/v2 v2.5.2 h1:HAsucWRhsqcDzl6Ua9aR8JwYOTzrZyPrF0/FNxJVAI0=

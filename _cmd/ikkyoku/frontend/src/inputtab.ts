@@ -210,6 +210,7 @@ export function mountInputTab(root: HTMLElement, opts: InputTabOptions): InputTa
         <span class="hint-para">
         <strong>URL はどのサイトのものでもかまいません。</strong>
         <strong>読売（竜王戦）の対局ページ</strong>・<strong>日本将棋連盟の棋譜中継</strong>・
+        <strong>将棋DB2</strong>・<strong>ふわりと将棋の棋譜速報</strong>・
         ほかのサイトの <code>.kif</code>・読売の棋譜 ID を扱います
         （<strong>URL か棋譜か、どこのものかは自動で見分けます</strong>）。
         対局中は棋譜が伸びるので、カードの<strong>「更新」</strong>で取り直せます
