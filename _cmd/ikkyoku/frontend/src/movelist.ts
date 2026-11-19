@@ -470,8 +470,16 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
   // **最後の手が下に隠れたまま終わっていた**（2026-11-20。111 手の棋譜で 110 手目までしか見えない）。
   // 寄せるのは描き直したときの 1 回だけだったので、あとから縮むと取り残される。
   // ⚠️ **人がスクロールで今の手を外したら寄せ直さない**（読んでいる場所を大きさの変化で奪わない）。
+  // ⚠️ **器の大きさが変わってから寄せ直すまでのあいだに来た scroll では決めない**（seenHeight）。
+  // scroll は描くコマの頭（レイアウトと ResizeObserver より前）に配られるので、描き直しで溜まった
+  // scroll が同じコマの縮みと重なると、**縮んだ器で今の手が隠れて見え、寄せ直しを自分で止めていた**
+  // （2026-11-20。111 手目は出たが「112 投了」が隠れたまま終わった）。
   let keepCurrent = true;
+  let seenHeight = -1;
   movesPanel.addEventListener("scroll", () => {
+    if (movesPanel.clientHeight !== seenHeight) {
+      return;
+    }
     const cur = movesPanel.querySelector<HTMLElement>(".move-chip.is-current");
     if (!cur) {
       return;
@@ -481,6 +489,7 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
     keepCurrent = r.bottom > p.top && r.top < p.bottom;
   }, { passive: true });
   new ResizeObserver(() => {
+    seenHeight = movesPanel.clientHeight;
     // ⚠️ **隠れているあいだ（`display: none`）は寄せない**（測れないので寄せても効かない。
     // 出たときにもう一度ここへ来る）。
     if (keepCurrent && movesPanel.clientHeight > 0) {
