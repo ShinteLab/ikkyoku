@@ -1722,7 +1722,13 @@ export function mountSidePane(opts: SidePaneOptions): SidePaneHandle {
       if (batchNext > batchLast) {
         // ⚠️ **追いつきは黙って最新手へ戻る**（来たことは自動更新の 1 行が既に言っている。
         // ここで書いても、最新手の解析の「起動しています…」がすぐ上書きする）。
+        const done = !catchUp;
         finishRun(catchUp ? "" : `連続解析: ${batchLast}手目まで終わりました`, true);
+        // ⚠️ **最後の手（と「投了」の行）を見せて終わる**（2026-11-20）。終わった瞬間に上の行が
+        // 変わって器が縮むので、落ち着いてから一番下へ。追いつきは最新手へ戻る側が描き直す。
+        if (done) {
+          moveListUI.revealSettled();
+        }
         return;
       }
       const n = batchNext;

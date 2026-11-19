@@ -35,6 +35,10 @@ export interface MoveListHandle {
   // フォーカスが外れるので、**フォーカスのある行**では決められない。
   // 消すと親へ戻るので、**最後の手で押し続ければ 1 手ずつ短くなる。**
   dropCurrent(): void;
+  // revealSettled は**画面が落ち着いてから**今見ている手を見せ直す（最後の手ならスクロールバーを一番下へ）。
+  // 連続解析が終わったときに呼ぶ（2026-11-20）。⚠️ **人がスクロールで今の手を外していても寄せる**
+  // （終わったことを見せるのが目的。呼ぶのは終わった 1 回だけ）。
+  revealSettled(): void;
 }
 
 export interface MoveListOptions {
@@ -454,13 +458,22 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
     if (!cur) {
       return;
     }
-    const opt: ScrollIntoViewOptions = { block: "nearest", inline: "nearest" };
-    const id = cur.dataset.id ?? "";
-    if (id) {
-      movesPanel.querySelector<HTMLElement>(`.move-chip.is-end[data-end-of="${id}"]`)?.scrollIntoView(opt);
-    }
-    cur.scrollIntoView(opt);
     keepCurrent = true;
+    // ⚠️ **リストの最後の行（今の手、またはその終局の行）なら、スクロールバーを一番下へ**（2026-11-20）。
+    // 「見える位置へ寄せる」（scrollIntoView）では連続解析の終わりに「投了」の行が隠れたまま残った。
+    // 一番下なら最後の行は必ず見える。
+    const id = cur.dataset.id ?? "";
+    const end = id
+      ? movesPanel.querySelector<HTMLElement>(`.move-chip.is-end[data-end-of="${id}"]`)
+      : null;
+    const last = movesPanel.lastElementChild;
+    if (last && (last.contains(end ?? cur))) {
+      movesPanel.scrollTop = movesPanel.scrollHeight;
+      return;
+    }
+    const opt: ScrollIntoViewOptions = { block: "nearest", inline: "nearest" };
+    end?.scrollIntoView(opt);
+    cur.scrollIntoView(opt);
   };
 
   // keepCurrent は**今見ている手が見えているか**（最後に寄せたあと、人がスクロールで外していないか）。
@@ -815,6 +828,15 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
       // 普通は見えている）。
       const r = (chip ?? movesPanel).getBoundingClientRect();
       dropAt(r.left + 16, r.bottom, id, label);
+    },
+    revealSettled() {
+      // ⚠️ **2 コマ待つ** —— 終わった瞬間に上の行（ボタンの文言・解析の行）が変わり、
+      // 器の高さが決まるのは次のレイアウトのあと。今寄せても縮んだぶん隠れる。
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        if (movesPanel.clientHeight > 0) {
+          revealCurrent();
+        }
+      }));
     },
   };
 }
