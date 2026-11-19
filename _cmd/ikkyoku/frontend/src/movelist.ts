@@ -440,11 +440,53 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
       }
     }
     // 今見ている手が画面の外にあると、進めても手順が動いていないように見える。
-    movesPanel.querySelector<HTMLElement>(".move-chip.is-current")?.scrollIntoView({
-      block: "nearest",
-      inline: "nearest",
-    });
+    revealCurrent();
   };
+
+  // ---- 今見ている手を見せ続ける（2026-11-20）--------------------------------
+  //
+  // revealCurrent は今見ている手の行を見える位置へ寄せる。**その手で終局していれば
+  // 終局の行（「112 投了」）も一緒に見せる**（最後の手まで辿ったら、終わったことまで読める）。
+  // ⚠️ **終局の行を先に寄せ、手の行をあとに寄せる** —— リストが 1 行ぶんしか無いときは
+  // 手の行のほうが残る。
+  const revealCurrent = () => {
+    const cur = movesPanel.querySelector<HTMLElement>(".move-chip.is-current");
+    if (!cur) {
+      return;
+    }
+    const opt: ScrollIntoViewOptions = { block: "nearest", inline: "nearest" };
+    const id = cur.dataset.id ?? "";
+    if (id) {
+      movesPanel.querySelector<HTMLElement>(`.move-chip.is-end[data-end-of="${id}"]`)?.scrollIntoView(opt);
+    }
+    cur.scrollIntoView(opt);
+    keepCurrent = true;
+  };
+
+  // keepCurrent は**今見ている手が見えているか**（最後に寄せたあと、人がスクロールで外していないか）。
+  //
+  // ⚠️ **リストの器が縮んだら寄せ直す**（下の ResizeObserver）。連続解析が終わった瞬間に
+  // 上の行（解析の行の文言・状態の 1 行・ボタンの文言）の高さが変わって器が縮み、
+  // **最後の手が下に隠れたまま終わっていた**（2026-11-20。111 手の棋譜で 110 手目までしか見えない）。
+  // 寄せるのは描き直したときの 1 回だけだったので、あとから縮むと取り残される。
+  // ⚠️ **人がスクロールで今の手を外したら寄せ直さない**（読んでいる場所を大きさの変化で奪わない）。
+  let keepCurrent = true;
+  movesPanel.addEventListener("scroll", () => {
+    const cur = movesPanel.querySelector<HTMLElement>(".move-chip.is-current");
+    if (!cur) {
+      return;
+    }
+    const p = movesPanel.getBoundingClientRect();
+    const r = cur.getBoundingClientRect();
+    keepCurrent = r.bottom > p.top && r.top < p.bottom;
+  }, { passive: true });
+  new ResizeObserver(() => {
+    // ⚠️ **隠れているあいだ（`display: none`）は寄せない**（測れないので寄せても効かない。
+    // 出たときにもう一度ここへ来る）。
+    if (keepCurrent && movesPanel.clientHeight > 0) {
+      revealCurrent();
+    }
+  }).observe(movesPanel);
 
   // ---- 手順を消す（手順リストの右クリック）--------------------------------
   //
