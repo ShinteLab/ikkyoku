@@ -1366,7 +1366,7 @@ func (s *StudyService) Evals() EvalGraph {
 	}
 	// ⚠️ **点は「今の経路」だけ**（枝と本譜を 1 本の折れ線に混ぜない）。
 	line := s.study.Line()
-	g := EvalGraph{Series: s.evals.series(line), IDs: line}
+	g := EvalGraph{Series: s.evals.series(line), IDs: line, Session: s.session}
 	if g.Series == nil {
 		g.Series = []EvalSeries{}
 	}

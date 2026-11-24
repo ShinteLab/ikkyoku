@@ -404,3 +404,28 @@ func TestEvalGraphCurrentMoveWithoutPoints(t *testing.T) {
 		t.Errorf("戻った先の手 = %d %q, want 1 ▲７六歩", g.Number, g.Move)
 	}
 }
+
+// 別の棋譜に切り替えたら `Session` が変わり、手を指しただけなら変わらないこと（2026-11-25）。
+//
+// ⚠️ **グラフが横軸の範囲を「全て」に戻す目印。** 変わらないと、絞っていた範囲が
+// 新しい棋譜に無いとき何も描かれない。⚠️ **同じ平手の根を採り直しても変わること**
+// （根の SFEN では見分けられない）。手を指すたびに変わると、絞った範囲が 1 手で戻る。
+func TestEvalGraphSessionChangesWithRoot(t *testing.T) {
+	s := adopted(t)
+	first := s.Evals().Session
+	if first == "" {
+		t.Fatal("Session が空（採った検討には id があるはず）")
+	}
+	if _, err := s.Play("7g7f"); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	if got := s.Evals().Session; got != first {
+		t.Errorf("手を指しただけで Session が変わりました: %q → %q", first, got)
+	}
+	if _, err := s.Adopt(); err != nil {
+		t.Fatalf("Adopt: %v", err)
+	}
+	if got := s.Evals().Session; got == first {
+		t.Errorf("根を入れ替えたのに Session が同じ: %q", got)
+	}
+}

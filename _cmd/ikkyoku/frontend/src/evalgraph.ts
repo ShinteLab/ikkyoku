@@ -409,6 +409,8 @@ export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
   host.tabIndex = 0;
 
   let graph: EvalGraph | null = null;
+  // 最後に描いた検討の id（null ならまだ描いていない）。**変わったら範囲を「全て」に戻す。**
+  let session: string | null = null;
   // 今ホバーしている手数（null なら離れている）。**画面だけの状態。**
   let hover: number | null = null;
   // ドラッグで範囲を選んでいる最中の両端（null なら掴んでいない）。
@@ -973,8 +975,20 @@ export function mountEvalGraph(opts: EvalGraphOptions): EvalGraphHandle {
     render(next: EvalGraph | null) {
       graph = next;
       hover = null;
+      // **別の棋譜に切り替えたら「全て」に戻す**（2026-11-25）。絞っていた 110-120 手が
+      // 新しい棋譜に無いと、何も描かれずに壊れて見える。
+      // ⚠️ **見分けるのは Go の `session`**（根を入れ替えるたびに変わる）。根の SFEN だと
+      // 平手の棋譜どうしを見分けられない。⚠️ **null（取れなかった）では戻さない。**
+      const nextSession = next?.session ?? null;
+      if (nextSession !== null && session !== null && nextSession !== session) {
+        all.checked = true;
+        syncFields();
+      }
+      if (nextSession !== null) {
+        session = nextSession;
+      }
       // ⚠️ **掴んでいる状態を持ち越さないこと**（局面が変わったのに、前の絵の
-      // 上で選び始めた範囲が残る）。**範囲そのもの（欄の値）は残す** ——
+      // 上で選び始めた範囲が残る）。**同じ検討のあいだは範囲（欄の値）を残す** ——
       // 絞って見ているところに 1 手指したら全体に戻る、では使えない。
       dragA = null;
       dragB = null;
