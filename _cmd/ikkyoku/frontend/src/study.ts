@@ -454,15 +454,38 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
 
   // askPromote は押した場所で「成る / 成らず」を聞く。
   // 選ばずに閉じたら onPick は呼ばれない（＝指さない）。
-  const askPromote = (x: number, y: number, onPick: (promote: boolean) => void) => {
+  //
+  // **指したあとの駒の字を横に並べて聞く**（2026-11-25。「銀｜全」の下に小さく「不成｜成」）。
+  // 「成る」「成らず」の文字は形が似ていて押し違えるが、駒の字なら成った駒は形がはっきり違う。
+  // ⚠️ **字は Go が付ける**（`LegalMove.piece`。盤から駒を読んで組み立てないこと）。
+  // 字が来ていなければ、前の文字のメニュー（縦）で聞く。
+  const askPromote = (
+    x: number, y: number, promote: LegalMove, stay: LegalMove,
+    onPick: (promote: boolean) => void,
+  ) => {
     closeAsk();
+    const pieces = !!promote.piece && !!stay.piece;
     const handle: PopupHandle = openPopup(x, y, {
       label: "成るかどうか",
-      // **「成る」を先に置いて初期フォーカスにする**（成るほうが圧倒的に多い）。
-      items: [
-        { label: "成る", kind: "primary", onPick: () => onPick(true) },
-        { label: "成らず", onPick: () => onPick(false) },
-      ],
+      ...(pieces
+        ? {
+            // **左が成らない駒・右が成った駒**（ユーザーの指定）。⚠️ **初期フォーカスは成る側**
+            // （成るほうが圧倒的に多い。Enter で成る）。
+            row: true,
+            pieceWhite: state?.turn === 2,
+            focus: 1,
+            items: [
+              { label: "不成", piece: stay.piece, onPick: () => onPick(false) },
+              { label: "成", piece: promote.piece, kind: "primary" as const, onPick: () => onPick(true) },
+            ],
+          }
+        : {
+            // **「成る」を先に置いて初期フォーカスにする**（成るほうが圧倒的に多い）。
+            items: [
+              { label: "成る", kind: "primary" as const, onPick: () => onPick(true) },
+              { label: "成らず", onPick: () => onPick(false) },
+            ],
+          }),
       // ⚠️ **メニューが自分で閉じたときも `ask` を空けること**（2026-11-25 に実機で踏んだ）。
       // 外側クリック・Esc・窓を離れる、で閉じるのは `popup.ts` で、こちらは知らない。
       // 空けないと `ask` が残り、盤と駒台のクリックが**ずっと無視されて盤が動かなくなる**。
@@ -511,7 +534,7 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
     if (promote && stay) {
       // ⚠️ **選ぶまで掴んだままにしておく**（光ったまま待つ）。ここで pick を
       // 落とすと、閉じただけのときに選択が消えて掴み直しになる。
-      askPromote(at.x, at.y, (yes) => go(yes ? promote.usi : stay.usi));
+      askPromote(at.x, at.y, promote, stay, (yes) => go(yes ? promote.usi : stay.usi));
       return;
     }
     go(dests[0].usi);

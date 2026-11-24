@@ -10,6 +10,9 @@
 // （「キャンセル＝不成」は読み取れない）。**押した場所でそのまま聞く**ほうが、
 // 盤や手順から目を離さずに選べる。
 //
+// **例外は成る / 成らずだけ**（2026-11-25）—— 指したあとの駒の字を**横に**並べて聞く（`row` / `piece`）。
+// 文字の項目ではなく駒 2 つなので、縦に揃えた理由（横に長い帯になる）が当てはまらない。
+//
 // ⚠️ **どこで出すものも同じ作りにしてある**（位置決め・Esc・外側クリック・初期フォーカス・
 // 矢印キー）。**次に作るときもここを使うこと** —— コピーすると、外側クリックの
 // タイミングのような**間違えやすいところだけが食い違う**。
@@ -32,6 +35,11 @@ export interface PopupItem {
   // note は行の右端に添える薄い字（連続解析の秒数ごとの所要時間など）。
   // **選ぶ材料を行の中に置くためのもの**で、押した結果は label が言う。
   note?: string;
+  // piece は**駒の字で選ばせるとき**の SFEN の字（"S" / "+S"。成る / 成らず。2026-11-25）。
+  // 盤と同じ駒のフォントで大きく書き、label はその下に小さく添える（`row` と組で使う）。
+  //
+  // ⚠️ **label を消さないこと**（「成 / 不成」。成った字を知らない人の手掛かりで、読み上げの名前）。
+  piece?: string;
   onPick(): void;
 }
 
@@ -46,6 +54,14 @@ export interface PopupOptions {
   //
   // ⚠️ **消す操作では「やめる」に当てること** —— Enter の連打で消えてしまわないように。
   focus?: number;
+  // row は**項目を横に並べる**（2026-11-25。駒の字で選ばせる成る / 成らずだけ）。
+  // 矢印キーは左右で移る（上下でも移る）。
+  //
+  // ⚠️ **文字の項目には使わないこと**（2026-10-02 に縦に揃えた理由。項目が増えると横に長い帯になる）。
+  row?: boolean;
+  // pieceWhite は駒の字に**後手の書体の切り替え**（王/玉・馬/左馬）を当てるか。
+  // ⚠️ **向きは回さない**（選ぶための字なので、盤の向きによらず正立で読ませる）。
+  pieceWhite?: boolean;
   // onClose は閉じたときに呼ばれる（選んだかどうかに関わらず）。
   onClose?(): void;
 }
@@ -87,7 +103,7 @@ interface Anchor {
 // preferBelow は**収まらなくても真下に出す**か（`openPopupBelow`）。
 function open(at: Anchor, dx: number, preferBelow: boolean, opts: PopupOptions): PopupHandle {
   const box = document.createElement("div");
-  box.className = "popup-menu";
+  box.className = "popup-menu" + (opts.row ? " is-row" : "");
   box.setAttribute("role", "menu");
   box.setAttribute("aria-label", opts.label);
 
@@ -95,7 +111,7 @@ function open(at: Anchor, dx: number, preferBelow: boolean, opts: PopupOptions):
   const buttons = opts.items.map((item) => {
     const b = document.createElement("button");
     b.type = "button";
-    b.className = "popup-btn" + (item.kind ? ` is-${item.kind}` : "");
+    b.className = "popup-btn" + (item.kind ? ` is-${item.kind}` : "") + (item.piece ? " is-piece" : "");
     b.setAttribute("role", "menuitem");
     if (item.checked !== undefined) {
       // ⚠️ **`role`/`aria-checked` も付けること**（読み上げでは印が見えない）。
@@ -113,7 +129,19 @@ function open(at: Anchor, dx: number, preferBelow: boolean, opts: PopupOptions):
       dot.style.background = item.swatch;
       b.appendChild(dot);
     }
-    b.appendChild(document.createTextNode(item.label));
+    if (item.piece) {
+      // 駒の字と、その下に小さく label。⚠️ **字は `textContent`**（"+S" を書体のリガチャが全にする）。
+      const glyph = document.createElement("span");
+      glyph.className = "popup-piece" + (opts.pieceWhite ? " is-white" : "");
+      glyph.textContent = item.piece;
+      glyph.setAttribute("aria-hidden", "true");
+      const cap = document.createElement("span");
+      cap.className = "popup-piece-label";
+      cap.textContent = item.label;
+      b.append(glyph, cap);
+    } else {
+      b.appendChild(document.createTextNode(item.label));
+    }
     if (item.note) {
       const note = document.createElement("span");
       note.className = "popup-note";
@@ -159,7 +187,8 @@ function open(at: Anchor, dx: number, preferBelow: boolean, opts: PopupOptions):
   const below = window.innerHeight - m - (at.bottom + d);
   const above = at.top - d - m;
   const row = buttons[0]?.getBoundingClientRect().height ?? 0;
-  const head = h - row * buttons.length;
+  // 横に並べたときは行が 1 つ（見出しの高さの見積もりは縦のときだけ要る）。
+  const head = opts.row ? 0 : h - row * buttons.length;
   const roomy = preferBelow && below >= Math.min(h, head + row * belowRows);
   let top: number;
   if (h <= below) {
@@ -195,7 +224,11 @@ function open(at: Anchor, dx: number, preferBelow: boolean, opts: PopupOptions):
       return;
     }
     // 矢印キーで項目を移る（端から端へ回る）。Enter / Space はボタンそのものが受ける。
-    const step = { ArrowDown: 1, ArrowUp: -1 }[e.key];
+    // 横に並べたときは左右でも移る。
+    const keys: Record<string, number> = opts.row
+      ? { ArrowDown: 1, ArrowUp: -1, ArrowRight: 1, ArrowLeft: -1 }
+      : { ArrowDown: 1, ArrowUp: -1 };
+    const step: number | undefined = keys[e.key];
     if (step === undefined && e.key !== "Home" && e.key !== "End") {
       return;
     }

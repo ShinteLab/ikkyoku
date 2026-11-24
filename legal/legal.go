@@ -13,6 +13,7 @@ package legal
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/ShinteLab/core/sfen"
 	coreusi "github.com/ShinteLab/core/usi"
@@ -40,6 +41,14 @@ type Move struct {
 	// ⚠️ **同じ移動先に成りと不成の 2 つが並ぶことがある。** どちらを指すかは
 	// 人が決めることなので、**片方に丸めないこと**（UI が聞く）。
 	Promote bool `json:"promote"`
+	// Piece は**指したあとに行き先に居る駒**の SFEN の字（2026-11-25）。先後を問わず大文字で、
+	// 成る手は成った字（銀が成る手は "+S"、成らない手は "S"）。打ちは打つ駒の字。
+	//
+	// **成る / 成らずを駒の字で聞くため**（「成る」「成らず」の文字は形が似ていて押し違える）。
+	// ShogiSFEN は "+S" を全の 1 字にするので、画面はこれを駒のフォントで書くだけでよい。
+	// ⚠️ **画面で盤から駒を読んで組み立てさせないこと**（フロントに将棋を書かない）。
+	// ⚠️ **入るのは `Moves` だけ**（`Parse` は局面を見ないので空）。空なら画面は字を出さない。
+	Piece string `json:"piece,omitempty"`
 }
 
 // Drops は打ちかを返す。
@@ -68,6 +77,7 @@ func Moves(positionSFEN string) (out []Move, err error) {
 		return nil, fmt.Errorf("この局面を読めませんでした: %w", err)
 	}
 
+	cells := boardLetters(positionSFEN)
 	cands := b.Candidate()
 	out = make([]Move, 0, len(cands))
 	for _, a := range cands {
@@ -78,9 +88,50 @@ func Moves(positionSFEN string) (out []Move, err error) {
 		if !ok {
 			continue // 読めない手は落とす（出せる手が減るだけで、嘘は出さない）
 		}
+		m.Piece = pieceAfter(m, cells)
 		out = append(out, m)
 	}
 	return out, nil
+}
+
+// boardLetters は局面 SFEN の盤面を、マスごとの**駒の大文字**にする（成駒は "+S"。空きは ""）。
+// 座標は `Move` と同じ（`sfen.ParseBoard` の rank/file がそのまま一致する）。
+// 読めなければ nil（`Piece` が空になるだけで、合法手は出す）。
+func boardLetters(positionSFEN string) *[9][9]string {
+	board, _, _ := strings.Cut(positionSFEN, " ")
+	var cells [9][9]string
+	err := sfen.ParseBoard(board, func(rank, file, base int, _, promoted bool) {
+		l := sfen.Letter(base)
+		if rank < 0 || rank > 8 || file < 0 || file > 8 || l == "None" {
+			return
+		}
+		if promoted {
+			l = "+" + l
+		}
+		cells[rank][file] = l
+	})
+	if err != nil {
+		return nil
+	}
+	return &cells
+}
+
+// pieceAfter は指したあとに行き先に居る駒の字（`Move.Piece`）を返す。分からなければ ""。
+func pieceAfter(m Move, cells *[9][9]string) string {
+	if m.Drops() {
+		if l := sfen.Letter(m.Drop); l != "None" {
+			return l
+		}
+		return ""
+	}
+	if cells == nil {
+		return ""
+	}
+	l := cells[m.FromRank][m.FromFile]
+	if l != "" && m.Promote {
+		return "+" + l
+	}
+	return l
 }
 
 // InCheck は局面 SFEN で**手番の側が王手されているか**を返す（2026-10-09）。

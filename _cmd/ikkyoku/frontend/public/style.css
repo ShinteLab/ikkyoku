@@ -4779,6 +4779,56 @@ html.is-graph #app {
   border-radius: 50%;
 }
 
+/* 駒の字で選ばせるメニュー（成る / 成らず。2026-11-25）。**駒を横に並べ、下に小さく「成 / 不成」**。
+   「成る」「成らず」の文字は形が似ていて押し違えるので、指したあとの駒の姿で選ばせる。
+   ⚠️ **横に並べるのはこれだけ**（文字の項目は縦。`.popup-menu` の注記）。 */
+.popup-menu.is-row {
+  flex-direction: row;
+  min-width: 0;
+  gap: 4px;
+}
+
+.popup-btn.is-piece {
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 10px 4px;
+}
+
+/* 駒の字。⚠️ **盤の駒と同じ書体・色**（`--shogi-font` / `--shogi-piece-color`。駒台の
+   `.stock-chip` と同じ木地）—— 書体が違うと盤で見ている駒と結び付かない。
+   ⚠️ **後手の駒でも回さない**（選ぶための字なので正立で読ませる。書体の切り替えだけ当てる）。 */
+.popup-piece {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--shogi-font, "ShogiSFEN"), serif;
+  font-feature-settings: var(--piece-features-black, normal);
+  font-size: 34px;
+  font-weight: normal;
+  line-height: 1;
+  color: var(--shogi-piece-color, #1a1a1a);
+  background: #f3c877;
+  border: 1px solid #5a3b1a;
+  border-radius: 3px;
+}
+
+.popup-piece.is-white {
+  font-feature-settings: var(--piece-features-white, normal);
+}
+
+/* 駒の下の「成 / 不成」。⚠️ **塗った項目の上では地の色に合わせる**（`.popup-note` と同じ）。 */
+.popup-piece-label {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.popup-btn:hover .popup-piece-label,
+.popup-btn:focus .popup-piece-label {
+  color: inherit;
+}
+
 /* 盤の右の列（2026-08-12 に作り替えた）。**解析のものは全部ここに入る** ——
    解析の行・エンジンごとの結果・評価値グラフ・手順・SFEN。
 

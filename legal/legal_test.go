@@ -150,3 +150,54 @@ func TestInCheck(t *testing.T) {
 		}
 	}
 }
+
+// Piece は指したあとに行き先に居る駒の字（2026-11-25。成る / 成らずを駒の字で聞くため）。
+// ⚠️ **成る手と成らない手で字が分かれること**（同じ字だと画面で見分けが付かない）。
+// 後手の駒も大文字・成駒が動く手は成った字のまま・打ちは打つ駒の字。
+func TestMovesPiece(t *testing.T) {
+	// 先手の銀が 3 段目へ入れる（4d → 4c）。後手の歩を 1 枚持ち、先手の龍が 9 筋にいる。
+	const s = "4k4/9/9/5S3/9/9/9/+R8/4K4 b P 1"
+	ms, err := legal.Moves(s)
+	if err != nil {
+		t.Fatalf("Moves: %v", err)
+	}
+	want := map[string]string{
+		"4d4c+": "+S",
+		"4d4c":  "S",
+		"9h9g":  "+R",
+		"P*5e":  "P",
+	}
+	got := map[string]string{}
+	for _, m := range ms {
+		if _, ok := want[m.USI]; ok {
+			got[m.USI] = m.Piece
+		}
+	}
+	for usi, w := range want {
+		if g, ok := got[usi]; !ok {
+			t.Errorf("%s が合法手に入っていません", usi)
+		} else if g != w {
+			t.Errorf("%s の Piece = %q, want %q", usi, g, w)
+		}
+	}
+
+	// 後手の手番でも大文字（駒のフォントは大小で同じ字。向きは画面が決める）。
+	const w = "4k4/9/9/9/9/3s5/9/9/4K4 w - 1"
+	ms, err = legal.Moves(w)
+	if err != nil {
+		t.Fatalf("Moves: %v", err)
+	}
+	found := false
+	for _, m := range ms {
+		if m.USI != "6f6g+" {
+			continue
+		}
+		found = true
+		if m.Piece != "+S" {
+			t.Errorf("後手の 6f6g+ の Piece = %q, want \"+S\"", m.Piece)
+		}
+	}
+	if !found {
+		t.Error("6f6g+ が合法手に入っていません")
+	}
+}
