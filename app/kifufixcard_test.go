@@ -83,3 +83,48 @@ func cardOf(errorMove int, source, sourceID string) GameDetail {
 	d.SourceID = sourceID
 	return d
 }
+
+// ambiguousKI2 は 3 手目の ▲５八金 が絞れない KI2（実際は ▲５八金左 など）。
+const ambiguousKI2 = "先手：太郎\n後手：花子\n▲７六歩    △３四歩\n▲５八金    △８四歩\n"
+
+// **棋譜タブの行も、棚の棋譜 id で引いた直しの表で ⚠ の手を越えられたら修正済**（2026-11-25）。
+// ⚠️ 直していない棋譜・⚠ の無い棋譜は返さない。
+func TestFixedNotesForShelf(t *testing.T) {
+	svc, study := newTestKifuService(t)
+	// 3 手目が盤に当たらない（金が 2 枚とも行けるのに右・左が無い）。⚠️ kicho も ikkyoku も止まる棋譜にすること
+	// （`miswrittenKI2` の ▲５五金は ikkyoku だけが打ちとして止まり、kicho は ⚠ を付けない）。
+	bad, err := svc.ImportKIF(ambiguousKI2)
+	if err != nil {
+		t.Fatalf("ImportKIF: %v", err)
+	}
+	if bad.ErrorMove != 3 {
+		t.Fatalf("kicho の ⚠ が 3 手目に付いていない: %d", bad.ErrorMove)
+	}
+	clean, err := svc.ImportKIF(testKIF)
+	if err != nil {
+		t.Fatalf("ImportKIF: %v", err)
+	}
+	ids := []string{bad.ID, clean.ID}
+	if got := svc.FixedNotes(ids); len(got) != 0 {
+		t.Errorf("直していないのに修正済: %v", got)
+	}
+
+	load, err := svc.SendToStudy(bad.ID)
+	if err != nil {
+		t.Fatalf("SendToStudy: %v", err)
+	}
+	if _, err := study.GoTo(nodeByUSI(t, load.State, "3c3d", true)); err != nil {
+		t.Fatal(err)
+	}
+	st, err := study.Play("6i5h")
+	if err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	if _, err := study.FixMove(nodeByUSI(t, st, "6i5h", true), "replace"); err != nil {
+		t.Fatalf("FixMove: %v", err)
+	}
+	got := svc.FixedNotes(ids)
+	if len(got) != 1 || !strings.Contains(got[bad.ID], "直し 1 か所") {
+		t.Errorf("修正済 = %v", got)
+	}
+}

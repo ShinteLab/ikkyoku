@@ -10,12 +10,12 @@
 // ⚠️ **「棋譜 URL をコピー」は置かない**（kicho の UI にはある）。あれは
 // ShogiHome 等の外部ツールへ渡すためのもので、ikkyoku では渡す先が自分自身。
 // **代わりに置くのが「解析」で、その口は棋戦名のリンク**（2026-09-14）。
-import { Clipboard } from "@wailsio/runtime";
+import { Clipboard, Events } from "@wailsio/runtime";
 import { FiEdit2 } from "react-icons/fi";
 import { KifuService } from "../bindings/github.com/ShinteLab/ikkyoku/app";
 import { askText } from "./asktext";
 import { iconMarkup } from "./icon";
-import { flagByLabel, shelfMarks } from "./kifumarks";
+import { fixedMark, flagByLabel, shelfMarks } from "./kifumarks";
 import { openPopup } from "./popup";
 import type {
   FlagEntry,
@@ -277,11 +277,38 @@ export function mountLibrary(
     if (!modal.open) modal.showModal();
   };
 
-  // renderMarks は詳細の見出しの下に行と同じ印を出す。
+  // renderMarks は詳細の見出しの下に行と同じ印を出す（「✎ 修正済」は聞いてから足す）。
   const renderMarks = (g: GameSummary) => {
     const marks = shelfMarks(g);
     modalMarks.replaceChildren(...marks);
     modalMarks.hidden = marks.length === 0;
+    if (g.errorMove > 0) void markFixed([g.id]);
+  };
+
+  // placeFixed は印の並びの「⚠ N手目」のすぐ後ろに「✎ 修正済」を置く（note が空なら外す）。
+  const placeFixed = (box: Element, note: string) => {
+    box.querySelector(".kifu-mark.is-fixed")?.remove();
+    const err = box.querySelector(".kifu-mark.is-error");
+    if (err) err.after(...fixedMark(note));
+  };
+
+  // markFixed は「⚠ N手目」を解析タブで直してある棋譜を Go に聞いて、行と詳細に「✎ 修正済」を出す（2026-11-25）。
+  // ⚠️ **判定は Go**（`KifuService.FixedNotes`）。⚠️ **`GameSummary` に載せない**（あちらは kicho の値のまま）。
+  // ⚠️ **聞けなくても何もしない**（札が出ないだけ）。
+  const markFixed = async (ids: string[]) => {
+    if (ids.length === 0) return;
+    let notes: Record<string, string | undefined>;
+    try {
+      notes = (await KifuService.FixedNotes(ids)) ?? {};
+    } catch {
+      return;
+    }
+    for (const id of ids) {
+      const note = notes[id] ?? "";
+      const line = rows.querySelector(`tr[data-id="${CSS.escape(id)}"] .library-event`);
+      if (line) placeFixed(line, note);
+      if (openDetail?.id === id) placeFixed(modalMarks, note);
+    }
   };
 
   // loadFlags は指摘の一覧を読み直す。⚠️ **閉じたあと・別の棋譜を開いたあとに届いた返事は捨てる。**
@@ -471,6 +498,9 @@ export function mountLibrary(
     return td;
   };
 
+  // shownErrors は一覧に並べた「⚠ N手目」の棋譜（`kifu:fixed` で聞き直す相手）。
+  let shownErrors: string[] = [];
+
   const render = (res: SearchResult) => {
     const games = res.games ?? [];
     rows.replaceChildren();
@@ -582,6 +612,9 @@ export function mountLibrary(
       tr.append(actions);
       rows.append(tr);
     }
+
+    shownErrors = games.filter((g) => g.errorMove > 0).map((g) => g.id);
+    void markFixed(shownErrors);
 
     // 件数。条件を付けているときだけ「N / 全体」にする。
     // ⚠️ **並べた行数ではなく該当件数（matched）を出す。** 上限で切られていると
@@ -724,6 +757,13 @@ export function mountLibrary(
       modalCopy.classList.add("is-copied");
       window.setTimeout(() => modalCopy.classList.remove("is-copied"), 900);
     });
+  });
+
+  // 解析タブで直しの表が変わった（2026-11-25。Go の `kifu:fixed`）。並べている ⚠ の行と詳細を聞き直す。
+  Events.On("kifu:fixed", () => {
+    const ids = [...shownErrors];
+    if (openDetail && openDetail.errorMove > 0 && !ids.includes(openDetail.id)) ids.push(openDetail.id);
+    void markFixed(ids);
   });
 
   return {
