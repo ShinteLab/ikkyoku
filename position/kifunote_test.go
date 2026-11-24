@@ -141,3 +141,57 @@ func TestStudySnapshotKeepsNotes(t *testing.T) {
 		}
 	}
 }
+
+// 各手に**その側の、その手までの合計**が載ること（2026-11-25）。
+//
+// ⚠️ **先手と後手を別々に足すこと**（1 つにまとめると手順の合計になってしまう）。
+// ⚠️ **枝の手は経路で足すこと** —— 枝の手そのものは時間を持たないので出ず、
+// その先の棋譜の手も本譜の合計を壊さない。
+func TestFromKIFTotals(t *testing.T) {
+	study, _, err := position.FromKIF(notedKIF + "   4 ８四歩(83)   ( 1:00/00:05:05)\n")
+	if err != nil {
+		t.Fatalf("FromKIF: %v", err)
+	}
+	nodes := study.Nodes()
+	for i, want := range []string{"00:00:00", "00:04:05", "02:05:00", "00:05:05"} {
+		if nodes[i].Total != want {
+			t.Errorf("%d手目の合計 = %q, want %q", i+1, nodes[i].Total, want)
+		}
+	}
+	// 2 手目まで戻って別の手を指す（時間を持たない枝の手）。
+	if err := study.GoTo(nodes[1].ID); err != nil {
+		t.Fatalf("GoTo: %v", err)
+	}
+	if err := study.Play("6g6f"); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	found := false
+	for _, n := range study.Nodes() {
+		if n.USI == "6g6f" {
+			found = true
+			if n.Total != "" {
+				t.Errorf("時間を持たない枝の手に合計が出ています: %+v", n)
+			}
+		}
+		// 本譜の合計は枝を足しても変わらないこと。
+		if n.ID == nodes[3].ID && n.Total != "00:05:05" {
+			t.Errorf("枝を足したら本譜の 4 手目の合計が変わりました: %q", n.Total)
+		}
+	}
+	if !found {
+		t.Fatal("枝の手が手順にありません")
+	}
+}
+
+// ⚠️ **時間の欄が無い棋譜では合計も出さないこと**（全手 0 秒の合計 "00:00:00" が並ぶ）。
+func TestFromKIFWithoutTimesHasNoTotal(t *testing.T) {
+	study, _, err := position.FromKIF("手合割：平手\n   1 ７六歩(77)\n   2 ３四歩(33)\n")
+	if err != nil {
+		t.Fatalf("FromKIF: %v", err)
+	}
+	for _, n := range study.Nodes() {
+		if n.Total != "" {
+			t.Errorf("時間の欄が無いのに合計が出ています: %+v", n)
+		}
+	}
+}

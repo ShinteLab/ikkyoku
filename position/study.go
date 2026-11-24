@@ -131,6 +131,14 @@ type Node struct {
 	// 正当なので、**値が 0 かどうかで出す/出さないを決めないこと**（"0:00" と
 	// 「書いてない」は別物）。⚠️ **書式は Go 側**（`kifu.FormatSpend`。分は繰り上げない）。
 	Time string `json:"time,omitempty"`
+	// Total は**この手を指した側の、この手までの消費時間の合計**（"01:23:45"。2026-11-25）。
+	//
+	// 根からこの手までの経路のうち、**同じ側の棋譜の手の時間だけ**を足す（KIF の
+	// `( 4:00/01:00:00)` の右と同じ並び）。⚠️ **入るのは `Time` があるときだけ**。
+	// ⚠️ **棋譜の累計の欄は読まない**（core が読み捨てる）—— 途中の局面から始まる棋譜では
+	// 開始局面より前の時間が入らない。⚠️ **枝の手は経路で足すので、本譜とは別の合計になる**
+	// （時間を持たない手は 0 として素通りする）。⚠️ **書式は Go 側**（`kifu.FormatTotal`）。
+	Total string `json:"total,omitempty"`
 	// Comment は**棋譜に書いてあったこの手のコメント**（KIF の `*` 行。複数行は改行で連結）。
 	//
 	// ⚠️ **解析で足した手・盤で指した手には付かない**（棋譜の手ではないので、元から無い）。
@@ -458,8 +466,26 @@ func (n *treeNode) node(depth int, main bool) Node {
 		Hand:    n.hand,
 		Guess:   n.guess,
 		Time:    n.note.time(),
+		Total:   n.total(),
 		Comment: n.note.Comment,
 	}
+}
+
+// total は**この手を指した側の、根からこの手までの消費時間の合計**（書いてなければ空）。
+//
+// 同じ側の手は 2 つ上ごとに来るので、親の親を辿って足す。⚠️ **根（top）は手ではない**ので
+// 足さない（`parent == nil` で止まる）。
+func (n *treeNode) total() string {
+	if !n.note.Timed {
+		return ""
+	}
+	var sum time.Duration
+	for m := n; m != nil && m.parent != nil; m = m.parent.parent {
+		if m.note.Timed {
+			sum += m.note.Spend
+		}
+	}
+	return kifu.FormatTotal(sum)
 }
 
 // time は画面に出す消費時間（書いてなければ空）。

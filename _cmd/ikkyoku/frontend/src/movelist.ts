@@ -183,7 +183,7 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
       o?: {
         depth?: number; main?: boolean; parent?: number; fork?: boolean;
         sources?: string[]; hand?: boolean; guess?: boolean;
-        time?: string; comment?: string; mark?: MoveMark;
+        time?: string; total?: string; comment?: string; mark?: MoveMark;
       },
     ) => {
       // ⚠️ **行は chip とトグルの 2 つ**（ボタンの中にボタンは置けない）。
@@ -305,7 +305,12 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
           const tm = document.createElement("span");
           tm.className = "move-time";
           tm.textContent = o?.time ?? "";
-          b.appendChild(tm);
+          // その側の、この手までの合計（2026-11-25。Go の `Node.Total`）。
+          // ⚠️ **時間の列と一緒に、どの行にも作る**（空でも幅を取る。列を揃えるため）。
+          const tt = document.createElement("span");
+          tt.className = "move-total";
+          tt.textContent = o?.total ?? "";
+          b.append(tm, tt);
         }
         const full = o?.comment ?? "";
         if (full) {
@@ -372,7 +377,9 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
         if (hasTime) {
           const tm = document.createElement("span");
           tm.className = "move-time";
-          body.appendChild(tm);
+          const tt = document.createElement("span");
+          tt.className = "move-total";
+          body.append(tm, tt);
         }
       }
       row.append(pad, body);
@@ -428,7 +435,7 @@ export function mountMoveList(opts: MoveListOptions): MoveListHandle {
           {
             depth: m.depth, main: m.main, parent: m.parent, fork: isFork(m),
             sources: m.sources ?? [], hand: m.hand ?? false, guess: m.guess ?? false,
-            time: m.time ?? "", comment: m.comment ?? "", mark: marks.get(m.id),
+            time: m.time ?? "", total: m.total ?? "", comment: m.comment ?? "", mark: marks.get(m.id),
           }),
       );
       // ⚠️ **手数は終わった手の次**（90 手目で終わったら「91 投了」）。
