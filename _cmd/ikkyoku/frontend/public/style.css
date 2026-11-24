@@ -6614,6 +6614,12 @@ html.is-graph #app {
   border-color: var(--line-danger);
 }
 
+/* 解析タブで直してある（2026-11-25。入力タブのカード）。手順リストの ✎（`.move-mark.is-fixed`）と同じ色。 */
+.kifu-mark.is-fixed {
+  color: var(--info-ink);
+  border-color: currentColor;
+}
+
 .kifu-mark.is-flag {
   color: var(--warn-ink);
   border-color: currentColor;

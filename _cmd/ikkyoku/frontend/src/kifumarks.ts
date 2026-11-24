@@ -24,6 +24,13 @@ export function errorMarks(g: Pick<GameSummary, "errorMove" | "error">): HTMLEle
   return [badge("is-error", `⚠ ${g.errorMove}手目`, g.error)];
 }
 
+// fixedMark は「⚠ N手目」を解析タブで直してあるときの札（2026-11-25。入力タブのカード）。
+// note は Go の `KifuService.FixedNote`（空なら出さない）。⚠️ **これだけは ikkyoku の値**（kicho には無い）。
+export function fixedMark(note: string): HTMLElement[] {
+  if (!note) return [];
+  return [badge("is-fixed", "✎ 修正済", note)];
+}
+
 // shelfMarks は棚の棋譜の印の全部（エラー・指摘・親子）。
 export function shelfMarks(g: GameSummary): HTMLElement[] {
   const out = errorMarks(g);

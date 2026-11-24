@@ -110,7 +110,13 @@ type fixAction struct {
 // 表を変えたら原本を読み直して据え直す（`rebuildLocked`）。⚠️ **出していない項目は断る**（画面の古い表示から押されても
 // 別の手を直さない）。
 func (s *StudyService) FixMove(id int, op string) (st StudyState, err error) {
-	defer func() { s.publish(st, err) }()
+	defer func() {
+		s.publish(st, err)
+		// 入力タブのカードの「修正済」を見直させる（`kifufixcard.go`）。⚠️ **ロックの外で出す**。
+		if err == nil && s.Emit != nil {
+			s.Emit(kifuFixedEvent, nil)
+		}
+	}()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.study == nil || s.fix.original == nil {

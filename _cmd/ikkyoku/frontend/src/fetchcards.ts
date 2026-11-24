@@ -32,7 +32,7 @@
 // （「解析する」→ 解析タブ / 「棋譜に保存」→ 棋譜タブ）。
 import { Clipboard, Events } from "@wailsio/runtime";
 import { KifuService, StudyService } from "../bindings/github.com/ShinteLab/ikkyoku/app";
-import { errorMarks } from "./kifumarks";
+import { errorMarks, fixedMark } from "./kifumarks";
 import { openPopup } from "./popup";
 import type {
   GameDetail,
@@ -93,6 +93,9 @@ type FetchCard = {
   //
   // 載っていれば再起動しても復元される。**「棋譜に保存」するとカードごと外す。**
   watched: boolean;
+  // fixed は「⚠ N手目」を解析タブで直してあるときのホバーの文（2026-11-25。空なら直していない）。
+  // ⚠️ **判定は Go**（`KifuService.FixedNote`）。画面で手数を比べない。
+  fixed: string;
   notice: string;
   error: string;
 };
@@ -141,6 +144,7 @@ const cardFromWatch = (w: WatchEntry): FetchCard => {
     pasted: false,
     origin: "",
     watched: true,
+    fixed: "",
     notice: "",
     error: "",
   };
@@ -219,7 +223,7 @@ export function mountFetchCards(
     if (i < 0) {
       // watched は仮の一覧へ載せてから立てる（remember を参照）。
       cards = [
-        { key, game: g, pasted: false, origin: "", watched: false, notice: "", error: "" },
+        { key, game: g, pasted: false, origin: "", watched: false, fixed: "", notice: "", error: "" },
         ...cards,
       ];
       return;
@@ -232,6 +236,26 @@ export function mountFetchCards(
     if (i < 0) return;
     cards[i] = { ...cards[i], ...next };
     render();
+  };
+
+  // checkFixed は「⚠ N手目」を解析タブで直してあるかを Go に聞いてカードへ写す（2026-11-25）。
+  // 中身が変わったとき（取得・取り直し・貼り付け）と、直しの表が変わったとき（`kifu:fixed`）に聞く。
+  // ⚠️ **聞けなくても何もしない**（札が出ないだけ）。
+  const checkFixed = async (key: string) => {
+    const card = cards.find((c) => c.key === key);
+    if (!card) return;
+    let fixed = "";
+    if (card.game.errorMove > 0 && card.game.kif) {
+      try {
+        fixed = await KifuService.FixedNote(card.game, card.pasted);
+      } catch {
+        fixed = "";
+      }
+    }
+    // ⚠️ **聞いているあいだにカードが消えた・変わったら写さない**（古い中身の答えになる）。
+    const now = cards.find((c) => c.key === key);
+    if (!now || now.game !== card.game || now.fixed === fixed) return;
+    patch(key, { fixed });
   };
 
   // remember は取得したカードを仮の一覧（棚の DB）へ載せる。
@@ -314,6 +338,7 @@ export function mountFetchCards(
     }
     mergeCard(got);
     render();
+    void checkFixed(cardKey(got));
     // 取り直した内容で仮の一覧も最新化する（手数・終局が一覧に出る）。
     await remember(got);
     return got;
@@ -468,7 +493,8 @@ export function mountFetchCards(
     title.className = "fetch-card-title";
     title.textContent = game.event || "(棋戦名なし)";
     // カードに出す印は盤に当たらない手（⚠ N手目）だけ（2026-11-19。指摘と親子は棋譜タブの行の持ち物）。
-    head.append(title, ...errorMarks(game));
+    // 直してあれば横に「修正済」（2026-11-25。⚠ はそのまま —— 原本は書き換えないので）。
+    head.append(title, ...errorMarks(game), ...fixedMark(card.fixed));
     // ⚠️ **見出しの札は貼り付けたカードだけ**（2026-11-19。"貼り付け" かファイル名）。
     // 取得したカードのサイト名は「取得元 URL」の行に URL と並べて出す（`addSource`）。
     if (card.pasted) {
@@ -628,6 +654,7 @@ export function mountFetchCards(
     }
     mergeCard(got);
     render();
+    void checkFixed(cardKey(got));
     await remember(got);
   };
 
@@ -649,11 +676,13 @@ export function mountFetchCards(
           pasted: true,
           origin,
           watched: false,
+          fixed: "",
           notice: "",
           error: "",
         },
         ...cards,
       ];
+      void checkFixed(got.key);
     } else {
       // ⚠️ **同じ本文ならカードを増やさない**（位置を保つ。取得したカードと同じ約束）。
       cards[i] = { ...cards[i], notice: "同じ棋譜のカードがあります（増やしていません）", error: "" };
@@ -712,6 +741,14 @@ export function mountFetchCards(
     const card = cards.find((c) => c.key === key);
     if (!card || card.pasted || busyKeys.has(key)) return;
     void refresh(card);
+  });
+
+  // 解析タブで直しの表が変わった（2026-11-25。Go の `kifu:fixed`）。⚠ のカードを全部聞き直す
+  // （⚠️ **鍵では絞らない** —— カードの鍵と控えの鍵は作りが違う。⚠ のカードは 1〜2 枚なので足りる）。
+  Events.On("kifu:fixed", () => {
+    for (const c of cards) {
+      if (c.game.errorMove > 0) void checkFixed(c.key);
+    }
   });
 
   render();
