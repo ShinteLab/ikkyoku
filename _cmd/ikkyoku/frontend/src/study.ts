@@ -456,14 +456,28 @@ export function mountStudyBoard(opts: StudyBoardOptions): StudyBoardHandle {
   // 選ばずに閉じたら onPick は呼ばれない（＝指さない）。
   const askPromote = (x: number, y: number, onPick: (promote: boolean) => void) => {
     closeAsk();
-    ask = openPopup(x, y, {
+    const handle: PopupHandle = openPopup(x, y, {
       label: "成るかどうか",
       // **「成る」を先に置いて初期フォーカスにする**（成るほうが圧倒的に多い）。
       items: [
         { label: "成る", kind: "primary", onPick: () => onPick(true) },
         { label: "成らず", onPick: () => onPick(false) },
       ],
+      // ⚠️ **メニューが自分で閉じたときも `ask` を空けること**（2026-11-25 に実機で踏んだ）。
+      // 外側クリック・Esc・窓を離れる、で閉じるのは `popup.ts` で、こちらは知らない。
+      // 空けないと `ask` が残り、盤と駒台のクリックが**ずっと無視されて盤が動かなくなる**。
+      // ⚠️ **閉じたのが今のメニューのときだけ**（`closeAsk` → 開き直しの順で、前のメニューの
+      // 知らせが新しいメニューを消さないように）。
+      // 外側クリックで閉じたときは、そのクリックがそのまま盤に届く（`popup.ts` は
+      // pointerdown で閉じ、盤は click で受ける）—— 掴んだ駒は残しているので、
+      // 別の行き先を押せば指し、同じ駒を押せば離す。
+      onClose: () => {
+        if (ask === handle) {
+          ask = null;
+        }
+      },
     });
+    ask = handle;
   };
 
   // ⚠️ **中継を追っているあいだは駒を動かせない**（2026-10-07。ユーザーの判断）。
